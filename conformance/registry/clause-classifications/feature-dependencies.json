@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-feature-dependencies-a-new-property-dependson-can-be-optionally-added-desc-039bf6bd",
+      "clause": "clu-feature-dependencies-a-new-property-dependson-can-be-optionally-added-desc-039bf6bd",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-feature-dependencies-adding-feature-s-to-this-property-tells-the-orch-algo-5150f266",
+      "clause": "clu-feature-dependencies-adding-feature-s-to-this-property-tells-the-orch-algo-5150f266",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-an-orchestrating-tool-should-remove-all-installs-algo-e4d47679",
+      "clause": "clu-feature-dependencies-an-orchestrating-tool-should-remove-all-installs-algo-e4d47679",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-feature-dependencies-commit-to-installationorder-only-those-nodes-who-algo-bf65dc02",
+      "clause": "clu-feature-dependencies-commit-to-installationorder-only-those-nodes-who-algo-bf65dc02",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-compare-and-sort-each-feature-lexiographically-b-algo-ed9f808d",
+      "clause": "clu-feature-dependencies-compare-and-sort-each-feature-lexiographically-b-algo-ed9f808d",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-dependency-resolution-is-only-performed-on-initi-desc-603bcd42",
+      "clause": "clu-feature-dependencies-dependency-resolution-is-only-performed-on-initi-desc-603bcd42",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-feature-dependencies-dependson-ghcr-io-second-1-flag-true-io-791d2b05",
+      "clause": "clu-feature-dependencies-dependson-ghcr-io-second-1-flag-true-io-791d2b05",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-feature-dependencies-each-node-in-the-graph-has-an-implicit-default-r-algo-72caf843",
+      "clause": "clu-feature-dependencies-each-node-in-the-graph-has-an-implicit-default-r-algo-72caf843",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-for-dependson-dependencies-the-dependency-will-b-algo-2ba70907",
+      "clause": "clu-feature-dependencies-for-dependson-dependencies-the-dependency-will-b-algo-2ba70907",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-feature-dependencies-from-the-user-defined-features-the-orchestrating-algo-038fa45f",
+      "clause": "clu-feature-dependencies-from-the-user-defined-features-the-orchestrating-algo-038fa45f",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-if-there-is-ever-a-round-where-no-elements-are-a-algo-eaf1402b",
+      "clause": "clu-feature-dependencies-if-there-is-ever-a-round-where-no-elements-are-a-algo-eaf1402b",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-installsafter-is-not-recursive-algo-6d8aa9e0",
+      "clause": "clu-feature-dependencies-installsafter-is-not-recursive-algo-6d8aa9e0",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-feature-dependencies-mediatype-application-vnd-oci-image-manifest-v1-io-e17c68d7",
+      "clause": "clu-feature-dependencies-mediatype-application-vnd-oci-image-manifest-v1-io-e17c68d7",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-only-the-features-equal-to-the-max-roundpriority-algo-6e6948bb",
+      "clause": "clu-feature-dependencies-only-the-features-equal-to-the-max-roundpriority-algo-6e6948bb",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-start-with-all-the-elements-from-b2-in-a-worklis-algo-e03a3c04",
+      "clause": "clu-feature-dependencies-start-with-all-the-elements-from-b2-in-a-worklis-algo-e03a3c04",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-the-orchestrating-tool-is-responsible-for-calcul-algo-10e3be9a",
+      "clause": "clu-feature-dependencies-the-orchestrating-tool-is-responsible-for-calcul-algo-10e3be9a",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-the-orchestrating-tool-must-fallback-to-download-must-e98c49b3",
+      "clause": "clu-feature-dependencies-the-orchestrating-tool-must-fallback-to-download-must-e98c49b3",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-the-orchestrating-tool-should-assign-a-roundprio-algo-3ef2e621",
+      "clause": "clu-feature-dependencies-the-orchestrating-tool-should-assign-a-roundprio-algo-3ef2e621",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-the-overridefeatureinstallorder-property-of-devc-algo-116737c8",
+      "clause": "clu-feature-dependencies-the-overridefeatureinstallorder-property-of-devc-algo-116737c8",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-feature-dependencies-the-set-of-features-to-be-installed-is-the-union-algo-c707f67a",
+      "clause": "clu-feature-dependencies-the-set-of-features-to-be-installed-is-the-union-algo-c707f67a",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
+    },
+    {
+      "id": "clc-feature-dependencies-this-specification-defines-two-features-as-equal-desc-c6fa6084",
+      "clause": "clu-feature-dependencies-this-specification-defines-two-features-as-equal-desc-c6fa6084",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-feature-dependencies-to-speed-up-dependency-resolution-all-features-p-desc-9ea95360",
+      "clause": "clu-feature-dependencies-to-speed-up-dependency-resolution-all-features-p-desc-9ea95360",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-feature-dependencies-two-feature-are-identical-if-their-manifest-dige-algo-ee493920",
+      "clause": "clu-feature-dependencies-two-feature-are-identical-if-their-manifest-dige-algo-ee493920",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-feature-dependencies-while-the-worklist-is-not-empty-iterate-through-algo-9d7e0a05",
+      "clause": "clu-feature-dependencies-while-the-worklist-is-not-empty-iterate-through-algo-9d7e0a05",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    }
+  ]
+}

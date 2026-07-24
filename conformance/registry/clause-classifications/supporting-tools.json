@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-supporting-tools-a-codespace-is-a-development-environment-that-s-desc-d545f89d",
+      "clause": "clu-supporting-tools-a-codespace-is-a-development-environment-that-s-desc-d545f89d",
+      "disposition": "not-applicable",
+      "rationale": "Authoring, publishing, or tool-specific material outside deacon's consumer-only runtime scope (constitution II)."
+    },
+    {
+      "id": "clc-supporting-tools-a-dev-container-command-line-interface-cli-that-desc-b5b7198a",
+      "clause": "clu-supporting-tools-a-dev-container-command-line-interface-cli-that-desc-b5b7198a",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-supporting-tools-an-array-of-extension-ids-that-specify-the-exten-desc-e843b6ac",
+      "clause": "clu-supporting-tools-an-array-of-extension-ids-that-specify-the-exten-desc-e843b6ac",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-supporting-tools-codespaces-disableautomaticconfiguration-true-io-38f1cf46",
+      "clause": "clu-supporting-tools-codespaces-disableautomaticconfiguration-true-io-38f1cf46",
+      "disposition": "not-applicable",
+      "rationale": "Authoring, publishing, or tool-specific material outside deacon's consumer-only runtime scope (constitution II)."
+    },
+    {
+      "id": "clc-supporting-tools-codespaces-will-automatically-perform-some-defau-desc-b9bcfd15",
+      "clause": "clu-supporting-tools-codespaces-will-automatically-perform-some-defau-desc-b9bcfd15",
+      "disposition": "not-applicable",
+      "rationale": "Authoring, publishing, or tool-specific material outside deacon's consumer-only runtime scope (constitution II)."
+    },
+    {
+      "id": "clc-supporting-tools-lets-you-use-a-container-as-a-full-featured-deve-desc-645f0796",
+      "clause": "clu-supporting-tools-lets-you-use-a-container-as-a-full-featured-deve-desc-645f0796",
+      "disposition": "not-applicable",
+      "rationale": "Authoring, publishing, or tool-specific material outside deacon's consumer-only runtime scope (constitution II)."
+    },
+    {
+      "id": "clc-supporting-tools-mounts-array-codespaces-ignores-bind-mounts-with-desc-1b4957a7",
+      "clause": "clu-supporting-tools-mounts-array-codespaces-ignores-bind-mounts-with-desc-1b4957a7",
+      "disposition": "not-applicable",
+      "rationale": "Authoring, publishing, or tool-specific material outside deacon's consumer-only runtime scope (constitution II)."
+    },
+    {
+      "id": "clc-supporting-tools-set-default-container-specific-settings-json-val-io-fc3a41cd",
+      "clause": "clu-supporting-tools-set-default-container-specific-settings-json-val-io-fc3a41cd",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-supporting-tools-shutdownaction-enum-does-not-apply-to-codespaces-desc-55b06d3b",
+      "clause": "clu-supporting-tools-shutdownaction-enum-does-not-apply-to-codespaces-desc-55b06d3b",
+      "disposition": "not-applicable",
+      "rationale": "Authoring, publishing, or tool-specific material outside deacon's consumer-only runtime scope (constitution II)."
+    },
+    {
+      "id": "clc-supporting-tools-visual-studio-added-dev-container-support-in-vis-desc-7b4f5bd7",
+      "clause": "clu-supporting-tools-visual-studio-added-dev-container-support-in-vis-desc-7b4f5bd7",
+      "disposition": "not-applicable",
+      "rationale": "Authoring, publishing, or tool-specific material outside deacon's consumer-only runtime scope (constitution II)."
+    },
+    {
+      "id": "clc-supporting-tools-visual-studio-code-specific-properties-go-under-desc-94ff0710",
+      "clause": "clu-supporting-tools-visual-studio-code-specific-properties-go-under-desc-94ff0710",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-supporting-tools-workspacemount-string-not-yet-supported-when-usi-desc-ea06083a",
+      "clause": "clu-supporting-tools-workspacemount-string-not-yet-supported-when-usi-desc-ea06083a",
+      "disposition": "not-applicable",
+      "rationale": "Authoring, publishing, or tool-specific material outside deacon's consumer-only runtime scope (constitution II)."
+    }
+  ]
+}

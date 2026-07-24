@@ -18,11 +18,14 @@
 //!   (US3, T030–T031).
 
 pub mod certify;
+pub mod clause;
+pub mod clause_diff;
 pub mod coverage;
 pub mod diff;
 pub mod inventory;
 pub mod load;
 pub mod model;
+pub mod prose;
 pub mod report;
 pub mod schema;
 pub mod validate;
@@ -78,6 +81,51 @@ pub fn default_inventory_file() -> std::path::PathBuf {
         .join("conformance")
         .join("inventory")
         .join("constraints.json")
+}
+
+/// The default spec-prose root: `<workspace_root>/conformance/spec`. Contains one
+/// `<rev-pin>/` subdirectory per vendored spec revision (each with a `manifest.json`
+/// and the byte-exact vendored Markdown documents). The CLI's `--spec <dir>` flag
+/// overrides it (tests point it at fixtures) (021-normative-clause-inventory).
+pub fn default_spec_dir() -> std::path::PathBuf {
+    workspace_root().join("conformance").join("spec")
+}
+
+/// The pin of the currently vendored mandatory spec revision (the subdirectory of
+/// [`default_spec_dir`] holding the manifest + byte-exact prose files). Matches the
+/// `pin` of the `rev-spec-<pin>` revision record. Bumped only on a conscious
+/// re-vendoring (quickstart.md "Re-vendoring") (021-normative-clause-inventory).
+pub const CURRENT_SPEC_PIN: &str = "113500f4";
+
+/// The default pinned-spec directory for `clause generate`/`check`:
+/// `<workspace_root>/conformance/spec/<CURRENT_SPEC_PIN>/`. The CLI's `--spec <dir>`
+/// flag overrides it (021-normative-clause-inventory).
+pub fn default_pinned_spec_dir() -> std::path::PathBuf {
+    default_spec_dir().join(CURRENT_SPEC_PIN)
+}
+
+/// The default committed clause inventory file:
+/// `<workspace_root>/conformance/inventory/clauses.json` — the machine-owned,
+/// byte-stable prose-clause inventory (sibling of `constraints.json`). The CLI's
+/// `--clauses <file>` flag overrides it (021-normative-clause-inventory).
+pub fn default_clauses_file() -> std::path::PathBuf {
+    workspace_root()
+        .join("conformance")
+        .join("inventory")
+        .join("clauses.json")
+}
+
+/// Resolve the `(spec_dir, clauses_file)` that belong to a registry, as siblings under
+/// the same `conformance/` tree: `<registry>/../spec/<CURRENT_SPEC_PIN>` and
+/// `<registry>/../inventory/clauses.json`. Mirrors the schema-inventory sibling
+/// resolution `inventory_paths_for` uses in the CLI (021-normative-clause-inventory).
+pub fn clause_paths_for(
+    registry_dir: &std::path::Path,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let base = registry_dir.parent().unwrap_or(registry_dir);
+    let spec_dir = base.join("spec").join(CURRENT_SPEC_PIN);
+    let clauses_file = base.join("inventory").join("clauses.json");
+    (spec_dir, clauses_file)
 }
 
 #[cfg(test)]

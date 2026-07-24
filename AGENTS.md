@@ -126,6 +126,7 @@ Document this checklist in your plan.md or PR description to prevent spec drift.
 - None (filesystem state/markers only) (008-up-lifecycle-hooks)
 
 ## Recent Changes
+- 021-normative-clause-inventory: prose companion to 020's schema inventory in the dev-only `deacon-conformance` crate. Vendored `docs/specs/` Markdown under `conformance/spec/<pin>/` (18 docs, `manifest.json` with fingerprints + `consumer`/`authoring` scope); machine-owned `conformance/inventory/clauses.json` (`clu-` units, substance-anchored ids) produced by `clause generate` (canonicalization, NOT extraction — no LLM/network in CI); hand-authored `clc-` records under `conformance/registry/clause-classifications/` (per-clause for consumer docs, document-scope `not-applicable` default for authoring docs). `validate`/`certify` enforce V11–V15 (V11–V14 generalized to inventory units, V15 = clause↔source integrity). `clause check`/`diff`/`scaffold` mirror the `inventory` subcommands; `diff` makes moves first-class. See `conformance/RULES.md` "Inventory join (V11–V15)".
 - 001-up-gap-spec: Added Rust stable (2021 edition) + clap, serde/serde_json, anyhow/thiserror, tracing, tokio (as already in repo)
 - 2025-11-19: Added pre-implementation checklist and common anti-patterns based on outdated subcommand implementation review
 - 2025-11-20: Standardized on `make test-nextest-*` targets exclusively; added mandatory nextest configuration requirements; documented test parallelization strategy for optimal resource utilization

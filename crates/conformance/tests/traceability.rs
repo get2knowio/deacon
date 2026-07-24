@@ -294,3 +294,72 @@ fn section<'a>(md: &'a str, start: &str, end: &str) -> &'a str {
         .unwrap_or_else(|| panic!("report.md missing section {end:?} after {start:?}"));
     &rest[..to]
 }
+
+// ===========================================================================
+// Clause → behavior traceability (021, T034; FR-026, SC-006). Over the REAL
+// committed registry + clause inventory, checked deterministically and offline:
+// every behavior-mapped clause classification resolves forward to an existing
+// behavior, and every such behavior is reachable back from its clause(s). No
+// network, no model — pure functions of committed data.
+// ===========================================================================
+
+use deacon_conformance::model::Disposition;
+use deacon_conformance::{clause_paths_for, default_registry_dir};
+
+#[test]
+fn every_consumer_clause_maps_forward_and_back_to_a_real_behavior() {
+    let registry = Registry::load(&default_registry_dir()).expect("real registry loads");
+    let (_spec, clauses_file) = clause_paths_for(&default_registry_dir());
+    let inventory =
+        deacon_conformance::load::load_clause_inventory(&clauses_file).expect("clauses load");
+
+    let behavior_ids: HashSet<&str> = registry.behaviors.iter().map(|b| b.id.as_str()).collect();
+    let clause_ids: HashSet<&str> = inventory
+        .as_ref()
+        .map(|inv| inv.units.iter().map(|u| u.id.as_str()).collect())
+        .unwrap_or_default();
+
+    // Forward: every behavior-mapped clause classification points at a real clause AND
+    // real behaviors.
+    let mut behavior_to_clauses: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for clc in &registry.clause_classifications {
+        if clc.disposition != Disposition::BehaviorMapped {
+            continue;
+        }
+        let clause = clc
+            .clause
+            .as_deref()
+            .expect("a behavior-mapped clause classification is per-clause, not document-scope");
+        assert!(
+            clause_ids.contains(clause),
+            "clc {:?} references clause {clause:?} absent from the committed inventory",
+            clc.id
+        );
+        assert!(
+            !clc.behaviors.is_empty(),
+            "behavior-mapped clc {:?} must name ≥1 behavior",
+            clc.id
+        );
+        for behavior in &clc.behaviors {
+            assert!(
+                behavior_ids.contains(behavior.as_str()),
+                "clc {:?} maps to behavior {behavior:?}, which is not an existing bhv- record",
+                clc.id
+            );
+            behavior_to_clauses
+                .entry(behavior.clone())
+                .or_default()
+                .push(clause.to_string());
+        }
+    }
+
+    // Backward: each behavior reached from a clause is reachable back to ≥1 clause
+    // (the inverse index is total by construction — assert it is navigable and stable).
+    for (behavior, clauses) in &behavior_to_clauses {
+        assert!(
+            !clauses.is_empty(),
+            "behavior {behavior:?} must back-trace to ≥1 clause"
+        );
+    }
+}

@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-json-reference-a-command-string-or-list-of-command-arguments-to-desc-dff1da95",
+      "clause": "clu-json-reference-a-command-string-or-list-of-command-arguments-to-desc-dff1da95",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-a-command-to-run-each-time-a-tool-has-successful-desc-ac507e3c",
+      "clause": "clu-json-reference-a-command-to-run-each-time-a-tool-has-successful-desc-ac507e3c",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-a-command-to-run-each-time-the-container-is-succ-desc-56473251",
+      "clause": "clu-json-reference-a-command-to-run-each-time-the-container-is-succ-desc-56473251",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-a-default-value-for-when-the-environment-variabl-io-e0533bcb",
+      "clause": "clu-json-reference-a-default-value-for-when-the-environment-variabl-io-e0533bcb",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
+    },
+    {
+      "id": "clc-json-reference-a-dev-container-configuration-will-inherit-the-r-desc-8967e88c",
+      "clause": "clu-json-reference-a-dev-container-configuration-will-inherit-the-r-desc-8967e88c",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-a-name-for-the-dev-container-displayed-in-the-ui-desc-94cd872c",
+      "clause": "clu-json-reference-a-name-for-the-dev-container-displayed-in-the-ui-desc-94cd872c",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-a-set-of-name-value-pairs-that-sets-or-overrides-desc-482998a9",
+      "clause": "clu-json-reference-a-set-of-name-value-pairs-that-sets-or-overrides-desc-482998a9",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-a-set-of-name-value-pairs-that-sets-or-overrides-desc-f73a61bb",
+      "clause": "clu-json-reference-a-set-of-name-value-pairs-that-sets-or-overrides-desc-f73a61bb",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-a-string-indicating-minimum-memory-requirements-io-b29e3295",
+      "clause": "clu-json-reference-a-string-indicating-minimum-memory-requirements-io-b29e3295",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-json-reference-an-array-of-docker-cli-arguments-that-should-be-io-2f81ef14",
+      "clause": "clu-json-reference-an-array-of-docker-cli-arguments-that-should-be-io-2f81ef14",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-json-reference-an-array-of-port-numbers-or-host-port-values-io-5bb030ac",
+      "clause": "clu-json-reference-an-array-of-port-numbers-or-host-port-values-io-5bb030ac",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-json-reference-an-enum-that-specifies-the-command-any-tool-shou-io-805d039b",
+      "clause": "clu-json-reference-an-enum-that-specifies-the-command-any-tool-shou-io-805d039b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-json-reference-an-object-of-dev-container-feature-ids-and-relat-desc-9adb363c",
+      "clause": "clu-json-reference-an-object-of-dev-container-feature-ids-and-relat-desc-9adb363c",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-cross-orchestrator-way-to-add-additional-mounts-io-9f0f755a",
+      "clause": "clu-json-reference-cross-orchestrator-way-to-add-additional-mounts-io-9f0f755a",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-json-reference-defaults-to-true-for-when-using-an-image-dockerf-io-76d19efa",
+      "clause": "clu-json-reference-defaults-to-true-for-when-using-an-image-dockerf-io-76d19efa",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-compose-project-name-robust"
+      ]
+    },
+    {
+      "id": "clc-json-reference-dictates-when-port-forwarding-is-required-to-map-desc-535d595e",
+      "clause": "clu-json-reference-dictates-when-port-forwarding-is-required-to-map-desc-535d595e",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-each-command-property-is-an-string-or-list-of-co-io-88240d31",
+      "clause": "clu-json-reference-each-command-property-is-an-string-or-list-of-co-io-88240d31",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-state-container-parity"
+      ]
+    },
+    {
+      "id": "clc-json-reference-for-each-command-property-if-the-value-is-a-sing-algo-edd92849",
+      "clause": "clu-json-reference-for-each-command-property-if-the-value-is-a-sing-algo-edd92849",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-json-reference-if-one-of-the-lifecycle-scripts-fails-any-subseq-algo-cb502f9a",
+      "clause": "clu-json-reference-if-one-of-the-lifecycle-scripts-fails-any-subseq-algo-cb502f9a",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
+    },
+    {
+      "id": "clc-json-reference-indicates-the-type-of-shell-to-use-to-probe-for-io-896c5f64",
+      "clause": "clu-json-reference-indicates-the-type-of-shell-to-use-to-probe-for-io-896c5f64",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-json-reference-it-and-subsequent-commands-execute-inside-the-co-desc-c68356ad",
+      "clause": "clu-json-reference-it-and-subsequent-commands-execute-inside-the-co-desc-c68356ad",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-it-executes-inside-the-container-after-oncreatec-desc-5d71a46e",
+      "clause": "clu-json-reference-it-executes-inside-the-container-after-oncreatec-desc-5d71a46e",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-it-happens-after-updatecontentcommand-and-once-t-desc-9d62d901",
+      "clause": "clu-json-reference-it-happens-after-updatecontentcommand-and-once-t-desc-9d62d901",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-notify-is-the-default-and-a-notification-will-ap-io-fbfdc269",
+      "clause": "clu-json-reference-notify-is-the-default-and-a-notification-will-ap-io-fbfdc269",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-json-reference-object-that-maps-a-port-number-host-port-value-r-desc-b51d0b4f",
+      "clause": "clu-json-reference-object-that-maps-a-port-number-host-port-value-r-desc-b51d0b4f",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-on-linux-if-containeruser-or-remoteuser-is-speci-io-a22a9e99",
+      "clause": "clu-json-reference-on-linux-if-containeruser-or-remoteuser-is-speci-io-a22a9e99",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-exec-container-id-metadata"
+      ]
+    },
+    {
+      "id": "clc-json-reference-overrides-the-user-for-all-operations-run-as-ins-desc-de726edc",
+      "clause": "clu-json-reference-overrides-the-user-for-all-operations-run-as-ins-desc-de726edc",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-overrides-the-user-that-devcontainer-json-suppor-desc-61ec0c65",
+      "clause": "clu-json-reference-overrides-the-user-that-devcontainer-json-suppor-desc-61ec0c65",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-path-that-the-docker-build-should-be-run-from-re-io-a9b5d4b9",
+      "clause": "clu-json-reference-path-that-the-docker-build-should-be-run-from-re-io-a9b5d4b9",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-json-reference-product-specific-properties-defined-in-supportin-desc-3094d978",
+      "clause": "clu-json-reference-product-specific-properties-defined-in-supportin-desc-3094d978",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-required-when-using-a-dockerfile-the-location-of-io-8a8518c6",
+      "clause": "clu-json-reference-required-when-using-a-dockerfile-the-location-of-io-8a8518c6",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-build-image-parity"
+      ],
+      "notes": "Prose\u2192behavior traceability for this behavior now flows through this clause; supersedes retired src-spec-build-image (021 T036)."
+    },
+    {
+      "id": "clc-json-reference-required-when-using-an-image-the-name-of-an-imag-io-ceb577d8",
+      "clause": "clu-json-reference-required-when-using-an-image-the-name-of-an-imag-io-ceb577d8",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-json-reference-required-when-using-docker-compose-the-name-of-t-io-910c920c",
+      "clause": "clu-json-reference-required-when-using-docker-compose-the-name-of-t-io-910c920c",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-compose-project-name-robust"
+      ]
+    },
+    {
+      "id": "clc-json-reference-requires-workspacefolder-be-set-as-well-override-io-af28a4ff",
+      "clause": "clu-json-reference-requires-workspacefolder-be-set-as-well-override-io-af28a4ff",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-state-container-parity"
+      ]
+    },
+    {
+      "id": "clc-json-reference-requires-workspacemount-be-set-sets-the-default-desc-76b98b58",
+      "clause": "clu-json-reference-requires-workspacemount-be-set-sets-the-default-desc-76b98b58",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-sets-the-default-path-that-devcontainer-json-sup-desc-51f12465",
+      "clause": "clu-json-reference-sets-the-default-path-that-devcontainer-json-sup-desc-51f12465",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-the-order-of-the-array-matters-since-the-content-io-bdf2bf4c",
+      "clause": "clu-json-reference-the-order-of-the-array-matters-since-the-content-io-bdf2bf4c",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-json-reference-this-property-accepts-a-port-or-array-of-ports-t-desc-3f93bee1",
+      "clause": "clu-json-reference-this-property-accepts-a-port-or-array-of-ports-t-desc-3f93bee1",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-this-property-allows-you-to-override-the-feature-desc-bebdddcd",
+      "clause": "clu-json-reference-this-property-allows-you-to-override-the-feature-desc-bebdddcd",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-json-reference-values-are-none-stopcontainer-default-for-image-io-9ba26e5a",
+      "clause": "clu-json-reference-values-are-none-stopcontainer-default-for-image-io-9ba26e5a",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-compose-project-name-robust"
+      ]
+    },
+    {
+      "id": "clc-json-reference-variables-can-be-referenced-in-certain-string-va-desc-ca54b6fc",
+      "clause": "clu-json-reference-variables-can-be-referenced-in-certain-string-va-desc-ca54b6fc",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    }
+  ]
+}

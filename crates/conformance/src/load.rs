@@ -23,9 +23,9 @@ use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
 use crate::model::{
-    BehaviorUnit, CertificationProfile, Classification, Collection, ConstraintInventory,
-    ContextDimension, DeaconExtension, Gap, ObservableChannel, SchemasManifest, SourceRevision,
-    SourceUnit, TestCase, Waiver,
+    BehaviorUnit, CertificationProfile, Classification, ClauseClassification, ClauseInventory,
+    Collection, ConstraintInventory, ContextDimension, DeaconExtension, Gap, ObservableChannel,
+    SchemasManifest, SourceRevision, SourceUnit, SpecManifest, TestCase, Waiver,
 };
 
 /// A schema-class load failure for a single file: an unreadable file, malformed
@@ -125,6 +125,53 @@ pub enum LoadError {
     /// hand edit to the machine-owned file or a stale commit.
     #[error("committed inventory is out of date: regeneration differs from {path:?}")]
     InventoryOutOfDate { path: PathBuf },
+
+    // --- Normative clause inventory (021) ---------------------------------
+    /// A vendored prose file's SHA-256 does not match the spec-manifest fingerprint
+    /// (V14). Blocking: the vendored copy no longer matches the claimed revision.
+    #[error("spec manifest fingerprint mismatch for {file:?}: manifest {expected}, file {actual}")]
+    SpecFingerprintMismatch {
+        file: PathBuf,
+        expected: String,
+        actual: String,
+    },
+
+    /// A clause's `excerpt` is not a verbatim substring of the pinned document under
+    /// its recorded heading anchor (V15). Fail-loud provenance-in-source failure.
+    #[error(
+        "clause {clause:?}: excerpt not found in the pinned document under heading {heading:?}"
+    )]
+    ExcerptNotFoundAtAnchor { clause: String, heading: String },
+
+    /// A clause's authored `strength` label contradicts its excerpt's RFC-2119
+    /// keywords, or a `descriptive` clause hides a mandatory keyword (V15,
+    /// research Decision 4).
+    #[error(
+        "clause {clause:?}: strength label {labeled:?} contradicts excerpt keywords \
+         (detected {detected:?})"
+    )]
+    StrengthKeywordMismatch {
+        clause: String,
+        labeled: String,
+        detected: String,
+    },
+
+    /// An `ambiguous` clause carries no per-clause classification (Decision 5/7). A
+    /// document-scope default never clears ambiguity.
+    #[error("clause {clause:?} is ambiguous and has no per-clause classification")]
+    AmbiguousClauseUnclassified { clause: String },
+
+    /// The committed clause inventory does not byte-match a fresh canonicalization
+    /// (V14). Either a hand edit to the machine-owned file or a stale commit.
+    #[error("committed clause inventory is out of date: canonicalization differs from {path:?}")]
+    ClauseInventoryOutOfDate { path: PathBuf },
+
+    /// A document-scope classification default targets a `consumer`-scope document,
+    /// which must be classified clause-by-clause (V13, Decision 7).
+    #[error(
+        "document-scope classification targets consumer document {document:?} (only authoring documents may carry a document-scope default)"
+    )]
+    DocumentScopeOnConsumerDoc { document: String },
 }
 
 /// Render a collected batch of schema errors, one per line, for `LoadError::Schema`.
@@ -159,6 +206,10 @@ pub struct Registry {
     /// per manifest document key (020-schema-constraint-inventory). A missing
     /// directory is empty (loaded before any classifications are authored).
     pub classifications: Vec<Classification>,
+    /// Hand-authored clause-classification records — `clause-classifications/*.json`,
+    /// one file per document key plus `authoring.json` for document-scope defaults
+    /// (021-normative-clause-inventory). A missing directory is empty.
+    pub clause_classifications: Vec<ClauseClassification>,
 }
 
 impl Registry {
@@ -205,6 +256,11 @@ impl Registry {
             waivers: load_waivers(&root.join("waivers"), &mut errors),
             // classifications/*.json — one collection per manifest document key.
             classifications: load_dir_collections(&root.join("classifications"), &mut errors),
+            // clause-classifications/*.json — per-document + authoring.json defaults.
+            clause_classifications: load_dir_collections(
+                &root.join("clause-classifications"),
+                &mut errors,
+            ),
         };
 
         if errors.is_empty() {
@@ -447,6 +503,93 @@ pub fn load_inventory(path: &Path) -> Result<Option<ConstraintInventory>, LoadEr
     }
     let raw = read_file(path).map_err(|e| LoadError::Schema(vec![e]))?;
     let inventory: ConstraintInventory =
+        deserialize_located(path, &raw).map_err(|e| LoadError::Schema(vec![e]))?;
+    Ok(Some(inventory))
+}
+
+/// Load and fingerprint-verify a spec-prose manifest at `spec_dir/manifest.json`
+/// (data-model.md §1, 021-normative-clause-inventory).
+///
+/// For every `documents[]` entry, reads the sibling vendored Markdown file, verifies it
+/// carries no CR bytes (cross-platform byte-stability), computes its SHA-256, and
+/// compares it to the manifest's recorded `sha256`; a mismatch is a blocking
+/// [`LoadError::SpecFingerprintMismatch`] (V14). The `key`/`scope` shapes are enforced
+/// too (unique lowercase `[a-z0-9-]` keys). A missing or malformed manifest, or an
+/// unreadable vendored file, is a located [`LoadError::Schema`].
+pub fn load_spec_manifest(spec_dir: &Path) -> Result<SpecManifest, LoadError> {
+    let manifest_path = spec_dir.join("manifest.json");
+    let raw = read_file(&manifest_path).map_err(|e| LoadError::Schema(vec![e]))?;
+    let manifest: SpecManifest =
+        deserialize_located(&manifest_path, &raw).map_err(|e| LoadError::Schema(vec![e]))?;
+
+    let mut seen_keys: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for doc in &manifest.documents {
+        if doc.key.is_empty()
+            || !doc
+                .key
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
+            return Err(LoadError::MalformedSchema {
+                document: doc.key.clone(),
+                cause: format!(
+                    "manifest document key {:?} is not a valid `<doc>` id component \
+                     (require non-empty lowercase [a-z0-9-])",
+                    doc.key
+                ),
+            });
+        }
+        if !seen_keys.insert(doc.key.as_str()) {
+            return Err(LoadError::MalformedSchema {
+                document: doc.key.clone(),
+                cause: format!(
+                    "duplicate manifest document key {:?} (keys must be unique)",
+                    doc.key
+                ),
+            });
+        }
+    }
+
+    for doc in &manifest.documents {
+        let file = spec_dir.join(&doc.file);
+        let bytes = std::fs::read(&file).map_err(|e| {
+            LoadError::Schema(vec![SchemaError {
+                file: file.clone(),
+                location: None,
+                message: format!("could not read vendored prose: {e}"),
+            }])
+        })?;
+        if bytes.contains(&b'\r') {
+            return Err(LoadError::MalformedSchema {
+                document: doc.key.clone(),
+                cause: format!(
+                    "vendored prose {:?} contains a CR byte; vendored docs MUST be LF-only \
+                     for cross-platform byte-stability",
+                    doc.file
+                ),
+            });
+        }
+        let actual = sha256_hex(&bytes);
+        if actual != doc.sha256 {
+            return Err(LoadError::SpecFingerprintMismatch {
+                file,
+                expected: doc.sha256.clone(),
+                actual,
+            });
+        }
+    }
+    Ok(manifest)
+}
+
+/// Load the committed clause inventory at `path` (data-model.md §2). Returns
+/// `Ok(None)` when the file is absent (later phases generate it). A present-but-malformed
+/// file is a located [`LoadError::Schema`].
+pub fn load_clause_inventory(path: &Path) -> Result<Option<ClauseInventory>, LoadError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = read_file(path).map_err(|e| LoadError::Schema(vec![e]))?;
+    let inventory: ClauseInventory =
         deserialize_located(path, &raw).map_err(|e| LoadError::Schema(vec![e]))?;
     Ok(Some(inventory))
 }
@@ -730,6 +873,102 @@ mod tests {
             load_inventory(&path).unwrap_err(),
             LoadError::Schema(_)
         ));
+    }
+
+    #[test]
+    fn load_spec_manifest_verifies_fingerprints_and_rejects_cr() {
+        let dir = tempfile::tempdir().unwrap();
+        let prose = b"# Heading\n\nThe tool MUST do X.\n";
+        let good = sha256_hex(prose);
+        fs::write(dir.path().join("doc.md"), prose).unwrap();
+        let manifest_json = format!(
+            r#"{{ "schemaVersion": 1, "revision": "rev-spec-113500f4", "documents": [
+                {{ "key": "reference", "file": "doc.md",
+                   "upstreamUrl": "https://example/doc.md", "sha256": "{good}",
+                   "scope": "consumer" }}
+            ] }}"#
+        );
+        fs::write(dir.path().join("manifest.json"), &manifest_json).unwrap();
+        let manifest = load_spec_manifest(dir.path()).expect("verified manifest loads");
+        assert_eq!(manifest.revision, "rev-spec-113500f4");
+        assert_eq!(manifest.documents[0].key, "reference");
+
+        // Tampered bytes → fingerprint mismatch.
+        fs::write(
+            dir.path().join("doc.md"),
+            b"# Heading\n\nThe tool MUST do Y.\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            load_spec_manifest(dir.path()).unwrap_err(),
+            LoadError::SpecFingerprintMismatch { .. }
+        ));
+
+        // A CR byte is rejected outright.
+        let cr = b"# Heading\r\n\r\nThe tool MUST do X.\r\n";
+        let cr_hash = sha256_hex(cr);
+        fs::write(dir.path().join("doc.md"), cr).unwrap();
+        let cr_manifest = format!(
+            r#"{{ "schemaVersion": 1, "revision": "rev-spec-113500f4", "documents": [
+                {{ "key": "reference", "file": "doc.md",
+                   "upstreamUrl": "https://example/doc.md", "sha256": "{cr_hash}",
+                   "scope": "consumer" }}
+            ] }}"#
+        );
+        fs::write(dir.path().join("manifest.json"), &cr_manifest).unwrap();
+        assert!(matches!(
+            load_spec_manifest(dir.path()).unwrap_err(),
+            LoadError::MalformedSchema { .. }
+        ));
+    }
+
+    #[test]
+    fn load_clause_inventory_missing_is_none_and_present_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("clauses.json");
+        assert!(
+            load_clause_inventory(&path)
+                .expect("missing is ok")
+                .is_none()
+        );
+
+        fs::write(
+            &path,
+            r#"{ "schemaVersion": 1, "revision": "rev-spec-113500f4", "units": [
+                { "id": "clu-reference-x-must-a1b2c3d4", "document": "reference",
+                  "strength": "must", "testability": "directly-testable",
+                  "fingerprint": "ab", "locations": [
+                    { "heading": "H", "anchor": "h", "ordinal": 1, "excerpt": "MUST x" }
+                  ], "context": null }
+            ] }"#,
+        )
+        .unwrap();
+        let inv = load_clause_inventory(&path)
+            .expect("present")
+            .expect("some");
+        assert_eq!(inv.units.len(), 1);
+        assert_eq!(inv.units[0].document, "reference");
+    }
+
+    #[test]
+    fn loads_clause_classifications_collection() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "clause-classifications/reference.json",
+            r#"{ "schemaVersion": 1, "records": [
+                { "id": "clc-reference-x-must-a1b2c3d4",
+                  "clause": "clu-reference-x-must-a1b2c3d4",
+                  "disposition": "behavior-mapped",
+                  "behaviors": ["bhv-up-lifecycle-oncreate-once"] }
+            ] }"#,
+        );
+        let reg = Registry::load(dir.path()).expect("loads");
+        assert_eq!(reg.clause_classifications.len(), 1);
+        assert_eq!(
+            reg.clause_classifications[0].clause.as_deref(),
+            Some("clu-reference-x-must-a1b2c3d4")
+        );
     }
 
     #[test]

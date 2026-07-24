@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-spec-113500f4",
+  "documents": [
+    {
+      "key": "reference",
+      "file": "devcontainer-reference.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/devcontainer-reference.md",
+      "sha256": "daef12b6b61d91322c84fadffce188646fcfb067660803e1b622154b02b6185f",
+      "scope": "consumer"
+    },
+    {
+      "key": "json-reference",
+      "file": "devcontainerjson-reference.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/devcontainerjson-reference.md",
+      "sha256": "d1f7f3620d5caf82497c6972da6ea8139984b8108f47eefa5d67e4b3a12caa8a",
+      "scope": "consumer"
+    },
+    {
+      "key": "supporting-tools",
+      "file": "supporting-tools.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/supporting-tools.md",
+      "sha256": "716c01e66cf12dd4e50e9ecc71f6c1fa7d3b772975ab4fa9749fa196fa84dc76",
+      "scope": "consumer"
+    },
+    {
+      "key": "image-metadata",
+      "file": "image-metadata.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/image-metadata.md",
+      "sha256": "433503201027ccc01d2cff83c9c84e084739d281c2bbab6e55c7f472c4a36da6",
+      "scope": "consumer"
+    },
+    {
+      "key": "lockfile",
+      "file": "devcontainer-lockfile.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/devcontainer-lockfile.md",
+      "sha256": "a24d8571fddce54f2b4e320926928066c7efcae56d42dd17570daab2b199f800",
+      "scope": "consumer"
+    },
+    {
+      "key": "devcontainer-id-variable",
+      "file": "devcontainer-id-variable.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/devcontainer-id-variable.md",
+      "sha256": "ea9174aecefff9f1becb61d3b186bebe4609639505c65ef08e2c172c79ce9d48",
+      "scope": "consumer"
+    },
+    {
+      "key": "parallel-lifecycle",
+      "file": "parallel-lifecycle-script-execution.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/parallel-lifecycle-script-execution.md",
+      "sha256": "9e5274c9079e6fd6b595ddc74b867195b3612a2805fa3c516e29ba943a27ab16",
+      "scope": "consumer"
+    },
+    {
+      "key": "features-lifecycle-scripts",
+      "file": "features-contribute-lifecycle-scripts.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/features-contribute-lifecycle-scripts.md",
+      "sha256": "024976b7db816a955ba8116fbdd67c97702186a834938cce39706950830c466e",
+      "scope": "consumer"
+    },
+    {
+      "key": "features-user-env",
+      "file": "features-user-env-variables.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/features-user-env-variables.md",
+      "sha256": "4fc549b9390efe6a6ad21b7cfc966ab4a1e0b8377b3af92f508aa0a99edaf190",
+      "scope": "consumer"
+    },
+    {
+      "key": "feature-dependencies",
+      "file": "feature-dependencies.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/feature-dependencies.md",
+      "sha256": "e5a37893d9cab790499860abad25f2c90006a2180dae6e43679ddbd52e50810a",
+      "scope": "consumer"
+    },
+    {
+      "key": "gpu-host-requirement",
+      "file": "gpu-host-requirement.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/gpu-host-requirement.md",
+      "sha256": "fdf3741b2e5d33e026b609b0657746403dacfcf0ff6a450fca5daa44ee649fe6",
+      "scope": "consumer"
+    },
+    {
+      "key": "declarative-secrets",
+      "file": "declarative-secrets.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/declarative-secrets.md",
+      "sha256": "ea4acc0cc9a557ace68fa28e22b56006bb6c34ce4c2eabdb99a2c0d0a05abf82",
+      "scope": "consumer"
+    },
+    {
+      "key": "secrets-support",
+      "file": "secrets-support.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/secrets-support.md",
+      "sha256": "af4775cbe1984a1e05a6cc3f32c3bac3da65d544a92d3c4fc5be86e9d8d9e65c",
+      "scope": "consumer"
+    },
+    {
+      "key": "features-legacy-ids",
+      "file": "features-legacyIds-deprecated-properties.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/features-legacyIds-deprecated-properties.md",
+      "sha256": "021b198f6305142b60ac5b3731f4704cd4546ab21e250af2b73bd4f0deab7852",
+      "scope": "consumer"
+    },
+    {
+      "key": "features",
+      "file": "devcontainer-features.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/devcontainer-features.md",
+      "sha256": "c054b4fd79c3f88673e6254c67d485f910fc464bd8c1785be6db48e1ffdc9f3a",
+      "scope": "authoring"
+    },
+    {
+      "key": "features-distribution",
+      "file": "devcontainer-features-distribution.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/devcontainer-features-distribution.md",
+      "sha256": "64e6555816dbf43c9af2610def74191bbe8a7de834acf39bf1cf516b8109a5ba",
+      "scope": "authoring"
+    },
+    {
+      "key": "templates",
+      "file": "devcontainer-templates.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/devcontainer-templates.md",
+      "sha256": "fe4757e34f74073830d619ac35af11003bee4ee69a50a02c152c59f468be7efd",
+      "scope": "authoring"
+    },
+    {
+      "key": "templates-distribution",
+      "file": "devcontainer-templates-distribution.md",
+      "upstreamUrl": "https://raw.githubusercontent.com/devcontainers/spec/113500f4/docs/specs/devcontainer-templates-distribution.md",
+      "sha256": "9a2a27514a37ce8d89af841f3137815b8cd925737904c71a668c64087f4bb960",
+      "scope": "authoring"
+    }
+  ]
+}

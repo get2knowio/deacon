@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-features-user-env-additionally-the-home-folders-of-the-two-users-a-io-15684a98",
+      "clause": "clu-features-user-env-additionally-the-home-folders-of-the-two-users-a-io-15684a98",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-exec-container-id-metadata"
+      ],
+      "notes": "Prose\u2192behavior traceability now flows through this clause; supersedes retired src-spec-container-metadata-recovery (021 T036)."
+    },
+    {
+      "id": "clc-features-user-env-if-no-remoteuser-is-configured-remote-user-is-se-algo-d105730b",
+      "clause": "clu-features-user-env-if-no-remoteuser-is-configured-remote-user-is-se-algo-d105730b",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-exec-container-id-metadata"
+      ]
+    },
+    {
+      "id": "clc-features-user-env-pass-remote-user-and-container-user-environment-io-3dda5725",
+      "clause": "clu-features-user-env-pass-remote-user-and-container-user-environment-io-3dda5725",
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-exec-container-id-metadata"
+      ]
+    },
+    {
+      "id": "clc-features-user-env-the-container-user-can-be-set-with-containeruser-desc-b793399d",
+      "clause": "clu-features-user-env-the-container-user-can-be-set-with-containeruser-desc-b793399d",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    }
+  ]
+}

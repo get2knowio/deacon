@@ -1,0 +1,4034 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-spec-113500f4",
+  "units": [
+    {
+      "id": "clu-declarative-secrets-add-an-optional-secrets-property-to-the-devconta-io-9b453bae",
+      "document": "declarative-secrets",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "57f1fc68771f0b73215a4d0c6a4ff6998219b0a5087aa0b60ff3e74a6372d477",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 1,
+          "excerpt": "Add an optional `secrets` property to the `devContainer.base.schema.json`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-declarative-secrets-description-string-a-brief-description-of-the-se-io-8536a807",
+      "document": "declarative-secrets",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "dc27216cbc3c15dd18eec137f8c4190201fed3c89c3b1c786d69d5db177cf605",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 4,
+          "excerpt": "`description` | `string` | A brief description of the secret."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-declarative-secrets-documentationurl-string-a-url-pointing-to-where-io-58c0bc69",
+      "document": "declarative-secrets",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "acd864b20a65bea0fa5ec279cc57046fb91873794239f9c4de2298a7e18bef0e",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 5,
+          "excerpt": "`documentationUrl` | `string` | A URL pointing to where the user can obtain more information about the secret."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-declarative-secrets-implementations-may-inject-these-secrets-into-th-desc-d00b7761",
+      "document": "declarative-secrets",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "5424a1f2b6e93e5f12eac39c670c7a80db23d9fee7924f6620725c08bd2d983a",
+      "locations": [
+        {
+          "heading": "Example",
+          "anchor": "example",
+          "ordinal": 1,
+          "excerpt": "Implementations _may_ inject these secrets into the container as environment variables."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-declarative-secrets-the-keys-of-this-object-are-the-names-of-the-sec-desc-3b0681c7",
+      "document": "declarative-secrets",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "263aa9fcc3a3062fc9db8a741c2e692ece6a24eab8f4e133dfd39ecaa035135e",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 2,
+          "excerpt": "The keys of this object are the names of the secrets that are in use. Keys should be [valid Linux environment variable names](https://pubs.opengroup.org/onlinepubs/000095399/basedefs/xbd_chap08.html)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-declarative-secrets-these-secrets-are-recommended-to-the-user-but-ar-desc-922bbd63",
+      "document": "declarative-secrets",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "724ad6b9756306667c78be8e1a960bb6eceb7479e524f988a3b926fc413da409",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 3,
+          "excerpt": "These `secrets` are recommended to the user but are not _required_ for creation."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-devcontainer-id-variable-compute-a-sha-256-hash-from-the-utf-8-encoded-in-algo-ff771e6e",
+      "document": "devcontainer-id-variable",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "65f3bdd11295d9148ecec9f94fa7fbf2cbafb288cb6ab179fe2c78a288ea4716",
+      "locations": [
+        {
+          "heading": "Label-based Computation",
+          "anchor": "label-based-computation",
+          "ordinal": 2,
+          "excerpt": "Compute a SHA-256 hash from the UTF-8 encoded input string."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-devcontainer-id-variable-excluding-boolean-numbers-and-enum-properties-th-desc-45721081",
+      "document": "devcontainer-id-variable",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "5dac037e5366f859ea9e1269eb0109ab2f81e83b87777a878f37005a927fe5af",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 3,
+          "excerpt": "Excluding boolean, numbers and enum properties the properties supporting `${devcontainerId}` in the feature metadata are: `entrypoint`, `mounts`, `customizations`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-devcontainer-id-variable-excluding-boolean-numbers-and-enum-properties-th-desc-bd0ca7d0",
+      "document": "devcontainer-id-variable",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "eb71b941082ce5b4a31fe69c44f9c5aba7e078be1be3cac14f30ad925b42a30f",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 2,
+          "excerpt": "Excluding boolean, numbers and enum properties the properties supporting `${devcontainerId}` in the devcontainer.json are: `name`, `runArgs`, `initializeCommand`, `onCreateCommand`, `updateContentCommand`, `postCreateCommand`, `postStartCommand`, `postAttachCommand`, `workspaceFolder`, `workspaceMount`, `mounts`, `containerEnv`, `remoteEnv`, `containerUser`, `remoteUser`, `customizations`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-devcontainer-id-variable-it-should-only-be-used-in-parts-of-the-configura-desc-556d8d7d",
+      "document": "devcontainer-id-variable",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "186858b37483e2549c61dbf1c0649fed8d7245e7e4e5c8f9ae9f5b7c12ada7e2",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 1,
+          "excerpt": "It should only be used in parts of the configuration and metadata that is not used for building the image because that would otherwise prevent pre-building the image at a time when the dev container's id is not known yet."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-devcontainer-id-variable-the-identifier-must-only-contain-alphanumeric-ch-desc-13534537",
+      "document": "devcontainer-id-variable",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "a4f8c1bc88da93f19cbe60837e480c1edc66fcb992e2fa68b80da5060e910638",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 5,
+          "excerpt": "The identifier must only contain alphanumeric characters."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-devcontainer-id-variable-they-must-ensure-that-it-is-unique-among-other-d-desc-f5994239",
+      "document": "devcontainer-id-variable",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "5ed612bacaa183ee2b5855a2a14139e5d516f990852777e0debeb11f0f3ce89a",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 4,
+          "excerpt": "They must ensure that it is unique among other dev containers on the same Docker host and that it is stable across rebuilds of dev containers."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-devcontainer-id-variable-to-ensure-implementations-get-to-the-same-result-algo-001cb9f4",
+      "document": "devcontainer-id-variable",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "585cdbc708c4593928b4c760eff247536126efe3770e51c152f2da2af313b6ae",
+      "locations": [
+        {
+          "heading": "Label-based Computation",
+          "anchor": "label-based-computation",
+          "ordinal": 1,
+          "excerpt": "To ensure implementations get to the same result, the object keys must be sorted and any optional whitespace outside of the keys and values must be removed."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-devcontainer-id-variable-use-a-base-32-encoded-representation-left-padded-algo-26efae91",
+      "document": "devcontainer-id-variable",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "ef90058a974829e249a2f86c4a602cbb6c8db274bad5b24e345d0922183e5ef8",
+      "locations": [
+        {
+          "heading": "Label-based Computation",
+          "anchor": "label-based-computation",
+          "ordinal": 3,
+          "excerpt": "Use a base-32 encoded representation left-padded with '0' to 52 characters as the result."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-a-new-property-dependson-can-be-optionally-added-desc-039bf6bd",
+      "document": "feature-dependencies",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "adfe9e90f555b501b8ee14d4cdb3f7d712f1e7ebc58ea00aa1698c57d924fc97",
+      "locations": [
+        {
+          "heading": "(A) Add `dependsOn` property",
+          "anchor": "a-add-dependson-property",
+          "ordinal": 1,
+          "excerpt": "A new property `dependsOn` can be optionally added to the `devcontainer-feature.json`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-adding-feature-s-to-this-property-tells-the-orch-algo-5150f266",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "e3124c52043fed7266f338891980c5b073c63b2bcde4b726c7d532266b691057",
+      "locations": [
+        {
+          "heading": "(A) Add `dependsOn` property",
+          "anchor": "a-add-dependson-property",
+          "ordinal": 2,
+          "excerpt": "Adding Feature(s) to this property tells the orchestrating tool to install the Feature(s) (with the associated options, if provided) before installing the Feature that declares the dependency."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-an-orchestrating-tool-should-remove-all-installs-algo-e4d47679",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "10a553dd42f84664ea1f938e2a202c162ae449e3218baca591d99f25176fed90",
+      "locations": [
+        {
+          "heading": "installsAfter",
+          "anchor": "installsafter",
+          "ordinal": 2,
+          "excerpt": "an orchestrating tool should remove all `installsAfter` directed edges that do not correspond with a Feature in the `worklist` that is set to be installed."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-commit-to-installationorder-only-those-nodes-who-algo-bf65dc02",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "dd6242231bdf20bc27ffcf3113cd8cea4df733faf2d2393e47aea0f2e43ceb49",
+      "locations": [
+        {
+          "heading": "**(B3) Round-based sorting**",
+          "anchor": "b3-round-based-sorting",
+          "ordinal": 3,
+          "excerpt": "commit to `installationOrder` only those nodes who share the maximum `roundPriority`.  Return all nodes in `round` with a strictly lower `roundPriority` to the `worklist` to be reprocessed in subsequent iterations."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-compare-and-sort-each-feature-lexiographically-b-algo-ed9f808d",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "98bb5022cb6db48bd20d8cf88ca3468cd41bc3bfad35d485fd42f0612e65c20a",
+      "locations": [
+        {
+          "heading": "Definition: Round Stable Sort",
+          "anchor": "definition-round-stable-sort",
+          "ordinal": 1,
+          "excerpt": "Compare and sort each Feature lexiographically by their fully qualified resource name (For OCI-published Features, that means the ID without version or digest.)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-dependency-resolution-is-only-performed-on-initi-desc-603bcd42",
+      "document": "feature-dependencies",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "6fbdf08b066b86a709e5cbf96eedba7fc3818bcae6e72c184383a57df2424ad3",
+      "locations": [
+        {
+          "heading": "Image Metadata",
+          "anchor": "image-metadata",
+          "ordinal": 1,
+          "excerpt": "Dependency resolution is only performed on initial container creation by reading the `features` object of `devcontainer.json` and resolving the Features in that point in time."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-dependson-ghcr-io-second-1-flag-true-io-791d2b05",
+      "document": "feature-dependencies",
+      "strength": "io-contract",
+      "testability": "indirectly-testable",
+      "fingerprint": "336104359008f5381f222732d326a2f697cc60e06feb29004eae9c90fec6db0d",
+      "locations": [
+        {
+          "heading": "(A) Add `dependsOn` property",
+          "anchor": "a-add-dependson-property",
+          "ordinal": 3,
+          "excerpt": "    \"dependsOn\": {\n        \"ghcr.io/second:1\": {\n            \"flag\": true\n        },"
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-feature-dependencies-each-node-in-the-graph-has-an-implicit-default-r-algo-72caf843",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "2f43bc54c79b04bf956741832006d27a4e42fa673a0ece2b3e8d190b8659a06b",
+      "locations": [
+        {
+          "heading": "**(B2) Assigning `roundPriority`**",
+          "anchor": "b2-assigning-roundpriority",
+          "ordinal": 1,
+          "excerpt": "Each node in the graph has an implicit, default `roundPriority` of 0."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-for-dependson-dependencies-the-dependency-will-b-algo-2ba70907",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "452824885b29d74e87df1e5176d14c7598f5a6ade4f8d5d2b7e59e9bccee631a",
+      "locations": [
+        {
+          "heading": "**(B1) Building dependency graph**",
+          "anchor": "b1-building-dependency-graph",
+          "ordinal": 2,
+          "excerpt": "For `dependsOn` dependencies, the dependency will be fed back into the worklist to be recursively resolved."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-from-the-user-defined-features-the-orchestrating-algo-038fa45f",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "7c7cf13a2540027ba7617f8f470cf16a85f63bd4ef4dae6f52e3385dfbd198cc",
+      "locations": [
+        {
+          "heading": "**(B1) Building dependency graph**",
+          "anchor": "b1-building-dependency-graph",
+          "ordinal": 1,
+          "excerpt": "From the user-defined Features, the orchestrating tool will build a dependency graph."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-if-there-is-ever-a-round-where-no-elements-are-a-algo-eaf1402b",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "48ea608cd6d2312d124accbf73d2cd82ed959cef7d133c7a1e5e45e3694859e1",
+      "locations": [
+        {
+          "heading": "**(B3) Round-based sorting**",
+          "anchor": "b3-round-based-sorting",
+          "ordinal": 4,
+          "excerpt": "If there is ever a round where no elements are added to `installationOrder`, the algorithm should terminate and return an error."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-installsafter-is-not-recursive-algo-6d8aa9e0",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "6584ebbcc054c7778d0cef8d42eb0dff7487103279ed14cf00efc01b4f7ce8cc",
+      "locations": [
+        {
+          "heading": "installsAfter",
+          "anchor": "installsafter",
+          "ordinal": 1,
+          "excerpt": "`installsAfter` is not recursive."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-mediatype-application-vnd-oci-image-manifest-v1-io-e17c68d7",
+      "document": "feature-dependencies",
+      "strength": "io-contract",
+      "testability": "indirectly-testable",
+      "fingerprint": "7cf3ebe906116eba03d9a31029238ffba75c3488715adb06537db03340cec9fa",
+      "locations": [
+        {
+          "heading": "Identifying Dependencies - OCI Registry",
+          "anchor": "identifying-dependencies---oci-registry",
+          "ordinal": 3,
+          "excerpt": "  \"mediaType\": \"application/vnd.oci.image.manifest.v1+json\","
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-feature-dependencies-only-the-features-equal-to-the-max-roundpriority-algo-6e6948bb",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "13bb130402d6d2fe8a3914d1dd6dc20916b99bccf6952a3d361fce5c84562c0e",
+      "locations": [
+        {
+          "heading": "**(B2) Assigning `roundPriority`**",
+          "anchor": "b2-assigning-roundpriority",
+          "ordinal": 2,
+          "excerpt": "only the Features equal to the max `roundPriority` of that set will be committed (the remaining will be uncommitted and reevaulated in subsequent rounds)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-start-with-all-the-elements-from-b2-in-a-worklis-algo-e03a3c04",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "3296c07be05b2fe54781f6006219afef4a364d0770ecaadb294288184af4b43d",
+      "locations": [
+        {
+          "heading": "**(B3) Round-based sorting**",
+          "anchor": "b3-round-based-sorting",
+          "ordinal": 1,
+          "excerpt": "Start with all the elements from **(B2)** in a `worklist` and an empty list `installationOrder`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-the-orchestrating-tool-is-responsible-for-calcul-algo-10e3be9a",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "6668a0848ea7c87909fcea298a4a1c929a223c0891f581b75a6bdcaae1331f95",
+      "locations": [
+        {
+          "heading": "(B) `dependsOn` install order algorithm",
+          "anchor": "b-dependson-install-order-algorithm",
+          "ordinal": 1,
+          "excerpt": "The orchestrating tool is responsible for calculating a Feature installation order (or error, if no valid installation order can be resolved)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-the-orchestrating-tool-must-fallback-to-download-must-e98c49b3",
+      "document": "feature-dependencies",
+      "strength": "must",
+      "testability": "indirectly-testable",
+      "fingerprint": "f57d34fb2430193541038578bd91d84d32f25596c9db4b2e835234a17beeab27",
+      "locations": [
+        {
+          "heading": "Identifying Dependencies - OCI Registry",
+          "anchor": "identifying-dependencies---oci-registry",
+          "ordinal": 2,
+          "excerpt": "the orchestrating tool MUST fallback to downloading and extracting the Feature's contents to read the metadata properties."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-the-orchestrating-tool-should-assign-a-roundprio-algo-3ef2e621",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "e3a9da0a070d8a2cc1acfb47f7ba6479f9c007f60d4f056df1916641c0f74e23",
+      "locations": [
+        {
+          "heading": "overrideFeatureInstallOrder",
+          "anchor": "overridefeatureinstallorder",
+          "ordinal": 2,
+          "excerpt": "the orchestrating tool should assign a `roundPriority` of `n - idx` to each Feature, where `idx` is the zero-based index of the Feature in the array."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-the-overridefeatureinstallorder-property-of-devc-algo-116737c8",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "da7aec103404dc0799441d0d61d5b20abc5608b4102aa3db5000cfd33171c3e1",
+      "locations": [
+        {
+          "heading": "overrideFeatureInstallOrder",
+          "anchor": "overridefeatureinstallorder",
+          "ordinal": 1,
+          "excerpt": "The `overrideFeatureInstallOrder` property of `devcontainer.json` is an array of Feature IDs that are to be installed in descending priority order as soon as its dependencies outlined above are installed."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-the-set-of-features-to-be-installed-is-the-union-algo-c707f67a",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "9c8d2f4b00bc868cfdc4a7d577cbf9ae444015bb6231668bb4e861b7a376743b",
+      "locations": [
+        {
+          "heading": "(B) `dependsOn` install order algorithm",
+          "anchor": "b-dependson-install-order-algorithm",
+          "ordinal": 2,
+          "excerpt": "The set of Features to be installed is the union of user-defined Features and their dependencies."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-this-specification-defines-two-features-as-equal-desc-c6fa6084",
+      "document": "feature-dependencies",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "cbdff8a82d660669fb35b31fd9250811be5f050d782b6044acff4e88b6a52f3b",
+      "locations": [
+        {
+          "heading": "Definition: Feature Equality",
+          "anchor": "definition-feature-equality",
+          "ordinal": 1,
+          "excerpt": "This specification defines two Features as equal if both Features point to the same exact contents and are executed with the same options."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-to-speed-up-dependency-resolution-all-features-p-desc-9ea95360",
+      "document": "feature-dependencies",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "d5dd5458512f9de1c2218fb753013e38e90b6aed38882e21bf0942fe22587029",
+      "locations": [
+        {
+          "heading": "Identifying Dependencies - OCI Registry",
+          "anchor": "identifying-dependencies---oci-registry",
+          "ordinal": 1,
+          "excerpt": "To speed up dependency resolution, all Features [published to an OCI registry](https://containers.dev/implementors/features-distribution/#oci-registry) will have their entire `devcontainer-feature.json` serialized and added as an [annotation](https://github.com/opencontainers/image-spec/blob/main/annotations.md)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-two-feature-are-identical-if-their-manifest-dige-algo-ee493920",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "b02493dcfe31a7aa4c9b05730b0dd0638bca3d6ffc86ff8b4dd4fce0c29eee25",
+      "locations": [
+        {
+          "heading": "Definition: Feature Equality",
+          "anchor": "definition-feature-equality",
+          "ordinal": 2,
+          "excerpt": "two Feature are identical if their manifest digests are equal, and the options executed against the Feature are equal (compared value by value)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-feature-dependencies-while-the-worklist-is-not-empty-iterate-through-algo-9d7e0a05",
+      "document": "feature-dependencies",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "716070e1dd6d6ef49032562963c99037bd5c40d215eab05220b72d14414c5c2e",
+      "locations": [
+        {
+          "heading": "**(B3) Round-based sorting**",
+          "anchor": "b3-round-based-sorting",
+          "ordinal": 2,
+          "excerpt": "While the `worklist` is not empty, iterate through each element in the `worklist` and check if all its dependencies (if any) are already members of `installationOrder`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-a-feature-is-a-self-contained-entity-in-a-folder-desc-daed6e03",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "fbc2350f65f8abd60ee8a79cb699f7a66f797fe9c63990ef7fa1092236fcc2dc",
+      "locations": [
+        {
+          "heading": "Folder structure",
+          "anchor": "folder-structure",
+          "ordinal": 1,
+          "excerpt": "A Feature is a self contained entity in a folder with at least a `devcontainer-feature.json` and `install.sh` entrypoint script."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-a-feature-s-options-specified-as-the-value-of-a-desc-9028c1c5",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "39f8102c6749eb90b4af8f48cac4b7d26fef71699cfec45d00e8aae3d33c3104",
+      "locations": [
+        {
+          "heading": "Option Resolution",
+          "anchor": "option-resolution",
+          "ordinal": 1,
+          "excerpt": "A Feature's 'options' - specified as the value of a single Feature key/value pair in the user's `devcontainer.json` - are passed to the Feature as environment variables."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-all-commands-within-that-group-are-executed-in-p-algo-a78f4973",
+      "document": "features",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "41c18bb9ba160b8ca9a06decdcc39f916dbd3d70dbfe11e06cbd70a9ba75aab3",
+      "locations": [
+        {
+          "heading": "Behavior",
+          "anchor": "behavior",
+          "ordinal": 3,
+          "excerpt": "all commands within that group are executed in parallel, but still blocking commands from subsequent Features and/or the `devcontainer.json`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-all-properties-are-optional-except-for-id-versio-desc-f714e36c",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "e6772b2c789b8bbb05b502fcc8027f86f168cc2b146c75f9ae36094efa9d81ec",
+      "locations": [
+        {
+          "heading": "devcontainer-feature.json properties",
+          "anchor": "devcontainer-featurejson-properties",
+          "ordinal": 1,
+          "excerpt": "All properties are optional **except for `id`, `version`, and `name`**."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-any-options-defined-by-a-feature-s-devcontainer-desc-94f2f9f6",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "d8b5bada7668979aafe80adf7ea8b405e0dc38f176f49b8978918ff69b8b26cb",
+      "locations": [
+        {
+          "heading": "Option Resolution",
+          "anchor": "option-resolution",
+          "ordinal": 4,
+          "excerpt": "Any options defined by a Feature's `devcontainer-feature.json` that are omitted in the user's `devcontainer.json` will be implicitly exported as its default value."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-applications-should-default-to-bin-sh-for-featur-desc-025df47e",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "c1f7aecc9fe8c1f51ed84b0fbcf71705f861d07d714efca97beb8ca55346d0d1",
+      "locations": [
+        {
+          "heading": "Authoring",
+          "anchor": "authoring",
+          "ordinal": 1,
+          "excerpt": "Applications should default to `/bin/sh` for Features that do not include this information."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-as-a-shorthand-the-value-of-a-feature-can-be-pro-desc-f3124266",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "f23348981e4a5f2aa1ba2ef316adbb8ce0cdafe3fdc4918a5721c0f2193b9a65",
+      "locations": [
+        {
+          "heading": "devcontainer.json properties",
+          "anchor": "devcontainerjson-properties",
+          "ordinal": 1,
+          "excerpt": "As a shorthand, the value of a `feature` can be provided as a single string. This string is mapped to an option called `version`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-by-default-features-are-installed-on-top-of-a-ba-desc-a302b55b",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "21280a83b815594a7ee8ff52dbc0c7a06a3253eb0b9eb9d8f980a303531abd1b",
+      "locations": [
+        {
+          "heading": "Installation order",
+          "anchor": "installation-order",
+          "ordinal": 1,
+          "excerpt": "By default, Features are installed on top of a base image in an order determined as optimal by the implementing tool."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-commands-provided-by-features-are-always-execute-desc-dd4498b0",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "ab4023ca20b5adafd4a7b0e781d6ffe06352c329b59a3395e1870273bf6b37a1",
+      "locations": [
+        {
+          "heading": "Behavior",
+          "anchor": "behavior",
+          "ordinal": 1,
+          "excerpt": "Commands provided by Features are always executed _before_ any user-provided lifecycle commands (i.e. in the `devcontainer.json`)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-compute-a-sha-256-hash-from-the-utf-8-encoded-in-algo-220fd88c",
+      "document": "features",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "65f3bdd11295d9148ecec9f94fa7fbf2cbafb288cb6ab179fe2c78a288ea4716",
+      "locations": [
+        {
+          "heading": "Label-based Computation",
+          "anchor": "label-based-computation",
+          "ordinal": 1,
+          "excerpt": "Compute a SHA-256 hash from the UTF-8 encoded input string."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-containerenv-is-added-before-the-feature-is-exec-desc-053522a1",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "633fb7949b881d8fda385a2fa6c2f2b74bb233488dc696b904e02bf24035b134",
+      "locations": [
+        {
+          "heading": "Implementation notes",
+          "anchor": "implementation-notes",
+          "ordinal": 3,
+          "excerpt": "`containerEnv` is added before the Feature is executed as `ENV` commands in the Dockerfile."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-a-local-feature-may-not-be-referenced-by-absolut-desc-e6c73d75",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "7afbf1d3814fd26ab51b9d57ded5822cbc120b7862201c49e5b4380956aca7e8",
+      "locations": [
+        {
+          "heading": "Locally referenced Features",
+          "anchor": "locally-referenced-features",
+          "ordinal": 3,
+          "excerpt": "A local Feature may **not** be referenced by absolute path."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-a-local-feature-s-source-code-must-be-contained-desc-95530a45",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "87ba1734c495f98752a735dcc95545f482008cdce8e2dba8e711722688cfd7af",
+      "locations": [
+        {
+          "heading": "Locally referenced Features",
+          "anchor": "locally-referenced-features",
+          "ordinal": 1,
+          "excerpt": "A local Feature's source code **must** be contained within a sub-folder of the `.devcontainer/ folder`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-an-annotation-named-dev-containers-metadata-shou-desc-b05655d2",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "af4d87a38e8a1a6adb7cf69d6ea4cff474475c5a93978244c2c35a3342efbbcb",
+      "locations": [
+        {
+          "heading": "OCI Registry",
+          "anchor": "oci-registry",
+          "ordinal": 3,
+          "excerpt": "an [annotation](https://github.com/opencontainers/image-spec/blob/main/annotations.md) named `dev.containers.metadata` should be populated on the manifest when published by an implementing tool."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-each-features-s-devcontainer-feature-json-metada-desc-b76d2912",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "3dabc34024293edd4fc858dc5b4d4b55f59d19f03315fdc100fbf46867443127",
+      "locations": [
+        {
+          "heading": "devcontainer-collection.json",
+          "anchor": "devcontainer-collectionjson",
+          "ordinal": 1,
+          "excerpt": "Each Features's `devcontainer-feature.json` metadata file is appended into the `features` top-level array."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-each-packaged-feature-is-pushed-to-the-registry-desc-fd7d5c27",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "d31f27a47e7349f12a771dfea7b847296a5ef168ff04ee11de8e7f03f702f2cf",
+      "locations": [
+        {
+          "heading": "OCI Registry",
+          "anchor": "oci-registry",
+          "ordinal": 1,
+          "excerpt": "Each packaged feature is pushed to the registry following the naming convention `<registry>/<namespace>/<id>[:version]`, where version is the major, minor, and patch version of the Feature, according to the semver specification."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-each-sub-directory-should-be-named-such-that-it-desc-28ecbc16",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "1120dcae375bb8179a2d5a557cc3e0e6fffe04d53116b541bcf5c0d99942aeec",
+      "locations": [
+        {
+          "heading": "Source code",
+          "anchor": "source-code",
+          "ordinal": 2,
+          "excerpt": "Each sub-directory should be named such that it matches the `id` field of the `devcontainer-feature.json`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-features-are-distributed-as-tarballs-desc-bd68764b",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "7569738d29b6e360ac30d49762568b04f889678aee4adf0ec657d98332b07579",
+      "locations": [
+        {
+          "heading": "Packaging",
+          "anchor": "packaging",
+          "ordinal": 1,
+          "excerpt": "Features are distributed as tarballs."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-features-source-code-is-stored-in-a-git-reposito-desc-dfd5fa79",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "9285f34910cf394788269306ab3f69daf7b73c1bb6742e3cd5ce6d3cbf5e0f6e",
+      "locations": [
+        {
+          "heading": "Source code",
+          "anchor": "source-code",
+          "ordinal": 1,
+          "excerpt": "Features source code is stored in a git repository."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-mediatype-application-vnd-oci-image-manifest-v1-io-0a1ceea4",
+      "document": "features-distribution",
+      "strength": "io-contract",
+      "testability": "not-applicable",
+      "fingerprint": "7cf3ebe906116eba03d9a31029238ffba75c3488715adb06537db03340cec9fa",
+      "locations": [
+        {
+          "heading": "OCI Registry",
+          "anchor": "oci-registry",
+          "ordinal": 4,
+          "excerpt": "\"mediaType\": \"application/vnd.oci.image.manifest.v1+json\","
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-features-distribution-the-auto-generated-devcontainer-collection-json-desc-1182fae9",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "b1c1b8bed6b0f8444ccea730447d6ac3e7ce00105020e4c0e80a7aa36705c31f",
+      "locations": [
+        {
+          "heading": "OCI Registry",
+          "anchor": "oci-registry",
+          "ordinal": 2,
+          "excerpt": "The auto-generated `devcontainer-collection.json` is pushed to the registry with the same `namespace` as above and no accompanying `feature` name. The collection file is always tagged as `latest`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-the-relative-path-is-provided-using-unix-style-p-desc-95ef8af0",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "b32d830936433750e8fb4e1b56f95a0d7fe802c3083d64c49458fd2ce761eeb4",
+      "locations": [
+        {
+          "heading": "Locally referenced Features",
+          "anchor": "locally-referenced-features",
+          "ordinal": 4,
+          "excerpt": "The relative path is provided using unix-style path syntax (e.g. `./myFeature`) regardless of the host operating system."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-the-sub-folder-name-must-match-the-feature-s-id-desc-68ba92a6",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "b67eef65699a801c77a623d4ae2b2f2aca8870d0017bddc28dbab427341dddcc",
+      "locations": [
+        {
+          "heading": "Locally referenced Features",
+          "anchor": "locally-referenced-features",
+          "ordinal": 2,
+          "excerpt": "The sub-folder name **must** match the Feature's `id` field."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-the-tarball-is-named-devcontainer-feature-id-tgz-desc-d8398b64",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "946266beae42f74f58f89824268c04d6a070915d373ce4a21c6c3b37acbc609d",
+      "locations": [
+        {
+          "heading": "Packaging",
+          "anchor": "packaging",
+          "ordinal": 2,
+          "excerpt": "The tarball is named `devcontainer-feature-<id>.tgz`, where `<id>` is the Feature's `id` field."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-the-tgz-archive-file-must-be-named-devcontainer-desc-b32fee89",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "14609f05f1e26eee6046ecc9c59f580a6c251ff0f7421d2f6b2ded485c7a051b",
+      "locations": [
+        {
+          "heading": "Directly referencing a tarball",
+          "anchor": "directly-referencing-a-tarball",
+          "ordinal": 1,
+          "excerpt": "The `.tgz` archive file must be named `devcontainer-feature-<featureId>.tgz`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-distribution-tooling-that-handles-publishing-features-will-no-desc-4129df00",
+      "document": "features-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "cb7b1f7608454e925b90a6aaaa13908ce055efed320e24ec307f4abde48642bd",
+      "locations": [
+        {
+          "heading": "Versioning",
+          "anchor": "versioning",
+          "ordinal": 1,
+          "excerpt": "Tooling that handles publishing Features will not republish features if that exact version has already been published; however, tooling must republish major and minor versions in accordance with the semver specification."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-each-command-contributed-by-a-feature-is-execute-desc-304ca215",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "3f506644900cd7346d861a3e9a41f5b41bfae11f52aad917d31eb7d13312319f",
+      "locations": [
+        {
+          "heading": "Behavior",
+          "anchor": "behavior",
+          "ordinal": 2,
+          "excerpt": "each command contributed by a Feature is executed in sequence (blocking the next command from executing)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-each-feature-script-executes-as-its-own-layer-to-desc-6a08d1b6",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "10cf453daaaf6a495e7c8027720551553b46e9e3a90c9fad7d67e8fb3a3f809c",
+      "locations": [
+        {
+          "heading": "Implementation notes",
+          "anchor": "implementation-notes",
+          "ordinal": 4,
+          "excerpt": "Each Feature script executes as its own layer to aid in caching and rebuilding."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-feature-identifiers-should-be-assumed-to-be-case-desc-68ef18bd",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "ec9c8f3dc8398887ff2df3c7bbe4ab794a24bfd000139382b5c0506e23deda4b",
+      "locations": [
+        {
+          "heading": "Referencing a feature",
+          "anchor": "referencing-a-feature",
+          "ordinal": 1,
+          "excerpt": "Feature identifiers should be assumed to be case-insensitive and should be normalized to lowercase."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-feature-scripts-run-as-the-root-user-and-sometim-desc-86913dfe",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "1c3723e1e6cf234d1ac1ac4a524362cb417ce57648c11a5ee8378b3701aec746",
+      "locations": [
+        {
+          "heading": "User environment variables",
+          "anchor": "user-environment-variables",
+          "ordinal": 1,
+          "excerpt": "Feature scripts run as the `root` user and sometimes need to know which user account the dev container will be used with."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-if-any-of-the-features-indicated-in-the-dependso-desc-b94a100f",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "92f64ad2e31292f62ec4e42c425ab57b23942c03ab9e538019bc764af604a522",
+      "locations": [
+        {
+          "heading": "The dependsOn property",
+          "anchor": "the-dependson-property",
+          "ordinal": 2,
+          "excerpt": "If any of the Features indicated in the `dependsOn` property cannot be installed (e.g. due to circular dependency, failure to resolve the Feature, etc) the entire dev container creation should fail."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-if-no-remoteuser-is-configured-remote-user-is-se-desc-fca91b8f",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "21c6a0e8bdc375f75887185955d32f3b5b6e11df4fa5d9a55355fd549608d62e",
+      "locations": [
+        {
+          "heading": "User environment variables",
+          "anchor": "user-environment-variables",
+          "ordinal": 3,
+          "excerpt": "If no `remoteUser` is configured, `_REMOTE_USER` is set to the same value as `_CONTAINER_USER`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-in-the-snippet-above-myfeature-must-be-installed-must-7630c7ee",
+      "document": "features",
+      "strength": "must",
+      "testability": "indirectly-testable",
+      "fingerprint": "3e24b542fec1ca3a352a36c7cb2a43c12d6c7e0a2f8c534dfcd7a934184dd051",
+      "locations": [
+        {
+          "heading": "The dependsOn property",
+          "anchor": "the-dependson-property",
+          "ordinal": 1,
+          "excerpt": "In the snippet above, `myfeature` MUST be installed after `foo`, `bar`, and `baz`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-installsafter-is-not-evaluated-recursively-algo-7d30c616",
+      "document": "features",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "496ab77e551d613f5fa5045d59ae60e540cd1d1cd95a95d11f2203ebc153baeb",
+      "locations": [
+        {
+          "heading": "The installsAfter Property",
+          "anchor": "the-installsafter-property",
+          "ordinal": 1,
+          "excerpt": "`installsAfter` is **not** evaluated recursively."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-installsafter-only-influences-the-installation-o-algo-6fcd528e",
+      "document": "features",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "9ca89830ad7f0b6cca8fb39eab656c6795153f7d55e40ba01480e56744889809",
+      "locations": [
+        {
+          "heading": "The installsAfter Property",
+          "anchor": "the-installsafter-property",
+          "ordinal": 2,
+          "excerpt": "`installsAfter` only influences the installation order of Features that are **already set to be installed**."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-it-will-be-emitted-to-a-file-named-devcontainer-io-1d1b4962",
+      "document": "features",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "c3754ca1d0c337408e597c390d2c072b070c6d45cd3a34d57f120ea685f4354a",
+      "locations": [
+        {
+          "heading": "Option Resolution",
+          "anchor": "option-resolution",
+          "ordinal": 2,
+          "excerpt": "it will be emitted to a file named `devcontainer-features.env` following the format `<OPTION_NAME>=<value>`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-legacy-ids-defaults-to-array-of-old-ids-used-to-publish-thi-io-dc47b23f",
+      "document": "features-legacy-ids",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "ca9f421651e3b72f4de94d07a307418ded319676fc6163bf5bbec57511e3359a",
+      "locations": [
+        {
+          "heading": "1. legacyIds",
+          "anchor": "1-legacyids",
+          "ordinal": 1,
+          "excerpt": "Defaults to `[]`. Array of old IDs used to publish this Feature."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-legacy-ids-defaults-to-false-indicates-that-the-feature-is-io-651a4b56",
+      "document": "features-legacy-ids",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "cde29c96bdde3b5ce4ab73f2f5595a9a078e2f6088682981df6d388db29ba802",
+      "locations": [
+        {
+          "heading": "2. deprecated",
+          "anchor": "2-deprecated",
+          "ordinal": 1,
+          "excerpt": "Defaults to `false`. Indicates that the Feature is deprecated, and will not receive any further updates/support."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-legacy-ids-if-this-property-is-set-to-true-then-it-indicate-desc-cc1c45f4",
+      "document": "features-legacy-ids",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "f059953cd8b6db2fe3e23a5044238dab0500bccfbc3054a82c0dd252268d1f19",
+      "locations": [
+        {
+          "heading": "2. deprecated",
+          "anchor": "2-deprecated",
+          "ordinal": 2,
+          "excerpt": "If this property is set to `true`, then it indicates that the Feature is deprecated and won't be receiving any further updates/support. The OCI artifacts would exist, hence, the current dev configs will continue to work."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-legacy-ids-the-cli-tooling-will-be-updated-to-also-look-at-algo-b10031b2",
+      "document": "features-legacy-ids",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "c6df5ab2f704f6ad69b4b3619ea23a52bde3381689b3a074a81b718280e26b40",
+      "locations": [
+        {
+          "heading": "Supporting backwards compatibility for installsAfter property",
+          "anchor": "supporting-backwards-compatibility-for-installsafter-property",
+          "ordinal": 1,
+          "excerpt": "the CLI tooling will be updated to also look at the `legacyIds` property along with the `id` for determining the installation order."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-legacy-ids-the-property-is-useful-for-renaming-a-currently-desc-60127c26",
+      "document": "features-legacy-ids",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "8cbc40b2d2edb6a00a510b6e6845ab39cf78d4afebc3a0117c0b4c392e13da9f",
+      "locations": [
+        {
+          "heading": "1. legacyIds",
+          "anchor": "1-legacyids",
+          "ordinal": 2,
+          "excerpt": "The property is useful for renaming a currently published Feature within a single namespace."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-legacy-ids-the-semantic-version-of-the-feature-defined-by-t-desc-d1b0f722",
+      "document": "features-legacy-ids",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "01c6e1fd2e2b25053ad2d560c7f7d109b5dbe11f87ffa7c2ff4cdc908afe8e6e",
+      "locations": [
+        {
+          "heading": "Example: Renaming a Feature",
+          "anchor": "example-renaming-a-feature",
+          "ordinal": 1,
+          "excerpt": "The semantic version of the Feature defined by the `version` property should be **continued** and should not be restarted at `1.0.0`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-legacy-ids-will-dual-publish-the-old-ids-defined-by-the-leg-desc-0d5a6b09",
+      "document": "features-legacy-ids",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "db9c6cb89d8a50544a8c4f88d4bfdad6e84c56762393422171c73b0b6a2e5283",
+      "locations": [
+        {
+          "heading": "Changes to the Features distribution specification",
+          "anchor": "changes-to-the-features-distribution-specification",
+          "ordinal": 1,
+          "excerpt": "will dual publish the old `id`s (defined by the `legacyIds` property), and the new `id`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-lifecycle-scripts-all-other-semantics-match-the-existing-lifecycle-desc-c02f9c97",
+      "document": "features-lifecycle-scripts",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "224df1ab876b976c5d21362b43e0d2f711164b812adb4202f6642adde7b79388",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 4,
+          "excerpt": "All other semantics match the existing [Lifecycle Scripts](https://containers.dev/implementors/json_reference/#lifecycle-scripts) and [lifecycle script parallel execution](https://containers.dev/implementors/spec/#parallel-exec) behavior exactly."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-lifecycle-scripts-as-with-all-lifecycle-hooks-commands-are-execute-desc-fb55e890",
+      "document": "features-lifecycle-scripts",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "4224f0fc12cf1462891d8b03da7bdbb668a1feb282325b32d4c98d63afb2edd8",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 2,
+          "excerpt": "As with all lifecycle hooks, commands are executed from the context (cwd) of the [project workspace folder](https://containers.dev/implementors/spec/#project-workspace-folder)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-lifecycle-scripts-if-one-of-the-lifecycle-scripts-fails-any-subseq-algo-3e112729",
+      "document": "features-lifecycle-scripts",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "a3b310e68a21162fc1d501734637778e58cd9a23b17821adf920960e468661ad",
+      "locations": [
+        {
+          "heading": "Installation",
+          "anchor": "installation",
+          "ordinal": 2,
+          "excerpt": "If one of the lifecycle scripts fails, any subsequent scripts will not be executed."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-lifecycle-scripts-implementations-are-not-required-to-persist-feat-desc-e70d2cb7",
+      "document": "features-lifecycle-scripts",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "579b14ae03a22a694fb34e67fa711e4b6afb08b64b50ca06ec4b81228a3b210a",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 3,
+          "excerpt": "Implementations are not required to persist Feature install scripts beyond the initial build."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-lifecycle-scripts-no-subsequent-lifecycle-commands-shall-proceed-u-algo-0aca04ec",
+      "document": "features-lifecycle-scripts",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "aab1d4a5fe10d3b7a980128d1094fe2553d9fc232fd7879c31c4201dff584c5e",
+      "locations": [
+        {
+          "heading": "Installation",
+          "anchor": "installation",
+          "ordinal": 1,
+          "excerpt": "No subsequent lifecycle commands shall proceed until the current command completes."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-lifecycle-scripts-note-that-initializecommand-is-omitted-pending-f-desc-15212db2",
+      "document": "features-lifecycle-scripts",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "0078750de5af1351769decb8b42087dac37267ac83b6249c9a3d55ac2d86f940",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 1,
+          "excerpt": "Note that `initializeCommand` is omitted, pending further discussions around a secure design."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-lifecycle-scripts-when-a-dev-container-is-brought-up-for-each-life-algo-91b49557",
+      "document": "features-lifecycle-scripts",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "72ac478478772e96649995cebfbebcb50ec0d1f0e45a7234ae2ab6c56ed28902",
+      "locations": [
+        {
+          "heading": "Execution",
+          "anchor": "execution",
+          "ordinal": 1,
+          "excerpt": "When a dev container is brought up, for each lifecycle hook, each Feature that contributes a command to a lifecycle hook shall have the command executed in sequence, following the same execution order as outlined in [Feature installation order](https://containers.dev/implementors/features/#installation-order), and always before any user-provided lifecycle commands."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-parameters-like-capadd-securityop-are-concatenat-desc-1b18e10d",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "2a807196bb6011657b23c2c6e726317fe817de21909cdc9ce49ee9ffb498999f",
+      "locations": [
+        {
+          "heading": "Implementation notes",
+          "anchor": "implementation-notes",
+          "ordinal": 2,
+          "excerpt": "Parameters like `capAdd`, `securityOp`  are concatenated."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-parameters-like-privileged-init-are-included-if-desc-8051176c",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "92c48123cae158a9f9df3cdbace13dd1669c86ec7c5c644df87cf98eb37065ad",
+      "locations": [
+        {
+          "heading": "Implementation notes",
+          "anchor": "implementation-notes",
+          "ordinal": 1,
+          "excerpt": "Parameters like `privileged`, `init` are included if just 1 Feature requires them."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-proposals-value1-value2-io-691c42c1",
+      "document": "features",
+      "strength": "io-contract",
+      "testability": "not-applicable",
+      "fingerprint": "8ada6ab666cf96d8aab0306d839816f0d453ea582cc8f42af3c999e6478099b1",
+      "locations": [
+        {
+          "heading": "The options property",
+          "anchor": "the-options-property",
+          "ordinal": 1,
+          "excerpt": "\"proposals\": [\"value1\", \"value2\"],"
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-features-remote-user-and-container-user-environment-varia-desc-2c5cca76",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "e432e8d3a704519a1cf980131dc95c3456dc8dce917cc37bb9c546445de48861",
+      "locations": [
+        {
+          "heading": "User environment variables",
+          "anchor": "user-environment-variables",
+          "ordinal": 2,
+          "excerpt": "`_REMOTE_USER` and `_CONTAINER_USER` environment variables are passed to the Features scripts with `_CONTAINER_USER` being the container's user and `_REMOTE_USER` being the configured `remoteUser`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-replace-w-g-replace-d-g-touppercase-algo-37933881",
+      "document": "features",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "126308dbe4a797db08bfdb2b7be4f2c447b0749afd07bccbea917dda4bf9500e",
+      "locations": [
+        {
+          "heading": "Option Resolution",
+          "anchor": "option-resolution",
+          "ordinal": 3,
+          "excerpt": ".replace(/[^\\w_]/g, '_')\n\t.replace(/^[\\d_]+/g, '_')\n\t.toUpperCase();"
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-features-the-dependson-property-must-be-evaluated-recursi-desc-02808f73",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "30f1dbae9e022fb47c44adda509edde7b0eab37dca0db162ce046e3ccd0636ce",
+      "locations": [
+        {
+          "heading": "The dependsOn property",
+          "anchor": "the-dependson-property",
+          "ordinal": 3,
+          "excerpt": "The `dependsOn` property must be evaluated recursively."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-the-home-folders-of-the-two-users-are-passed-to-desc-e63de366",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "81b7f6d44a84e5c973ef24d757a6be2a31f9ab5f06a9f1e6b7f8f165262c1bc2",
+      "locations": [
+        {
+          "heading": "User environment variables",
+          "anchor": "user-environment-variables",
+          "ordinal": 4,
+          "excerpt": "the home folders of the two users are passed to the Feature scripts as `_REMOTE_USER_HOME` and `_CONTAINER_USER_HOME` environment variables."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-the-id-becomes-the-name-of-the-environment-varia-desc-31d4642c",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "7fc844c483144cd0e98e9e568bb956beb4c8f2592005f765c79db00b8a4a48cc",
+      "locations": [
+        {
+          "heading": "The options property",
+          "anchor": "the-options-property",
+          "ordinal": 2,
+          "excerpt": "The ID becomes the name of the environment variable in all caps."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-the-install-sh-script-for-each-feature-should-be-desc-b7c920aa",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "cc41a00442664bf439b6bdb9debaa2bc723fe99c56958cf577bd0e62221d265b",
+      "locations": [
+        {
+          "heading": "Invoking install.sh",
+          "anchor": "invoking-installsh",
+          "ordinal": 1,
+          "excerpt": "The `install.sh` script for each Feature should be executed as `root` during a container image build."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-the-latest-version-annotation-is-added-implicitl-desc-60c7b3c7",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "02b74bcec1f3b92e0354dc27b81a7efcc94cc67366cde7d3caa572c00a47a36c",
+      "locations": [
+        {
+          "heading": "devcontainer.json properties",
+          "anchor": "devcontainerjson-properties",
+          "ordinal": 2,
+          "excerpt": "The `:latest` version annotation is added implicitly if omitted."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-the-orchestrating-tool-should-assign-a-roundprio-algo-0de9ab37",
+      "document": "features",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "e3a9da0a070d8a2cc1acfb47f7ba6479f9c007f60d4f056df1916641c0f74e23",
+      "locations": [
+        {
+          "heading": "The 'overrideFeatureInstallOrder' property",
+          "anchor": "the-overridefeatureinstallorder-property",
+          "ordinal": 1,
+          "excerpt": "the orchestrating tool should assign a `roundPriority` of `n - idx` to each Feature, where `idx` is the zero-based index of the Feature in the array."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-the-properties-supporting-devcontainerid-in-the-desc-49ac4346",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "014fb65b0fd2a2b31101b69456efb33c7036780ac1949f42bd19a06acc5caa4d",
+      "locations": [
+        {
+          "heading": "Dev Container ID",
+          "anchor": "dev-container-id",
+          "ordinal": 1,
+          "excerpt": "the properties supporting `${devcontainerId}` in the Feature metadata are: `entrypoint`, `mounts`, `customizations`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-they-must-ensure-that-it-is-unique-among-other-d-desc-3180a890",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "5ed612bacaa183ee2b5855a2a14139e5d516f990852777e0debeb11f0f3ce89a",
+      "locations": [
+        {
+          "heading": "Dev Container ID",
+          "anchor": "dev-container-id",
+          "ordinal": 2,
+          "excerpt": "They must ensure that it is unique among other dev containers on the same Docker host and that it is stable across rebuilds of dev containers."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-to-ensure-that-the-appropriate-shell-is-used-the-desc-69c662f2",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "ea34cd67371b45729b6691eb61312bb1cec316853e0bcb6ff57402572164e8dc",
+      "locations": [
+        {
+          "heading": "Invoking install.sh",
+          "anchor": "invoking-installsh",
+          "ordinal": 2,
+          "excerpt": "To ensure that the appropriate shell is used, the execute bit should be set on `install.sh` and the file invoked directly (e.g. `chmod +x install.sh && ./install.sh`)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-tooling-that-handles-releasing-features-will-not-desc-e06497e8",
+      "document": "features",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "40c5a2301bc82348d0f49b6120d2ce328856caa5913787c1f33d00d6169e15fe",
+      "locations": [
+        {
+          "heading": "Versioning",
+          "anchor": "versioning",
+          "ordinal": 1,
+          "excerpt": "Tooling that handles releasing Features will not republish Features if that exact version has already been published; however, tooling must republish major and minor versions in accordance with the semver specification."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-use-a-base-32-encoded-representation-left-padded-algo-cf1473ea",
+      "document": "features",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "ef90058a974829e249a2f86c4a602cbb6c8db274bad5b24e345d0922183e5ef8",
+      "locations": [
+        {
+          "heading": "Label-based Computation",
+          "anchor": "label-based-computation",
+          "ordinal": 2,
+          "excerpt": "Use a base-32 encoded representation left-padded with '0' to 52 characters as the result."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-user-env-additionally-the-home-folders-of-the-two-users-a-io-15684a98",
+      "document": "features-user-env",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "23d2597c36b68b34415dbd8215786bb11699ee6c5826e9d9420125a123dbf147",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 3,
+          "excerpt": "Additionally the home folders of the two users are passed to the feature scripts as `_REMOTE_USER_HOME` and `_CONTAINER_USER_HOME` environment variables."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-user-env-if-no-remoteuser-is-configured-remote-user-is-se-algo-d105730b",
+      "document": "features-user-env",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "21c6a0e8bdc375f75887185955d32f3b5b6e11df4fa5d9a55355fd549608d62e",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 2,
+          "excerpt": "If no `remoteUser` is configured, `_REMOTE_USER` is set to the same value as `_CONTAINER_USER`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-user-env-pass-remote-user-and-container-user-environment-io-3dda5725",
+      "document": "features-user-env",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "fa0c4edea876d5c186053fa625aa20d7989a2538d6c242e205891062877bbad7",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 1,
+          "excerpt": "Pass `_REMOTE_USER` and `_CONTAINER_USER` environment variables to the features scripts with `_CONTAINER_USER` being the container's user and `_REMOTE_USER` being the configured `remoteUser`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-features-user-env-the-container-user-can-be-set-with-containeruser-desc-b793399d",
+      "document": "features-user-env",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "cc920336d047c0bdcc1a361a9e7cff2a2e5e9d6704fe8be1d9b49d985572aa75",
+      "locations": [
+        {
+          "heading": "Notes",
+          "anchor": "notes",
+          "ordinal": 1,
+          "excerpt": "The container user can be set with `containerUser` in the devcontainer.json and image metadata, `user` in the docker-compose.yml, `USER` in the Dockerfile and can be passed down from the base image."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-gpu-host-requirement-a-string-indicating-minimum-memory-requirements-io-1b5d1079",
+      "document": "gpu-host-requirement",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "ab1e18aca5aab5732e3ea07ccae4ea88dcc50185ad16e50acf3b6abe53d68027",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 4,
+          "excerpt": "A string indicating minimum memory requirements with a `tb`, `gb`, `mb`, or `kb` suffix."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-gpu-host-requirement-indicates-the-minimum-required-number-of-cores-io-529e3b33",
+      "document": "gpu-host-requirement",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "c43a40ea6701aa308d5bb12906025f04ab6cdfb2aa0733b5ba623434bdcf382b",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 3,
+          "excerpt": "Indicates the minimum required number of cores."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-gpu-host-requirement-indicates-whether-or-not-a-gpu-is-required-a-val-io-d8c6d13d",
+      "document": "gpu-host-requirement",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "a18a1608c34f16dd802eb32ba6475d102e96237125b7ae8e344cf6481f00b4a1",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 2,
+          "excerpt": "Indicates whether or not a GPU is required. A value 'optional' indicates that might be used if available."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-gpu-host-requirement-we-propose-to-add-a-new-gpu-property-to-the-host-io-6b095695",
+      "document": "gpu-host-requirement",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "d8e11d3b0122b938ab1c3f4b3347374ca0d90b400e649c3acb997be5934da429",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 1,
+          "excerpt": "We propose to add a new `gpu` property to the `hostRequirements` object in the devcontainer.json schema. The property can be a boolean value, the string `optional` or an object:"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-capadd-string-union-of-all-capadd-arrays-without-io-2f3f3193",
+      "document": "image-metadata",
+      "strength": "io-contract",
+      "testability": "indirectly-testable",
+      "fingerprint": "d0cbd9b1433375c924d8f2adef40d622964043c16d2f41ccb6978b6a826853ad",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 3,
+          "excerpt": "| `capAdd` | `string[]` | Union of all `capAdd` arrays without duplicates. | x | x |"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-forwardports-number-string-union-of-all-ports-wi-io-62ee1814",
+      "document": "image-metadata",
+      "strength": "io-contract",
+      "testability": "indirectly-testable",
+      "fingerprint": "804d75346004c41d379b00050db026ba387635b02fb73377a5bef7e5e2962160",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 5,
+          "excerpt": "| `forwardPorts` | `(number \\| string)[]` | Union of all ports without duplicates. Last one wins (when mapping changes). | x |   |"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-id-string-init-boolean-privileged-boolean-capadd-io-8cf55d2d",
+      "document": "image-metadata",
+      "strength": "io-contract",
+      "testability": "informative",
+      "fingerprint": "aae708226ad781f1dbdb459f10c014d913d0493e89661d80399d730ce6946430",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 2,
+          "excerpt": "[\n\t{\n\t\t\"id\"?: string,\n\t\t\"init\"?: boolean,\n\t\t\"privileged\"?: boolean,\n\t\t\"capAdd\"?: string[],\n\t\t\"securityOpt\"?: string[],\n\t\t\"entrypoint\"?: string,"
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-image-metadata-init-boolean-true-if-at-least-one-is-true-false-io-68bfc594",
+      "document": "image-metadata",
+      "strength": "io-contract",
+      "testability": "indirectly-testable",
+      "fingerprint": "4535692c77f91a14726a5a63f95fbbeca53eebc5090b003880a45c8287fc214c",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 2,
+          "excerpt": "| `init` | `boolean` | `true` if at least one is `true`, `false` otherwise. | x | x |"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-mounts-string-type-src-dst-collected-list-of-all-io-a4d7d6d5",
+      "document": "image-metadata",
+      "strength": "io-contract",
+      "testability": "indirectly-testable",
+      "fingerprint": "c9d2b3db41bce7fcf69df5ede7d7d44800db0f4ed61194e1b9a74fb21bed99bc",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 4,
+          "excerpt": "| `mounts` | `(string \\| { type, src, dst })[]` | Collected list of all mountpoints. Conflicts: Last source wins. | x | x |"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-record-dev-container-config-and-feature-metadata-desc-dac9ade3",
+      "document": "image-metadata",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "c395b7dd80036674919de94fca9e7f530e2a682234745220697c581b95d4f86e",
+      "locations": [
+        {
+          "heading": "Goal",
+          "anchor": "goal",
+          "ordinal": 1,
+          "excerpt": "Record dev container config and feature metadata in prebuilt images, such that, the image and the built-in features can be used with a devcontainer.json"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-the-metadata-is-added-to-the-image-as-a-devconta-io-721243cf",
+      "document": "image-metadata",
+      "strength": "io-contract",
+      "testability": "indirectly-testable",
+      "fingerprint": "add02a57c14257900762a3455f3c755a65accbe94e4b7ae17d884002eda3a87f",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 4,
+          "excerpt": "The metadata is added to the image as a `devcontainer.metadata` label with a JSON string value representing the above array or single object."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-to-apply-the-metadata-together-with-a-user-s-dev-desc-4d54126e",
+      "document": "image-metadata",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "ff2ce432cdd3d3d8be2efd97bc4f582d45e62da56fdb3249854cf12ac90a7cf9",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 1,
+          "excerpt": "To apply the metadata together with a user's devcontainer.json at runtime the following merge logic by property is used."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-to-simplify-adding-this-metadata-for-other-tools-desc-8bade94f",
+      "document": "image-metadata",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "2e384fd0d3b6c43a385b3d38efd948087e029edfce117aa765a0541d65734fd7",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 3,
+          "excerpt": "To simplify adding this metadata for other tools, we also support having a single top-level object with the same properties."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-variables-in-string-values-will-be-substituted-a-desc-31cd8289",
+      "document": "image-metadata",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "2db43804d40be1dad427d6df92a856a6c76522f948a6b0636a5328daec0271c5",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 6,
+          "excerpt": "Variables in string values will be substituted at the time the value is applied. When the order matters, the devcontainer.json is considered last."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-we-are-adding-support-for-mounts-containerenv-co-desc-dbddd9df",
+      "document": "image-metadata",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "9c83f1b3880a6121b63e7a8d6502445f4e98eff17b9d83914773f15b87064e95",
+      "locations": [
+        {
+          "heading": "Additional devcontainer.json Properties",
+          "anchor": "additional-devcontainerjson-properties",
+          "ordinal": 1,
+          "excerpt": "We are adding support for `mounts`, `containerEnv`, `containerUser`, `init`, `privileged`, `capAdd`, and `securityOpt` to the devcontainer.json"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-image-metadata-we-propose-to-add-metadata-to-the-image-with-the-desc-b54f56f3",
+      "document": "image-metadata",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "b1b3839a558b5fd5b67aed48d961d242983e30dc70bc544f75a0190f6e4b0005",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 1,
+          "excerpt": "We propose to add metadata to the image with the following structure using one entry per feature and devcontainer.json"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-a-command-string-or-list-of-command-arguments-to-desc-dff1da95",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "94ffeb7f8bebe95519f83482e90b70cd7fd2fd601f90e5b28edb4e9b0d5b0e79",
+      "locations": [
+        {
+          "heading": "Lifecycle scripts",
+          "anchor": "lifecycle-scripts",
+          "ordinal": 2,
+          "excerpt": "A command string or list of command arguments to run on the **host machine** during initialization, including during container creation and on subsequent starts."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-a-command-to-run-each-time-a-tool-has-successful-desc-ac507e3c",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "99fdfeba53143d60470b445d373bb1f08d64cdf90d9fce477335d54b4d967382",
+      "locations": [
+        {
+          "heading": "Lifecycle scripts",
+          "anchor": "lifecycle-scripts",
+          "ordinal": 7,
+          "excerpt": "A command to run each time a tool has successfully attached to the container."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-a-command-to-run-each-time-the-container-is-succ-desc-56473251",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "f7c720d5902c45ddd5230646076dba2bb7bb2cee8e162270ae3cf914e362e39b",
+      "locations": [
+        {
+          "heading": "Lifecycle scripts",
+          "anchor": "lifecycle-scripts",
+          "ordinal": 6,
+          "excerpt": "A command to run each time the container is successfully started."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-a-default-value-for-when-the-environment-variabl-io-e0533bcb",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "1d3998e37008ca596a616970ad4ed0acc4f48893cd6007514a221d8d3a052e70",
+      "locations": [
+        {
+          "heading": "Variables in devcontainer.json",
+          "anchor": "variables-in-devcontainerjson",
+          "ordinal": 2,
+          "excerpt": "A default value for when the environment variable is not set can be given with `${localEnv:VARIABLE_NAME:default_value}`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-a-dev-container-configuration-will-inherit-the-r-desc-8967e88c",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "a87b2335dad1778eb74fc0561ca955aae0ad8ccbfe23796d2ae4be3b07297bd2",
+      "locations": [
+        {
+          "heading": "remoteUser",
+          "anchor": "remoteuser",
+          "ordinal": 1,
+          "excerpt": "A dev container configuration will inherit the `remoteUser` property from the base image it uses."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-a-name-for-the-dev-container-displayed-in-the-ui-desc-94cd872c",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "a4a0c62de210dfbffd7f041dd2ba03fc6b943a1768ac2a397edac1c0696d8704",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 1,
+          "excerpt": "A name for the dev container displayed in the UI"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-a-set-of-name-value-pairs-that-sets-or-overrides-desc-482998a9",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "670401780221bec94352a1c3b3a9aea4ee7a384ee4f431d3d391f7a8d8bd3091",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 5,
+          "excerpt": "A set of name-value pairs that sets or overrides environment variables for the `devcontainer.json` supporting service / tool (or sub-processes like terminals) but not the container as a whole."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-a-set-of-name-value-pairs-that-sets-or-overrides-desc-f73a61bb",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "b26b92b32a6b28e0b864cf1bae78a62dfc4078312b6ac5138ebe4bd8c338c2d1",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 4,
+          "excerpt": "A set of name-value pairs that sets or overrides environment variables for the container."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-a-string-indicating-minimum-memory-requirements-io-b29e3295",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "ab1e18aca5aab5732e3ea07ccae4ea88dcc50185ad16e50acf3b6abe53d68027",
+      "locations": [
+        {
+          "heading": "Minimum host requirements",
+          "anchor": "minimum-host-requirements",
+          "ordinal": 1,
+          "excerpt": "A string indicating minimum memory requirements with a `tb`, `gb`, `mb`, or `kb` suffix."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-an-array-of-docker-cli-arguments-that-should-be-io-2f81ef14",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "38c087f2c6b07e9d0f7432fd94c3054f77158ca9d1b0ff62ceaeb361e899501f",
+      "locations": [
+        {
+          "heading": "Image or Dockerfile specific properties",
+          "anchor": "image-or-dockerfile-specific-properties",
+          "ordinal": 7,
+          "excerpt": "An array of [Docker CLI arguments](https://docs.docker.com/engine/reference/commandline/run/) that should be used when running the container. Defaults to `[]`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-an-array-of-port-numbers-or-host-port-values-io-5bb030ac",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "86ee5ac0bb1c8e5edf230bcc66015152f93a696dcb1eb125f2678961f5e4248b",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 2,
+          "excerpt": "An array of port numbers or `\"host:port\"` values"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-an-enum-that-specifies-the-command-any-tool-shou-io-805d039b",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "b2bdb7cf4e6f6269ecbf5df11c735847185880848e7269c796090d3e0f971110",
+      "locations": [
+        {
+          "heading": "Lifecycle scripts",
+          "anchor": "lifecycle-scripts",
+          "ordinal": 8,
+          "excerpt": "An enum that specifies the command any tool should wait for before connecting. Defaults to `updateContentCommand`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-an-object-of-dev-container-feature-ids-and-relat-desc-9adb363c",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "963cd4ab5cb65ed443371dddbb282aaa2f9278c372965b1785fa2ca029beb064",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 13,
+          "excerpt": "An object of [Dev Container Feature IDs](https://containers.dev/features) and related options to be added into your primary container."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-cross-orchestrator-way-to-add-additional-mounts-io-9f0f755a",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "indirectly-testable",
+      "fingerprint": "8812c80630b8a471e242882a7fd942eb02d6a0dfae4469e6fbf5d501da5971a8",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 12,
+          "excerpt": "Cross-orchestrator way to add additional mounts to a container. Each value is a string that accepts the same values as the [Docker CLI `--mount` flag]"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-defaults-to-true-for-when-using-an-image-dockerf-io-76d19efa",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "aaceb8ffd8df6b2ac29275367670fe4475cc207f9aac41f854349633e969c3c5",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 10,
+          "excerpt": "Defaults to `true` for when using an image Dockerfile and `false` when referencing a Docker Compose file."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-dictates-when-port-forwarding-is-required-to-map-desc-535d595e",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "debcd1a7ddeef17e56d2da09ae9700ca4b6ee4f597df5aa4951df1b51b26ce04",
+      "locations": [
+        {
+          "heading": "Port attributes",
+          "anchor": "port-attributes",
+          "ordinal": 2,
+          "excerpt": "Dictates when port forwarding is required to map the port in the container to the same port locally or not."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-each-command-property-is-an-string-or-list-of-co-io-88240d31",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "a6900a2c7b313163dc65cc6e234c74391292ee70a7b60b60a12a13dfc666d0fe",
+      "locations": [
+        {
+          "heading": "Lifecycle scripts",
+          "anchor": "lifecycle-scripts",
+          "ordinal": 1,
+          "excerpt": "Each command property is an string or list of command arguments that should execute from the `workspaceFolder`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-for-each-command-property-if-the-value-is-a-sing-algo-edd92849",
+      "document": "json-reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "c5f5c5f89406bc943a2982c0a56d296adb4e1459bf1401a978fc4961736e15c3",
+      "locations": [
+        {
+          "heading": "Lifecycle scripts",
+          "anchor": "lifecycle-scripts",
+          "ordinal": 9,
+          "excerpt": "For each command property, if the value is a single string, it will be run in `/bin/sh`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-if-one-of-the-lifecycle-scripts-fails-any-subseq-algo-cb502f9a",
+      "document": "json-reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "a3b310e68a21162fc1d501734637778e58cd9a23b17821adf920960e468661ad",
+      "locations": [
+        {
+          "heading": "Lifecycle scripts",
+          "anchor": "lifecycle-scripts",
+          "ordinal": 10,
+          "excerpt": "If one of the lifecycle scripts fails, any subsequent scripts will not be executed."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-indicates-the-type-of-shell-to-use-to-probe-for-io-896c5f64",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "8f5a3342075bb671619ed016d8ad2ede5931f5f074285a0f149d4f1d3eb6492d",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 9,
+          "excerpt": "Indicates the type of shell to use to \"probe\" for user environment variables to include in `devcontainer.json` supporting services' / tools' processes: `none`, `interactiveShell`, `loginShell`, or `loginInteractiveShell` (default)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-it-and-subsequent-commands-execute-inside-the-co-desc-c68356ad",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "b71164c28d0805152deff5c556b2973b0e2868e038e2bb79a8f27faa9673ff44",
+      "locations": [
+        {
+          "heading": "Lifecycle scripts",
+          "anchor": "lifecycle-scripts",
+          "ordinal": 3,
+          "excerpt": "It and subsequent commands execute **inside** the container immediately after it has started for the first time."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-it-executes-inside-the-container-after-oncreatec-desc-5d71a46e",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "307bba02fb4f45ea71de5345089dd8bfc2466e70b4569cc1915d9eb5d0e04489",
+      "locations": [
+        {
+          "heading": "Lifecycle scripts",
+          "anchor": "lifecycle-scripts",
+          "ordinal": 4,
+          "excerpt": "It executes inside the container after `onCreateCommand` whenever new content is available in the source tree during the creation process."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-it-happens-after-updatecontentcommand-and-once-t-desc-9d62d901",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "5513c62662e79c2fb2743e2e38a8ab44cf6412c65b73d3e78afa6b346faeb3b9",
+      "locations": [
+        {
+          "heading": "Lifecycle scripts",
+          "anchor": "lifecycle-scripts",
+          "ordinal": 5,
+          "excerpt": "It happens after `updateContentCommand` and once the dev container has been assigned to a user for the first time."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-notify-is-the-default-and-a-notification-will-ap-io-fbfdc269",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "indirectly-testable",
+      "fingerprint": "12d96cc2695a7a85f80fd2936b695dc451f8e4458f55a329791eb5192afafcd7",
+      "locations": [
+        {
+          "heading": "Port attributes",
+          "anchor": "port-attributes",
+          "ordinal": 1,
+          "excerpt": "`notify` is the default, and a notification will appear when the port is auto-forwarded."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-object-that-maps-a-port-number-host-port-value-r-desc-b51d0b4f",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "b0a18c88d7c5672913bef34b7ece3a88bfe2988c8c5f564553be05e07ededf42",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 3,
+          "excerpt": "Object that maps a port number, `\"host:port\"` value, range, or regular expression to a set of default options."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-on-linux-if-containeruser-or-remoteuser-is-speci-io-a22a9e99",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "cdca268b66ec07345fb372988f061ae9e6407a796a0a3a93729f16cf0e29d315",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 8,
+          "excerpt": "On Linux, if `containerUser` or `remoteUser` is specified, the user's UID/GID will be updated to match the local user's UID/GID to avoid permission problems with bind mounts. Defaults to `true`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-overrides-the-user-for-all-operations-run-as-ins-desc-de726edc",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "551faed09f7463b35aa9418f6d64b90e31132e3f2b22d2e1a6b40687c21cdcd5",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 7,
+          "excerpt": "Overrides the user for all operations run as inside the container. Defaults to either `root` or the last `USER` instruction in the related Dockerfile used to create the image."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-overrides-the-user-that-devcontainer-json-suppor-desc-61ec0c65",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "60f589d6ce63c107b9088a90ab950f551eee71a5d17fe45407320e0275ea4105",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 6,
+          "excerpt": "Overrides the user that `devcontainer.json` supporting services tools / runs as in the container (along with sub-processes like terminals, tasks, or debugging)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-path-that-the-docker-build-should-be-run-from-re-io-a9b5d4b9",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "330e62bbfe0e00d700a4a81a3e32a09a29dc6a5f8a5a3e7c5aa4badc2c977788",
+      "locations": [
+        {
+          "heading": "Image or Dockerfile specific properties",
+          "anchor": "image-or-dockerfile-specific-properties",
+          "ordinal": 3,
+          "excerpt": "Path that the Docker build should be run from relative to `devcontainer.json`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-product-specific-properties-defined-in-supportin-desc-3094d978",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "28732f7af95fdae7bdba8252638ee901ea5a659a020165db1c32fcfce84499c4",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 15,
+          "excerpt": "Product specific properties, defined in [supporting tools](supporting-tools.md)"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-required-when-using-a-dockerfile-the-location-of-io-8a8518c6",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "9a3843ee2b223629277f9ccba3a7c64ded321f325947c3baecea5550c08f1c2d",
+      "locations": [
+        {
+          "heading": "Image or Dockerfile specific properties",
+          "anchor": "image-or-dockerfile-specific-properties",
+          "ordinal": 2,
+          "excerpt": "**Required** when using a Dockerfile. The location of a [Dockerfile](https://docs.docker.com/engine/reference/builder/) that defines the contents of the container. The path is relative to the `devcontainer.json` file."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-required-when-using-an-image-the-name-of-an-imag-io-ceb577d8",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "b5430f8e07e342ab8b26acc513ff87ad9cd8b03c326e50440f1e2c93d797df3b",
+      "locations": [
+        {
+          "heading": "Image or Dockerfile specific properties",
+          "anchor": "image-or-dockerfile-specific-properties",
+          "ordinal": 1,
+          "excerpt": "**Required** when using an image. The name of an image in a container registry"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-required-when-using-docker-compose-the-name-of-t-io-910c920c",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "4225ad3e74ffbeec255ce00fabec0708f56e54780979750fe891878ddf50e561",
+      "locations": [
+        {
+          "heading": "Docker Compose specific properties",
+          "anchor": "docker-compose-specific-properties",
+          "ordinal": 2,
+          "excerpt": "**Required** when [using Docker Compose](https://docs.docker.com/compose/). The name of the service `devcontainer.json` supporting services / tools should connect to once running."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-requires-workspacefolder-be-set-as-well-override-io-af28a4ff",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "52a0f8722ca25de6da757ce80a5adf94941edca78d50428ed61367f87e17565a",
+      "locations": [
+        {
+          "heading": "Image or Dockerfile specific properties",
+          "anchor": "image-or-dockerfile-specific-properties",
+          "ordinal": 5,
+          "excerpt": "Requires `workspaceFolder` be set as well. Overrides the default local mount point for the workspace when the container is created."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-requires-workspacemount-be-set-sets-the-default-desc-76b98b58",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "c3861ab2c274f43af0a90548bba74009f2fad229eaeb32f023fdeac15e201888",
+      "locations": [
+        {
+          "heading": "Image or Dockerfile specific properties",
+          "anchor": "image-or-dockerfile-specific-properties",
+          "ordinal": 6,
+          "excerpt": "Requires `workspaceMount` be set. Sets the default path that `devcontainer.json` supporting services / tools should open when connecting to the container. Defaults to the automatic source code mount location."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-sets-the-default-path-that-devcontainer-json-sup-desc-51f12465",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "9fde020f58aa5d552a63f675281fc113fa0c2e0765ddefdad07fca528cf314b1",
+      "locations": [
+        {
+          "heading": "Docker Compose specific properties",
+          "anchor": "docker-compose-specific-properties",
+          "ordinal": 3,
+          "excerpt": "Sets the default path that `devcontainer.json` supporting services / tools should open when connecting to the container (which is often the path to a volume mount where the source code can be found in the container). Defaults to `\"/\"`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-the-order-of-the-array-matters-since-the-content-io-bdf2bf4c",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "3e85baa965bcc41eb9e4722564962e937f25bb5f02854153e9cf2fb8e20f52aa",
+      "locations": [
+        {
+          "heading": "Docker Compose specific properties",
+          "anchor": "docker-compose-specific-properties",
+          "ordinal": 1,
+          "excerpt": "The order of the array matters since the contents of later files can override values set in previous ones."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-this-property-accepts-a-port-or-array-of-ports-t-desc-3f93bee1",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "9c3dcb3486043fae4bfddc4b71eef661bf6ba2fc6f226180d1764dbfb216464c",
+      "locations": [
+        {
+          "heading": "Image or Dockerfile specific properties",
+          "anchor": "image-or-dockerfile-specific-properties",
+          "ordinal": 4,
+          "excerpt": "This property accepts a port or array of ports that should be published locally when the container is running."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-this-property-allows-you-to-override-the-feature-desc-bebdddcd",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "c303a8005a298f180377117a90511c7650e9d4cecbfae01382ca492abe29cf25",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 14,
+          "excerpt": "This property allows you to override the Feature install order when needed."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-values-are-none-stopcontainer-default-for-image-io-9ba26e5a",
+      "document": "json-reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "6c779461852ffda9b0b3fce9863220b38840952f60892234032a5e89194e239e",
+      "locations": [
+        {
+          "heading": "General devcontainer.json properties",
+          "anchor": "general-devcontainerjson-properties",
+          "ordinal": 11,
+          "excerpt": "Values are  `none`, `stopContainer` (default for image or Dockerfile), and `stopCompose` (default for Docker Compose)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-json-reference-variables-can-be-referenced-in-certain-string-va-desc-ca54b6fc",
+      "document": "json-reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "1baeb09505e33db9ed6ff591a1e96d3a1f26e62bf5cf2c2b060f89f4c36e87cd",
+      "locations": [
+        {
+          "heading": "Variables in devcontainer.json",
+          "anchor": "variables-in-devcontainerjson",
+          "ordinal": 1,
+          "excerpt": "Variables can be referenced in certain string values in `devcontainer.json` in the following format: **${variableName}**."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-lockfile-dependson-an-array-of-feature-identifiers-equal-io-d7227bc0",
+      "document": "lockfile",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "766781c78ba87f7dcd10ddfb21ce43e7650a0332ab174725a7372d632a36ae3a",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 4,
+          "excerpt": "- `dependsOn`: An array of feature identifiers equal to the feature's `dependsOn` keys in its `devcontainer-feature.json` including any version or checksum suffix. If the array is empty, this property can be omitted. For every feature listed here, the lockfile will also have a feature record."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-lockfile-integrity-sha256-followed-by-the-hex-encoded-sha-io-87cbdc86",
+      "document": "lockfile",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "e25588cef266d3d94bd9bc1f811319ecd08582f44bffb61023ffa4106300fa47",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 3,
+          "excerpt": "- `integrity`: `sha256:` followed by the hex encoded SHA-256 checksum of the download artifact."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-lockfile-local-features-and-the-deprecated-github-release-desc-c92caf0c",
+      "document": "lockfile",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "4b665172ad8a4fede3463e7c00ff02f3eaef48977ce0e2c5d9ce9473df3d916c",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 6,
+          "excerpt": "Local features and the deprecated GitHub releases features are not recorded in the lockfile."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-lockfile-resolved-oci-feature-a-qualified-feature-id-with-io-d5cc5400",
+      "document": "lockfile",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "7f9ac2c6024248ca213f9e485693c535c98d14cbad0807f60c44ce92978e5ca2",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 1,
+          "excerpt": "- `resolved`:\n    - OCI feature: A qualified feature id with the sha256 hash (not the version number).\n    - tarball feature: The `https:` URL used to download the feature."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-lockfile-the-feature-identifiers-recorded-as-keys-and-in-desc-5c3b3fc9",
+      "document": "lockfile",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "df01a121dd5971bab6012a0702b33f2a7c2c2f3b17dbf25d35060da55301c76f",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 5,
+          "excerpt": "The feature identifiers recorded as keys and in the `dependsOn` arrays are converted to lowercase to simplify lookups and comparisons."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-lockfile-the-lockfile-is-named-devcontainer-lock-json-is-io-0aa47a05",
+      "document": "lockfile",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "fe2e1771acaa1e01157a401069eca44cad5bde6aaeb18b59511df90faacafaa4",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 7,
+          "excerpt": "The lockfile is named `devcontainer-lock.json`, is located in the same folder as the `devcontainer.json` and contains a JSON object with a `\"features\"` property holding the above keys."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-lockfile-version-the-full-version-number-io-3dc63be7",
+      "document": "lockfile",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "2c1a532c2396a1954648af6630f1d5ed184414e09f2f8421be1b1750f8ddc01d",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 2,
+          "excerpt": "- `version`: The full version number."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-parallel-lifecycle-db-mysql-u-root-p-my-database-io-380cf840",
+      "document": "parallel-lifecycle",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "6b04c788eee93e8e43272cde40a5edca4aa48fc31b40fbfc2e02bccc853d475b",
+      "locations": [
+        {
+          "heading": "Example",
+          "anchor": "example",
+          "ordinal": 1,
+          "excerpt": "\"db\": [\"mysql\", \"-u\", \"root\", \"-p\", \"my database\"]"
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-parallel-lifecycle-each-command-must-exit-successfully-for-the-stag-desc-3dfa4a54",
+      "document": "parallel-lifecycle",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "1ad8aecd6d0077c1e811a7b16a4838d8d34f8165bf1ac73128764865b5d55ff9",
+      "locations": [
+        {
+          "heading": "Spec changes",
+          "anchor": "spec-changes",
+          "ordinal": 2,
+          "excerpt": "Each command must exit successfully for the stage to be considered successful."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-parallel-lifecycle-each-entry-in-the-object-will-be-run-in-parallel-algo-9fe15a2e",
+      "document": "parallel-lifecycle",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "4806cc91bbc16e8cf9ff7affcfa0698da4e416c174591b9d8ccddc2514cbde96",
+      "locations": [
+        {
+          "heading": "Spec changes",
+          "anchor": "spec-changes",
+          "ordinal": 3,
+          "excerpt": "Each entry in the `object` will be run in parallel during that lifecycle step."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-parallel-lifecycle-the-key-of-the-object-will-be-a-unique-name-for-io-e2509dfa",
+      "document": "parallel-lifecycle",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "a95095a2c17e247c1727eac82389ddb94acdc5fbb148386113968d60f88f14dd",
+      "locations": [
+        {
+          "heading": "Spec changes",
+          "anchor": "spec-changes",
+          "ordinal": 1,
+          "excerpt": "The key of the `object` will be a unique name for the command and the value will be the `string` or `array` command."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-a-default-mount-should-be-included-so-that-the-s-desc-fc22f151",
+      "document": "reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "a27b9fe21d2e093cb969f22d559dae06569477e3d8157b98488bf2a2ec3bba90",
+      "locations": [
+        {
+          "heading": "Mounts",
+          "anchor": "mounts",
+          "ordinal": 1,
+          "excerpt": "A default mount should be included so that the source code is accessible from inside the container."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-additionally-execute-the-poststartcommand-and-po-algo-1e29acde",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "e8e1a1782461558a2bc9797e291941bda08140cd5566eb79e2ffc7e643702567",
+      "locations": [
+        {
+          "heading": "Environment Resume",
+          "anchor": "environment-resume",
+          "ordinal": 1,
+          "excerpt": "Additionally, execute the `postStartCommand` and `postAttachCommand` in the container."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-by-default-postcreatecommand-is-executed-in-the-algo-4585aa1e",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "bba043eb5d19858b79224a479a0f939c5d6fd7c2a928cbf9edd50fca1a1af43c",
+      "locations": [
+        {
+          "heading": "Post Container Creation",
+          "anchor": "post-container-creation",
+          "ordinal": 2,
+          "excerpt": "By default, `postCreateCommand` is executed in the background after reporting the successful creation of the development environment."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-capadd-string-io-19b2ff76",
+      "document": "reference",
+      "strength": "io-contract",
+      "testability": "informative",
+      "fingerprint": "51c0447344edc91c89e8e0055f6c43903dfe0b3ae69a1d48ba153ec05f2e0a4a",
+      "locations": [
+        {
+          "heading": "Image Metadata",
+          "anchor": "image-metadata",
+          "ordinal": 3,
+          "excerpt": "\"capAdd\"?: string[],"
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-reference-collected-list-of-all-mountpoints-conflicts-last-algo-6e3a3659",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "62524122807f691f4a10f1dbf23b808f1a65761de62d712a50b62f809d235b72",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 3,
+          "excerpt": "Collected list of all mountpoints. Conflicts: Last source wins."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-collected-list-of-all-oncreatecommands-algo-c1f1604c",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "9f7700b05cf501ee898c87dda67972a81a61370f4b95bcfb7d34201f2b81965b",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 4,
+          "excerpt": "Collected list of all onCreateCommands."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-container-mounts-environment-variables-and-user-algo-fc512eb6",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "b2a00d969aabc5b1fbd34bb8ceaaa1e3fc2a929511ce738b4607c44fe9637d37",
+      "locations": [
+        {
+          "heading": "Container Creation",
+          "anchor": "container-creation",
+          "ordinal": 1,
+          "excerpt": "container [mounts](#mounts), [environment variables](#environment-variables), and [user](#users) configuration should be applied at this point."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-each-command-must-exit-successfully-for-the-stag-algo-bc7ea234",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "1ad8aecd6d0077c1e811a7b16a4838d8d34f8165bf1ac73128764865b5d55ff9",
+      "locations": [
+        {
+          "heading": "Parallel lifecycle script execution",
+          "anchor": "parallel-lifecycle-script-execution-a",
+          "ordinal": 2,
+          "excerpt": "Each command must exit successfully for the stage to be considered successful."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-each-entry-in-the-object-will-be-run-in-parallel-algo-6d33de69",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "4806cc91bbc16e8cf9ff7affcfa0698da4e416c174591b9d8ccddc2514cbde96",
+      "locations": [
+        {
+          "heading": "Parallel lifecycle script execution",
+          "anchor": "parallel-lifecycle-script-execution-a",
+          "ordinal": 1,
+          "excerpt": "Each entry in the `object` will be run in parallel during that lifecycle step."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-execution-of-initializecommand-algo-0e0c96b0",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "d91ddade317b95a212aa9aa5afb590e74242a02c78f3b4708dc5556e18b8d27a",
+      "locations": [
+        {
+          "heading": "Initialization",
+          "anchor": "initialization",
+          "ordinal": 1,
+          "excerpt": "Execution of `initializeCommand`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-however-remote-user-and-environment-variable-con-algo-a74a1d41",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "514f4a5e280839daa3be2290d1a01ece252c3adbd04598372c581621dd4af276",
+      "locations": [
+        {
+          "heading": "Container Creation",
+          "anchor": "container-creation",
+          "ordinal": 2,
+          "excerpt": "However, remote user and environment variable configuration should **not** be."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-if-the-waitfor-property-is-defined-then-executio-algo-0000032a",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "da81c72137f887cc18d17cd621b776ef164a316021d5d8ed60b9467b00aeab3e",
+      "locations": [
+        {
+          "heading": "Post Container Creation",
+          "anchor": "post-container-creation",
+          "ordinal": 3,
+          "excerpt": "If the `waitFor` property is defined, then execution should block until all commands in the sequence up to the specified property have executed."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-per-variable-last-value-wins-algo-c8dcfd00",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "16101b6b481a2a1f543d1225d11eb8e8a26ccb6274fc7ccd448313280e3b8760",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 6,
+          "excerpt": "Per variable, last value wins."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-probed-environment-variables-should-be-merged-wi-algo-bc58ffe5",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "7cf10013173ff0e670ea16b23ff79f9dc2593d4f732b8c3bf29dd21481e933f0",
+      "locations": [
+        {
+          "heading": "Environment Variables",
+          "anchor": "environment-variables",
+          "ordinal": 2,
+          "excerpt": "\"probed\" environment variables should be merged with Remote environment variables for any processes the implementer injects after the container is created."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-products-using-it-should-expect-to-find-a-devcon-algo-2d2bc8c5",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "060efaedee60f176a8cba1861b47953df16a23fc57d60b84031387191b32c3de",
+      "locations": [
+        {
+          "heading": "devcontainer.json",
+          "anchor": "devcontainerjson",
+          "ordinal": 1,
+          "excerpt": "Products using it should expect to find a `devcontainer.json` file in one or more of the following locations (in order of precedence):"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-remote-environment-variables-and-user-configurat-algo-5e726990",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "29661fe192f8cacc5d9c38f43863bdf0f9c94121efaa5a9624dd7ca10385c233",
+      "locations": [
+        {
+          "heading": "Post Container Creation",
+          "anchor": "post-container-creation",
+          "ordinal": 4,
+          "excerpt": "Remote [environment variables](#environment-variables) and [user](#users) configuration should be applied to all created processes in the container (inclusive of `userEnvProbe`)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-server-npm-start-io-c402ff95",
+      "document": "reference",
+      "strength": "io-contract",
+      "testability": "informative",
+      "fingerprint": "15208922ebbb085a1010171b0240fe4ac9fc3034266748eeb56856d6914b3a22",
+      "locations": [
+        {
+          "heading": "Example",
+          "anchor": "example",
+          "ordinal": 1,
+          "excerpt": "\"server\": \"npm start\","
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-reference-service-declares-the-main-container-that-will-be-desc-63a9b6bf",
+      "document": "reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "840aae8aa19861868a331fbf34f6231e4f64386e0dd8cb2fdee25db825be3c13",
+      "locations": [
+        {
+          "heading": "Docker Compose based",
+          "anchor": "docker-compose-based",
+          "ordinal": 1,
+          "excerpt": "`service`: declares the **main** container that will be used for all other operations."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-set-using-the-remoteuser-property-in-all-cases-a-desc-317a6ed2",
+      "document": "reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "f0208b87acea9476dd0b5edb49d64d2abe1306906c10f069d095ff94f273dab5",
+      "locations": [
+        {
+          "heading": "Users",
+          "anchor": "users",
+          "ordinal": 1,
+          "excerpt": "Set using the `remoteUser` property in all cases and defaults to the container user."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-the-default-mount-point-for-the-source-code-can-desc-53d64f45",
+      "document": "reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "203b5bba0292db79b4395657e592af2f336640570af37d0e403b1070a33b9c12",
+      "locations": [
+        {
+          "heading": "workspaceFolder and workspaceMount",
+          "anchor": "workspacefolder-and-workspacemount",
+          "ordinal": 1,
+          "excerpt": "The default mount point for the source code can be set with the `workspaceMount` property for **image** and **dockerfile** scenarios or using the built in `mounts` property in **Docker Compose** files."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-the-metadata-is-added-to-the-image-as-a-devconta-io-421635c0",
+      "document": "reference",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "add02a57c14257900762a3455f3c755a65accbe94e4b7ae17d884002eda3a87f",
+      "locations": [
+        {
+          "heading": "Image Metadata",
+          "anchor": "image-metadata",
+          "ordinal": 2,
+          "excerpt": "The metadata is added to the image as a `devcontainer.metadata` label with a JSON string value representing the above array or single object."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-the-only-required-parameter-in-this-case-is-the-desc-2d275895",
+      "document": "reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "2cdf28eb10aee4505c161108130520b007fa4a5c26906558684b4712b4af93ba",
+      "locations": [
+        {
+          "heading": "Dockerfile based",
+          "anchor": "dockerfile-based",
+          "ordinal": 1,
+          "excerpt": "The only required parameter in this case is the relative reference to the `Dockerfile` in `build.dockerfile`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-the-only-required-parameter-is-image-desc-96bf70dd",
+      "document": "reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "08c7005c7a8adba02d1f7f58f2ff14e63120aee6899503735768fe2a68e53b74",
+      "locations": [
+        {
+          "heading": "Image based",
+          "anchor": "image-based",
+          "ordinal": 1,
+          "excerpt": "The only required parameter is `image`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-the-project-workspace-folder-is-where-an-impleme-desc-042d067e",
+      "document": "reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "02377f29b8d1ccbf509a4d223653415f81f644caa28ce08dfbf8d311bab628a2",
+      "locations": [
+        {
+          "heading": "Project Workspace Folder",
+          "anchor": "project-workspace-folder",
+          "ordinal": 1,
+          "excerpt": "The **project workspace folder** is where an implementing tool should begin to search for `devcontainer.json` files."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-these-contents-should-then-be-merged-with-any-lo-algo-a8e77908",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "16ac9c598a90f36d07314cdea67ee02dcf78f0d061633ef07d670de3a827c74a",
+      "locations": [
+        {
+          "heading": "Image Metadata",
+          "anchor": "image-metadata",
+          "ordinal": 1,
+          "excerpt": "These contents should then be merged with any local `devcontainer.json` file contents at the time the container is created."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-these-variables-can-change-during-the-lifetime-o-desc-57c3f38c",
+      "document": "reference",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "ad6a2d9e0afdff1b4346a82330e64fc0477d9e9f1c6cb5814217f8b6495e3086",
+      "locations": [
+        {
+          "heading": "Environment Variables",
+          "anchor": "environment-variables",
+          "ordinal": 1,
+          "excerpt": "These variables can change during the lifetime of the container, and are added after the container's `ENTRYPOINT` has fired."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-this-set-of-commands-is-executed-in-sequence-on-algo-462a5272",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "a840ad364053bfe321cb1661b2c04a63e74681e104513007d242b082fd4f885d",
+      "locations": [
+        {
+          "heading": "Post Container Creation",
+          "anchor": "post-container-creation",
+          "ordinal": 1,
+          "excerpt": "This set of commands is executed in sequence on a container the first time it's created and depending on the creation parameters received."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-true-if-at-least-one-is-true-false-otherwise-algo-219a6637",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "b1bd519c5fe74750f9111905ab5a8084e53d4ad29742f08c08b1ff0f676b44b4",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 1,
+          "excerpt": "`true` if at least one is `true`, `false` otherwise."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-uid-gid-sync-ing-is-an-optional-task-for-linux-o-algo-6c12fea6",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "67b4ceaea76fa7c5e22d87b96de779b86e45fc00a4b33b7028f29ff9265dd22f",
+      "locations": [
+        {
+          "heading": "Container Creation",
+          "anchor": "container-creation",
+          "ordinal": 3,
+          "excerpt": "UID/GID sync'ing is an optional task for Linux (only) and that executes if the `updateRemoteUserUID` property is set to true and a `containerUser` or `remoteUser` is specified."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-union-of-all-capadd-arrays-without-duplicates-algo-2aa7395e",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "cd2926c5d83ce2c6e298f6a6fdca2f936ca453d70babc64be6e5f75f577f7584",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 2,
+          "excerpt": "Union of all `capAdd` arrays without duplicates."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-union-of-all-ports-without-duplicates-last-one-w-algo-28d2b3f8",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "directly-testable",
+      "fingerprint": "709d27d8b84aecfc64b3aa5427a8cd0eaf8ce8bd2b38eb5f370fcdcc7cfd39df",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 5,
+          "excerpt": "Union of all ports without duplicates. Last one wins (when mapping changes)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-validate-that-a-workspace-source-folder-has-been-algo-bb15890d",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "a0cd9b72154b7091458e41c44a80d71ff677aa552ed5af90b215addb3412c5c9",
+      "locations": [
+        {
+          "heading": "Configuration Validation",
+          "anchor": "configuration-validation",
+          "ordinal": 1,
+          "excerpt": "Validate that a workspace source folder has been provided."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-variables-in-string-values-will-be-substituted-a-algo-9107fc1e",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "1d3d1a3dbb5513aa2f766cd8fab3c4e9d4c6d2a15f98119ee7b7b1d104667f3e",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 7,
+          "excerpt": "Variables in string values will be substituted at the time the value is applied."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-reference-when-the-order-matters-the-devcontainer-json-is-algo-b1bacaaf",
+      "document": "reference",
+      "strength": "algorithm",
+      "testability": "indirectly-testable",
+      "fingerprint": "5801475df8d3d59c2b052873c187cd260e733e051bfac52eb6f3feab511ae52a",
+      "locations": [
+        {
+          "heading": "Merge Logic",
+          "anchor": "merge-logic",
+          "ordinal": 8,
+          "excerpt": "When the order matters, the `devcontainer.json` is considered last."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-secrets-support-a-conforming-implementation-should-provide-a-sec-desc-db09d7dc",
+      "document": "secrets-support",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "c89fc64caed2af340a9fda735984610bea1bb5c53fe69b6b57223ee7c0e02b51",
+      "locations": [
+        {
+          "heading": "Passing secrets in",
+          "anchor": "passing-secrets-in",
+          "ordinal": 2,
+          "excerpt": "A conforming implementation should provide a secure mechanism to pass secrets, such as a secrets file, Windows credential manager, Mac keychain, Azure keyvault etc. for example."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-secrets-support-a-supporting-tool-e-g-the-dev-container-cli-refe-desc-e1c78ef9",
+      "document": "secrets-support",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "08e43f6bac19aa818b5b04544bd14bedb78a887b41a42541b41825fa0bd7e7a7",
+      "locations": [
+        {
+          "heading": "Proposal",
+          "anchor": "proposal",
+          "ordinal": 1,
+          "excerpt": "A [supporting tool](https://containers.dev/supporting#tools) (e.g. the [dev container CLI reference implementation](https://github.com/devcontainers/cli)) should behave according to the following properties:"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-secrets-support-password-simple-passwords-io-9f6c9dd8",
+      "document": "secrets-support",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "0c863e3a7752af8d780173040e05fb5433ca1f7e8f0e41365c53f4e6b15263ed",
+      "locations": [
+        {
+          "heading": "Example",
+          "anchor": "example",
+          "ordinal": 1,
+          "excerpt": "\"PASSWORD\": \"Simple Passwords\""
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-secrets-support-secrets-are-not-part-of-dev-containers-specifica-desc-a5be2256",
+      "document": "secrets-support",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "4daae2ae19db9f662b22e6d4b952e53d5cf193e3590eaf1b60eab57ed2052be3",
+      "locations": [
+        {
+          "heading": "Passing secrets in",
+          "anchor": "passing-secrets-in",
+          "ordinal": 1,
+          "excerpt": "Secrets are not part of dev containers specification and we do not expect users to store secrets inside `devcontainer.json` file."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-secrets-support-users-can-change-a-secret-s-value-at-any-time-an-desc-31591036",
+      "document": "secrets-support",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "142b16a56ebe9eeb5fa2b8125818ad72ff0906ede8ada6f188e4645131c58465",
+      "locations": [
+        {
+          "heading": "What are secrets",
+          "anchor": "what-are-secrets",
+          "ordinal": 1,
+          "excerpt": "Users can change a secret's value at any time, and a conforming dev containers implementation should support dynamically changing secrets without having to rebuild the container."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-supporting-tools-a-codespace-is-a-development-environment-that-s-desc-d545f89d",
+      "document": "supporting-tools",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "726d9bb228fa99b20048423b4cbc2aa12dc00ee57727fedfe66ee6016183d971",
+      "locations": [
+        {
+          "heading": "GitHub Codespaces",
+          "anchor": "github-codespaces",
+          "ordinal": 1,
+          "excerpt": "A [codespace](https://docs.github.com/en/codespaces/overview) is a development environment that's hosted in the cloud."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-supporting-tools-a-dev-container-command-line-interface-cli-that-desc-b5b7198a",
+      "document": "supporting-tools",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "ca37d6ad00ed69d8758eea2293189c233aaacec65764a8c63b2c946f7af4e032",
+      "locations": [
+        {
+          "heading": "Dev Container CLI",
+          "anchor": "dev-container-cli",
+          "ordinal": 1,
+          "excerpt": "A dev container command line interface (CLI) that implements this specification."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-supporting-tools-an-array-of-extension-ids-that-specify-the-exten-desc-e843b6ac",
+      "document": "supporting-tools",
+      "strength": "descriptive",
+      "testability": "informative",
+      "fingerprint": "df2af77f4defbbf2f8fcbb3be5d57030e888bd298609a79bce0de23b72c7b208",
+      "locations": [
+        {
+          "heading": "Visual Studio Code",
+          "anchor": "visual-studio-code",
+          "ordinal": 3,
+          "excerpt": "An array of extension IDs that specify the extensions that should be installed inside the container when it is created. Defaults to `[]`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-supporting-tools-codespaces-disableautomaticconfiguration-true-io-38f1cf46",
+      "document": "supporting-tools",
+      "strength": "io-contract",
+      "testability": "not-applicable",
+      "fingerprint": "94771320a48122fef2d652f88ed6982c574fa2228049c55398133ac0fdc66d52",
+      "locations": [
+        {
+          "heading": "Product specific properties",
+          "anchor": "product-specific-properties-1",
+          "ordinal": 2,
+          "excerpt": "\t\"codespaces\": {\n\t\t\"disableAutomaticConfiguration\": true\n\t}"
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-supporting-tools-codespaces-will-automatically-perform-some-defau-desc-b9bcfd15",
+      "document": "supporting-tools",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "b62e520cccab9585ee899652839237d8adb668406811ed45b9c4c5679044e84a",
+      "locations": [
+        {
+          "heading": "Product specific properties",
+          "anchor": "product-specific-properties-1",
+          "ordinal": 1,
+          "excerpt": "Codespaces will automatically perform some default setup when the `devcontainer.json` does not specify a `postCreateCommand`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-supporting-tools-lets-you-use-a-container-as-a-full-featured-deve-desc-645f0796",
+      "document": "supporting-tools",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "97701f2b2b6fde15e958c0bcfdc5116fcda4a7a106dcd6686ecd7570b81b5862",
+      "locations": [
+        {
+          "heading": "Visual Studio Code Dev Containers",
+          "anchor": "visual-studio-code-dev-containers",
+          "ordinal": 1,
+          "excerpt": "lets you use a container as a full-featured development environment."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-supporting-tools-mounts-array-codespaces-ignores-bind-mounts-with-desc-1b4957a7",
+      "document": "supporting-tools",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "3093988dc3bb2c0180325d46c5efb99d0245278a01580be7ad88da07e6b3de52",
+      "locations": [
+        {
+          "heading": "Product specific limitations",
+          "anchor": "product-specific-limitations-1",
+          "ordinal": 1,
+          "excerpt": "| `mounts` | array | Codespaces ignores \"bind\" mounts with the exception of the Docker socket. Volume mounts are still allowed.|"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-supporting-tools-set-default-container-specific-settings-json-val-io-fc3a41cd",
+      "document": "supporting-tools",
+      "strength": "io-contract",
+      "testability": "informative",
+      "fingerprint": "7a6eb091fc595ef9d526105a14e46657df76e9f26125daf259ba2bf1ef468958",
+      "locations": [
+        {
+          "heading": "Visual Studio Code",
+          "anchor": "visual-studio-code",
+          "ordinal": 2,
+          "excerpt": "\t\t\t// Set *default* container specific settings.json values on container create.\n\t\t\t\"settings\": {},\n\t\t\t\"extensions\": [],"
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-supporting-tools-shutdownaction-enum-does-not-apply-to-codespaces-desc-55b06d3b",
+      "document": "supporting-tools",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "447fdc31542537a9ec29078a60eee6b06655d5c51aac75bdc1e8f40ecb71a4f9",
+      "locations": [
+        {
+          "heading": "Product specific limitations",
+          "anchor": "product-specific-limitations-1",
+          "ordinal": 2,
+          "excerpt": "| `shutdownAction` | enum | Does not apply to Codespaces. |"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-supporting-tools-visual-studio-added-dev-container-support-in-vis-desc-7b4f5bd7",
+      "document": "supporting-tools",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "dfcfd650c5b18b81f3850d922cc8efef2858b1c95be2f1fb57c7e8d0c92700b6",
+      "locations": [
+        {
+          "heading": "Visual Studio",
+          "anchor": "visual-studio",
+          "ordinal": 1,
+          "excerpt": "Visual Studio added dev container support in Visual Studio 2022 17.4 for C++ projects using CMake Presets."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-supporting-tools-visual-studio-code-specific-properties-go-under-desc-94ff0710",
+      "document": "supporting-tools",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "d50c888273a922440fe0d587df293b7d06560c4d706db4859d7feabd8bb483cb",
+      "locations": [
+        {
+          "heading": "Visual Studio Code",
+          "anchor": "visual-studio-code",
+          "ordinal": 1,
+          "excerpt": "Visual Studio Code specific properties go under `vscode` inside `customizations`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-supporting-tools-workspacemount-string-not-yet-supported-when-usi-desc-ea06083a",
+      "document": "supporting-tools",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "07a0f664296c1adab8a6eea2cf147efd9d9a597f7ed53cf1dec5756c24dc2435",
+      "locations": [
+        {
+          "heading": "Product specific limitations",
+          "anchor": "product-specific-limitations",
+          "ordinal": 1,
+          "excerpt": "| `workspaceMount` | string | Not yet supported when using Clone Repository in Container Volume. |"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-a-path-is-relative-to-the-root-of-the-template-s-desc-ec433cf4",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "bf1540345c3fee6bb285215275a5eb06ccc711ec7fd569740a6db85f14c41887",
+      "locations": [
+        {
+          "heading": "The optionalPaths property",
+          "anchor": "the-optionalpaths-property",
+          "ordinal": 2,
+          "excerpt": "A path is relative to the root of the Template source directory."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-a-single-template-is-a-folder-with-at-least-a-de-desc-3aa671bf",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "1f69f28647ea019496c4351db65a503090a88a265df77679375a86942b341baf",
+      "locations": [
+        {
+          "heading": "Folder structure",
+          "anchor": "folder-structure",
+          "ordinal": 1,
+          "excerpt": "A single Template is a folder with at least a `devcontainer-template.json` and"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-a-supporting-tool-will-parse-the-options-object-desc-71357a1f",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "447f8eb1e609e829a8d0fea88e32f8b94ce9b6289ca89ba818f35275dba8cb42",
+      "locations": [
+        {
+          "heading": "Option Resolution",
+          "anchor": "option-resolution",
+          "ordinal": 1,
+          "excerpt": "A supporting tool will parse the `options` object provided by the user. If a value is selected for a Template, it will be replaced in the files (within the sub-directory of the Template)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-before-applying-a-template-tooling-must-inspect-desc-1eb54b25",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "64ecdbacb3ccde194b5282680b7170276fa3bcab6a5cdf97adbfa1bfa69e0de8",
+      "locations": [
+        {
+          "heading": "The optionalPaths property",
+          "anchor": "the-optionalpaths-property",
+          "ordinal": 1,
+          "excerpt": "Before applying a Template, tooling must inspect the `optionalPaths` property of a Template and prompt the user on whether each file or folder should be included in the resulting output workspace folder."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-distribution-a-custom-media-type-application-vnd-devcontainer-desc-c254518f",
+      "document": "templates-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "80a5eee8a79bb0cd0dd0b47a34ffe6b1a3d592a0a9776e7194b6e1648628acd8",
+      "locations": [
+        {
+          "heading": "OCI Registry",
+          "anchor": "oci-registry",
+          "ordinal": 3,
+          "excerpt": "A custom media type `application/vnd.devcontainers` and `application/vnd.devcontainers.layer.v1+tar` are used as demonstrated below."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-distribution-a-template-s-source-code-is-stored-in-a-git-repo-desc-897770c2",
+      "document": "templates-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "d0f4b2e8e03dd123023eceb1ab9a4a35c94171956d35daebe4080ceb6da18202",
+      "locations": [
+        {
+          "heading": "Source code",
+          "anchor": "source-code",
+          "ordinal": 1,
+          "excerpt": "A Template's source code is stored in a git repository."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-distribution-each-packaged-template-is-pushed-to-the-registry-desc-64ee59d8",
+      "document": "templates-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "8d5994536d49f6accdbe908cd9fe7da71f386961eaba06468a151fccbef96e36",
+      "locations": [
+        {
+          "heading": "OCI Registry",
+          "anchor": "oci-registry",
+          "ordinal": 1,
+          "excerpt": "Each packaged Template is pushed to the registry following the naming convention `<registry>/<namespace>/<id>[:version]`, where version is the major, minor, and patch version of the Template, according to the semver specification."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-distribution-each-sub-directory-should-be-named-such-that-it-desc-a1a13d46",
+      "document": "templates-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "fb44c74a127d412dfa16f2aebc2f03e7c249ec7dfbeb4c5c21a3ed9e8b685121",
+      "locations": [
+        {
+          "heading": "Source code",
+          "anchor": "source-code",
+          "ordinal": 3,
+          "excerpt": "Each sub-directory should be named such that it matches the `id` field of the `devcontainer-template.json`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-distribution-each-template-s-devcontainer-template-json-metad-desc-b4c50ee8",
+      "document": "templates-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "108ccc9dacf3dd239ad69db092f7f0f3ae4b29925dd678a97d13bcebb6b3596d",
+      "locations": [
+        {
+          "heading": "devcontainer-collection.json",
+          "anchor": "devcontainer-collectionjson",
+          "ordinal": 1,
+          "excerpt": "Each Template's `devcontainer-template.json` metadata file is appended into the `templates` top-level array."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-distribution-templates-and-features-should-be-placed-in-diffe-desc-e3232a51",
+      "document": "templates-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "9a40002387c2d7a7f20d17f3a78fe890d21799f3d2230166de1f1bceadad83ef",
+      "locations": [
+        {
+          "heading": "Source code",
+          "anchor": "source-code",
+          "ordinal": 2,
+          "excerpt": "Templates and [Features](./devcontainer-features.md) should be placed in different git repositories."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-distribution-templates-are-distributed-as-tarballs-desc-fa6d9954",
+      "document": "templates-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "bde0be1888aad676376d6e9ebccb86a56ec6e5223920c9da5c5267d9232c261e",
+      "locations": [
+        {
+          "heading": "Packaging",
+          "anchor": "packaging",
+          "ordinal": 1,
+          "excerpt": "Templates are distributed as tarballs."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-distribution-the-collection-file-is-always-tagged-as-latest-desc-1a1ca07f",
+      "document": "templates-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "3b3d085b8c9ebaacc575584e790048d0bec2a7c4dc7257865cedb8dc88d14c8c",
+      "locations": [
+        {
+          "heading": "OCI Registry",
+          "anchor": "oci-registry",
+          "ordinal": 2,
+          "excerpt": "The collection file is always tagged as `latest`."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-distribution-the-tarball-is-named-devcontainer-template-id-tg-desc-5e5a3519",
+      "document": "templates-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "73e9ac18cab29e1e7eb5f2ad8fa0c2c99d70a292b255b3a0ee3ce83c5460bf3b",
+      "locations": [
+        {
+          "heading": "Packaging",
+          "anchor": "packaging",
+          "ordinal": 2,
+          "excerpt": "The tarball is named `devcontainer-template-<id>.tgz`, where `<id>` is the Templates's `id` field."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-distribution-tooling-that-handles-publishing-templates-will-n-desc-5a60b658",
+      "document": "templates-distribution",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "fa63806c1a594be6273f72484179854aba1b28632711c9afc7ffce641ba98e61",
+      "locations": [
+        {
+          "heading": "Versioning",
+          "anchor": "versioning",
+          "ordinal": 1,
+          "excerpt": "Tooling that handles publishing Templates will not republish Templates if that exact version has already been published; however, tooling must republish major and minor versions in accordance with the semver specification."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-for-a-directory-provide-the-full-relative-path-w-desc-6f870ac2",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "438b76ceedf4724879293942dad1d9739896ec881e3db2143dec90066c936698",
+      "locations": [
+        {
+          "heading": "The optionalPaths property",
+          "anchor": "the-optionalpaths-property",
+          "ordinal": 3,
+          "excerpt": "For a directory, provide the full relative path with a trailing slash and asterisk (`/*`) appended to the path.  The directory and its children will be recursively ignored."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-image-mcr-microsoft-com-devcontainers-java-0-tem-io-b5fb90c8",
+      "document": "templates",
+      "strength": "io-contract",
+      "testability": "directly-testable",
+      "fingerprint": "f57726ec988b30efa40692db79bfae2a03a0bd218b8ef9c8d3bb8eac8cef2fa6",
+      "locations": [
+        {
+          "heading": "Option resolution example",
+          "anchor": "option-resolution-example",
+          "ordinal": 1,
+          "excerpt": "\"image\": \"mcr.microsoft.com/devcontainers/java:0-${templateOption:imageVariant}\","
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-templates-proposals-value1-value2-io-6ce0f73c",
+      "document": "templates",
+      "strength": "io-contract",
+      "testability": "not-applicable",
+      "fingerprint": "8ada6ab666cf96d8aab0306d839816f0d453ea582cc8f42af3c999e6478099b1",
+      "locations": [
+        {
+          "heading": "The options property",
+          "anchor": "the-options-property",
+          "ordinal": 1,
+          "excerpt": "\"proposals\": [\"value1\", \"value2\"],"
+        }
+      ],
+      "context": {
+        "inCodeFence": true
+      }
+    },
+    {
+      "id": "clu-templates-the-devcontainer-template-json-file-defines-info-desc-0b0e6110",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "7b39113e185a4d36f9abb1a62f9554558960f05e85b78c56195da22ab0527ef5",
+      "locations": [
+        {
+          "heading": "devcontainer-template.json properties",
+          "anchor": "devcontainer-templatejson-properties",
+          "ordinal": 1,
+          "excerpt": "The `devcontainer-template.json` file defines information about the Template to be used by any"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-the-id-format-oci-registry-namespace-template-se-desc-b9423a08",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "4229d86e7f8e41f6127085aa307311b1a66e967b30548cca22ee6d5d2f95d53e",
+      "locations": [
+        {
+          "heading": "Referencing a Template",
+          "anchor": "referencing-a-template",
+          "ordinal": 1,
+          "excerpt": "The `id` format (`<oci-registry>/<namespace>/<template>[:<semantic-version>]`) dictates how a"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-the-options-must-be-unique-for-every-devcontaine-desc-09529bff",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "81d12ee2f8ac72c00d943d79a4ea5db009f4849d713391916fc292170d7d8d35",
+      "locations": [
+        {
+          "heading": "The options property",
+          "anchor": "the-options-property",
+          "ordinal": 4,
+          "excerpt": "The `options` must be unique for every `devcontainer-template.json`"
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-the-tools-would-replace-the-option-id-with-the-s-desc-8c2b22b7",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "directly-testable",
+      "fingerprint": "9d57f0dc326db3a04c7362bedd4bff46a59b2f7f1b838ea8a4f310b5412c9d81",
+      "locations": [
+        {
+          "heading": "The options property",
+          "anchor": "the-options-property",
+          "ordinal": 2,
+          "excerpt": "The tools would replace the option ID with the selected value in all the files (within the sub-directory of the Template)."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-this-replacement-would-happen-before-dropping-th-desc-6c8076c4",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "indirectly-testable",
+      "fingerprint": "abc1c13294671f22e57bf9c6b8b57842a03d4b822adb04686be75ce2e1fe2f5f",
+      "locations": [
+        {
+          "heading": "The options property",
+          "anchor": "the-options-property",
+          "ordinal": 3,
+          "excerpt": "This replacement would happen before dropping the `.devcontainer/devcontainer.json` and other files (within the sub-directory of the Template) required to containerize your project."
+        }
+      ],
+      "context": null
+    },
+    {
+      "id": "clu-templates-tooling-that-handles-releasing-templates-will-no-desc-4d0a3bca",
+      "document": "templates",
+      "strength": "descriptive",
+      "testability": "not-applicable",
+      "fingerprint": "864c4fe876118bf0d7a43add5353c5465387ba262aad1d106562db5250b3d496",
+      "locations": [
+        {
+          "heading": "Versioning",
+          "anchor": "versioning",
+          "ordinal": 1,
+          "excerpt": "Tooling that handles releasing Templates will not republish Templates if that exact version has already been published; however, tooling must republish major and minor versions in accordance with the semver specification."
+        }
+      ],
+      "context": null
+    }
+  ]
+}

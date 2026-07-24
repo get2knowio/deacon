@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-spec-abcdef12",
+  "units": [
+    { "id": "clu-doc-moved-must-11111111", "document": "doc", "strength": "must",
+      "testability": "directly-testable", "fingerprint": "11",
+      "locations": [ { "heading": "New Location", "anchor": "new-location", "ordinal": 1, "excerpt": "The tool MUST relocate." } ], "context": null },
+    { "id": "clu-doc-new-must-44444444", "document": "doc", "strength": "must",
+      "testability": "directly-testable", "fingerprint": "44",
+      "locations": [ { "heading": "Shared", "anchor": "shared", "ordinal": 1, "excerpt": "The tool MUST do the new thing." } ], "context": null },
+    { "id": "clu-doc-nm-must-55555555", "document": "doc", "strength": "must",
+      "testability": "directly-testable", "fingerprint": "55",
+      "locations": [ { "heading": "Reflow", "anchor": "reflow", "ordinal": 1, "excerpt": "The tool  MUST   stay." } ], "context": null },
+    { "id": "clu-doc-added-must-66666666", "document": "doc", "strength": "must",
+      "testability": "directly-testable", "fingerprint": "66",
+      "locations": [ { "heading": "Fresh", "anchor": "fresh", "ordinal": 1, "excerpt": "The tool MUST appear." } ], "context": null }
+  ]
+}

@@ -25,8 +25,9 @@ use serde::Serialize;
 use crate::coverage::{BehaviorCoverage, Coverage, CoverageState};
 use crate::load::Registry;
 use crate::model::{
-    Classification, Condition, ConstraintInventory, ConstraintKind, Decision, Disposition,
-    ExpectedOutcome, GapKind, ReferenceStatus, RevisionKind, SpecStatus,
+    Classification, ClauseClassification, ClauseInventory, Condition, ConstraintInventory,
+    ConstraintKind, Decision, Disposition, ExpectedOutcome, GapKind, ReferenceStatus, RevisionKind,
+    SpecStatus, Strength, Testability,
 };
 use crate::validate::join_inventory;
 
@@ -60,7 +61,58 @@ pub struct ReportJson {
     /// records. Present-but-zeroed when the registry ships no sibling inventory
     /// (mirrors the validate V11–V14 scoping).
     pub inventory: InventorySection,
+    /// The normative-clause inventory summary (021-normative-clause-inventory, T026):
+    /// clause counts by strength/testability/document, disposition tallies, and the
+    /// unclassified + ambiguous-pending review queues. Present-but-zeroed when the
+    /// registry ships no sibling clause inventory.
+    pub clauses: ClauseSection,
 }
+
+/// The normative-clause-inventory section of `report.json`
+/// (021-normative-clause-inventory, FR-017). Deterministic: strength/testability counts
+/// in enum-declaration order, document counts document-key-sorted, listings ID-sorted.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClauseSection {
+    /// The manifest revision the clause inventory was canonicalized from; empty when none.
+    pub revision: String,
+    /// Total clause units across all documents.
+    pub total_units: usize,
+    /// Clause counts keyed by document, document-key-sorted.
+    pub units_by_document: IndexMap<String, usize>,
+    /// Clause counts for every `Strength`, in declaration order (all six always present).
+    pub units_by_strength: IndexMap<String, usize>,
+    /// Clause counts for every `Testability`, in declaration order (all five present).
+    pub units_by_testability: IndexMap<String, usize>,
+    /// Clause-classification disposition tallies.
+    pub dispositions: DispositionTally,
+    /// Clause IDs with no effective disposition (the V12 review queue), ID-sorted.
+    pub unclassified: Vec<String>,
+    /// Ambiguous-testability clause IDs still awaiting a per-clause decision, ID-sorted.
+    pub ambiguous_pending: Vec<String>,
+    /// Clause-classification IDs whose clause is absent from the inventory (V11 stale),
+    /// ID-sorted.
+    pub stale: Vec<String>,
+}
+
+/// Every `Strength` in declaration order (deterministic emission).
+const ALL_STRENGTHS: [Strength; 6] = [
+    Strength::Must,
+    Strength::Should,
+    Strength::May,
+    Strength::Algorithm,
+    Strength::IoContract,
+    Strength::Descriptive,
+];
+
+/// Every `Testability` in declaration order (deterministic emission).
+const ALL_TESTABILITIES: [Testability; 5] = [
+    Testability::DirectlyTestable,
+    Testability::IndirectlyTestable,
+    Testability::Informative,
+    Testability::Ambiguous,
+    Testability::NotApplicable,
+];
 
 /// The constraint-inventory section of `report.json` (020-schema-constraint-inventory,
 /// FR-014). Summarizes the committed inventory (`conformance/inventory/constraints.json`)
@@ -221,8 +273,35 @@ pub struct WaiverEntry {
 /// registry ships no sibling inventory (e.g. the V1–V10 acceptance fixtures), in
 /// which case that section is present-but-zeroed.
 pub fn build_report(registry: &Registry, inventory: Option<&ConstraintInventory>) -> ReportJson {
+    build_report_full(
+        registry,
+        inventory,
+        None,
+        &Default::default(),
+        &Default::default(),
+    )
+}
+
+/// Build the report model, including the normative-clause-inventory section. `clauses` is
+/// the committed clause inventory (`None` → present-but-zeroed); `authoring_docs` and
+/// `covered_docs` drive the document-scope resolution of the clause join (mirroring
+/// `validate::join_clauses`).
+pub fn build_report_full(
+    registry: &Registry,
+    inventory: Option<&ConstraintInventory>,
+    clauses: Option<&ClauseInventory>,
+    authoring_docs: &std::collections::HashSet<String>,
+    covered_docs: &std::collections::HashSet<String>,
+) -> ReportJson {
     let coverage = Coverage::evaluate(registry);
-    build_report_from_coverage(registry, &coverage, inventory)
+    build_report_from_coverage(
+        registry,
+        &coverage,
+        inventory,
+        clauses,
+        authoring_docs,
+        covered_docs,
+    )
 }
 
 /// Build the report model from a registry and its already-computed coverage.
@@ -230,6 +309,9 @@ fn build_report_from_coverage(
     registry: &Registry,
     coverage: &Coverage<'_>,
     inventory: Option<&ConstraintInventory>,
+    clauses: Option<&ClauseInventory>,
+    authoring_docs: &std::collections::HashSet<String>,
+    covered_docs: &std::collections::HashSet<String>,
 ) -> ReportJson {
     let profile = coverage.profile.map(|p| {
         // Emit the context map in dimension-ID-sorted order (determinism rule).
@@ -324,6 +406,12 @@ fn build_report_from_coverage(
     unclassified_source_units.sort();
 
     let inventory_section = build_inventory_section(inventory, &registry.classifications);
+    let clause_section = build_clause_section(
+        clauses,
+        &registry.clause_classifications,
+        authoring_docs,
+        covered_docs,
+    );
 
     ReportJson {
         schema_version: SCHEMA_VERSION,
@@ -337,6 +425,84 @@ fn build_report_from_coverage(
         waivers,
         unclassified_source_units,
         inventory: inventory_section,
+        clauses: clause_section,
+    }
+}
+
+/// Summarize the committed clause inventory joined against the hand-authored
+/// clause-classification records (021-normative-clause-inventory, T026). Deterministic;
+/// present-but-zeroed when `clauses` is `None`.
+fn build_clause_section(
+    clauses: Option<&ClauseInventory>,
+    classifications: &[ClauseClassification],
+    authoring_docs: &std::collections::HashSet<String>,
+    covered_docs: &std::collections::HashSet<String>,
+) -> ClauseSection {
+    use crate::validate::join_clauses;
+
+    let mut units_by_strength: IndexMap<String, usize> = IndexMap::new();
+    for s in ALL_STRENGTHS {
+        units_by_strength.insert(enum_str(&s), 0);
+    }
+    let mut units_by_testability: IndexMap<String, usize> = IndexMap::new();
+    for t in ALL_TESTABILITIES {
+        units_by_testability.insert(enum_str(&t), 0);
+    }
+
+    let mut units_by_document: IndexMap<String, usize> = IndexMap::new();
+    let mut revision = String::new();
+    let mut total_units = 0usize;
+    let mut ambiguous_pending: Vec<String> = Vec::new();
+
+    // A clause counts as "pending" when ambiguous AND lacking a per-clause classification.
+    let per_clause: std::collections::HashSet<&str> = classifications
+        .iter()
+        .filter_map(|c| c.clause.as_deref())
+        .collect();
+
+    if let Some(inv) = clauses {
+        revision = inv.revision.clone();
+        total_units = inv.units.len();
+        for unit in &inv.units {
+            *units_by_document.entry(unit.document.clone()).or_insert(0) += 1;
+            *units_by_strength
+                .entry(enum_str(&unit.strength))
+                .or_insert(0) += 1;
+            *units_by_testability
+                .entry(enum_str(&unit.testability))
+                .or_insert(0) += 1;
+            if unit.testability == Testability::Ambiguous && !per_clause.contains(unit.id.as_str())
+            {
+                ambiguous_pending.push(unit.id.clone());
+            }
+        }
+    }
+    units_by_document.sort_keys();
+    ambiguous_pending.sort();
+
+    let mut dispositions = DispositionTally::default();
+    for c in classifications {
+        match c.disposition {
+            Disposition::BehaviorMapped => dispositions.behavior_mapped += 1,
+            Disposition::NonTestable => dispositions.non_testable += 1,
+            Disposition::NotApplicable => dispositions.not_applicable += 1,
+        }
+    }
+
+    let join = clauses
+        .map(|inv| join_clauses(&inv.units, classifications, authoring_docs, covered_docs))
+        .unwrap_or_default();
+
+    ClauseSection {
+        revision,
+        total_units,
+        units_by_document,
+        units_by_strength,
+        units_by_testability,
+        dispositions,
+        unclassified: join.unclassified,
+        ambiguous_pending,
+        stale: join.stale,
     }
 }
 
@@ -634,7 +800,85 @@ fn render_md(report: &ReportJson) -> String {
     // 8. Constraint inventory — committed units joined against classifications.
     render_inventory_md(&mut md, &report.inventory);
 
+    // 9. Normative clause inventory — committed clauses joined against classifications.
+    render_clause_md(&mut md, &report.clauses);
+
     md
+}
+
+/// Render the normative-clause-inventory section of `report.md`
+/// (021-normative-clause-inventory, T026). Deterministic; empty-inventory renders "none".
+fn render_clause_md(md: &mut String, section: &ClauseSection) {
+    md.push_str("\n## Normative clause inventory\n\n");
+    if section.total_units == 0 {
+        md.push_str("No committed clause inventory.\n");
+        return;
+    }
+    let _ = writeln!(md, "**Revision:** `{}`\n", section.revision);
+    let _ = writeln!(md, "**Total clauses:** {}\n", section.total_units);
+
+    md.push_str("### Clauses by document\n\n");
+    md.push_str("| Document | Clauses |\n|----------|---------|\n");
+    for (doc, count) in &section.units_by_document {
+        let _ = writeln!(md, "| `{doc}` | {count} |");
+    }
+
+    md.push_str("\n### Clauses by strength\n\n");
+    md.push_str("| Strength | Clauses |\n|----------|---------|\n");
+    for (strength, count) in &section.units_by_strength {
+        let _ = writeln!(md, "| `{strength}` | {count} |");
+    }
+
+    md.push_str("\n### Clauses by testability\n\n");
+    md.push_str("| Testability | Clauses |\n|-------------|---------|\n");
+    for (testability, count) in &section.units_by_testability {
+        let _ = writeln!(md, "| `{testability}` | {count} |");
+    }
+
+    md.push_str("\n### Dispositions\n\n");
+    md.push_str("| Disposition | Count |\n|-------------|-------|\n");
+    let _ = writeln!(
+        md,
+        "| `behavior-mapped` | {} |",
+        section.dispositions.behavior_mapped
+    );
+    let _ = writeln!(
+        md,
+        "| `non-testable` | {} |",
+        section.dispositions.non_testable
+    );
+    let _ = writeln!(
+        md,
+        "| `not-applicable` | {} |",
+        section.dispositions.not_applicable
+    );
+
+    md.push_str("\n### Unclassified clauses\n\n");
+    if section.unclassified.is_empty() {
+        md.push_str("None.\n");
+    } else {
+        for id in &section.unclassified {
+            let _ = writeln!(md, "- `{id}`");
+        }
+    }
+
+    md.push_str("\n### Ambiguous pending review\n\n");
+    if section.ambiguous_pending.is_empty() {
+        md.push_str("None.\n");
+    } else {
+        for id in &section.ambiguous_pending {
+            let _ = writeln!(md, "- `{id}`");
+        }
+    }
+
+    md.push_str("\n### Stale clause classifications\n\n");
+    if section.stale.is_empty() {
+        md.push_str("None.\n");
+    } else {
+        for id in &section.stale {
+            let _ = writeln!(md, "- `{id}`");
+        }
+    }
 }
 
 /// Render the constraint-inventory section of `report.md`
@@ -738,10 +982,13 @@ fn conditions_str(conditions: &[Condition]) -> String {
 pub fn write_reports(
     registry: &Registry,
     inventory: Option<&ConstraintInventory>,
+    clauses: Option<&ClauseInventory>,
+    authoring_docs: &std::collections::HashSet<String>,
+    covered_docs: &std::collections::HashSet<String>,
     out_dir: &Path,
 ) -> std::io::Result<(std::path::PathBuf, std::path::PathBuf)> {
     std::fs::create_dir_all(out_dir)?;
-    let report = build_report(registry, inventory);
+    let report = build_report_full(registry, inventory, clauses, authoring_docs, covered_docs);
 
     let json_path = out_dir.join("report.json");
     std::fs::write(&json_path, render_json(&report))?;

@@ -27,7 +27,7 @@ use deacon_conformance::certify::{BlockingKind, certify};
 use deacon_conformance::inventory::{generate_inventory, write_inventory};
 use deacon_conformance::load::Registry;
 use deacon_conformance::model::ConstraintUnit;
-use deacon_conformance::validate::InventoryInputs;
+use deacon_conformance::validate::{ClauseInputs, InventoryInputs};
 use deacon_conformance::workspace_root;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -325,7 +325,16 @@ fn certify_fixture(
     registry_dir: &Path,
 ) -> deacon_conformance::certify::Certification {
     let reg = Registry::load(registry_dir).expect("fixture registry loads");
-    certify(&reg, &fx.inputs())
+    certify(&reg, &fx.inputs(), &no_clause_inputs())
+}
+
+/// Clause inputs pointing at absent paths, so the clause join scopes itself out (these
+/// constraint-inventory fixtures ship no committed clause inventory / vendored prose).
+fn no_clause_inputs() -> ClauseInputs<'static> {
+    ClauseInputs {
+        spec_dir: Path::new("/nonexistent-conformance/spec"),
+        clauses_file: Path::new("/nonexistent-conformance/inventory/clauses.json"),
+    }
 }
 
 /// Assert a `constraint` blocker of `code` naming `record` is present.
@@ -497,5 +506,150 @@ fn real_registry_certifies_clean_now_that_the_gate_is_wired() {
             .is_empty(),
         "the real registry has zero blocking items, got: {:?}",
         doc["blocking"]
+    );
+}
+
+// ===========================================================================
+// Normative-clause-inventory certification wiring (021, T033; FR-018/FR-022,
+// SC-008). Proves an unclassified/stale clause blocks `certify`, and well-formed
+// not-applicable/non-testable clause dispositions never do — over the fixture prose
+// (`fixtures/conformance/prose`, seven committed clauses) via the library `certify`.
+// ===========================================================================
+
+use deacon_conformance::model::{ClauseClassification, Disposition, RevisionKind, SourceRevision};
+
+fn prose_spec_dir() -> PathBuf {
+    workspace_root().join("fixtures/conformance/prose")
+}
+
+/// The canonical ids of the committed fixture clauses.
+fn fixture_clause_ids() -> Vec<String> {
+    deacon_conformance::clause::generate_clauses(
+        &prose_spec_dir(),
+        &prose_spec_dir().join("clauses.json"),
+    )
+    .expect("fixture clauses canonicalize")
+    .units
+    .into_iter()
+    .map(|u| u.id)
+    .collect()
+}
+
+/// A registry carrying only a `spec`-kind revision (so V14's revision-pin check passes)
+/// plus the given clause classifications.
+fn clause_registry(classifications: Vec<ClauseClassification>) -> Registry {
+    Registry {
+        revisions: vec![SourceRevision {
+            id: "rev-spec-113500f4".to_string(),
+            kind: RevisionKind::Spec,
+            pin: "113500f4".to_string(),
+            url: "u".to_string(),
+            verified_against: None,
+        }],
+        clause_classifications: classifications,
+        ..Default::default()
+    }
+}
+
+fn certify_clauses(registry: &Registry) -> deacon_conformance::certify::Certification {
+    let spec = prose_spec_dir();
+    let clauses = spec.join("clauses.json");
+    // No constraint inventory here — scope that join out; exercise ONLY the clause gate.
+    certify(
+        registry,
+        &InventoryInputs {
+            schemas_dir: Path::new("/nonexistent-conformance/schemas"),
+            inventory_file: Path::new("/nonexistent-conformance/inventory/constraints.json"),
+        },
+        &ClauseInputs {
+            spec_dir: &spec,
+            clauses_file: &clauses,
+        },
+    )
+}
+
+#[test]
+fn unclassified_clause_blocks_certify() {
+    // No clause classifications at all → every fixture clause is unclassified (V12).
+    let cert = certify_clauses(&clause_registry(vec![]));
+    assert!(!cert.certified, "unclassified clauses must block certify");
+    assert!(
+        cert.blocking
+            .iter()
+            .any(|b| b.kind == BlockingKind::Clause && b.code.as_deref() == Some("V12")),
+        "an unclassified clause must appear as a Clause V12 blocker, got: {:#?}",
+        cert.blocking
+    );
+}
+
+#[test]
+fn not_applicable_and_non_testable_clause_dispositions_never_block() {
+    // Classify every fixture clause with a well-formed non-blocking disposition.
+    let classifications: Vec<ClauseClassification> = fixture_clause_ids()
+        .into_iter()
+        .enumerate()
+        .map(|(i, clause)| {
+            let tail = clause.strip_prefix("clu-").unwrap().to_string();
+            ClauseClassification {
+                id: format!("clc-{tail}"),
+                clause: Some(clause),
+                document: None,
+                disposition: if i % 2 == 0 {
+                    Disposition::NotApplicable
+                } else {
+                    Disposition::NonTestable
+                },
+                behaviors: vec![],
+                rationale: Some(
+                    "outside consumer runtime scope / no testable behavior".to_string(),
+                ),
+                notes: None,
+            }
+        })
+        .collect();
+    let cert = certify_clauses(&clause_registry(classifications));
+    assert!(
+        !cert.blocking.iter().any(|b| b.kind == BlockingKind::Clause),
+        "well-formed not-applicable/non-testable clauses must never block, got: {:#?}",
+        cert.blocking
+    );
+    assert!(cert.certified, "a fully-classified fixture must certify");
+}
+
+#[test]
+fn stale_clause_classification_blocks_certify() {
+    // A classification pointing at a clause that does not exist → V11 stale.
+    let ghost = "clu-sample-ghost-must-00000000";
+    let mut classifications: Vec<ClauseClassification> = fixture_clause_ids()
+        .into_iter()
+        .map(|clause| {
+            let tail = clause.strip_prefix("clu-").unwrap().to_string();
+            ClauseClassification {
+                id: format!("clc-{tail}"),
+                clause: Some(clause),
+                document: None,
+                disposition: Disposition::NotApplicable,
+                behaviors: vec![],
+                rationale: Some("r".to_string()),
+                notes: None,
+            }
+        })
+        .collect();
+    classifications.push(ClauseClassification {
+        id: format!("clc-{}", ghost.strip_prefix("clu-").unwrap()),
+        clause: Some(ghost.to_string()),
+        document: None,
+        disposition: Disposition::NotApplicable,
+        behaviors: vec![],
+        rationale: Some("points at a removed clause".to_string()),
+        notes: None,
+    });
+    let cert = certify_clauses(&clause_registry(classifications));
+    assert!(
+        cert.blocking
+            .iter()
+            .any(|b| b.kind == BlockingKind::Clause && b.code.as_deref() == Some("V11")),
+        "a stale clause classification must block as Clause V11, got: {:#?}",
+        cert.blocking
     );
 }

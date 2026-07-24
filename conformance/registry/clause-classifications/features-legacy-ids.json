@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "clc-features-legacy-ids-defaults-to-array-of-old-ids-used-to-publish-thi-io-dc47b23f",
+      "clause": "clu-features-legacy-ids-defaults-to-array-of-old-ids-used-to-publish-thi-io-dc47b23f",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-features-legacy-ids-defaults-to-false-indicates-that-the-feature-is-io-651a4b56",
+      "clause": "clu-features-legacy-ids-defaults-to-false-indicates-that-the-feature-is-io-651a4b56",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-features-legacy-ids-if-this-property-is-set-to-true-then-it-indicate-desc-cc1c45f4",
+      "clause": "clu-features-legacy-ids-if-this-property-is-set-to-true-then-it-indicate-desc-cc1c45f4",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-legacy-ids-the-cli-tooling-will-be-updated-to-also-look-at-algo-b10031b2",
+      "clause": "clu-features-legacy-ids-the-cli-tooling-will-be-updated-to-also-look-at-algo-b10031b2",
+      "disposition": "non-testable",
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+    },
+    {
+      "id": "clc-features-legacy-ids-the-property-is-useful-for-renaming-a-currently-desc-60127c26",
+      "clause": "clu-features-legacy-ids-the-property-is-useful-for-renaming-a-currently-desc-60127c26",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-legacy-ids-the-semantic-version-of-the-feature-defined-by-t-desc-d1b0f722",
+      "clause": "clu-features-legacy-ids-the-semantic-version-of-the-feature-defined-by-t-desc-d1b0f722",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    },
+    {
+      "id": "clc-features-legacy-ids-will-dual-publish-the-old-ids-defined-by-the-leg-desc-0d5a6b09",
+      "clause": "clu-features-legacy-ids-will-dual-publish-the-old-ids-defined-by-the-leg-desc-0d5a6b09",
+      "disposition": "non-testable",
+      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+    }
+  ]
+}

@@ -40,6 +40,15 @@ parity = { max-threads = 2 }
 # CLI-only parity tests
 parity-cli = { max-threads = 8 }
 
+# Dev-only `deacon-conformance` hermetic test binaries — `registry_valid`,
+# `classification_join`, `inventory_*`, `gap_certification`, `traceability`, and the
+# 021-normative-clause-inventory binaries `clause_extraction` / `clause_determinism` /
+# `clause_baseline` / `clause_diff` / `clause_classification_join` — carry NO override:
+# they are fast, non-docker, non-network, no-model tests that run in EVERY profile
+# (default / dev-fast / full / ci) by default (they are neither in any `default-filter`
+# exclusion nor a docker/smoke group). This is the standing convention for conformance
+# tests; the five clause binaries follow it (T003).
+
 # Default profile: Balanced parallelization for local development
 [profile.default]
 retries = 0

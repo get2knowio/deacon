@@ -28,7 +28,7 @@ use serde::Serialize;
 
 use crate::coverage::Coverage;
 use crate::load::Registry;
-use crate::validate::{InventoryInputs, check_inventory};
+use crate::validate::{ClauseInputs, InventoryInputs, check_clause_inventory, check_inventory};
 
 /// Why a certification is blocked: an unresolved gap record, an in-profile behavior
 /// with no structural coverage, or a schema-constraint-inventory join violation
@@ -46,6 +46,11 @@ pub enum BlockingKind {
     /// breakage). The [`Blocking::code`] carries the specific class
     /// (020-schema-constraint-inventory T037; contracts/cli-inventory.md).
     Constraint,
+    /// A normative-clause-inventory join violation (V11 stale, V12 unclassified/ambiguous/
+    /// duplicated clause, V13 malformed classification, V14 provenance, V15 clause↔source
+    /// integrity). The [`Blocking::code`] carries the specific class
+    /// (021-normative-clause-inventory; contracts/clause-classification-schema.md).
+    Clause,
 }
 
 /// One blocking item: its `kind`, the offending record ID, and — for a `constraint`
@@ -87,7 +92,11 @@ pub struct Certification {
 /// For a fixture registry that ships neither a committed inventory nor a vendored
 /// schemas directory, [`check_inventory`] scopes itself out and contributes nothing —
 /// certification then reduces to the gap/uncovered gate exactly as before this wiring.
-pub fn certify(registry: &Registry, inventory: &InventoryInputs) -> Certification {
+pub fn certify(
+    registry: &Registry,
+    inventory: &InventoryInputs,
+    clauses: &ClauseInputs,
+) -> Certification {
     let coverage = Coverage::evaluate(registry);
 
     let profile = coverage.profile.map(|p| p.id.clone()).unwrap_or_default();
@@ -107,10 +116,16 @@ pub fn certify(registry: &Registry, inventory: &InventoryInputs) -> Certificatio
     // which of stale/unclassified/malformed/provenance failed.
     let inventory_blockers = check_inventory(registry, inventory);
 
+    // Normative-clause-inventory join violations (V11–V15) block certification
+    // (021-normative-clause-inventory; wired last per research Decision 10). The SAME
+    // implementation `validate` runs.
+    let clause_blockers = check_clause_inventory(registry, clauses);
+
     // Blocking order: all gaps first, then all uncovered, then all constraint
-    // violations (each group already deterministically ordered).
-    let mut blocking: Vec<Blocking> =
-        Vec::with_capacity(gap_ids.len() + uncovered_ids.len() + inventory_blockers.len());
+    // violations, then all clause violations (each group deterministically ordered).
+    let mut blocking: Vec<Blocking> = Vec::with_capacity(
+        gap_ids.len() + uncovered_ids.len() + inventory_blockers.len() + clause_blockers.len(),
+    );
     blocking.extend(gap_ids.into_iter().map(|id| Blocking {
         kind: BlockingKind::Gap,
         id: id.to_string(),
@@ -123,6 +138,11 @@ pub fn certify(registry: &Registry, inventory: &InventoryInputs) -> Certificatio
     }));
     blocking.extend(inventory_blockers.into_iter().map(|v| Blocking {
         kind: BlockingKind::Constraint,
+        id: v.record,
+        code: Some(v.code),
+    }));
+    blocking.extend(clause_blockers.into_iter().map(|v| Blocking {
+        kind: BlockingKind::Clause,
         id: v.record,
         code: Some(v.code),
     }));
@@ -160,12 +180,21 @@ mod tests {
         }
     }
 
+    /// Clause inputs pointing at absent paths, so [`check_clause_inventory`] scopes itself
+    /// out (these fixtures ship no committed clause inventory / vendored prose).
+    fn no_clauses() -> ClauseInputs<'static> {
+        ClauseInputs {
+            spec_dir: Path::new("/nonexistent-conformance/spec"),
+            clauses_file: Path::new("/nonexistent-conformance/inventory/clauses.json"),
+        }
+    }
+
     #[test]
     fn valid_fixture_with_a_gap_is_not_certified() {
         // The valid fixture carries `gap-readconfig-remote-user`, so it is structurally
         // valid yet NOT certified — a gap always blocks (FR-020, FR-025).
         let registry = valid_registry();
-        let result = certify(&registry, &no_inventory());
+        let result = certify(&registry, &no_inventory(), &no_clauses());
         assert!(!result.certified, "a registry with a gap must not certify");
         assert!(
             result
@@ -188,7 +217,7 @@ mod tests {
     fn empty_registry_certifies_cleanly() {
         // Nothing in-profile, no gaps → certified (mirrors the real seed registry).
         let registry = Registry::default();
-        let result = certify(&registry, &no_inventory());
+        let result = certify(&registry, &no_inventory(), &no_clauses());
         assert!(result.certified, "empty registry must certify");
         assert!(result.blocking.is_empty());
         assert!(result.waived.is_empty());

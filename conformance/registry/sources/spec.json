@@ -2,14 +2,6 @@
   "schemaVersion": 1,
   "records": [
     {
-      "id": "src-spec-build-image",
-      "inventory": "spec",
-      "revision": "rev-spec-113500f4",
-      "locator": "Image building",
-      "summary": "A devcontainer image is built from the resolved configuration and the build outcome is reported.",
-      "behaviors": ["bhv-build-image-parity"]
-    },
-    {
       "id": "src-spec-container-inspect",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
@@ -24,22 +16,6 @@
       "locator": "Command execution",
       "summary": "A command is executed inside the container with its output streamed and its exit code propagated.",
       "behaviors": ["bhv-exec-command-parity"]
-    },
-    {
-      "id": "src-spec-container-metadata-recovery",
-      "inventory": "spec",
-      "revision": "rev-spec-113500f4",
-      "locator": "Container metadata label recovery",
-      "summary": "The merged configuration is written to the container's devcontainer.metadata label at create time, so config that lives only in devcontainer.json (e.g. remoteEnv) is recoverable from the running container by exec/read-configuration/set-up without the workspace.",
-      "behaviors": ["bhv-exec-container-id-metadata"]
-    },
-    {
-      "id": "src-spec-lifecycle-up",
-      "inventory": "spec",
-      "revision": "rev-spec-113500f4",
-      "locator": "Up / lifecycle",
-      "summary": "The up flow creates a container from the resolved configuration with the expected environment and remote user.",
-      "behaviors": ["bhv-up-exec-parity"]
     },
     {
       "id": "src-spec-readconfig-resolution",

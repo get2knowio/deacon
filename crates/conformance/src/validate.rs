@@ -49,13 +49,19 @@ use std::path::Path;
 
 use serde::Serialize;
 
+use crate::clause::{generate_clauses, render as render_clauses};
 use crate::inventory::{generate_inventory, render};
-use crate::load::{LoadError, Registry, SchemaError, load_inventory};
-use crate::model::{
-    BehaviorUnit, CertificationProfile, Classification, Condition, ConstraintInventory,
-    ConstraintUnit, Decision, Disposition, RecordType, ReferenceStatus, RevisionKind, SpecStatus,
-    parse_id,
+use crate::load::{
+    LoadError, Registry, SchemaError, load_clause_inventory, load_inventory, load_spec_manifest,
 };
+use crate::model::{
+    BehaviorUnit, CertificationProfile, Classification, ClauseClassification, ClauseInventory,
+    ClauseUnit, Condition, ConstraintInventory, ConstraintUnit, Decision, Disposition,
+    DocumentScope, RecordType, ReferenceStatus, RevisionKind, SpecManifest, SpecStatus, Strength,
+    Testability, parse_id,
+};
+use crate::prose::Document;
+use crate::prose::strength::{has_family, hides_mandatory_keyword};
 
 /// A single structural violation. `code` is the stable class (`"V1"`..`"V10"` or
 /// `"SCHEMA"`); `record` names the offending registry record (or, for SCHEMA, the
@@ -133,6 +139,18 @@ pub struct InventoryInputs<'a> {
     pub inventory_file: &'a Path,
 }
 
+/// Where to find the normative-clause-inventory provenance inputs for the V11–V15 clause
+/// join (021-normative-clause-inventory). The committed clause inventory is the join
+/// target; the pinned spec directory drives the V14 regeneration/fingerprint verification
+/// and the V15 excerpt-present-at-anchor checks. Tests point both at fixtures.
+#[derive(Debug, Clone, Copy)]
+pub struct ClauseInputs<'a> {
+    /// The pinned spec directory (`manifest.json` + the vendored Markdown files).
+    pub spec_dir: &'a Path,
+    /// The committed clause inventory file.
+    pub clauses_file: &'a Path,
+}
+
 /// Load the registry at `root`, validate it (V1–V10 via [`run`]), AND enforce the
 /// schema-constraint-inventory join classes (V11–V14 via [`check_inventory`]) in the
 /// SAME single pass, returning ALL violations sorted by code then record ID.
@@ -148,11 +166,13 @@ pub fn validate_path_with_inventory(
     today: &str,
     repo_root: &Path,
     inputs: &InventoryInputs,
+    clause_inputs: &ClauseInputs,
 ) -> Result<Vec<Violation>, LoadError> {
     match Registry::load(root) {
         Ok(registry) => {
             let mut violations = run(&registry, today, repo_root);
             violations.extend(check_inventory(&registry, inputs));
+            violations.extend(check_clause_inventory(&registry, clause_inputs));
             sort_violations(&mut violations);
             Ok(violations)
         }
@@ -493,6 +513,512 @@ fn check_provenance(
     }
 }
 
+// ===========================================================================
+// Normative clause inventory join (V11–V15) — 021-normative-clause-inventory
+// ===========================================================================
+
+/// The join of the committed clause inventory against the hand-authored
+/// clause-classification records, with the document-scope resolution rule (research
+/// Decision 7). The clause analogue of [`InventoryJoin`] — the same conceptual V11/V12
+/// classes generalized from a constraint unit to a clause unit.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClauseJoin {
+    /// Clause IDs with no effective disposition (V12), ID-sorted. Includes an unresolved
+    /// `ambiguous` clause (no document-scope cover permitted) and a clause whose only
+    /// cover would be an invalid document-scope default.
+    pub unclassified: Vec<String>,
+    /// Per-clause classification IDs whose `clause` is absent from the inventory (V11),
+    /// ID-sorted.
+    pub stale: Vec<String>,
+    /// Clauses classified more than once by per-clause records (V12): `(clause id,
+    /// offending classification ids)`, both ID-sorted.
+    pub duplicated: Vec<(String, Vec<String>)>,
+}
+
+/// Join `units` against `classifications` with the document-scope resolution rule. Pure
+/// and total (no filesystem access): a per-clause record wins; else, if the clause's
+/// document is `authoring`-scope AND its testability ≠ `ambiguous`, a document-scope
+/// default applies; else the clause is unclassified. `authoring_docs` is the set of
+/// document keys the manifest marks `authoring`; `covered_docs` is the set of document
+/// keys carrying a (valid) document-scope default record.
+pub fn join_clauses(
+    units: &[ClauseUnit],
+    classifications: &[ClauseClassification],
+    authoring_docs: &HashSet<String>,
+    covered_docs: &HashSet<String>,
+) -> ClauseJoin {
+    // Per-clause records, keyed by clause id.
+    let mut per_clause: HashMap<&str, Vec<&str>> = HashMap::new();
+    for cls in classifications {
+        if let Some(clause) = cls.clause.as_deref() {
+            per_clause.entry(clause).or_default().push(cls.id.as_str());
+        }
+    }
+    let unit_ids: HashSet<&str> = units.iter().map(|u| u.id.as_str()).collect();
+
+    let mut join = ClauseJoin::default();
+    for unit in units {
+        match per_clause.get(unit.id.as_str()) {
+            Some(ids) if ids.len() > 1 => {
+                let mut ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
+                ids.sort();
+                join.duplicated.push((unit.id.clone(), ids));
+            }
+            Some(_) => {} // exactly one per-clause record wins.
+            None => {
+                // No per-clause record: a document-scope default may cover it, but ONLY
+                // for an authoring document AND a non-ambiguous clause (Decision 7).
+                let ambiguous = unit.testability == Testability::Ambiguous;
+                let covered = authoring_docs.contains(&unit.document)
+                    && !ambiguous
+                    && covered_docs.contains(&unit.document);
+                if !covered {
+                    join.unclassified.push(unit.id.clone());
+                }
+            }
+        }
+    }
+    for cls in classifications {
+        if let Some(clause) = cls.clause.as_deref() {
+            if !unit_ids.contains(clause) {
+                join.stale.push(cls.id.clone());
+            }
+        }
+    }
+
+    join.unclassified.sort();
+    join.stale.sort();
+    join.duplicated.sort();
+    join
+}
+
+/// Enforce the normative-clause-inventory join classes (V11–V15) by joining the loaded
+/// registry's clause-classification records against the committed clause inventory and the
+/// vendored pinned prose (021-normative-clause-inventory). Returns every violation found
+/// (sorted); an empty vector means the join is clean. The V11–V14 classes are the
+/// *generalized* inventory-unit classes; V15 is prose-specific source integrity.
+pub fn check_clause_inventory(registry: &Registry, inputs: &ClauseInputs) -> Vec<Violation> {
+    let mut out: Vec<Violation> = Vec::new();
+
+    // Scope out entirely when neither a committed clause inventory nor a vendored spec
+    // directory exists (e.g. the V1–V10 acceptance fixtures). Not a silent fallback — the
+    // real `conformance/` tree always has both, so the full V11–V15 set runs there.
+    if !inputs.clauses_file.exists() && !inputs.spec_dir.exists() {
+        return out;
+    }
+
+    // Load the spec manifest (for per-document scope) and the committed inventory.
+    let manifest: Option<SpecManifest> = match load_spec_manifest(inputs.spec_dir) {
+        Ok(m) => Some(m),
+        Err(LoadError::SpecFingerprintMismatch {
+            file,
+            expected,
+            actual,
+        }) => {
+            out.push(Violation::new(
+                "V14",
+                file.display().to_string(),
+                format!(
+                    "spec manifest fingerprint mismatch: manifest records {expected}, vendored \
+                     file is {actual}"
+                ),
+            ));
+            None
+        }
+        Err(e) => {
+            out.push(Violation::new(
+                "V14",
+                inputs.spec_dir.display().to_string(),
+                format!("could not load the spec manifest for the clause join: {e}"),
+            ));
+            None
+        }
+    };
+
+    let committed: Option<ClauseInventory> = match load_clause_inventory(inputs.clauses_file) {
+        Ok(inv) => inv,
+        Err(e) => {
+            out.push(Violation::new(
+                "V14",
+                inputs.clauses_file.display().to_string(),
+                format!("could not load the committed clause inventory for the join: {e}"),
+            ));
+            None
+        }
+    };
+
+    let units: &[ClauseUnit] = committed
+        .as_ref()
+        .map(|c| c.units.as_slice())
+        .unwrap_or(&[]);
+    let behavior_ids: HashSet<&str> = registry.behaviors.iter().map(|b| b.id.as_str()).collect();
+
+    // Document scope + which authoring documents actually carry a valid doc-scope default.
+    let authoring_docs: HashSet<String> = manifest
+        .as_ref()
+        .map(|m| {
+            m.documents
+                .iter()
+                .filter(|d| d.scope == DocumentScope::Authoring)
+                .map(|d| d.key.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let all_docs: HashSet<String> = manifest
+        .as_ref()
+        .map(|m| m.documents.iter().map(|d| d.key.clone()).collect())
+        .unwrap_or_default();
+    let covered_docs: HashSet<String> = registry
+        .clause_classifications
+        .iter()
+        .filter_map(|c| c.document.clone())
+        .filter(|d| authoring_docs.contains(d))
+        .collect();
+
+    let join = join_clauses(
+        units,
+        &registry.clause_classifications,
+        &authoring_docs,
+        &covered_docs,
+    );
+
+    // V11 (stale per-clause), from the shared join.
+    let stale: HashSet<&str> = join.stale.iter().map(String::as_str).collect();
+    for cls in &registry.clause_classifications {
+        if stale.contains(cls.id.as_str()) {
+            out.push(Violation::new(
+                "V11",
+                &cls.id,
+                format!(
+                    "clause classification references clause {:?}, which is absent from the \
+                     committed inventory (stale — delete or re-point it)",
+                    cls.clause.as_deref().unwrap_or("")
+                ),
+            ));
+        }
+        // V13 (shape/linkage), per classification record.
+        check_clause_classification_shape(cls, &behavior_ids, &authoring_docs, &all_docs, &mut out);
+    }
+
+    // V12 (unclassified / duplicated), per clause unit.
+    for id in &join.unclassified {
+        out.push(Violation::new(
+            "V12",
+            id,
+            "clause has no effective disposition (unclassified — a per-clause classification \
+             is required, or a document-scope default for a non-ambiguous authoring clause)",
+        ));
+    }
+    for (id, cls_ids) in &join.duplicated {
+        out.push(Violation::new(
+            "V12",
+            id,
+            format!(
+                "clause is classified by {} per-clause records ({}); exactly one is required \
+                 (duplicated)",
+                cls_ids.len(),
+                cls_ids.join(", ")
+            ),
+        ));
+    }
+
+    // V15 (clause↔source integrity), per clause unit — needs the parsed prose.
+    if let (Some(manifest), Some(committed)) = (manifest.as_ref(), committed.as_ref()) {
+        check_clause_source_integrity(manifest, inputs.spec_dir, committed, &mut out);
+    }
+
+    // V14 (provenance): fingerprint (surfaced above), revision pin, and byte-identity.
+    check_clause_provenance(registry, inputs, committed.as_ref(), &mut out);
+
+    sort_violations(&mut out);
+    out
+}
+
+/// V13 shape/linkage checks for a single clause-classification record
+/// (contracts/clause-classification-schema.md).
+fn check_clause_classification_shape(
+    cls: &ClauseClassification,
+    behavior_ids: &HashSet<&str>,
+    authoring_docs: &HashSet<String>,
+    all_docs: &HashSet<String>,
+    out: &mut Vec<Violation>,
+) {
+    // `clause` XOR `document`.
+    match (&cls.clause, &cls.document) {
+        (Some(clause), None) => {
+            // Per-clause: id = `clc-` + the exact tail of the `clu-` id.
+            match clause.strip_prefix("clu-") {
+                Some(tail) => {
+                    let expected = format!("clc-{tail}");
+                    if cls.id != expected {
+                        out.push(Violation::new(
+                            "V13",
+                            &cls.id,
+                            format!(
+                                "clause classification id must mirror its clause tail (expected \
+                                 {expected:?} for clause {clause:?})"
+                            ),
+                        ));
+                    }
+                }
+                None => out.push(Violation::new(
+                    "V13",
+                    &cls.id,
+                    format!(
+                        "clause {clause:?} is not a `clu-` id; the id-tail mirror is undefined"
+                    ),
+                )),
+            }
+        }
+        (None, Some(document)) => {
+            // Document-scope: id = `clc-doc-<key>`, only for an authoring document.
+            let expected = format!("clc-doc-{document}");
+            if cls.id != expected {
+                out.push(Violation::new(
+                    "V13",
+                    &cls.id,
+                    format!("document-scope classification id must be {expected:?}"),
+                ));
+            }
+            if !all_docs.contains(document) {
+                out.push(Violation::new(
+                    "V13",
+                    &cls.id,
+                    format!("document-scope classification targets unknown document {document:?}"),
+                ));
+            } else if !authoring_docs.contains(document) {
+                out.push(Violation::new(
+                    "V13",
+                    &cls.id,
+                    format!(
+                        "document-scope classification targets consumer document {document:?}; \
+                         only authoring documents may carry a document-scope default"
+                    ),
+                ));
+            }
+        }
+        (Some(_), Some(_)) => out.push(Violation::new(
+            "V13",
+            &cls.id,
+            "clause classification has BOTH `clause` and `document` (exactly one is required)",
+        )),
+        (None, None) => out.push(Violation::new(
+            "V13",
+            &cls.id,
+            "clause classification has NEITHER `clause` nor `document` (exactly one is required)",
+        )),
+    }
+
+    // `behaviors` arity + existence, keyed to disposition.
+    match cls.disposition {
+        Disposition::BehaviorMapped => {
+            if cls.behaviors.is_empty() {
+                out.push(Violation::new(
+                    "V13",
+                    &cls.id,
+                    "disposition `behavior-mapped` requires a non-empty `behaviors` list",
+                ));
+            }
+            for behavior in &cls.behaviors {
+                if !behavior_ids.contains(behavior.as_str()) {
+                    out.push(Violation::new(
+                        "V13",
+                        &cls.id,
+                        format!(
+                            "maps to behavior {behavior:?}, which is not an existing `bhv-` record"
+                        ),
+                    ));
+                }
+            }
+        }
+        Disposition::NonTestable | Disposition::NotApplicable => {
+            if !cls.behaviors.is_empty() {
+                out.push(Violation::new(
+                    "V13",
+                    &cls.id,
+                    format!(
+                        "disposition {} must have an empty `behaviors` list",
+                        disposition_name(cls.disposition)
+                    ),
+                ));
+            }
+        }
+    }
+
+    // `non-testable` / `not-applicable` require a non-empty `rationale`.
+    if matches!(
+        cls.disposition,
+        Disposition::NonTestable | Disposition::NotApplicable
+    ) {
+        let has_rationale = cls
+            .rationale
+            .as_deref()
+            .is_some_and(|r| !r.trim().is_empty());
+        if !has_rationale {
+            out.push(Violation::new(
+                "V13",
+                &cls.id,
+                format!(
+                    "disposition {} requires a non-empty `rationale`",
+                    disposition_name(cls.disposition)
+                ),
+            ));
+        }
+    }
+}
+
+/// V15 clause↔source integrity: strength ↔ excerpt keyword agreement, descriptive clauses
+/// not hiding a mandatory keyword, and each excerpt present under its recorded heading.
+fn check_clause_source_integrity(
+    manifest: &SpecManifest,
+    spec_dir: &Path,
+    committed: &ClauseInventory,
+    out: &mut Vec<Violation>,
+) {
+    // Parse each vendored document once.
+    let mut docs: HashMap<&str, Document> = HashMap::new();
+    for doc in &manifest.documents {
+        let path = spec_dir.join(&doc.file);
+        if let Ok(raw) = std::fs::read_to_string(&path) {
+            docs.insert(doc.key.as_str(), Document::parse(&raw));
+        }
+    }
+
+    for unit in &committed.units {
+        // Strength ↔ keyword agreement over the FIRST location's excerpt (all locations
+        // of a unit share the same normalized substance, so any is representative).
+        if let Some(loc) = unit.locations.first() {
+            match unit.strength {
+                Strength::Must | Strength::Should | Strength::May => {
+                    if !has_family(&loc.excerpt, unit.strength) {
+                        out.push(Violation::new(
+                            "V15",
+                            &unit.id,
+                            format!(
+                                "strength label {:?} is not supported by the excerpt's RFC-2119 \
+                                 keywords",
+                                strength_name(unit.strength)
+                            ),
+                        ));
+                    }
+                }
+                Strength::Descriptive => {
+                    if hides_mandatory_keyword(&loc.excerpt) {
+                        out.push(Violation::new(
+                            "V15",
+                            &unit.id,
+                            "descriptive clause hides an unqualified mandatory RFC-2119 keyword",
+                        ));
+                    }
+                }
+                Strength::Algorithm | Strength::IoContract => {}
+            }
+        }
+        // Every location's excerpt MUST be present in the pinned document under its anchor.
+        let Some(doc) = docs.get(unit.document.as_str()) else {
+            out.push(Violation::new(
+                "V15",
+                &unit.id,
+                format!("clause document {:?} has no vendored prose", unit.document),
+            ));
+            continue;
+        };
+        for loc in &unit.locations {
+            if !doc.contains_excerpt_at(&loc.anchor, &loc.excerpt) {
+                out.push(Violation::new(
+                    "V15",
+                    &unit.id,
+                    format!(
+                        "excerpt not present in the pinned document under heading {:?} (anchor {:?})",
+                        loc.heading, loc.anchor
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+/// V14 provenance for clauses: byte-identity vs canonicalized regeneration, and the
+/// inventory revision ↔ registry `spec`-kind revision pin. (The spec-manifest fingerprint
+/// is surfaced by [`check_clause_inventory`] via [`load_spec_manifest`].)
+fn check_clause_provenance(
+    registry: &Registry,
+    inputs: &ClauseInputs,
+    committed: Option<&ClauseInventory>,
+    out: &mut Vec<Violation>,
+) {
+    match generate_clauses(inputs.spec_dir, inputs.clauses_file) {
+        Ok(regenerated) => match std::fs::read_to_string(inputs.clauses_file) {
+            Ok(committed_raw) => {
+                if committed_raw != render_clauses(&regenerated) {
+                    out.push(Violation::new(
+                        "V14",
+                        inputs.clauses_file.display().to_string(),
+                        "committed clause inventory does not byte-match a fresh canonicalization \
+                         from the pinned prose (run `clause generate`)",
+                    ));
+                }
+            }
+            Err(e) => out.push(Violation::new(
+                "V14",
+                inputs.clauses_file.display().to_string(),
+                format!("could not read the committed clause inventory for comparison: {e}"),
+            )),
+        },
+        // A fingerprint/integrity error is already reported (fingerprint by
+        // check_clause_inventory; excerpt/strength by V15). Report other regeneration
+        // failures as provenance breakage.
+        Err(
+            LoadError::SpecFingerprintMismatch { .. }
+            | LoadError::ExcerptNotFoundAtAnchor { .. }
+            | LoadError::StrengthKeywordMismatch { .. },
+        ) => {}
+        Err(e) => out.push(Violation::new(
+            "V14",
+            inputs.spec_dir.display().to_string(),
+            format!("could not regenerate the clause inventory from the pinned prose: {e}"),
+        )),
+    }
+
+    if let Some(committed) = committed {
+        let spec_revisions: Vec<&str> = registry
+            .revisions
+            .iter()
+            .filter(|r| r.kind == RevisionKind::Spec)
+            .map(|r| r.id.as_str())
+            .collect();
+        if spec_revisions.is_empty() {
+            out.push(Violation::new(
+                "V14",
+                committed.revision.clone(),
+                "the registry declares no `spec`-kind revision to pin the clause inventory against",
+            ));
+        } else if !spec_revisions.contains(&committed.revision.as_str()) {
+            out.push(Violation::new(
+                "V14",
+                committed.revision.clone(),
+                format!(
+                    "clause inventory revision {:?} names no `spec`-kind revision record (declared: \
+                     {})",
+                    committed.revision,
+                    spec_revisions.join(", ")
+                ),
+            ));
+        }
+    }
+}
+
+fn strength_name(strength: Strength) -> &'static str {
+    match strength {
+        Strength::Must => "must",
+        Strength::Should => "should",
+        Strength::May => "may",
+        Strength::Algorithm => "algorithm",
+        Strength::IoContract => "io-contract",
+        Strength::Descriptive => "descriptive",
+    }
+}
+
 /// Convert the loader's located schema errors into `SCHEMA`-class violations. The
 /// `record` field carries the file path (with `line:column` when the loader
 /// captured one) so a schema failure names its location like every other violation.
@@ -606,6 +1132,18 @@ impl<'a> Checker<'a> {
         for src in &reg.sources {
             for b in &src.behaviors {
                 sourced.insert(b.as_str());
+            }
+        }
+        // A behavior-mapped clause classification is ALSO provenance (021 T036, FR-026):
+        // once a prose clause maps to a behavior via a `clc-` record, the behavior
+        // back-traces to the pinned prose through that clause, so the hand-written
+        // `src-spec-*` prose source unit is redundant and may be retired without orphaning
+        // the behavior. This is the single-path traceability the retirement establishes.
+        for clc in &reg.clause_classifications {
+            if matches!(clc.disposition, Disposition::BehaviorMapped) {
+                for b in &clc.behaviors {
+                    sourced.insert(b.as_str());
+                }
             }
         }
 
@@ -1260,6 +1798,8 @@ fn record_type_name(ty: RecordType) -> &'static str {
         RecordType::Extension => "extension",
         RecordType::Constraint => "constraint-unit",
         RecordType::Classification => "classification",
+        RecordType::ClauseUnit => "clause-unit",
+        RecordType::ClauseClassification => "clause-classification",
     }
 }
 
