@@ -364,8 +364,16 @@ pub struct ExpectedOutcome {
     pub expectation: String,
 }
 
-/// An executable-test reference record (`case-`) — `cases.json`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A conformance case record (`case-`) — `cases.json`.
+///
+/// A record is either **legacy** (binary-backed, with [`executable`](Self::executable)
+/// and [`outcomes`](Self::outcomes), pointing at a hand-written Rust test) or
+/// **declarative** (data-driven, with [`operations`](Self::operations), `oracleType`,
+/// and `expected`, run by the shared conformance runner). Never both, never neither;
+/// see [`TestCase::classify`] (research D2, 022-conformance-runner). The legacy and
+/// declarative field blocks below are mutually exclusive, and both the loader
+/// (`load.rs`) and the validator (`validate.rs`) enforce that fail-loud (FR-003).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TestCase {
     pub id: String,
@@ -375,10 +383,384 @@ pub struct TestCase {
     /// Declared context; must intersect every linked behavior's applicability (V10).
     #[serde(default)]
     pub context: Vec<Condition>,
-    pub executable: Executable,
-    /// Expected outcomes; ≥1 required.
-    #[serde(default)]
+
+    // ---- Legacy (binary-backed) fields — present iff this is a legacy case ----
+    /// The Rust test binary that exercises this case (legacy path only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable: Option<Executable>,
+    /// Expected outcomes on observable channels; ≥1 required for a legacy case.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outcomes: Vec<ExpectedOutcome>,
+
+    // ---- Declarative fields (022-conformance-runner) — present iff declarative ----
+    /// The ordered actions the runner performs (declarative path only); ≥1 required.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub operations: Vec<Operation>,
+    /// Which oracle this case is evaluated against (declarative path only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oracle_type: Option<OracleType>,
+    /// Per-channel expectations captured after running the operations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected: Vec<ExpectedObservable>,
+    /// Scoped tolerances for characterized divergences ([`AllowedDifference`], US4).
+    /// Excluded from `caseHash` (research D3) so annotating a tolerance never re-records.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_differences: Vec<AllowedDifference>,
+    /// Path/glob allowlist for the filesystem channel; required iff a filesystem-channel
+    /// expectation exists (keeps capture scoped, clarify Q1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fs_allowlist: Vec<String>,
+    /// Resources to reclaim after the run (success or failure).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cleanup: Option<Cleanup>,
+    /// The nextest resource group for a Docker-backed case (default `none`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_group: Option<ResourceGroup>,
+    /// Human prose; **excluded from `caseHash`** so annotating never re-records (D3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+/// The shape of a [`TestCase`] record: legacy (binary-backed) or declarative
+/// (data-driven), per research D2 (022-conformance-runner).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaseKind {
+    /// Binary-backed: `executable` present, no `operations`.
+    Legacy,
+    /// Data-driven: `operations` present, no `executable`.
+    Declarative,
+}
+
+/// Why a [`TestCase`] record is malformed with respect to the legacy/declarative
+/// either-or (FR-003). Rendered by [`CaseShapeError::message`] for located loader and
+/// validator diagnostics (constitution IV — fail-loud).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaseShapeError {
+    /// Both `executable` (legacy) and `operations` (declarative) are present.
+    Mixed,
+    /// Neither `executable` nor `operations` is present.
+    Neither,
+}
+
+impl CaseShapeError {
+    /// A precise, human-readable diagnosis naming the mistake and the remedy.
+    pub fn message(self) -> &'static str {
+        match self {
+            CaseShapeError::Mixed => {
+                "case declares BOTH a legacy `executable` and declarative `operations`; a \
+                 record must be exactly one shape (remove one)"
+            }
+            CaseShapeError::Neither => {
+                "case declares NEITHER a legacy `executable` nor declarative `operations`; a \
+                 record must be exactly one shape (add one)"
+            }
+        }
+    }
+}
+
+impl TestCase {
+    /// Classify this case as [`CaseKind::Legacy`] or [`CaseKind::Declarative`], or a
+    /// [`CaseShapeError`] if it is a mixed/neither malformed record (research D2,
+    /// FR-003). Legacy ⇔ has `executable`; declarative ⇔ has `operations`.
+    pub fn classify(&self) -> Result<CaseKind, CaseShapeError> {
+        match (self.executable.is_some(), !self.operations.is_empty()) {
+            (true, true) => Err(CaseShapeError::Mixed),
+            (false, false) => Err(CaseShapeError::Neither),
+            (true, false) => Ok(CaseKind::Legacy),
+            (false, true) => Ok(CaseKind::Declarative),
+        }
+    }
+}
+
+/// The consumer subcommand surface an [`Operation`] may invoke (Principle II).
+///
+/// A closed vocabulary, kept as a named constant so a Principle-II audit can grep it
+/// and the validator (`validate.rs`) can emit a located, human-readable message for a
+/// non-consumer subcommand rather than a cryptic enum-variant error (contract
+/// case-schema.md: "each `operations[].subcommand` ∈ consumer surface | new V-series").
+pub const CONSUMER_SUBCOMMANDS: &[&str] = &[
+    "up",
+    "down",
+    "exec",
+    "build",
+    "read-configuration",
+    "run-user-commands",
+    "templates-apply",
+    "doctor",
+];
+
+/// The observable-channel ids whose expectations require an `fsAllowlist` (data-model
+/// §1 / contract observer-channel.md). Filesystem capture is allowlist-scoped, never a
+/// full-tree diff (clarify Q1).
+pub const FILESYSTEM_CHANNELS: &[&str] = &[CHAN_FILESYSTEM, CHAN_FILE_CONTENT];
+
+// -- Channel id constants (data-model §4) -----------------------------------------
+// Stable ids matching `conformance/registry/channels.json`. The first six are the
+// pre-existing channels; the last five are added by 022-conformance-runner (T002).
+/// Process exit status.
+pub const CHAN_EXIT_CODE: &str = "chan-exit-code";
+/// Raw stdout bytes.
+pub const CHAN_STDOUT: &str = "chan-stdout";
+/// Raw stderr bytes.
+pub const CHAN_STDERR: &str = "chan-stderr";
+/// Presence/attributes of allowlisted paths (NOT full tree).
+pub const CHAN_FILESYSTEM: &str = "chan-filesystem";
+/// Contents of an allowlisted file.
+pub const CHAN_FILE_CONTENT: &str = "chan-file-content";
+/// Container lifecycle state (retained for legacy cases).
+pub const CHAN_CONTAINER_STATE: &str = "chan-container-state";
+/// Parsed structured (JSON) result document, distinct from raw stdout.
+pub const CHAN_STRUCTURED_OUTPUT: &str = "chan-structured-output";
+/// Built-image configuration + metadata (labels parsed semantically).
+pub const CHAN_IMAGE: &str = "chan-image";
+/// Container + network + volume + mount graph.
+pub const CHAN_PROCESS_GRAPH: &str = "chan-process-graph";
+/// Env, user, cwd, PATH resolution, signals, TTY, exit propagation.
+pub const CHAN_INJECTED_PROCESS: &str = "chan-injected-process";
+/// Lifecycle ordering, first-create vs restart, resume, cleanup transitions.
+pub const CHAN_TEMPORAL: &str = "chan-temporal";
+
+/// Which oracle a declarative [`TestCase`] is evaluated against (data-model §1,
+/// research D8). The four are semantically distinct verdicts; re-pointing a case at a
+/// different target changes only this field (FR-007).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OracleType {
+    /// Compare normalized observables to the declared `expected`; no reference run.
+    SpecExpectation,
+    /// Compare to a committed, provenance-checked snapshot.
+    Snapshot,
+    /// Run deacon + the pinned reference and compare normalized observables.
+    LiveDifferential,
+    /// Evaluate a declared relationship across ≥2 operations (idempotence,
+    /// first-create-vs-restart, resume) rather than a fixed output.
+    InvariantMetamorphic,
+}
+
+/// A single action the runner performs, ordered within a [`TestCase`] (data-model §2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Operation {
+    /// Unique within the case (referenced by a metamorphic [`Relationship`]).
+    pub id: String,
+    /// Consumer subcommand to invoke; validated against [`CONSUMER_SUBCOMMANDS`].
+    pub subcommand: String,
+    /// Arguments after the subcommand; part of `caseHash`.
+    #[serde(default)]
+    pub argv: Vec<String>,
+    /// Fixture ids this op materializes into the workspace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixtures: Vec<String>,
+    /// Optional stdin payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdin: Option<String>,
+    /// For negative cases: the failure phase the op is expected to fail in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect_failure_phase: Option<FailurePhase>,
+    /// Invariant/metamorphic only: the relationship this op asserts against a sibling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relationship: Option<Relationship>,
+}
+
+/// A metamorphic/invariant relationship asserted across operations (data-model §2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Relationship {
+    /// The kind of relationship being asserted.
+    pub kind: RelationshipKind,
+    /// The sibling operation id this relationship is evaluated against.
+    pub against_op: String,
+}
+
+/// The closed set of metamorphic relationship kinds (data-model §2, FR-008).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RelationshipKind {
+    /// Re-running the operation produces the same observable state.
+    Idempotence,
+    /// First create differs from a subsequent restart in the declared way.
+    FirstCreateVsRestart,
+    /// A resumed run reattaches to existing state rather than recreating it.
+    Resume,
+}
+
+/// A fixture the runner materializes into the workspace (data-model §3). Inputs are
+/// pinned (images by digest/tag, never `latest`); `fixtureHash` is derived from the
+/// fixture bytes and feeds `caseHash` + provenance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Fixture {
+    /// Referenced by [`Operation::fixtures`].
+    pub id: String,
+    /// Repo-relative source path (pinned input).
+    pub path: String,
+    /// SHA-256 of the fixture bytes; derived, so optional on the wire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixture_hash: Option<String>,
+}
+
+/// A per-channel expectation on a declarative [`TestCase`] (data-model §5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExpectedObservable {
+    /// A declared channel (`chan-…`); checked against `channels.json` (V9).
+    pub channel: String,
+    /// Which operation produced it (default: the last operation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    /// Channel-specific expectation shape (contract observer-channel.md). Required for
+    /// `spec-expectation`; MAY be omitted for `live-differential`/`snapshot` (the
+    /// reference/snapshot supplies the expectation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assertion: Option<Value>,
+}
+
+/// Resources the runner reclaims after a case runs, on success AND failure (data-model
+/// §1, contract case-schema.md). `images` is `false` | `true` | `"case-built"`; typed
+/// precisely in US5 (T052), stored as raw JSON here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Cleanup {
+    #[serde(default)]
+    pub containers: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Value>,
+    #[serde(default)]
+    pub networks: bool,
+    #[serde(default)]
+    pub volumes: bool,
+    #[serde(default)]
+    pub tempdir: bool,
+}
+
+/// The nextest resource group for a Docker-backed case (data-model §1). Absence means
+/// the default `none` (a hermetic case needs no Docker group).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResourceGroup {
+    /// Safe concurrent Docker usage (unique resource names).
+    DockerShared,
+    /// Exclusive Docker daemon access (shared state).
+    DockerExclusive,
+    /// Significant filesystem operations, no Docker.
+    FsHeavy,
+    /// No special group.
+    None,
+}
+
+/// A scoped tolerance for a characterized divergence (data-model §6, research D9, US4).
+///
+/// A tolerated divergence is scoped to `(behavior, observablePath, context)` and backed
+/// by a resolvable registry identity — exactly one of `waiverId`
+/// (`conformance/registry/waivers/wvr-*`) or `divergenceId` (a `bhv-`/`ext-` intentional
+/// divergence record). It applies ONLY to its `(behavior, observablePath)` (FR-033);
+/// there are NO global ignore lists (FR-032). Excluded from `caseHash` (research D3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AllowedDifference {
+    /// A `bhv-…` linked by the case; the tolerance is scoped to this behavior.
+    pub behavior: String,
+    /// Context tags the tolerance applies under (documents where it is valid).
+    #[serde(default)]
+    pub context: Vec<String>,
+    /// A dotted path WITHIN a channel (e.g. `chan-injected-process.env.TZ`), never a
+    /// bare channel (that would be a global ignore, FR-032).
+    pub observable_path: String,
+    /// Why this difference is acceptable.
+    pub rationale: String,
+    /// Backing registry waiver id (`wvr-…`); exactly one of `waiverId`/`divergenceId`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiver_id: Option<String>,
+    /// Backing intentional-divergence record id (`bhv-…`/`ext-…`); exactly one of
+    /// `waiverId`/`divergenceId`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub divergence_id: Option<String>,
+}
+
+/// Why an [`AllowedDifference`]'s backing identity is malformed (exactly-one-of
+/// `waiverId`/`divergenceId`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllowedDifferenceIdError {
+    /// Both `waiverId` and `divergenceId` are present.
+    Both,
+    /// Neither is present.
+    Neither,
+}
+
+impl AllowedDifferenceIdError {
+    /// A precise, human-readable diagnosis (constitution IV — fail-loud).
+    pub fn message(self) -> &'static str {
+        match self {
+            AllowedDifferenceIdError::Both => {
+                "allowed difference declares BOTH `waiverId` and `divergenceId`; exactly one \
+                 backing identity is required"
+            }
+            AllowedDifferenceIdError::Neither => {
+                "allowed difference declares NEITHER `waiverId` nor `divergenceId`; a backing \
+                 waiver/divergence identity is required (no unbacked tolerances)"
+            }
+        }
+    }
+}
+
+impl AllowedDifference {
+    /// The single backing identity (waiver or divergence id), or an
+    /// [`AllowedDifferenceIdError`] when both/neither is present.
+    pub fn resolved_id(&self) -> Result<&str, AllowedDifferenceIdError> {
+        match (&self.waiver_id, &self.divergence_id) {
+            (Some(_), Some(_)) => Err(AllowedDifferenceIdError::Both),
+            (None, None) => Err(AllowedDifferenceIdError::Neither),
+            (Some(w), None) => Ok(w),
+            (None, Some(d)) => Ok(d),
+        }
+    }
+
+    /// Whether the `observablePath` is a BARE channel (a `chan-…` id with no dotted
+    /// sub-path) or an empty/`*` wildcard — a global-ignore construct rejected by FR-032.
+    /// A well-formed path is `chan-<name>.<sub.path>` (at least one dotted segment after
+    /// the channel id).
+    pub fn is_global_ignore(&self) -> bool {
+        let p = self.observable_path.trim();
+        if p.is_empty() || p == "*" {
+            return true;
+        }
+        // Must start with a channel id and have a dotted sub-path after it.
+        match p.split_once('.') {
+            Some((chan, rest)) => !chan.starts_with("chan-") || rest.trim().is_empty(),
+            None => true, // no dot → bare channel (or a bare token)
+        }
+    }
+}
+
+/// The closed set of failure phases (data-model §8, clarify Q5). Reuses deacon's
+/// lifecycle/execution vocabulary — never an open string. Ordered as the run
+/// progresses: config-resolution → build → container-create → lifecycle:* → exec.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FailurePhase {
+    /// Resolving/merging the devcontainer configuration.
+    ConfigResolution,
+    /// Building the image.
+    Build,
+    /// Creating the container.
+    ContainerCreate,
+    /// `onCreateCommand`.
+    #[serde(rename = "lifecycle:onCreate")]
+    LifecycleOnCreate,
+    /// `updateContentCommand`.
+    #[serde(rename = "lifecycle:updateContent")]
+    LifecycleUpdateContent,
+    /// `postCreateCommand`.
+    #[serde(rename = "lifecycle:postCreate")]
+    LifecyclePostCreate,
+    /// `postStartCommand`.
+    #[serde(rename = "lifecycle:postStart")]
+    LifecyclePostStart,
+    /// `postAttachCommand`.
+    #[serde(rename = "lifecycle:postAttach")]
+    LifecyclePostAttach,
+    /// Executing a command in the container.
+    Exec,
 }
 
 /// A known gap (`gap-`) — `gaps.json`. Gaps satisfy structural coverage (V5) but

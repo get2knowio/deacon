@@ -17,6 +17,7 @@
 //! - [`diff`] — deterministic revision diff between two constraint inventories
 //!   (US3, T030–T031).
 
+pub mod case_hash;
 pub mod certify;
 pub mod clause;
 pub mod clause_diff;
@@ -28,6 +29,7 @@ pub mod model;
 pub mod prose;
 pub mod report;
 pub mod schema;
+pub mod snapshot;
 pub mod validate;
 
 /// Absolute path to the workspace root, derived from this crate's

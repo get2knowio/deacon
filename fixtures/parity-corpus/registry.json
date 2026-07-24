@@ -8,7 +8,8 @@
     { "name": "parity_state_diff",         "kind": "scenario", "docker_required": true },
     { "name": "parity_corpus_tier1",       "kind": "corpus",   "docker_required": false, "corpus": "tier1" },
     { "name": "parity_corpus_merged",      "kind": "corpus",   "docker_required": false, "corpus": "tier1" },
-    { "name": "parity_corpus_errors",      "kind": "corpus",   "docker_required": false, "corpus": "errors" }
+    { "name": "parity_corpus_errors",      "kind": "corpus",   "docker_required": false, "corpus": "errors" },
+    { "name": "parity_conformance_runner", "kind": "scenario", "docker_required": false }
   ],
   "internal_consistency_binaries": [
     "consistency_remote_env_flags",

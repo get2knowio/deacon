@@ -627,7 +627,11 @@ mod tests {
     #[test]
     fn embedded_registry_parses_and_matches_expected() {
         let reg = ParityRegistry::load().expect("embedded registry must parse");
-        assert_eq!(reg.live_binaries.len(), 9, "6 scenario + 3 corpus");
+        assert_eq!(
+            reg.live_binaries.len(),
+            10,
+            "7 scenario (incl. parity_conformance_runner, 022) + 3 corpus"
+        );
         assert_eq!(reg.internal_consistency_binaries.len(), 2);
         assert!(reg.corpus("tier1").is_some());
         assert!(reg.corpus("errors").is_some());

@@ -720,6 +720,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "console",
+ "deacon-conformance",
  "deacon-core",
  "flate2",
  "futures",
@@ -2127,6 +2128,7 @@ version = "0.0.0"
 dependencies = [
  "chrono",
  "deacon-conformance",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

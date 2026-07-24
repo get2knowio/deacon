@@ -34,3 +34,15 @@ conformance/inventory/clauses.json -text
 # Fixture prose and clause inventories carrying their own fingerprints/expected bytes.
 fixtures/conformance/prose/** -text
 fixtures/conformance/clause-drift/** -text
+
+# The declarative conformance runner (022-conformance-runner) hashes fixture bytes into
+# `fixtureHash` → `caseHash` and commits provenance-stamped snapshots. The hermetic
+# `snapshot_staleness` tests recompute those hashes from the fixture bytes and byte-compare
+# them to the recorded provenance. On a Windows checkout git's autocrlf would rewrite LF to
+# CRLF, changing the fixture bytes and failing the hash match. Pin these byte-exact paths.
+
+# Fixtures whose raw bytes feed fixtureHash / caseHash (never CRLF-translated).
+conformance/fixtures/** -text
+
+# Committed provenance/raw/normalized snapshot evidence (byte-exact committed artifacts).
+conformance/snapshots/** -text

@@ -21,13 +21,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 pub mod aggregate;
+pub mod compare;
+pub mod evidence;
 pub mod exec;
 pub mod normalize;
+pub mod observe;
 pub mod oracle;
+pub mod oracle_type;
 pub mod prereq;
 pub mod registry;
 pub mod report;
+pub mod runner;
 pub mod waiver;
+pub mod workspace;
 
 /// The one error taxonomy for the whole harness (data-model §9, FR-005).
 ///
@@ -157,6 +163,55 @@ pub enum HarnessError {
         found: usize,
         min: usize,
     },
+
+    // --- Declarative conformance runner (022-conformance-runner, T012) ---------
+    // Cause-specific fail-loud variants for the runner: a declared Docker/Node channel
+    // or normalization step, or a snapshot-oracle comparison, must never be silently
+    // skipped (constitution IV). These are distinct from the legacy
+    // [`DockerMissing`](Self::DockerMissing) pre-check, which the pre-022 `parity_*`
+    // path still uses: `DockerUnavailable`/`NodeUnavailable` are the 022 runner's
+    // environment-probe failures, carrying the specific cause the probe observed.
+    /// The runner requires Docker for a case's declared channels but it is unavailable.
+    #[error(
+        "Docker is unavailable for the conformance runner: {cause}. Remedy: start Docker (or \
+         provide a working `docker`) — a declared Docker channel must never be silently skipped."
+    )]
+    DockerUnavailable { cause: String },
+
+    /// The runner requires Node (for the pinned oracle) but it is unavailable.
+    #[error(
+        "Node is unavailable for the conformance runner: {cause}. Remedy: install the Node \
+         runtime the pinned `@devcontainers/cli` oracle needs — a live-differential case must \
+         never be silently skipped."
+    )]
+    NodeUnavailable { cause: String },
+
+    /// Normalization of a channel's evidence failed; the runner never falls back to raw
+    /// comparison (FR-005 / FR-029).
+    #[error(
+        "normalization failed for channel `{channel}`: {cause}. Remedy: fix the producer or the \
+         named normalization rule — there is no raw-comparison fallback."
+    )]
+    NormalizationFailed { channel: String, cause: String },
+
+    /// A committed snapshot is stale: a provenance/hash field no longer matches the
+    /// recomputed inputs or probed environment (FR-020). `field` names the FIRST
+    /// mismatch so the diagnosis is precise.
+    #[error(
+        "snapshot is stale: `{field}` no longer matches the committed provenance. Remedy: \
+         re-record via the reviewed `conformance-snapshot refresh` — a stale snapshot must fail, \
+         never auto-refresh."
+    )]
+    SnapshotStale { field: String },
+
+    /// No committed snapshot exists for the current platform — a coverage gap, distinct
+    /// from stale and from a silent skip (FR-016a).
+    #[error(
+        "no committed snapshot for platform `{os_arch}` (no-reference-for-platform). Remedy: \
+         record one via the reviewed refresh on this platform, or accept the coverage gap — this \
+         is never a silent skip."
+    )]
+    NoReferenceForPlatform { os_arch: String },
 }
 
 /// Environment override for the report/artifact root (see [`report_root`]).

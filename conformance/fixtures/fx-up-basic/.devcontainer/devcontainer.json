@@ -1,0 +1,5 @@
+{
+  "name": "ConformanceUpBasic",
+  "image": "alpine:3.19",
+  "containerEnv": { "CONF_TOKEN": "us5" }
+}

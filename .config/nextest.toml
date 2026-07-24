@@ -41,13 +41,19 @@ parity = { max-threads = 2 }
 parity-cli = { max-threads = 8 }
 
 # Dev-only `deacon-conformance` hermetic test binaries — `registry_valid`,
-# `classification_join`, `inventory_*`, `gap_certification`, `traceability`, and the
+# `classification_join`, `inventory_*`, `gap_certification`, `traceability`, the
 # 021-normative-clause-inventory binaries `clause_extraction` / `clause_determinism` /
-# `clause_baseline` / `clause_diff` / `clause_classification_join` — carry NO override:
-# they are fast, non-docker, non-network, no-model tests that run in EVERY profile
-# (default / dev-fast / full / ci) by default (they are neither in any `default-filter`
-# exclusion nor a docker/smoke group). This is the standing convention for conformance
-# tests; the five clause binaries follow it (T003).
+# `clause_baseline` / `clause_diff` / `clause_classification_join`, and the
+# 022-conformance-runner binaries `case_schema_valid` / `snapshot_staleness` /
+# `allowed_difference_scoping` / `normalization_semantics` (conformance crate) plus
+# `runner_record_replay` (parity-harness crate) — carry NO override: they are fast,
+# non-docker, non-network, no-model tests that run in EVERY profile (default / dev-fast /
+# full / ci) by default (they are neither in any `default-filter` exclusion nor a
+# docker/smoke group; `runner_record_replay` does not match `binary(#parity_*)`, so it is
+# NOT captured by the live-parity exclusions). This is the standing convention for
+# conformance tests; the four new hermetic conformance binaries + `runner_record_replay`
+# follow it (T004). The live differential binary `parity_conformance_runner` (US1, T026)
+# is the ONLY 022 binary that gets per-profile overrides, added in US1 (T027).
 
 # Default profile: Balanced parallelization for local development
 [profile.default]
@@ -56,7 +62,7 @@ slow-timeout = "60s"
 status-level = "pass"
 # Live parity scenario binaries run ONLY under `--profile parity` (018-harden-parity-harness).
 # Exclude them here so the default lane is truthful by non-selection (FR-014).
-default-filter = 'not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors))'
+default-filter = 'not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner))'
 
 [[profile.default.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -154,7 +160,7 @@ test-group = 'docker-slow-shared'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=docker_channels)'
 test-group = 'docker-shared'
 
 [[profile.default.overrides]]
@@ -192,7 +198,7 @@ priority = 100
 retries = 0
 slow-timeout = "30s"
 # Exclude: smoke, parity, Docker-dependent tests, testcontainers-based tests
-default-filter = 'not (binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_registry_check))) | binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=integration_auto_forward) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build))'
+default-filter = 'not (binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_registry_check))) | binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=integration_auto_forward) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build) | binary(=docker_channels))'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -277,7 +283,7 @@ filter = 'binary(=integration_build) | binary(=integration_build_output) | binar
 test-group = 'docker-slow-shared'
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=docker_channels)'
 test-group = 'docker-shared'
 
 [[profile.dev-fast.overrides]]
@@ -315,7 +321,7 @@ slow-timeout = { period = "90s", terminate-after = 1 }
 status-level = "none"
 # Live parity scenario binaries run ONLY under `--profile parity` (018-harden-parity-harness).
 # Exclude them here so even the "full" lane is truthful by non-selection (FR-014).
-default-filter = 'not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors))'
+default-filter = 'not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner))'
 
 # Profile for long-running integration tests (heavy end-to-end builds)
 [profile.long-running]
@@ -340,7 +346,7 @@ slow-timeout = { period = "30m", terminate-after = 1 }
 retries = 0
 slow-timeout = { period = "10m", terminate-after = 1 }
 status-level = "pass"
-default-filter = 'binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors))) | binary(#integration_*) | binary(=build_consistency) | binary(=up_dotfiles)'
+default-filter = 'binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner))) | binary(#integration_*) | binary(=build_consistency) | binary(=up_dotfiles)'
 
 [[profile.docker.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -419,7 +425,7 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "5m", terminate-after = 1 }
 
 [[profile.docker.overrides]]
-filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=docker_channels)'
 test-group = 'docker-shared'
 
 [[profile.docker.overrides]]
@@ -512,7 +518,7 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.full.overrides]]
-filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=docker_channels)'
 test-group = 'docker-shared'
 
 [[profile.full.overrides]]
@@ -552,7 +558,7 @@ fail-fast = false
 global-timeout = "1h"
 # Live parity scenario binaries run ONLY under `--profile parity` (018); exclude
 # them from ci alongside smoke so this lane is truthful by non-selection (FR-014).
-default-filter = 'not (binary(#smoke_*) | binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors))'
+default-filter = 'not (binary(#smoke_*) | binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner))'
 
 # Throttle smoke and parity tests while allowing more overlap
 [[profile.ci.overrides]]
@@ -619,7 +625,7 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "30m", terminate-after = 1 }
 
 [[profile.ci.overrides]]
-filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts)'
+filter = 'binary(=integration_host_requirements) | binary(=integration_port_forwarding) | binary(=integration_feature_security) | binary(=integration_feature_lifecycle) | binary(=integration_feature_mounts) | binary(=integration_feature_entrypoints) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=docker_channels)'
 test-group = 'docker-shared'
 threads-required = 1
 
@@ -659,7 +665,7 @@ slow-timeout = { period = "5m", terminate-after = 1 }
 status-level = "pass"
 fail-fast = false
 # MVP integration tests: smoke, parity, and core integration tests for up/exec/down/read-configuration
-default-filter = 'binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors))) | binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_up_exec_identity) | binary(=integration_down) | binary(=integration_runtime_selection) | binary(=integration_read_configuration) | binary(=integration_read_configuration_output) | binary(=integration_config) | binary(=integration_custom_container_name) | binary(=integration_exec) | binary(=integration_exec_env) | binary(=integration_exec_pty) | binary(=integration_e2e) | binary(#integration_env_probe_*) | binary(=aggregator) | binary(=normalize_consistency) | binary(=raw_outputs)'
+default-filter = 'binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner))) | binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_up_exec_identity) | binary(=integration_down) | binary(=integration_runtime_selection) | binary(=integration_read_configuration) | binary(=integration_read_configuration_output) | binary(=integration_config) | binary(=integration_custom_container_name) | binary(=integration_exec) | binary(=integration_exec_env) | binary(=integration_exec_pty) | binary(=integration_e2e) | binary(#integration_env_probe_*) | binary(=aggregator) | binary(=normalize_consistency) | binary(=raw_outputs)'
 
 # Smoke test grouping
 [[profile.mvp-integration.overrides]]
@@ -728,11 +734,13 @@ test-group = 'fs-heavy'
 retries = 0
 slow-timeout = { period = "15m", terminate-after = 1 }
 status-level = "pass"
-default-filter = 'binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors)'
+default-filter = 'binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner)'
 
-# Config-only parity runner → parity-cli group.
+# Config-only parity runners → parity-cli group. `parity_conformance_runner` (022,
+# US1) drives the declarative runner over config-only read-configuration cases, so it
+# is CLI-throttled like `parity_read_configuration`.
 [[profile.parity.overrides]]
-filter = 'binary(=parity_read_configuration)'
+filter = 'binary(=parity_read_configuration) | binary(=parity_conformance_runner)'
 test-group = 'parity-cli'
 
 # Container-scenario parity runners → parity group (throttled, daemon-friendly).

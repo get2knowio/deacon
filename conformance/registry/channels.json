@@ -18,12 +18,32 @@
       "description": "Presence, absence, or attributes of files and directories on the workspace or container filesystem."
     },
     {
+      "id": "chan-image",
+      "description": "Built-image configuration and metadata (labels parsed semantically, environment, entrypoint)."
+    },
+    {
+      "id": "chan-injected-process",
+      "description": "Injected process context: environment, user, cwd, PATH resolution, signals, TTY, and exit propagation."
+    },
+    {
+      "id": "chan-process-graph",
+      "description": "Container, network, volume, and mount graph produced by a run."
+    },
+    {
       "id": "chan-stderr",
       "description": "Bytes written to standard error (diagnostics, logs, progress)."
     },
     {
       "id": "chan-stdout",
       "description": "Bytes written to standard output (the command result document)."
+    },
+    {
+      "id": "chan-structured-output",
+      "description": "Parsed structured (JSON) result document, distinct from the raw stdout bytes."
+    },
+    {
+      "id": "chan-temporal",
+      "description": "Lifecycle ordering, first-create versus restart, resume, and cleanup transitions across a run."
     }
   ]
 }

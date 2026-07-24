@@ -368,18 +368,24 @@ waiver + registry loaders (`waiver`, `registry`), run-report fragments
 `crates/deacon/tests/parity_*.rs` are thin shells over these helpers.
 
 **Selection is profile-based, never an env-var opt-in.** The legacy
-`DEACON_PARITY=1` gate and the `cargo test` side-channel are retired. The nine
-live binaries run **only** under `cargo nextest run --profile parity` (whose
-`default-filter` is an explicit `binary(=…)` allow-list of exactly those nine —
-NOT a `parity_*` glob, which would wrongly capture the hermetic guards
-`parity_harness_faults` / `parity_registry_check`). Every other profile
-(`default`/`full`/`ci`/`dev-fast`/`mvp-integration`) excludes the nine, so those
+`DEACON_PARITY=1` gate and the `cargo test` side-channel are retired. The **ten**
+live binaries (the nine original scenario/corpus binaries plus
+`parity_conformance_runner`, the 022 declarative-runner driver) run **only** under
+`cargo nextest run --profile parity` (whose `default-filter` is an explicit
+`binary(=…)` allow-list of exactly those ten — NOT a `parity_*` glob, which would
+wrongly capture the hermetic guards `parity_harness_faults` /
+`parity_registry_check`). Every other profile
+(`default`/`full`/`ci`/`dev-fast`/`mvp-integration`) excludes the ten, so those
 lanes are truthful by **non-selection**: a green fast/CI run never implies live
 parity ran. There is no silent skip — a missing/mismatched oracle, missing
 Docker, or a normalization failure **fails** the run with a cause-specific
 `HarnessError`. `make test-parity` is a thin alias:
 `cargo nextest run --profile parity` then `cargo run -p parity-harness --bin
-parity-report`.
+parity-report`. (The 022 declarative runner extends this crate along the same
+seams — `exec`/`normalize`/`oracle`/`report`/`waiver` — adding `runner`,
+`oracle_type`, `compare`, `evidence`, `observe/`, `workspace`, and the
+`conformance-snapshot` refresh bin; see the "Declarative conformance runner"
+subsection under Conformance Registry.)
 
 **Registry + waiver model.** `fixtures/parity-corpus/registry.json` enumerates
 the live binaries, the internal-consistency binaries, and the corpora (with
@@ -496,6 +502,78 @@ until `certify` unblocks; disposition is never inherited by name.
 axes, link its source unit, cover it with a case/waiver/gap, then `validate`). Statuses
 are **evidence-backed** claims — no test case or waiver yet means `reference: unknown` →
 `decision: unresolved-gap` → a `gap-*` record.
+
+**Declarative conformance runner** (022-conformance-runner) — cases are DATA a shared
+runner executes, not pointers to hand-written Rust tests. A `cases.json` record is either
+**legacy** (`executable.binary` → a `parity_*` Rust test) or **declarative**
+(`operations` + `oracleType` + `expected`); never both, never neither (exactly-one-of
+enforced fail-loud at load). Adding a case/assertion/fixture is a pure data edit — NO new
+Rust function (SC-001). The hermetic data/validation/staleness logic lives in
+`deacon-conformance`; the live execution/observation/record logic in `parity-harness`.
+- **Declarative case shape** (data-model.md §1): ordered `operations[]` (consumer
+  subcommand + argv, `${WORKSPACE}` token, `fixtures`, optional `relationship` for
+  metamorphic); `oracleType`; per-channel `expected[]` (`assertion` shapes per
+  contract observer-channel.md); scoped `allowedDifferences[]`; `fsAllowlist`; `cleanup`;
+  `resourceGroup` (nextest group for Docker cases). Excluded from `caseHash`: `notes`,
+  `allowedDifferences`, `behaviors` — annotating never re-records a snapshot (D3).
+- **Four oracle types** (one explicit dispatch in `oracle_type.rs`, re-pointed by changing
+  ONLY `oracleType`): `spec-expectation` (compare to the declared `assertion`, deacon
+  only), `live-differential` (deacon vs the verified pinned oracle), `snapshot` (deacon vs
+  a committed provenance-checked snapshot), `invariant-metamorphic` (evaluate a declared
+  RELATIONSHIP — idempotence / first-create-vs-restart / resume — across ≥2 operations,
+  not a fixed output).
+- **Observable channels + observers** (`observe/`, one module per channel): CLI-process
+  (`chan-exit-code`/`chan-stdout`/`chan-stderr`/`chan-structured-output`), `chan-filesystem`/
+  `chan-file-content` (allowlist-scoped, NEVER full-tree), and the four Docker channels
+  `chan-image`/`chan-process-graph`/`chan-injected-process`/`chan-temporal`. Evidence is
+  captured RAW then normalized by the **single** `normalize.rs` — named, field-specific
+  rules (`path_token`/`label_semantic`/`mount_source_canonical`/`path_env_segmented`/
+  `null_preserving`); nothing blanket-removed (FR-029); raw + normalized persisted SEPARATELY.
+  `NORMALIZER_VERSION` (single source of truth in `deacon-conformance::snapshot`,
+  re-exported by `parity-harness::normalize`) participates in snapshot staleness.
+- **Docker cases** run in an ISOLATED external temp workspace (`workspace.rs`) with
+  collision-resistant names (unique workspace path → unique `devcontainer.local_folder`
+  label) and an RAII cleanup guard that reclaims container/network/volume/temp-dir on
+  success AND unwind. Image inputs MUST be pinned (`@sha256:`/concrete tag, never `latest`
+  — V18).
+- **Committed snapshots** live under `conformance/snapshots/<os-arch>/<case-id>/` as three
+  files — `provenance.json` (the FR-017 identity/env fields: oracle/source/node/docker/
+  compose versions, case/fixture hashes, imageDigests, normalizerVersion, argv, platform/
+  arch, `capturedAt`), `raw.json`, `normalized.json` (raw + normalized SEPARATE, FR-016).
+  Replay fails as **stale** naming the FIRST drifted EVIDENCE-DETERMINING input
+  (caseHash/fixtureHash/oracle/source/imageDigests/normalizerVersion — NOT
+  capturedAt/platform/arch, which are selectors, and NOT the host tool versions
+  node/docker/compose, which are informational: gating staleness on them would make every
+  snapshot stale on every machine but the recorder's, breaking cross-machine CI replay —
+  a genuine host-version effect on evidence shows up as a divergence instead); a missing
+  snapshot for the current `os-arch` is **no-reference-for-platform** (a coverage gap,
+  distinct from stale and from a silent skip).
+- **Runner/refresh/check split** (all dev-only, Principle II — NEVER a shipped `deacon`
+  subcommand): `conformance snapshot check|diff` (hermetic, `deacon-conformance` bin,
+  read-only — recompute hashes + probe env vs committed provenance; NEVER writes);
+  `conformance-snapshot refresh` (`parity-harness` bin — the REVIEWED record path: requires
+  the verified oracle + Docker + Node fail-loud, runs the reference, writes the three files
+  ATOMICALLY, prints a review diff — the git diff is the review surface); and the live test
+  binary `parity_conformance_runner` (`crates/deacon/tests/`, `--profile parity` only) that
+  drives the runner over every declarative case. Ordinary `cargo nextest run` NEVER rewrites
+  a committed snapshot (`only_the_refresh_bin_writes_committed_snapshots` guards this).
+- **Scoped allowed differences** (US4) — a tolerated divergence is `(behavior, context,
+  observablePath)` + exactly one resolvable `waiverId` (a real `wvr-`) or `divergenceId`
+  (an `ext-`/intentional-divergence behavior). NO global ignore lists (a bare-channel
+  `observablePath` is rejected fail-loud at load, FR-032); duplicates conflict at load
+  (FR-035); dangling ids are V19. A covered divergence verdicts `allowed-difference` (with
+  the backing id in the detail); an uncovered path stays `diverge`; an unconsumed tolerance
+  (its difference stopped reproducing) is reported STALE — the SAME self-invalidating
+  pattern as `waiver.rs`, not a fork (FR-043/034).
+- **New validation classes** (`validate.rs`, all block a PR via `registry_valid`): **V16**
+  declarative-case well-formedness (shape, `oracleType` present, consumer-surface
+  subcommand, spec-expectation ⇒ assertions, `fsAllowlist` iff a filesystem channel);
+  **V17** committed-snapshot integrity (orphan/malformed, in `validate_path_with_inventory`);
+  **V18** Docker-case pinned image inputs; **V19** allowed-difference identity resolution;
+  **V20** invariant-metamorphic arity (≥2 ops + a `relationship` referencing a sibling op).
+  `certify` surfaces committed-snapshot coverage + `no-reference-for-platform` as
+  NON-BLOCKING info (a snapshot is a reviewed artifact, not a release gate); it still blocks
+  ONLY on gaps/uncovered/inventory/clause. See `specs/022-conformance-runner/quickstart.md`.
 
 ## Parity & Conformance: Vocabulary, Gates, and the Build-Out Loop
 
@@ -921,6 +999,8 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - strict-JSON files — vendored schemas under `conformance/schemas/<rev>/` (020-schema-constraint-inventory)
 - Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing crate deps only — `serde`/`serde_json` (record (021-normative-clause-inventory)
 - strict-JSON + vendored Markdown — vendored prose under (021-normative-clause-inventory)
+- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json`, `indexmap` (declaration order), `sha2` (already used in `deacon-conformance` for `hash8`/fingerprints → case/fixture hashing), `tokio` (bounded async exec + streamed capture, already in `parity-harness`), `thiserror` (`HarnessError`/domain errors), `tracing`, `toml` (nextest-profile drift check, already a `parity-harness` dep), `tempfile` (isolated external workspaces, dev-dep); no new runtime crates (022-conformance-runner)
+- strict-JSON, version-controlled — extend `conformance/registry/cases.json` (declarative case shape) + `channels.json` (new channels); new committed evidence tree `conformance/snapshots/<os>-<arch>/<case-id>/{provenance,raw,normalized}.json` (atomic temp-file + `fs::rename` writes) (022-conformance-runner)
 
 ## Recent Changes
 - 018-harden-parity-harness: Added the dev-only `crates/parity-harness/` crate (oracle resolution + exact-version verify, bounded exec with raw capture, the single `normalize` module, waiver/registry loaders, report fragments + `parity-report` aggregator bin); moved live parity onto the dedicated `[profile.parity]` nextest profile; retired the `DEACON_PARITY=1` gate and the three Python corpus runners; added the `parity / live-certification` CI lane. See the "Parity Test Harness" section.

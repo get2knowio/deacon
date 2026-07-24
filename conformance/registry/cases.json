@@ -236,6 +236,159 @@
       "outcomes": [
         { "channel": "chan-exit-code", "expectation": "the selected profile's flags/config are applied to the invocation" }
       ]
+    },
+    {
+      "id": "case-readconfig-unknown-field-echo",
+      "behaviors": ["bhv-readconfig-unknown-field-preserved"],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": ["--workspace-folder", "${WORKSPACE}"],
+          "fixtures": ["fx-config-with-unknown-field"]
+        }
+      ],
+      "expected": [
+        { "channel": "chan-exit-code", "operation": "op-read", "assertion": { "equals": 0 } },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": { "jsonSubset": { "configuration": { "customUnknownKey": "preserved" } } }
+        }
+      ],
+      "cleanup": { "tempdir": true },
+      "notes": "Declarative spec-expectation case (022-conformance-runner MVP): unknown top-level keys round-trip through read-configuration (Constitution IV faithful-on-unmodeled). No new Rust function — the shared runner verdicts it from this data."
+    },
+    {
+      "id": "case-readconfig-parity-exit",
+      "behaviors": ["bhv-readconfig-basic-parse"],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": ["--workspace-folder", "${WORKSPACE}"],
+          "fixtures": ["fx-config-with-unknown-field"]
+        }
+      ],
+      "expected": [
+        { "channel": "chan-exit-code", "operation": "op-read" }
+      ],
+      "cleanup": { "tempdir": true },
+      "notes": "Declarative live-differential case (022-conformance-runner MVP): deacon and the pinned reference both exit 0 for a well-formed configuration. Runs in the parity lane only; the exit-code channel is compared without US3 normalization."
+    },
+    {
+      "id": "case-readconfig-workspace-file-present",
+      "behaviors": ["bhv-readconfig-basic-parse"],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": ["--workspace-folder", "${WORKSPACE}"],
+          "fixtures": ["fx-config-with-unknown-field"]
+        }
+      ],
+      "expected": [
+        { "channel": "chan-exit-code", "operation": "op-read", "assertion": { "equals": 0 } },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-read",
+          "assertion": { "exists": ".devcontainer/devcontainer.json" }
+        }
+      ],
+      "fsAllowlist": [".devcontainer/devcontainer.json"],
+      "cleanup": { "tempdir": true },
+      "notes": "Declarative spec-expectation case (022-conformance-runner US3): exercises the allowlist-scoped filesystem observer — the workspace's .devcontainer/devcontainer.json is present after read-configuration. path_token normalization applies; no full-tree diff (clarify Q1)."
+    },
+    {
+      "id": "case-readconfig-snapshot",
+      "behaviors": ["bhv-readconfig-basic-parse"],
+      "context": [],
+      "oracleType": "snapshot",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": ["--workspace-folder", "${WORKSPACE}"],
+          "fixtures": ["fx-config-with-unknown-field"]
+        }
+      ],
+      "expected": [
+        { "channel": "chan-exit-code", "operation": "op-read" }
+      ],
+      "cleanup": { "tempdir": true },
+      "notes": "Declarative snapshot-oracle case (022-conformance-runner US2): deacon's exit-code is compared against the committed, provenance-checked reference snapshot recorded via `conformance-snapshot refresh`. Replay fails as stale on caseHash/fixtureHash/oracleVersion/sourceRevision/node|docker|compose|imageDigests/normalizerVersion drift; a missing snapshot for the current os-arch is no-reference-for-platform."
+    },
+    {
+      "id": "case-up-docker-channels",
+      "behaviors": ["bhv-up-exec-parity"],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": ["--workspace-folder", "${WORKSPACE}"],
+          "fixtures": ["fx-up-basic"]
+        }
+      ],
+      "expected": [
+        { "channel": "chan-exit-code", "operation": "op-up", "assertion": { "equals": 0 } },
+        {
+          "channel": "chan-image",
+          "operation": "op-up",
+          "assertion": { "jsonSubset": { "labels": { "devcontainer.source": "deacon" } } }
+        },
+        {
+          "channel": "chan-injected-process",
+          "operation": "op-up",
+          "assertion": { "jsonSubset": { "env": { "CONF_TOKEN": "us5" } } }
+        },
+        {
+          "channel": "chan-process-graph",
+          "operation": "op-up",
+          "assertion": { "jsonSubset": {} }
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up",
+          "assertion": { "jsonSubset": { "status": "running" } }
+        }
+      ],
+      "cleanup": { "containers": true, "images": false, "networks": true, "volumes": true, "tempdir": true },
+      "notes": "Declarative Docker-backed spec-expectation case (022-conformance-runner US5): `deacon up` in an ISOLATED external temp workspace (collision-resistant, guaranteed cleanup) exercises all four Docker channels — chan-image (deacon stamps devcontainer.source), chan-injected-process (containerEnv CONF_TOKEN injected), chan-process-graph (mount/network/volume graph captured), chan-temporal (container running). Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-up-idempotent",
+      "behaviors": ["bhv-up-exec-parity"],
+      "context": [],
+      "oracleType": "invariant-metamorphic",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-1",
+          "subcommand": "up",
+          "argv": ["--workspace-folder", "${WORKSPACE}"],
+          "fixtures": ["fx-up-basic"]
+        },
+        {
+          "id": "op-up-2",
+          "subcommand": "up",
+          "argv": ["--workspace-folder", "${WORKSPACE}"],
+          "relationship": { "kind": "idempotence", "againstOp": "op-up-1" }
+        }
+      ],
+      "expected": [
+        { "channel": "chan-temporal", "operation": "op-up-2" }
+      ],
+      "cleanup": { "containers": true, "images": false, "networks": true, "volumes": true, "tempdir": true },
+      "notes": "Declarative invariant-metamorphic case (022-conformance-runner US6): a second `deacon up` on the same isolated workspace must be IDEMPOTENT — it reuses the running container created by the first up (same container id, still running) rather than recreating it. The oracle verdicts on the DECLARED RELATIONSHIP between op-up-2 and op-up-1's chan-temporal state, not a fixed output (FR-008). Image pinned to alpine:3.19 (V18)."
     }
   ]
 }

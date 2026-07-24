@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 
+use deacon_conformance::case_hash::hashes_for_case;
 use deacon_conformance::certify::certify;
 use deacon_conformance::clause::{generate_clauses, render as render_clauses, write_clauses};
 use deacon_conformance::clause_diff::{
@@ -33,12 +34,14 @@ use deacon_conformance::load::{
 };
 use deacon_conformance::model::{ClauseInventory, ConstraintInventory, DocumentScope};
 use deacon_conformance::report::write_reports;
+use deacon_conformance::snapshot;
 use deacon_conformance::validate::{
     ClauseInputs, InventoryInputs, Violation, validate_path, validate_path_with_inventory,
 };
 use deacon_conformance::{
-    CURRENT_SCHEMA_PIN, clause_paths_for, default_clauses_file, default_inventory_file,
-    default_pinned_schemas_dir, default_pinned_spec_dir, default_registry_dir, workspace_root,
+    CURRENT_SCHEMA_PIN, CURRENT_SPEC_PIN, clause_paths_for, default_clauses_file,
+    default_inventory_file, default_pinned_schemas_dir, default_pinned_spec_dir,
+    default_registry_dir, workspace_root,
 };
 
 /// Structural conformance-registry tooling (dev-only).
@@ -96,6 +99,43 @@ enum Command {
     Clause {
         #[command(subcommand)]
         command: ClauseCommand,
+    },
+    /// Committed snapshot staleness/diff tooling (022-conformance-runner). Hermetic,
+    /// read-only (never writes; the reviewed refresh is the `parity-harness`
+    /// `conformance-snapshot` bin). Handlers land in User Story 2 (T031–T033).
+    Snapshot {
+        #[command(subcommand)]
+        command: SnapshotCommand,
+    },
+}
+
+/// `snapshot <check|diff>` — hermetic, read-only staleness + drift operations over the
+/// committed `conformance/snapshots/<os>-<arch>/<case-id>/` trees (contract
+/// runner-cli.md §1). NEVER writes evidence — ordinary runs only read/compare (FR-021).
+#[derive(Debug, Subcommand)]
+enum SnapshotCommand {
+    /// Recompute case/fixture hashes + probe the environment and compare to the
+    /// committed provenance; report `stale` (naming the mismatched field) or
+    /// `no-reference-for-platform`. Exit `0` pass, `1` stale/violation, `2` malformed.
+    Check {
+        /// Restrict the check to a single case id (default: all cases).
+        #[arg(long, value_name = "ID")]
+        case: Option<String>,
+        /// Restrict the check to a single `os-arch` platform (default: the current one).
+        #[arg(long, value_name = "OS-ARCH")]
+        platform: Option<String>,
+    },
+    /// Deterministic drift between two snapshot trees.
+    Diff {
+        /// The old (left) snapshot directory.
+        #[arg(value_name = "OLD-DIR")]
+        old: PathBuf,
+        /// The new (right) snapshot directory.
+        #[arg(value_name = "NEW-DIR")]
+        new: PathBuf,
+        /// Output format. Defaults to `json`; `md` renders the human review document.
+        #[arg(long, value_name = "FORMAT", default_value = "json")]
+        format: DiffFormat,
     },
 }
 
@@ -267,7 +307,188 @@ fn run(cli: Cli) -> i32 {
                 clause_scaffold(&registry_dir, clauses, spec)
             }
         },
+        Command::Snapshot { command } => match command {
+            SnapshotCommand::Check { case, platform } => {
+                snapshot_check(&registry_dir, case.as_deref(), platform.as_deref())
+            }
+            SnapshotCommand::Diff { old, new, format } => snapshot_diff(&old, &new, format),
+        },
     }
+}
+
+/// `snapshot check` (contract runner-cli.md §1): recompute the case/fixture hashes +
+/// probe the host environment, compare to the committed provenance, and report `stale`
+/// (naming the first drifted field) or `no-reference-for-platform`. Hermetic (never
+/// writes). Exit `0` all fresh / no-reference (informational), `1` any stale, `2`
+/// malformed input / dangling reference.
+///
+/// The evidence-determining inputs (case/fixture hashes, oracle + source pins, normalizer
+/// version) are recomputed and compared. Host tool versions (Node/Docker/Compose) are
+/// informational, NOT staleness signals (see `snapshot::compare_staleness`), so they are
+/// neither probed nor compared — a snapshot stays fresh across machines regardless of the
+/// host toolchain (SC-003). `imageDigests` is not recomputed hermetically (it needs image
+/// inspection) — carried from the recorded provenance.
+fn snapshot_check(registry_dir: &Path, case_filter: Option<&str>, platform: Option<&str>) -> i32 {
+    let registry = match Registry::load(registry_dir) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: cannot load registry: {e}");
+            return 2;
+        }
+    };
+    let os_arch = platform
+        .map(str::to_string)
+        .unwrap_or_else(snapshot::current_os_arch);
+    // Snapshots are a sibling of the registry dir (mirrors the certify/validate
+    // sibling-resolution), so `snapshot check --registry <dir>` inspects that tree's
+    // snapshots rather than always the real committed ones. Fixtures stay
+    // workspace-rooted, matching how the runner/refresh/validate resolve them.
+    let snapshots_root = registry_dir
+        .parent()
+        .map(|p| p.join("snapshots"))
+        .unwrap_or_else(snapshot::default_snapshots_dir);
+    let fixtures_root = workspace_root().join("conformance").join("fixtures");
+
+    // Which declarative cases to check: the named one, or every declarative case.
+    let cases: Vec<&deacon_conformance::model::TestCase> = registry
+        .cases
+        .iter()
+        .filter(|c| {
+            matches!(
+                c.classify(),
+                Ok(deacon_conformance::model::CaseKind::Declarative)
+            )
+        })
+        // A default sweep (no --case) checks only `snapshot`-oracle cases — the ones a
+        // committed snapshot is expected for. An explicit --case is checked regardless of
+        // its oracle type (the user asked for it by id).
+        .filter(|c| {
+            case_filter.map_or(
+                c.oracle_type == Some(deacon_conformance::model::OracleType::Snapshot),
+                |id| c.id == id,
+            )
+        })
+        .collect();
+
+    if let Some(id) = case_filter {
+        if cases.is_empty() {
+            eprintln!("error: no declarative case with id {id:?}");
+            return 2;
+        }
+    }
+
+    let oracle_pin = snapshot::current_oracle_version_pin();
+    let mut stale = Vec::new();
+    let mut no_reference = Vec::new();
+    let mut fresh = 0usize;
+
+    for case in cases {
+        let resolution = match snapshot::resolve(&snapshots_root, &os_arch, &case.id) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 2;
+            }
+        };
+        let recorded = match resolution {
+            snapshot::Resolution::NoReferenceForPlatform { os_arch } => {
+                no_reference.push((case.id.clone(), os_arch));
+                continue;
+            }
+            snapshot::Resolution::Found(s) => s.provenance,
+        };
+        let (case_hash, fixture_hash) = match hashes_for_case(case, &fixtures_root) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("error: cannot recompute hashes for {}: {e}", case.id);
+                return 2;
+            }
+        };
+        // Build the `current` provenance: recompute the evidence-determining inputs and
+        // carry recorded values for the rest (host tool versions are not staleness signals,
+        // so they are not probed here; never fabricated).
+        let mut current = recorded.clone();
+        current.case_hash = case_hash;
+        current.fixture_hash = fixture_hash;
+        current.source_revision = CURRENT_SPEC_PIN.to_string();
+        current.normalizer_version = snapshot::NORMALIZER_VERSION.to_string();
+        if let Some(v) = &oracle_pin {
+            current.oracle_version = v.clone();
+        }
+
+        match snapshot::compare_staleness(&recorded, &current) {
+            snapshot::Staleness::Fresh => {
+                println!("fresh {}", case.id);
+                fresh += 1;
+            }
+            snapshot::Staleness::Stale {
+                field,
+                recorded,
+                current,
+            } => {
+                println!(
+                    "stale {} {field}: recorded {recorded:?} != current {current:?}",
+                    case.id
+                );
+                stale.push(case.id.clone());
+            }
+        }
+    }
+
+    for (id, os_arch) in &no_reference {
+        println!("no-reference-for-platform {id} ({os_arch})");
+    }
+    eprintln!(
+        "snapshot check ({os_arch}): {fresh} fresh, {} stale, {} no-reference",
+        stale.len(),
+        no_reference.len()
+    );
+    if stale.is_empty() { 0 } else { 1 }
+}
+
+/// `snapshot diff <old-dir> <new-dir>` (contract runner-cli.md §1): deterministic drift
+/// between two committed snapshot trees (a single case directory each). Exit `0` on
+/// success (whether or not differences exist — the diff IS the output), `2` on IO error.
+fn snapshot_diff(old: &Path, new: &Path, format: DiffFormat) -> i32 {
+    let old_snap = match snapshot::load_snapshot(old) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot load old snapshot: {e}");
+            return 2;
+        }
+    };
+    let new_snap = match snapshot::load_snapshot(new) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot load new snapshot: {e}");
+            return 2;
+        }
+    };
+    let entries = snapshot::diff(&old_snap, &new_snap);
+    match format {
+        DiffFormat::Json => match serde_json::to_string_pretty(&entries) {
+            Ok(doc) => println!("{doc}"),
+            Err(e) => {
+                eprintln!("error: could not serialize diff: {e}");
+                return 2;
+            }
+        },
+        DiffFormat::Md => {
+            if entries.is_empty() {
+                println!("No snapshot differences.");
+            } else {
+                println!("| Artifact | Path | Old | New |");
+                println!("|----------|------|-----|-----|");
+                for e in &entries {
+                    println!(
+                        "| {} | `{}` | `{}` | `{}` |",
+                        e.artifact, e.path, e.old, e.new
+                    );
+                }
+            }
+        }
+    }
+    0
 }
 
 /// `clause generate` (contracts/cli-clause.md): fingerprint-verify the spec manifest,
@@ -1082,7 +1303,13 @@ fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
         spec_dir: &spec_dir,
         clauses_file: &clauses_file,
     };
-    let result = certify(&registry, &inputs, &clause_inputs);
+    // Committed snapshots are a sibling of the registry dir (mirrors the inventory/clause
+    // sibling resolution); snapshot coverage is NON-BLOCKING info (T073).
+    let snapshots_dir = registry_dir
+        .parent()
+        .map(|p| p.join("snapshots"))
+        .unwrap_or_else(|| registry_dir.join("snapshots"));
+    let result = certify(&registry, &inputs, &clause_inputs, &snapshots_dir);
 
     if json {
         match serde_json::to_string_pretty(&result) {
@@ -1109,6 +1336,17 @@ fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
                     item.id
                 ),
             }
+        }
+        // NON-BLOCKING snapshot coverage info (T073, FR-042).
+        for cov in &result.snapshot_coverage {
+            println!(
+                "info snapshot-coverage: {} [{}]",
+                cov.case_id,
+                cov.platforms.join(", ")
+            );
+        }
+        for id in &result.no_reference {
+            println!("info no-reference-for-platform: {id} (no committed snapshot yet)");
         }
         if result.certified {
             println!("certified: {}", result.profile);

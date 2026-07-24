@@ -232,6 +232,73 @@ pub fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
+// ===========================================================================
+// Declarative conformance runner verdict report (T024, contract runner-cli.md)
+// ===========================================================================
+
+/// The deterministic verdict report: a single JSON document on stdout listing every
+/// case's per-channel verdict (contract runner-cli.md). It carries NO timestamps and NO
+/// absolute paths (paths are tokenized by normalization), and records are in declaration
+/// order (`Vec`, never `BTreeMap`) — so the body is byte-stable across runs (VI output
+/// contract, T018). Logs/progress go to stderr via `tracing`, never into this document.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerdictReport {
+    /// Report schema version.
+    pub schema_version: u32,
+    /// The `NORMALIZER_VERSION` the verdicts were produced under (FR-030).
+    pub normalizer_version: String,
+    /// Per-case verdicts, in declaration order.
+    pub cases: Vec<crate::evidence::CaseVerdict>,
+}
+
+impl VerdictReport {
+    /// Build a report over `cases` at the current [`crate::normalize::NORMALIZER_VERSION`].
+    pub fn new(cases: Vec<crate::evidence::CaseVerdict>) -> VerdictReport {
+        VerdictReport {
+            schema_version: 1,
+            normalizer_version: crate::normalize::NORMALIZER_VERSION.to_string(),
+            cases,
+        }
+    }
+
+    /// Render the report to its deterministic, byte-stable JSON string (2-space indent,
+    /// trailing newline). Ordering is fixed by struct/`Vec` order; there are no
+    /// timestamps or absolute paths in the body.
+    pub fn render(&self) -> Result<String, HarnessError> {
+        let mut out = serde_json::to_string_pretty(self).map_err(|e| HarnessError::Report {
+            cause: format!("could not serialize verdict report: {e}"),
+        })?;
+        out.push('\n');
+        Ok(out)
+    }
+
+    /// Emit the report as the single JSON document on stdout (contract runner-cli.md).
+    /// The caller writes all logs/progress to stderr via `tracing`.
+    pub fn emit_stdout(&self) -> Result<(), HarnessError> {
+        print!("{}", self.render()?);
+        Ok(())
+    }
+
+    /// The process exit code the runner should use (contract runner-cli.md §"Runner exit
+    /// codes"): 0 when every case is `agree`/`allowed-difference`; 1 on any `diverge`;
+    /// 3 on any `stale`; 4 on any harness `error`. The worst wins.
+    pub fn exit_code(&self) -> i32 {
+        use crate::evidence::Outcome;
+        let mut code = 0;
+        for case in &self.cases {
+            let this = match case.overall {
+                Outcome::Agree | Outcome::AllowedDifference | Outcome::NoReferenceForPlatform => 0,
+                Outcome::Diverge => 1,
+                Outcome::Stale => 3,
+                Outcome::Error => 4,
+            };
+            code = code.max(this);
+        }
+        code
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,8 +1,13 @@
-//! Structural validation engine (violation classes V1–V14 + SCHEMA), FR-019.
+//! Structural validation engine (violation classes V1–V20 + SCHEMA), FR-019.
 //!
-//! [`run`] evaluates the registry-only violation classes (V1–V10) over a loaded
-//! [`Registry`] and returns ALL violations found in a single pass (never
-//! first-failure), sorted by code then record ID (contracts/cli.md).
+//! [`run`] evaluates the registry-only violation classes (V1–V10, plus **V16**
+//! declarative-case well-formedness, **V18** Docker-case pinned-input enforcement, **V19**
+//! allowed-difference identity resolution, and **V20** invariant-metamorphic arity —
+//! 022-conformance-runner) over a loaded [`Registry`] and returns ALL violations found in
+//! a single pass (never first-failure),
+//! sorted by code then record ID (contracts/cli.md). **V17** (committed-snapshot
+//! integrity) runs in [`validate_path_with_inventory`], scoped to the snapshots sibling
+//! of the registry.
 //! [`check_inventory`] adds the schema-constraint-inventory join classes (V11–V14),
 //! which need the committed inventory + vendored schemas alongside the registry
 //! (020-schema-constraint-inventory). [`validate_path`] is the registry-only
@@ -55,10 +60,11 @@ use crate::load::{
     LoadError, Registry, SchemaError, load_clause_inventory, load_inventory, load_spec_manifest,
 };
 use crate::model::{
-    BehaviorUnit, CertificationProfile, Classification, ClauseClassification, ClauseInventory,
-    ClauseUnit, Condition, ConstraintInventory, ConstraintUnit, Decision, Disposition,
-    DocumentScope, RecordType, ReferenceStatus, RevisionKind, SpecManifest, SpecStatus, Strength,
-    Testability, parse_id,
+    BehaviorUnit, CONSUMER_SUBCOMMANDS, CaseKind, CertificationProfile, Classification,
+    ClauseClassification, ClauseInventory, ClauseUnit, Condition, ConstraintInventory,
+    ConstraintUnit, Decision, Disposition, DocumentScope, FILESYSTEM_CHANNELS, OracleType,
+    RecordType, ReferenceStatus, RevisionKind, SpecManifest, SpecStatus, Strength, Testability,
+    parse_id,
 };
 use crate::prose::Document;
 use crate::prose::strength::{has_family, hides_mandatory_keyword};
@@ -173,12 +179,92 @@ pub fn validate_path_with_inventory(
             let mut violations = run(&registry, today, repo_root);
             violations.extend(check_inventory(&registry, inputs));
             violations.extend(check_clause_inventory(&registry, clause_inputs));
+            // V17: committed snapshots are a sibling of the registry dir (mirrors the
+            // inventory/clause sibling resolution) — absent for fixture registries.
+            let snapshots_dir = root
+                .parent()
+                .map(|p| p.join("snapshots"))
+                .unwrap_or_else(|| root.join("snapshots"));
+            violations.extend(check_snapshots(&registry, &snapshots_dir));
             sort_violations(&mut violations);
             Ok(violations)
         }
         Err(LoadError::Schema(errors)) => Ok(schema_violations(&errors)),
         Err(other) => Err(other),
     }
+}
+
+/// **V17 — committed-snapshot provenance integrity** (022-conformance-runner, US2).
+/// Scans `snapshots_dir` (`<os-arch>/<case-id>/`) and flags: a snapshot whose `case-id`
+/// is not a declarative case in the registry (an orphan snapshot for a
+/// deleted/renamed/legacy case), and a snapshot whose `provenance.json` is missing or
+/// malformed. A missing snapshots directory yields no violations (fixture registries
+/// ship none). Staleness of a well-formed snapshot is NOT a validate concern — it is the
+/// `snapshot check` gate (a snapshot may be legitimately stale pending a reviewed
+/// refresh).
+pub fn check_snapshots(registry: &Registry, snapshots_dir: &Path) -> Vec<Violation> {
+    let mut out = Vec::new();
+    if !snapshots_dir.is_dir() {
+        return out;
+    }
+    let declarative: HashSet<&str> = registry
+        .cases
+        .iter()
+        .filter(|c| matches!(c.classify(), Ok(CaseKind::Declarative)))
+        .map(|c| c.id.as_str())
+        .collect();
+
+    // <snapshots>/<os-arch>/<case-id>/
+    let os_arch_dirs = match std::fs::read_dir(snapshots_dir) {
+        Ok(rd) => rd,
+        Err(e) => {
+            out.push(Violation::new(
+                "V17",
+                snapshots_dir.display().to_string(),
+                format!("cannot read snapshots directory: {e}"),
+            ));
+            return out;
+        }
+    };
+    let mut entries: Vec<(String, std::path::PathBuf)> = Vec::new();
+    for os_arch in os_arch_dirs.flatten() {
+        if !os_arch.path().is_dir() {
+            continue;
+        }
+        let os_arch_name = os_arch.file_name().to_string_lossy().into_owned();
+        if let Ok(cases) = std::fs::read_dir(os_arch.path()) {
+            for case_dir in cases.flatten() {
+                if case_dir.path().is_dir() {
+                    let case_id = case_dir.file_name().to_string_lossy().into_owned();
+                    entries.push((format!("{os_arch_name}/{case_id}"), case_dir.path()));
+                }
+            }
+        }
+    }
+    // Deterministic order.
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (key, dir) in entries {
+        let case_id = key.rsplit('/').next().unwrap_or(&key);
+        if !declarative.contains(case_id) {
+            out.push(Violation::new(
+                "V17",
+                key.clone(),
+                format!(
+                    "committed snapshot for {case_id:?} has no matching declarative case in the \
+                     registry (orphan snapshot — delete it or restore the case)"
+                ),
+            ));
+        }
+        if let Err(e) = crate::snapshot::load_provenance(&dir) {
+            out.push(Violation::new(
+                "V17",
+                key,
+                format!("committed snapshot provenance is unreadable/malformed: {e}"),
+            ));
+        }
+    }
+    out
 }
 
 /// The join of the committed inventory against the hand-authored classification
@@ -1055,6 +1141,10 @@ pub fn run(registry: &Registry, today: &str, repo_root: &Path) -> Vec<Violation>
     checker.check_contradictions(); // V8
     checker.check_channels(); // V9
     checker.check_context_intersection(); // V10
+    checker.check_declarative_cases(); // V16 (022-conformance-runner)
+    checker.check_docker_pinned_inputs(); // V18 (022-conformance-runner US5)
+    checker.check_allowed_difference_refs(); // V19 (022-conformance-runner US4)
+    checker.check_metamorphic_arity(); // V20 (022-conformance-runner US6)
 
     let mut out = checker.violations;
     sort_violations(&mut out);
@@ -1361,7 +1451,12 @@ impl<'a> Checker<'a> {
 
     fn check_executables(&mut self) {
         for case in &self.reg.cases {
-            let binary = &case.executable.binary;
+            // Declarative cases (022-conformance-runner) carry no `executable`; they
+            // are run by the shared runner, not a bespoke Rust binary.
+            let Some(executable) = &case.executable else {
+                continue;
+            };
+            let binary = &executable.binary;
             if !binary_exists(self.repo_root, binary) {
                 self.push(
                     "V1",
@@ -1652,10 +1747,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    // -- V9: outcome referencing an undeclared observable channel ------------
+    // -- V9: outcome/expected referencing an undeclared observable channel ---
 
     fn check_channels(&mut self) {
         for case in &self.reg.cases {
+            // Legacy outcomes.
             for outcome in &case.outcomes {
                 if !self.channel_ids.contains(outcome.channel.as_str()) {
                     self.push(
@@ -1664,6 +1760,20 @@ impl<'a> Checker<'a> {
                         format!(
                             "outcome references undeclared observable channel {:?}",
                             outcome.channel
+                        ),
+                    );
+                }
+            }
+            // Declarative expectations (022-conformance-runner): every `expected[].channel`
+            // must be declared in `channels.json` too (contract case-schema.md → V9).
+            for exp in &case.expected {
+                if !self.channel_ids.contains(exp.channel.as_str()) {
+                    self.push(
+                        "V9",
+                        &case.id,
+                        format!(
+                            "expected observable references undeclared observable channel {:?}",
+                            exp.channel
                         ),
                     );
                 }
@@ -1692,6 +1802,326 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+    }
+
+    // -- V16: declarative case well-formedness (022-conformance-runner, T013) -----
+    //
+    // Core well-formedness of a declarative case record (data-model §1, contract
+    // case-schema.md). The exactly-one-of shape is normally caught fail-loud at load
+    // (`load.rs::check_case_shapes`); it is re-checked here so a directly-constructed
+    // `Registry` (e.g. a unit test that bypasses `Registry::load`) still surfaces it
+    // under a stable code. Legacy (binary-backed) cases are governed by V1/V3/V9/V10
+    // and are untouched here.
+    fn check_declarative_cases(&mut self) {
+        for case in &self.reg.cases {
+            match case.classify() {
+                Err(shape) => self.push("V16", &case.id, shape.message().to_string()),
+                Ok(CaseKind::Legacy) => {} // legacy cases: existing V-series apply.
+                Ok(CaseKind::Declarative) => self.check_one_declarative_case(case),
+            }
+        }
+    }
+
+    /// The declarative-only rules, evaluated on a record already classified
+    /// [`CaseKind::Declarative`]: `oracleType` present, every `operations[].subcommand`
+    /// in the consumer surface (Principle II), `spec-expectation` ⇒ every `expected`
+    /// carries an `assertion`, and `fsAllowlist` present **iff** a filesystem-channel
+    /// expectation exists.
+    fn check_one_declarative_case(&mut self, case: &crate::model::TestCase) {
+        // oracleType must be declared (its 4-value membership is enforced at load by
+        // the closed `OracleType` enum; here we require presence).
+        let Some(oracle_type) = case.oracle_type else {
+            self.push(
+                "V16",
+                &case.id,
+                "declarative case must declare an `oracleType` \
+                 (spec-expectation | snapshot | live-differential | invariant-metamorphic)",
+            );
+            // Continue: the remaining rules do not depend on the oracle type except
+            // the spec-expectation assertion rule, which we can skip safely.
+            self.check_case_subcommands(case);
+            self.check_case_fs_allowlist(case);
+            return;
+        };
+
+        self.check_case_subcommands(case);
+
+        // spec-expectation ⇒ every declared expectation carries an assertion (there is
+        // no reference/snapshot to supply it).
+        if oracle_type == OracleType::SpecExpectation {
+            for exp in &case.expected {
+                if exp.assertion.is_none() {
+                    self.push(
+                        "V16",
+                        &case.id,
+                        format!(
+                            "spec-expectation case must carry an `assertion` on every \
+                             expected channel; channel {:?} has none",
+                            exp.channel
+                        ),
+                    );
+                }
+            }
+        }
+
+        self.check_case_fs_allowlist(case);
+    }
+
+    /// Every `operations[].subcommand` must be in the consumer surface (Principle II).
+    fn check_case_subcommands(&mut self, case: &crate::model::TestCase) {
+        for op in &case.operations {
+            if !CONSUMER_SUBCOMMANDS.contains(&op.subcommand.as_str()) {
+                self.push(
+                    "V16",
+                    &case.id,
+                    format!(
+                        "operation {:?} references non-consumer subcommand {:?}; the \
+                         consumer surface is {}",
+                        op.id,
+                        op.subcommand,
+                        CONSUMER_SUBCOMMANDS.join(" | ")
+                    ),
+                );
+            }
+        }
+    }
+
+    // -- V20: invariant-metamorphic arity (022-conformance-runner US6, T070) ----------
+    //
+    // An `invariant-metamorphic` case MUST declare ≥2 operations and at least one
+    // operation with a `relationship` referencing a SIBLING op id (data-model §1, FR-008)
+    // — a relationship needs a second operation to relate to. Conversely, a `relationship`
+    // on a non-metamorphic case is meaningless (only the metamorphic oracle evaluates it).
+    fn check_metamorphic_arity(&mut self) {
+        use crate::model::OracleType;
+        for case in &self.reg.cases {
+            let op_ids: HashSet<&str> = case.operations.iter().map(|o| o.id.as_str()).collect();
+            let is_metamorphic = case.oracle_type == Some(OracleType::InvariantMetamorphic);
+
+            if is_metamorphic {
+                if case.operations.len() < 2 {
+                    self.push(
+                        "V20",
+                        &case.id,
+                        "invariant-metamorphic case must declare at least 2 operations \
+                         (a relationship needs a sibling to relate to)",
+                    );
+                }
+                if !case.operations.iter().any(|o| o.relationship.is_some()) {
+                    self.push(
+                        "V20",
+                        &case.id,
+                        "invariant-metamorphic case must declare a `relationship` on at least \
+                         one operation (the declared relationship IS the oracle)",
+                    );
+                }
+            }
+
+            for op in &case.operations {
+                let Some(rel) = &op.relationship else {
+                    continue;
+                };
+                if !is_metamorphic {
+                    self.push(
+                        "V20",
+                        &case.id,
+                        format!(
+                            "operation {:?} declares a `relationship`, but the case is not \
+                             invariant-metamorphic (only that oracle evaluates relationships)",
+                            op.id
+                        ),
+                    );
+                }
+                if rel.against_op == op.id {
+                    self.push(
+                        "V20",
+                        &case.id,
+                        format!(
+                            "operation {:?} relationship references itself; it must reference a \
+                             SIBLING operation",
+                            op.id
+                        ),
+                    );
+                } else if !op_ids.contains(rel.against_op.as_str()) {
+                    self.push(
+                        "V20",
+                        &case.id,
+                        format!(
+                            "operation {:?} relationship references op {:?}, which is not an \
+                             operation of the case",
+                            op.id, rel.against_op
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    // -- V19: allowed-difference identity resolution (022-conformance-runner US4, T063) --
+    //
+    // Each allowed difference must (a) scope to a behavior the case links, and (b) resolve
+    // its backing identity — `waiverId` to an existing `wvr-` record, or `divergenceId` to
+    // an existing `ext-` record or an intentional-divergence behavior (FR-031/043). The
+    // exactly-one-of + bare-channel/duplicate structural checks are enforced fail-loud at
+    // load (`load.rs::check_allowed_differences`); V19 covers cross-record resolution.
+    fn check_allowed_difference_refs(&mut self) {
+        let waiver_ids: HashSet<&str> = self.reg.waivers.iter().map(|w| w.id.as_str()).collect();
+        let ext_ids: HashSet<&str> = self.reg.extensions.iter().map(|e| e.id.as_str()).collect();
+        let intentional_behaviors: HashSet<&str> = self
+            .reg
+            .behaviors
+            .iter()
+            .filter(|b| b.decision == Decision::IntentionalDivergence)
+            .map(|b| b.id.as_str())
+            .collect();
+
+        for case in &self.reg.cases {
+            let linked: HashSet<&str> = case.behaviors.iter().map(String::as_str).collect();
+            for ad in &case.allowed_differences {
+                if !linked.contains(ad.behavior.as_str()) {
+                    self.push(
+                        "V19",
+                        &case.id,
+                        format!(
+                            "allowed difference scopes to behavior {:?}, which the case does not \
+                             link (a tolerance must be scoped to a linked behavior)",
+                            ad.behavior
+                        ),
+                    );
+                }
+                if let Some(w) = &ad.waiver_id {
+                    if !waiver_ids.contains(w.as_str()) {
+                        self.push(
+                            "V19",
+                            &case.id,
+                            format!(
+                                "allowed difference waiverId {w:?} resolves to no \
+                                 `conformance/registry/waivers/wvr-*` record (dangling tolerance)"
+                            ),
+                        );
+                    }
+                }
+                if let Some(d) = &ad.divergence_id {
+                    if !ext_ids.contains(d.as_str()) && !intentional_behaviors.contains(d.as_str())
+                    {
+                        self.push(
+                            "V19",
+                            &case.id,
+                            format!(
+                                "allowed difference divergenceId {d:?} resolves to no `ext-` \
+                                 record or intentional-divergence behavior (dangling tolerance)"
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // -- V18: Docker cases must pin their image inputs (022-conformance-runner, T058) --
+    //
+    // A Docker-backed case (`resourceGroup: docker-*`) must reference fixtures whose
+    // devcontainer image is PINNED — a `@sha256:` digest or a concrete `:tag` other than
+    // `latest` (FR-038). A floating `latest` (or an untagged image) makes a snapshot
+    // non-reproducible. Fixtures whose config declares no `image` (Dockerfile/compose) or
+    // is absent/unreadable are skipped — V18 flags only a declared, unpinned image.
+    fn check_docker_pinned_inputs(&mut self) {
+        let fixtures_root = self.repo_root.join("conformance").join("fixtures");
+        for case in &self.reg.cases {
+            if !is_docker_case(case) {
+                continue;
+            }
+            let mut fixture_ids: Vec<&str> = case
+                .operations
+                .iter()
+                .flat_map(|op| op.fixtures.iter().map(String::as_str))
+                .collect();
+            fixture_ids.sort_unstable();
+            fixture_ids.dedup();
+            for id in fixture_ids {
+                if let Some(image) = fixture_image(&fixtures_root.join(id)) {
+                    if !image_is_pinned(&image) {
+                        self.violations.push(Violation::new(
+                            "V18",
+                            &case.id,
+                            format!(
+                                "Docker case references fixture {id:?} with an unpinned image \
+                                 {image:?}; pin it to a digest (`@sha256:…`) or a concrete tag \
+                                 (never `latest`) for reproducible snapshots (FR-038)"
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    /// `fsAllowlist` must be non-empty **iff** an `expected` filesystem-channel exists —
+    /// required so the filesystem observer has a scope, forbidden otherwise so capture
+    /// stays scoped (data-model §1, clarify Q1).
+    fn check_case_fs_allowlist(&mut self, case: &crate::model::TestCase) {
+        let has_fs_expectation = case
+            .expected
+            .iter()
+            .any(|e| FILESYSTEM_CHANNELS.contains(&e.channel.as_str()));
+        match (has_fs_expectation, case.fs_allowlist.is_empty()) {
+            (true, true) => self.push(
+                "V16",
+                &case.id,
+                "case has a filesystem-channel expectation but declares no `fsAllowlist` \
+                 (filesystem capture must be allowlist-scoped)",
+            ),
+            (false, false) => self.push(
+                "V16",
+                &case.id,
+                "case declares an `fsAllowlist` but has no filesystem-channel expectation \
+                 (remove the allowlist to keep capture scoped)",
+            ),
+            _ => {}
+        }
+    }
+}
+
+/// Whether a case is Docker-backed (its `resourceGroup` requests a Docker group).
+fn is_docker_case(case: &crate::model::TestCase) -> bool {
+    use crate::model::ResourceGroup;
+    matches!(
+        case.resource_group,
+        Some(ResourceGroup::DockerShared) | Some(ResourceGroup::DockerExclusive)
+    )
+}
+
+/// The `image` a fixture's devcontainer config declares, if any. Looks in
+/// `<fixture>/.devcontainer/devcontainer.json` then `<fixture>/.devcontainer.json`. A
+/// missing/unreadable/non-JSON config, or one with no `image`, yields `None`.
+fn fixture_image(fixture_dir: &Path) -> Option<String> {
+    for rel in [".devcontainer/devcontainer.json", ".devcontainer.json"] {
+        let path = fixture_dir.join(rel);
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(doc) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if let Some(image) = doc.get("image").and_then(|v| v.as_str()) {
+            return Some(image.to_string());
+        }
+    }
+    None
+}
+
+/// Whether an image reference is PINNED (FR-038): a `@sha256:` digest, or a concrete
+/// `:tag` other than `latest`. An untagged image or `:latest` is NOT pinned. The tag is
+/// the segment after the LAST `/` (so a `registry:port/image` host-port colon is not
+/// mistaken for a tag).
+fn image_is_pinned(image: &str) -> bool {
+    if image.contains("@sha256:") {
+        return true;
+    }
+    let last_segment = image.rsplit('/').next().unwrap_or(image);
+    match last_segment.split_once(':') {
+        Some((_, tag)) => !tag.is_empty() && tag != "latest",
+        None => false, // no tag → unpinned
     }
 }
 
@@ -2046,16 +2476,17 @@ mod tests {
             id: "case-x".to_string(),
             behaviors: vec!["bhv-a".to_string()],
             context: vec![],
-            executable: crate::model::Executable {
+            executable: Some(crate::model::Executable {
                 binary: "no_such_binary".to_string(),
                 test: None,
                 corpus: None,
                 case: None,
-            },
+            }),
             outcomes: vec![crate::model::ExpectedOutcome {
                 channel: "chan-ghost".to_string(),
                 expectation: "x".to_string(),
             }],
+            ..TestCase::default()
         });
         let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
         assert!(
@@ -2069,5 +2500,275 @@ mod tests {
         let reg = Registry::default();
         let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
         assert!(out.is_empty(), "empty registry is valid, got {out:?}");
+    }
+
+    #[test]
+    fn image_pinning_classifier() {
+        assert!(image_is_pinned("alpine:3.19"));
+        assert!(image_is_pinned(
+            "mcr.microsoft.com/devcontainers/base:bookworm"
+        ));
+        assert!(image_is_pinned("foo@sha256:abcdef"));
+        assert!(image_is_pinned("registry:5000/foo:1.2"));
+        assert!(!image_is_pinned("alpine:latest"));
+        assert!(!image_is_pinned("alpine"), "untagged is not pinned");
+        assert!(
+            !image_is_pinned("registry:5000/foo"),
+            "a host-port colon is not a tag"
+        );
+    }
+
+    #[test]
+    fn v18_flags_unpinned_docker_fixture_image() {
+        use crate::model::{ExpectedObservable, Operation, OracleType, ResourceGroup};
+        // A temp fixtures tree with an unpinned (`latest`) image under conformance/fixtures.
+        let repo = tempfile::tempdir().expect("tempdir");
+        let fx = repo
+            .path()
+            .join("conformance/fixtures/fx-latest/.devcontainer");
+        std::fs::create_dir_all(&fx).unwrap();
+        std::fs::write(
+            fx.join("devcontainer.json"),
+            r#"{ "image": "alpine:latest" }"#,
+        )
+        .unwrap();
+
+        let mut reg = Registry::default();
+        reg.cases.push(TestCase {
+            id: "case-docker-latest".to_string(),
+            behaviors: vec!["bhv-a".to_string()],
+            oracle_type: Some(OracleType::SpecExpectation),
+            resource_group: Some(ResourceGroup::DockerShared),
+            operations: vec![Operation {
+                id: "op-up".to_string(),
+                subcommand: "up".to_string(),
+                fixtures: vec!["fx-latest".to_string()],
+                ..Operation::default()
+            }],
+            expected: vec![ExpectedObservable {
+                channel: "chan-exit-code".to_string(),
+                operation: Some("op-up".to_string()),
+                assertion: Some(serde_json::json!({ "equals": 0 })),
+            }],
+            ..TestCase::default()
+        });
+        let out = run(&reg, "2026-07-19", repo.path());
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V18" && v.record == "case-docker-latest"),
+            "an unpinned Docker fixture image must be V18, got {out:?}"
+        );
+
+        // Re-pin to a concrete tag → no V18.
+        std::fs::write(
+            fx.join("devcontainer.json"),
+            r#"{ "image": "alpine:3.19" }"#,
+        )
+        .unwrap();
+        let out2 = run(&reg, "2026-07-19", repo.path());
+        assert!(
+            !out2.iter().any(|v| v.code == "V18"),
+            "a pinned image must not trip V18, got {out2:?}"
+        );
+    }
+
+    /// A well-formed declarative case, built directly (bypassing `Registry::load`), so
+    /// the V16 checks in `run` are exercised on the correctly-shaped path.
+    fn declarative_case(id: &str) -> TestCase {
+        use crate::model::{ExpectedObservable, Operation, OracleType};
+        TestCase {
+            id: id.to_string(),
+            behaviors: vec!["bhv-a".to_string()],
+            operations: vec![Operation {
+                id: "op-1".to_string(),
+                subcommand: "read-configuration".to_string(),
+                argv: vec!["--workspace-folder".to_string(), "${WORKSPACE}".to_string()],
+                ..Operation::default()
+            }],
+            oracle_type: Some(OracleType::SpecExpectation),
+            expected: vec![ExpectedObservable {
+                channel: "chan-exit-code".to_string(),
+                operation: Some("op-1".to_string()),
+                assertion: Some(serde_json::json!({ "equals": 0 })),
+            }],
+            ..TestCase::default()
+        }
+    }
+
+    /// A well-formed invariant-metamorphic case: two `up` ops, the second declaring an
+    /// idempotence relationship against the first (a sibling).
+    fn metamorphic_case(id: &str) -> TestCase {
+        use crate::model::{Operation, OracleType, Relationship, RelationshipKind};
+        let mut case = declarative_case(id);
+        case.oracle_type = Some(OracleType::InvariantMetamorphic);
+        case.operations = vec![
+            Operation {
+                id: "op-up-1".to_string(),
+                subcommand: "up".to_string(),
+                ..Operation::default()
+            },
+            Operation {
+                id: "op-up-2".to_string(),
+                subcommand: "up".to_string(),
+                relationship: Some(Relationship {
+                    kind: RelationshipKind::Idempotence,
+                    against_op: "op-up-1".to_string(),
+                }),
+                ..Operation::default()
+            },
+        ];
+        case
+    }
+
+    #[test]
+    fn v20_accepts_well_formed_metamorphic_case() {
+        let mut reg = Registry::default();
+        reg.cases.push(metamorphic_case("case-meta-ok"));
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            !out.iter().any(|v| v.code == "V20"),
+            "a well-formed metamorphic case must not trip V20, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn v20_flags_metamorphic_arity_and_relationship_errors() {
+        use crate::model::{Operation, Relationship, RelationshipKind};
+
+        // < 2 ops.
+        let mut one_op = metamorphic_case("case-meta-one-op");
+        one_op.operations.truncate(1);
+        one_op.operations[0].relationship = None;
+        // no relationship.
+        let mut no_rel = metamorphic_case("case-meta-no-rel");
+        no_rel.operations[1].relationship = None;
+        // relationship to a non-existent op.
+        let mut dangling = metamorphic_case("case-meta-dangling");
+        dangling.operations[1].relationship = Some(Relationship {
+            kind: RelationshipKind::Idempotence,
+            against_op: "op-nope".to_string(),
+        });
+        // relationship on a NON-metamorphic case.
+        let mut spec_with_rel = declarative_case("case-spec-rel");
+        spec_with_rel.operations.push(Operation {
+            id: "op-2".to_string(),
+            subcommand: "up".to_string(),
+            relationship: Some(Relationship {
+                kind: RelationshipKind::Idempotence,
+                against_op: "op-1".to_string(),
+            }),
+            ..Operation::default()
+        });
+
+        for case in [one_op, no_rel, dangling, spec_with_rel] {
+            let id = case.id.clone();
+            let mut reg = Registry::default();
+            reg.cases.push(case);
+            let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+            assert!(
+                out.iter().any(|v| v.code == "V20" && v.record == id),
+                "{id} must trip V20, got {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn v16_accepts_a_well_formed_declarative_case() {
+        let mut reg = Registry::default();
+        reg.cases.push(declarative_case("case-decl-ok"));
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            !out.iter().any(|v| v.code == "V16"),
+            "a well-formed declarative case must not trip V16, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn v16_flags_non_consumer_subcommand() {
+        let mut reg = Registry::default();
+        let mut case = declarative_case("case-decl-bad-subcommand");
+        case.operations[0].subcommand = "features".to_string(); // out of consumer scope
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V16" && v.record == "case-decl-bad-subcommand"),
+            "a non-consumer subcommand must be V16 (Principle II), got {out:?}"
+        );
+    }
+
+    #[test]
+    fn v16_flags_mixed_and_neither_shapes() {
+        let mut reg = Registry::default();
+        // Mixed: both executable and operations.
+        let mut mixed = declarative_case("case-mixed");
+        mixed.executable = Some(crate::model::Executable {
+            binary: "some_binary".to_string(),
+            test: None,
+            corpus: None,
+            case: None,
+        });
+        reg.cases.push(mixed);
+        // Neither: no executable, no operations.
+        reg.cases.push(TestCase {
+            id: "case-neither".to_string(),
+            behaviors: vec!["bhv-a".to_string()],
+            ..TestCase::default()
+        });
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V16" && v.record == "case-mixed"),
+            "a mixed legacy+declarative case must be V16, got {out:?}"
+        );
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V16" && v.record == "case-neither"),
+            "a shapeless case must be V16, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn v16_enforces_fs_allowlist_iff_filesystem_channel() {
+        // A filesystem-channel expectation with no allowlist trips V16.
+        let mut reg = Registry::default();
+        let mut needs_allowlist = declarative_case("case-fs-missing-allowlist");
+        needs_allowlist
+            .expected
+            .push(crate::model::ExpectedObservable {
+                channel: "chan-filesystem".to_string(),
+                operation: Some("op-1".to_string()),
+                assertion: Some(serde_json::json!({ "exists": "out.txt" })),
+            });
+        reg.cases.push(needs_allowlist);
+        // An allowlist with no filesystem channel also trips V16 (forbidden otherwise).
+        let mut stray_allowlist = declarative_case("case-fs-stray-allowlist");
+        stray_allowlist.fs_allowlist = vec!["out.txt".to_string()];
+        reg.cases.push(stray_allowlist);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V16" && v.record == "case-fs-missing-allowlist"),
+            "a filesystem expectation with no fsAllowlist must be V16, got {out:?}"
+        );
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V16" && v.record == "case-fs-stray-allowlist"),
+            "an fsAllowlist with no filesystem expectation must be V16, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn v16_requires_assertions_for_spec_expectation() {
+        let mut reg = Registry::default();
+        let mut case = declarative_case("case-spec-no-assertion");
+        case.expected[0].assertion = None; // spec-expectation needs it
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V16" && v.record == "case-spec-no-assertion"),
+            "spec-expectation without an assertion must be V16, got {out:?}"
+        );
     }
 }

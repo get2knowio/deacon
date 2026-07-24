@@ -66,6 +66,61 @@ pub struct ReportJson {
     /// unclassified + ambiguous-pending review queues. Present-but-zeroed when the
     /// registry ships no sibling clause inventory.
     pub clauses: ClauseSection,
+    /// Per-channel normalized-evidence coverage from declarative cases
+    /// (022-conformance-runner US3, T048): for every declared observable channel, how
+    /// many declarative cases exercise it and how many expectations carry an assertion
+    /// (spec-expectation coverage). One entry per declared channel, channel-id-sorted, so
+    /// the shape is stable (all channels present, zero when unused).
+    pub channel_coverage: Vec<ChannelCoverageEntry>,
+}
+
+/// One channel's declarative-case coverage row (022-conformance-runner, T048).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelCoverageEntry {
+    /// The `chan-…` id (declared in `channels.json`).
+    pub channel: String,
+    /// Number of declarative cases that declare an `expected` observable on this channel.
+    pub declarative_cases: usize,
+    /// Number of those expectations that carry an `assertion` (spec-expectation
+    /// normalized-evidence coverage; live-differential/snapshot expectations may omit it).
+    pub asserted_expectations: usize,
+}
+
+/// Build the per-channel declarative-evidence coverage (T048): one row per declared
+/// channel, channel-id-sorted, counting declarative cases that exercise it and the
+/// expectations carrying an assertion. Deterministic (all declared channels present).
+fn build_channel_coverage(registry: &Registry) -> Vec<ChannelCoverageEntry> {
+    let mut channels: Vec<&str> = registry.channels.iter().map(|c| c.id.as_str()).collect();
+    channels.sort_unstable();
+    channels
+        .into_iter()
+        .map(|channel| {
+            let mut declarative_cases = 0usize;
+            let mut asserted_expectations = 0usize;
+            for case in &registry.cases {
+                if !matches!(case.classify(), Ok(crate::model::CaseKind::Declarative)) {
+                    continue;
+                }
+                let on_channel: Vec<_> = case
+                    .expected
+                    .iter()
+                    .filter(|e| e.channel == channel)
+                    .collect();
+                if on_channel.is_empty() {
+                    continue;
+                }
+                declarative_cases += 1;
+                asserted_expectations +=
+                    on_channel.iter().filter(|e| e.assertion.is_some()).count();
+            }
+            ChannelCoverageEntry {
+                channel: channel.to_string(),
+                declarative_cases,
+                asserted_expectations,
+            }
+        })
+        .collect()
 }
 
 /// The normative-clause-inventory section of `report.json`
@@ -426,6 +481,7 @@ fn build_report_from_coverage(
         unclassified_source_units,
         inventory: inventory_section,
         clauses: clause_section,
+        channel_coverage: build_channel_coverage(registry),
     }
 }
 
@@ -803,7 +859,34 @@ fn render_md(report: &ReportJson) -> String {
     // 9. Normative clause inventory — committed clauses joined against classifications.
     render_clause_md(&mut md, &report.clauses);
 
+    // 10. Declarative channel coverage — normalized-evidence coverage per channel.
+    render_channel_coverage_md(&mut md, &report.channel_coverage);
+
     md
+}
+
+/// Render the per-channel declarative-evidence coverage section of `report.md`
+/// (022-conformance-runner, T048). Deterministic (channel-id-sorted); "none" when no
+/// declarative case exercises any channel yet.
+fn render_channel_coverage_md(md: &mut String, coverage: &[ChannelCoverageEntry]) {
+    md.push_str("\n## Declarative channel coverage\n\n");
+    let exercised: Vec<&ChannelCoverageEntry> = coverage
+        .iter()
+        .filter(|c| c.declarative_cases > 0)
+        .collect();
+    if exercised.is_empty() {
+        md.push_str("No declarative case exercises any channel yet.\n");
+        return;
+    }
+    md.push_str("| Channel | Declarative cases | Asserted expectations |\n");
+    md.push_str("|---------|-------------------|-----------------------|\n");
+    for entry in exercised {
+        let _ = writeln!(
+            md,
+            "| `{}` | {} | {} |",
+            entry.channel, entry.declarative_cases, entry.asserted_expectations
+        );
+    }
 }
 
 /// Render the normative-clause-inventory section of `report.md`

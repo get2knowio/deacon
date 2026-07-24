@@ -1,0 +1,19 @@
+{
+  "oracleVersion": "0.87.0",
+  "sourceRevision": "113500f4",
+  "caseHash": "42d69e9b0dd1e614d98e4fe0caacb26eaff7345833003eecffeb721c5d66bf1e",
+  "fixtureHash": "854692bcaf0627df3643ce4bb0fd8126ad7b5d32390d92986d445a88386f1be6",
+  "argv": [
+    "read-configuration",
+    "--workspace-folder",
+    "<WORKSPACE>"
+  ],
+  "platform": "linux",
+  "arch": "x86_64",
+  "nodeVersion": "22.23.1",
+  "dockerVersion": "29.6.2-1",
+  "composeVersion": "2.40.3",
+  "imageDigests": {},
+  "normalizerVersion": "2",
+  "capturedAt": "2026-07-24T14:46:23Z"
+}
