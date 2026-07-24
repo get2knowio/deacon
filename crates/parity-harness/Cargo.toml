@@ -22,7 +22,7 @@ tracing = { workspace = true }
 chrono = "0.4"
 # NEW dev-scope dependency: parses `.config/nextest.toml` in the registry check
 # (registry.rs / parity_registry_check) so profile-filter drift fails structurally.
-toml = "0.8"
+toml = "1.1"
 # Declarative conformance runner (022): the `matches` stdout/stderr assertion is a
 # regex match; `regex` is already a [workspace.dependencies] entry (used by core).
 regex = { workspace = true }
