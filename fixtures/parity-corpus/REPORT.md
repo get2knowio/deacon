@@ -1,6 +1,10 @@
 # Parity corpus — findings
 
-Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. 23 corpus configs.
+Oracle: `@devcontainers/cli` v0.87.0. deacon: this branch. **24** Tier-1 corpus
+configs — the count produced by the production discovery rule
+(`discover_tier1_cases`) and frozen in `conformance/migration/baseline.json`, which
+is authoritative for it. A directory listing yields one more entry (the sibling
+`errors/` corpus) and must not be used to count cases.
 
 Source of truth: the official containers.dev spec and the reference CLI's
 behavior — not any deacon-authored spec doc.
@@ -256,7 +260,8 @@ merged `config` (used for `featuresConfiguration`/`mergedConfiguration`)
 untouched. Also added a custom `extends` serializer so a single target emits as
 a bare string (`"./base.json"`) and `extends` is omitted (never `null`) when
 unset, matching the reference. Verified via the Tier-1 differ (`extends-child`
-now ✅ identical; **all 23 configs identical, 0 divergences**). Tests cover the
+now ✅ identical; **all corpus configs identical, 0 divergences** at that time).
+Tests cover the
 raw-output shape and the string/array/skip serialization.
 (`crates/core/src/config.rs`, `crates/deacon/src/commands/read_configuration.rs`.)
 
@@ -693,14 +698,19 @@ config `remoteUser` and CLI `--user` still win (lower-precedence merge).
   (no implicit network/pull), not a merge-logic bug. Compose configs
   additionally have no `config.image` to inspect at read-config time.
 
-## Corpus (20 configs)
+## Corpus (24 configs)
+
+The authoritative count and membership are the ones
+`deacon-conformance::parity_corpus::discover_tier1_cases` produces, frozen as the
+`parity_corpus_tier1::*` units in `conformance/migration/baseline.json`.
 
 image+features (`node-ts`, `python-features`, `go-minimal`, `dotnet-mounts`,
 `feature-order`), Dockerfile build (`dockerfile-build`, `build-args-subst`),
-compose (`compose-postgres`, `compose-array`), jsonc/kitchen-sink
-(`universal-jsonc`), lifecycle forms (`lifecycle-arrays`, `lifecycle-mixed`),
-extends (`extends-child`), substitution (`containerenv-subst`, `name-subst`,
-`workspacefolder-custom`), mounts (`mounts-bind-localenv`), ports (`ports-mixed`),
-user mapping (`user-mapping`), security (`init-privileged`),
-ruby + node-feature (`ruby-node-feature`), bare base + node-feature
-(`bare-base-node-feature`).
+compose (`compose-postgres`, `compose-array`, `dependson-autoinstall`),
+jsonc/kitchen-sink (`universal-jsonc`), lifecycle forms (`lifecycle-arrays`,
+`lifecycle-mixed`), extends (`extends-child`), substitution
+(`containerenv-subst`, `name-subst`, `workspacefolder-custom`), mounts
+(`mounts-bind-localenv`), ports (`ports-mixed`), user mapping (`user-mapping`),
+security (`init-privileged`), image-metadata object form
+(`object-form-metadata`), ruby + node-feature (`ruby-node-feature`), bare base +
+node-feature (`bare-base-node-feature`).

@@ -1,0 +1,2739 @@
+{
+  "schemaVersion": 1,
+  "revision": "98c26a5",
+  "generatedFrom": {
+    "parityRegistry": "fixtures/parity-corpus/registry.json",
+    "discovery": [
+      "discover_tier1_cases",
+      "discover_error_cases"
+    ]
+  },
+  "records": [
+    {
+      "id": "consistency_env_probe_flag::exec_honors_default_user_env_probe_login_shell",
+      "program": "consistency_env_probe_flag",
+      "category": "internal-consistency",
+      "dockerRequired": false,
+      "assertion": "`exec` honors the default login-interactive-shell user environment probe mode",
+      "channels": [
+        "chan-injected-process"
+      ],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": [
+        "value"
+      ]
+    },
+    {
+      "id": "consistency_env_probe_flag::up_shared_probe_helper_uses_login_shell",
+      "program": "consistency_env_probe_flag",
+      "category": "internal-consistency",
+      "dockerRequired": false,
+      "assertion": "`up`'s shared environment-probe helper uses the same login shell as `exec`, so the two subcommands cannot drift apart",
+      "channels": [
+        "chan-injected-process"
+      ],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": [
+        "value"
+      ]
+    },
+    {
+      "id": "consistency_remote_env_flags::remote_env_accepts_empty_values_for_up_and_exec",
+      "program": "consistency_remote_env_flags",
+      "category": "internal-consistency",
+      "dockerRequired": false,
+      "assertion": "`up` and `exec` both accept an empty remote-env value",
+      "channels": [
+        "chan-exit-code",
+        "chan-stderr"
+      ],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": [
+        "value"
+      ]
+    },
+    {
+      "id": "consistency_remote_env_flags::remote_env_validation_message_matches_for_up_and_exec",
+      "program": "consistency_remote_env_flags",
+      "category": "internal-consistency",
+      "dockerRequired": false,
+      "assertion": "`up` and `exec` reject a malformed remote-env value with the same diagnostic",
+      "channels": [
+        "chan-exit-code",
+        "chan-stderr"
+      ],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "value"
+      ]
+    },
+    {
+      "id": "parity_build::buildkit-only-features",
+      "program": "parity_build",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon's `build` fails gracefully with a diagnostic when BuildKit-only flags are requested without BuildKit, rather than producing a partial image",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output",
+        "chan-image"
+      ],
+      "errorPath": true,
+      "fixtures": [
+        "inline:parity_build#buildkit-only-features"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_build::creates-discoverable-image",
+      "program": "parity_build",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "both CLIs' `build` create an image discoverable by the same unique parity.token label",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output",
+        "chan-image"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_build#creates-discoverable-image"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_build::image-reference",
+      "program": "parity_build",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon's `build` from an image reference applies features and custom tags, emitting valid JSON with the custom tag and creating a labeled image",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output",
+        "chan-image"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_build#image-reference"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_build::output-json-format",
+      "program": "parity_build",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon's `build --output --output-format json` emits the documented JSON result shape whether the build succeeds or fails",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output",
+        "chan-image"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_build#output-json-format"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_build::push-json-output",
+      "program": "parity_build",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon's `build --push --output-format json` emits the documented JSON result shape whether the push succeeds or fails",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output",
+        "chan-image"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_build#push-json-output"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_build::with-build-args",
+      "program": "parity_build",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "both CLIs' `build` honor build args, producing images that carry the build-arg-derived label",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output",
+        "chan-image"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_build#with-build-args"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_conformance_runner::case-readconfig-parity-exit",
+      "program": "parity_conformance_runner",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference both exit successfully for a well-formed configuration",
+      "channels": [
+        "chan-exit-code"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "conformance/fixtures/fx-config-with-unknown-field"
+      ],
+      "diffClasses": [
+        "agree",
+        "diverge",
+        "allowed-difference",
+        "error"
+      ]
+    },
+    {
+      "id": "parity_conformance_runner::case-readconfig-snapshot",
+      "program": "parity_conformance_runner",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "`read-configuration`'s normalized observables match the committed, provenance-checked reference snapshot for this platform",
+      "channels": [
+        "chan-exit-code"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "conformance/fixtures/fx-config-with-unknown-field"
+      ],
+      "diffClasses": [
+        "agree",
+        "diverge",
+        "allowed-difference",
+        "no-reference-for-platform",
+        "stale",
+        "error"
+      ]
+    },
+    {
+      "id": "parity_conformance_runner::case-readconfig-unknown-field-echo",
+      "program": "parity_conformance_runner",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "an unknown top-level key round-trips through `read-configuration` instead of being dropped",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "conformance/fixtures/fx-config-with-unknown-field"
+      ],
+      "diffClasses": [
+        "agree",
+        "diverge",
+        "allowed-difference",
+        "error"
+      ]
+    },
+    {
+      "id": "parity_conformance_runner::case-readconfig-workspace-file-present",
+      "program": "parity_conformance_runner",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "`read-configuration` leaves the workspace's devcontainer configuration file in place",
+      "channels": [
+        "chan-exit-code",
+        "chan-filesystem"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "conformance/fixtures/fx-config-with-unknown-field"
+      ],
+      "diffClasses": [
+        "agree",
+        "diverge",
+        "allowed-difference",
+        "error"
+      ]
+    },
+    {
+      "id": "parity_conformance_runner::case-up-docker-channels",
+      "program": "parity_conformance_runner",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "`up` stamps deacon's image label, injects the configured container environment, and leaves a running container with the expected process graph",
+      "channels": [
+        "chan-exit-code",
+        "chan-image",
+        "chan-injected-process",
+        "chan-process-graph",
+        "chan-temporal"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "conformance/fixtures/fx-up-basic"
+      ],
+      "diffClasses": [
+        "agree",
+        "diverge",
+        "allowed-difference",
+        "error"
+      ]
+    },
+    {
+      "id": "parity_conformance_runner::case-up-idempotent",
+      "program": "parity_conformance_runner",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "a second `up` on an already-provisioned workspace reuses the running container rather than recreating it",
+      "channels": [
+        "chan-temporal"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "conformance/fixtures/fx-up-basic"
+      ],
+      "diffClasses": [
+        "agree",
+        "diverge",
+        "allowed-difference",
+        "error"
+      ]
+    },
+    {
+      "id": "parity_corpus_errors::bad-config-path",
+      "program": "parity_corpus_errors",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "both CLIs reject a --config path that does not exist",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": true,
+      "fixtures": [
+        "fixtures/parity-corpus/errors/bad-config-path"
+      ],
+      "diffClasses": [
+        "divergence"
+      ]
+    },
+    {
+      "id": "parity_corpus_errors::duplicate-keys",
+      "program": "parity_corpus_errors",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "both CLIs accept a configuration containing duplicate JSON keys and resolve it to the same document",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/errors/duplicate-keys"
+      ],
+      "diffClasses": [
+        "divergence"
+      ]
+    },
+    {
+      "id": "parity_corpus_errors::extends-cycle",
+      "program": "parity_corpus_errors",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon rejects a cyclic extends chain where the reference leniently accepts it",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": true,
+      "fixtures": [
+        "fixtures/parity-corpus/errors/extends-cycle"
+      ],
+      "diffClasses": [
+        "divergence"
+      ]
+    },
+    {
+      "id": "parity_corpus_errors::extends-missing",
+      "program": "parity_corpus_errors",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon rejects an extends target that does not exist where the reference leniently accepts it",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": true,
+      "fixtures": [
+        "fixtures/parity-corpus/errors/extends-missing"
+      ],
+      "diffClasses": [
+        "divergence"
+      ]
+    },
+    {
+      "id": "parity_corpus_errors::malformed-json",
+      "program": "parity_corpus_errors",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon rejects malformed JSONC where the reference leniently accepts it",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": true,
+      "fixtures": [
+        "fixtures/parity-corpus/errors/malformed-json"
+      ],
+      "diffClasses": [
+        "divergence"
+      ]
+    },
+    {
+      "id": "parity_corpus_errors::missing-config",
+      "program": "parity_corpus_errors",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "both CLIs reject a workspace that has no devcontainer configuration",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": true,
+      "fixtures": [
+        "fixtures/parity-corpus/errors/missing-config"
+      ],
+      "diffClasses": [
+        "divergence"
+      ]
+    },
+    {
+      "id": "parity_corpus_errors::unknown-field-preserved",
+      "program": "parity_corpus_errors",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "both CLIs accept an unknown top-level field and preserve it in the resolved configuration",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/errors/unknown-field-preserved"
+      ],
+      "diffClasses": [
+        "divergence"
+      ]
+    },
+    {
+      "id": "parity_corpus_errors::wrong-type-features",
+      "program": "parity_corpus_errors",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon rejects a wrongly-typed features value where the reference leniently accepts it",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": true,
+      "fixtures": [
+        "fixtures/parity-corpus/errors/wrong-type-features"
+      ],
+      "diffClasses": [
+        "divergence"
+      ]
+    },
+    {
+      "id": "parity_corpus_errors::wrong-type-forwardports",
+      "program": "parity_corpus_errors",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon rejects a wrongly-typed forwardPorts value where the reference leniently accepts it",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": true,
+      "fixtures": [
+        "fixtures/parity-corpus/errors/wrong-type-forwardports"
+      ],
+      "diffClasses": [
+        "divergence"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::bare-base-node-feature",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the bare-base-node-feature workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/bare-base-node-feature"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::build-args-subst",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the build-args-subst workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/build-args-subst"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::compose-array",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the compose-array workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/compose-array"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::compose-postgres",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the compose-postgres workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/compose-postgres"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::containerenv-subst",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the containerenv-subst workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/containerenv-subst"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::dependson-autoinstall",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the dependson-autoinstall workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/dependson-autoinstall"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::dockerfile-build",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the dockerfile-build workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/dockerfile-build"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::dotnet-mounts",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the dotnet-mounts workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/dotnet-mounts"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::extends-child",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the extends-child workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": true,
+      "fixtures": [
+        "fixtures/parity-corpus/extends-child"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::feature-order",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the feature-order workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/feature-order"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::go-minimal",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the go-minimal workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/go-minimal"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::init-privileged",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the init-privileged workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/init-privileged"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::lifecycle-arrays",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the lifecycle-arrays workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/lifecycle-arrays"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::lifecycle-mixed",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the lifecycle-mixed workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/lifecycle-mixed"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::mounts-bind-localenv",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the mounts-bind-localenv workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/mounts-bind-localenv"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::name-subst",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the name-subst workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/name-subst"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::node-ts",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the node-ts workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/node-ts"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::object-form-metadata",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the object-form-metadata workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/object-form-metadata"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::ports-mixed",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the ports-mixed workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/ports-mixed"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::python-features",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the python-features workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/python-features"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::ruby-node-feature",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the ruby-node-feature workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/ruby-node-feature"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::universal-jsonc",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the universal-jsonc workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/universal-jsonc"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::user-mapping",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the user-mapping workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/user-mapping"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_merged::workspacefolder-custom",
+      "program": "parity_corpus_merged",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same merged configuration (--include-merged-configuration) for the workspacefolder-custom workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/workspacefolder-custom"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::bare-base-node-feature",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the bare-base-node-feature workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/bare-base-node-feature"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::build-args-subst",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the build-args-subst workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/build-args-subst"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::compose-array",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the compose-array workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/compose-array"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::compose-postgres",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the compose-postgres workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/compose-postgres"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::containerenv-subst",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the containerenv-subst workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/containerenv-subst"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::dependson-autoinstall",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the dependson-autoinstall workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/dependson-autoinstall"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::dockerfile-build",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the dockerfile-build workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/dockerfile-build"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::dotnet-mounts",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the dotnet-mounts workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/dotnet-mounts"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::extends-child",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the extends-child workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/extends-child"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::feature-order",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the feature-order workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/feature-order"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::go-minimal",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the go-minimal workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/go-minimal"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::init-privileged",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the init-privileged workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/init-privileged"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::lifecycle-arrays",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the lifecycle-arrays workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/lifecycle-arrays"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::lifecycle-mixed",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the lifecycle-mixed workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/lifecycle-mixed"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::mounts-bind-localenv",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the mounts-bind-localenv workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/mounts-bind-localenv"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::name-subst",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the name-subst workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/name-subst"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::node-ts",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the node-ts workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/node-ts"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::object-form-metadata",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the object-form-metadata workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/object-form-metadata"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::ports-mixed",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the ports-mixed workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/ports-mixed"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::python-features",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the python-features workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/python-features"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::ruby-node-feature",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the ruby-node-feature workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/ruby-node-feature"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::universal-jsonc",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the universal-jsonc workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/universal-jsonc"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::user-mapping",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the user-mapping workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/user-mapping"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_corpus_tier1::workspacefolder-custom",
+      "program": "parity_corpus_tier1",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration for the workspacefolder-custom workspace",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/parity-corpus/workspacefolder-custom"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_exec::env-propagation",
+      "program": "parity_exec",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon's `--remote-env FOO=BAR` and the reference's `--env FOO=BAR` propagate the same environment variable into the executed command",
+      "channels": [
+        "chan-exit-code",
+        "chan-stdout",
+        "chan-injected-process"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_exec#env-propagation"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_exec::tty",
+      "program": "parity_exec",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon `exec` and the reference `exec` present the same TTY allocation to the executed command",
+      "channels": [
+        "chan-exit-code",
+        "chan-stdout",
+        "chan-injected-process"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_exec#tty"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_exec::user",
+      "program": "parity_exec",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon `exec` and the reference `exec` run the command as the same container user",
+      "channels": [
+        "chan-exit-code",
+        "chan-stdout",
+        "chan-injected-process"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_exec#user"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_exec::working-directory",
+      "program": "parity_exec",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon `exec` and the reference `exec` run the command in the same container working directory",
+      "channels": [
+        "chan-exit-code",
+        "chan-stdout",
+        "chan-injected-process"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_exec#working-directory"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::a_wrong_version_stub_reports_mismatch",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "an oracle whose reported version differs from the pin is reported as a version mismatch, never silently accepted",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [
+        "inline:write_stub"
+      ],
+      "diffClasses": [
+        "oracle-version-mismatch"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::b_nonexistent_override_reports_missing",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "an oracle override pointing at a nonexistent binary is reported as a missing oracle, never a skip",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [
+        "inline:write_stub"
+      ],
+      "diffClasses": [
+        "oracle-missing"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::c_failing_docker_stub_reports_docker_missing",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "a failing Docker probe is reported as docker-missing rather than allowing the check to pass",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [
+        "inline:write_stub"
+      ],
+      "diffClasses": [
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::d_crash_stub_is_oracle_failure",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "an oracle that crashes is reported as an oracle failure naming its preserved stderr",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [
+        "inline:write_stub"
+      ],
+      "diffClasses": [
+        "oracle-failure"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::e_garbage_output_is_malformed",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "non-JSON output where structured output was required is reported as malformed output",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [
+        "inline:write_stub"
+      ],
+      "diffClasses": [
+        "malformed-output"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::f_hang_stub_times_out_with_partial_output",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "an oracle that hangs is terminated at its bound and reported as a timeout with its partial output preserved",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [
+        "inline:write_stub"
+      ],
+      "diffClasses": [
+        "oracle-timeout"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::g_injected_difference_is_unwaived_divergence",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "an injected difference with no matching waiver is reported as a divergence, never absorbed",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "divergence"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::h_matching_waiver_yields_pass_waived",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "a difference matching an active waiver is reported as a waived pass naming the waiver record",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": [
+        "pass-waived"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::i_kept_waiver_without_difference_is_stale",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "a waiver whose characterized difference no longer reproduces is reported as stale rather than silently retained",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "stale-waiver"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::j_normalization_failure_has_no_raw_fallback",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "a normalization failure fails the run; the harness never falls back to raw comparison",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::k_reference_only_difference_is_classified_as_ref_only",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "a key the reference emits and deacon does not is classified as its own `ref-only` difference class and named",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "ref-only"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::l_deacon_only_difference_is_classified_and_not_deprioritized",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "a key deacon emits and the reference does not is reported as its own `deacon-only` difference class and is not ranked below the others as noise",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "deacon-only"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::m_value_difference_is_classified_with_both_sides",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "a shared key with differing values is classified as a `value` difference carrying both sides",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "value"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::n_accept_vs_reject_difference_preserves_direction",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "an accept-versus-reject difference keeps its direction: a waiver characterizing one direction never waives the inverse, and an agreement expectation waives neither",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "deacon-stricter",
+        "reference-stricter"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::o_allowed_difference_is_distinct_from_agree_and_names_its_backing_id",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "a divergence covered by a scoped tolerance verdicts `allowed-difference` naming its backing record, an uncovered path still verdicts `diverge`, and an unconsumed tolerance is reported stale",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "allowed-difference"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::p_no_reference_for_platform_is_its_own_outcome",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "a missing snapshot for the current platform verdicts `no-reference-for-platform`, distinct from both `agree` and `stale`, so an absent comparison is never reported as a pass",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "no-reference-for-platform"
+      ]
+    },
+    {
+      "id": "parity_harness_faults::q_stale_snapshot_is_reported_naming_the_drifted_field",
+      "program": "parity_harness_faults",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "a snapshot whose evidence-determining provenance drifted is reported stale naming the first drifted field, while a drifted host tool version or capture time is not staleness",
+      "channels": [],
+      "errorPath": true,
+      "fixtures": [],
+      "diffClasses": [
+        "stale"
+      ]
+    },
+    {
+      "id": "parity_observable_state::compose-config-mounts",
+      "program": "parity_observable_state",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "`devcontainer.json` mounts are applied by BOTH CLIs on the compose path",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_compose_config_mounts_applied_both_clis"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_observable_state::compose-project-name-isolated",
+      "program": "parity_observable_state",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon's compose project name is isolated from the reference CLI's, so the two CLIs' compose projects never collide",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_compose_project_name_isolated_from_reference"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_observable_state::container-and-image-labels",
+      "program": "parity_observable_state",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon stamps the reference-compatible discovery labels on its container and image while keeping its own isolation labels distinct",
+      "channels": [
+        "chan-container-state",
+        "chan-image"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_container_and_image_labels_isolated"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_observable_state::handoff-no-reuse",
+      "program": "parity_observable_state",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "a deacon `up` after a reference `up` on the same workspace provisions its own distinct container instead of silently attaching to the reference's",
+      "channels": [
+        "chan-container-state",
+        "chan-temporal"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_handoff_no_cross_cli_container_reuse"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_observable_state::lockfile-manifest-digest",
+      "program": "parity_observable_state",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "a deacon-generated feature lockfile carries the OCI manifest digest (not the layer digest) and is consumable by the reference CLI's `features resolve-dependencies`",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output",
+        "chan-file-content"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_lockfile_manifest_digest_resolves_dependencies"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_observable_state::merged-config-vs-runtime",
+      "program": "parity_observable_state",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "for each CLI independently, `read-configuration --include-merged-configuration` agrees with what `docker inspect` shows on the running container",
+      "channels": [
+        "chan-structured-output",
+        "chan-container-state"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_merged_config_matches_runtime_truth"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_observable_state::rendered-compose-state",
+      "program": "parity_observable_state",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "the primary compose service's rendered image, volumes, environment, and labels compare equal between the two CLIs on equivalent input",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_rendered_compose_state_comparable"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_read_configuration::basic",
+      "program": "parity_read_configuration",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration document for the basic devcontainer.jsonc fixture",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/config/basic"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_read_configuration::with-variables",
+      "program": "parity_read_configuration",
+      "category": "live-per-case",
+      "dockerRequired": false,
+      "assertion": "deacon and the pinned reference resolve the same configuration document, including variable substitution, for the with-variables devcontainer.jsonc fixture",
+      "channels": [
+        "chan-exit-code",
+        "chan-structured-output"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "fixtures/config/with-variables"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "oracle-failure",
+        "normalization"
+      ]
+    },
+    {
+      "id": "parity_registry_check::corpora_meet_registered_minimums",
+      "program": "parity_registry_check",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "each registered corpus discovers at least its declared minimum number of cases",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "parity_registry_check::nextest_parity_profile_selects_exactly_live_binaries",
+      "program": "parity_registry_check",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "the parity nextest profile selects exactly the registered live binaries and no other profile selects any of them",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "parity_registry_check::no_parity_source_uses_ignore_or_legacy_skip_idioms",
+      "program": "parity_registry_check",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "no parity source uses an ignore attribute or a legacy skip idiom, so a lane can never go green by not running",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "parity_registry_check::registry_matches_test_files_both_directions",
+      "program": "parity_registry_check",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "every registered live and internal-consistency binary has a source file, and every parity source file is registered or a recognized meta-test binary",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "parity_registry_check::tests_dir_anchor_is_valid",
+      "program": "parity_registry_check",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "the tests-directory anchor the registry check walks actually resolves, so a silent no-op scan is impossible",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "parity_registry_check::waivers_live_in_conformance_registry_not_legacy_locations",
+      "program": "parity_registry_check",
+      "category": "hermetic-guard",
+      "dockerRequired": false,
+      "assertion": "characterized exceptions resolve only from the conformance registry, never from a reintroduced legacy location",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "parity_state_diff::appport-published-ports",
+      "program": "parity_state_diff",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "`appPort` publishes the same container ports in both CLIs",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:state_diff_appport_published_ports"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_state_diff::compose-parity-with-feature-mount-gap",
+      "program": "parity_state_diff",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon's compose path folds resolved feature mounts into the container exactly as the reference does",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:state_diff_compose_parity_with_feature_mount_gap"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_state_diff::compose-sidecar-and-named-volume",
+      "program": "parity_state_diff",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "a compose sidecar service and a named volume are provisioned equivalently by both CLIs",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:state_diff_compose_sidecar_and_named_volume"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_state_diff::default-workspace-mount-target-parity",
+      "program": "parity_state_diff",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "the characterized divergence between deacon's and the reference's default workspace-mount target remains exactly as recorded, so a change forces a deliberate decision",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:state_diff_default_workspace_mount_target_parity"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_state_diff::dockerfile-build-and-nonroot-user",
+      "program": "parity_state_diff",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "a Dockerfile-built workspace with a non-root containerUser/remoteUser yields equivalent container state in both CLIs",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:state_diff_dockerfile_build_and_nonroot_user"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_state_diff::intra-deacon-single-vs-compose",
+      "program": "parity_state_diff",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon's own compose container state matches its single-container state for the same logical configuration, with no reference side involved",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:state_diff_intra_deacon_single_vs_compose"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_state_diff::mount-variety-readonly-and-tmpfs",
+      "program": "parity_state_diff",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "read-only bind mounts and tmpfs mounts are applied identically by both CLIs",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:state_diff_mount_variety_readonly_and_tmpfs"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_state_diff::single-container-parity",
+      "program": "parity_state_diff",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "deacon and the reference produce equivalent inspected container state for a single-container workspace",
+      "channels": [
+        "chan-container-state",
+        "chan-process-graph"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:state_diff_single_container_parity"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "parity_up_exec::traditional",
+      "program": "parity_up_exec",
+      "category": "live-per-case",
+      "dockerRequired": true,
+      "assertion": "after `up` on a traditional (non-compose) workspace, both CLIs' `exec` reach that workspace's own container and observe the same environment marker",
+      "channels": [
+        "chan-exit-code",
+        "chan-stdout",
+        "chan-container-state",
+        "chan-injected-process"
+      ],
+      "errorPath": false,
+      "fixtures": [
+        "inline:parity_up_and_exec_traditional"
+      ],
+      "diffClasses": [
+        "ref-only",
+        "value",
+        "deacon-only",
+        "divergence",
+        "oracle-failure",
+        "docker-missing"
+      ]
+    },
+    {
+      "id": "realworld::images-go",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `images-go` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::images-java",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `images-java` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::images-javascript-node",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `images-javascript-node` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::images-php",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `images-php` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::images-python",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `images-python` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::images-rust",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `images-rust` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-agentic-cookbook",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-agentic-cookbook` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-autogen",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-autogen` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-code-with-engineering-playbook",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-code-with-engineering-playbook` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-fhir-server",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-fhir-server` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-fluentui",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-fluentui` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-generative-ai-for-beginners",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-generative-ai-for-beginners` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-gh-cli",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-gh-cli` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-ml-for-beginners",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-ml-for-beginners` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-monaco-editor",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-monaco-editor` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-presidio-anonymizer",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-presidio-anonymizer` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-procdump-linux",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-procdump-linux` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-promptflow",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-promptflow` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-ruff",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-ruff` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-sample-app-aoai-chatgpt",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-sample-app-aoai-chatgpt` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-typescript",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-typescript` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-vscode",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-vscode` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::oss-web-dev-for-beginners",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `oss-web-dev-for-beginners` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::templates-go-postgres",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `templates-go-postgres` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::templates-javascript-node-postgres",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `templates-javascript-node-postgres` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::try-cpp",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `try-cpp` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::try-dotnetcore",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `try-dotnetcore` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::try-go",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `try-go` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::try-java",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `try-java` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::try-node",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `try-node` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::try-php",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `try-php` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::try-python",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `try-python` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    },
+    {
+      "id": "realworld::try-rust",
+      "program": "realworld",
+      "category": "external-corpus-entry",
+      "dockerRequired": false,
+      "assertion": "the pinned third-party workspace `try-rust` is recorded as a representative real-world configuration source; the manifest fetches it on demand and asserts nothing in CI",
+      "channels": [],
+      "errorPath": false,
+      "fixtures": [],
+      "diffClasses": []
+    }
+  ]
+}

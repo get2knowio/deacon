@@ -17,17 +17,22 @@
 //! - [`diff`] — deterministic revision diff between two constraint inventories
 //!   (US3, T030–T031).
 
+pub mod baseline;
 pub mod case_hash;
 pub mod certify;
 pub mod clause;
 pub mod clause_diff;
+pub mod conservation;
 pub mod coverage;
 pub mod diff;
 pub mod inventory;
 pub mod load;
+pub mod mapping;
 pub mod model;
+pub mod parity_corpus;
 pub mod prose;
 pub mod report;
+pub mod residual;
 pub mod schema;
 pub mod snapshot;
 pub mod validate;
@@ -128,6 +133,64 @@ pub fn clause_paths_for(
     let spec_dir = base.join("spec").join(CURRENT_SPEC_PIN);
     let clauses_file = base.join("inventory").join("clauses.json");
     (spec_dir, clauses_file)
+}
+
+/// The default migration data directory: `<workspace_root>/conformance/migration`.
+/// Holds the machine-owned `baseline.json` and the hand-authored `mapping.json`
+/// (023-migrate-parity-to-conformance). The CLI's `--registry <dir>` flag resolves it
+/// as a sibling of the registry via [`migration_paths_for`] so tests can point at
+/// fixtures.
+pub fn default_migration_dir() -> std::path::PathBuf {
+    workspace_root().join("conformance").join("migration")
+}
+
+/// The default committed baseline file:
+/// `<workspace_root>/conformance/migration/baseline.json` — the machine-owned,
+/// byte-stable, frozen pre-migration inventory.
+pub fn default_baseline_file() -> std::path::PathBuf {
+    default_migration_dir().join("baseline.json")
+}
+
+/// Resolve the `(baseline_file, mapping_file)` that belong to a registry, as siblings
+/// under the same `conformance/` tree: `<registry>/../migration/{baseline,mapping}.json`.
+/// Mirrors [`clause_paths_for`] / the schema-inventory sibling resolution.
+pub fn migration_paths_for(
+    registry_dir: &std::path::Path,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let base = registry_dir.parent().unwrap_or(registry_dir);
+    let migration = base.join("migration");
+    (
+        migration.join("baseline.json"),
+        migration.join("mapping.json"),
+    )
+}
+
+/// Atomically write `contents` to `path` (unique temp file + `fs::rename`), creating
+/// the parent directory if needed. Never leaves a partial file, and a shorter payload
+/// over a longer one can never leave trailing bytes (the failure mode a plain
+/// `fs::write` has — see `crates/core/src/cache/disk.rs::save_index`).
+///
+/// This is the SINGLE atomic-write primitive for every machine-owned artifact this
+/// crate emits (`constraints.json`, `clauses.json`, `baseline.json`); the per-artifact
+/// `write_*` helpers render their canonical string form and delegate here rather than
+/// re-implementing the temp-file dance.
+pub fn atomic_write(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("artifact.json");
+
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = parent.join(format!("{file_name}.tmp.{}.{}", std::process::id(), seq));
+
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 #[cfg(test)]

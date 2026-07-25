@@ -9,7 +9,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Backed by case-up-exec-parity (parity_up_exec)."
+      "notes": "Backed by case-up-exec-parity (parity_up_exec, a single reported outcome shared with bhv-exec-container-id-metadata) and, independently, by the declarative case-up-exec-decl-traditional (023 T040)."
     }
   ]
 }

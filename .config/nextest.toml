@@ -45,15 +45,32 @@ parity-cli = { max-threads = 8 }
 # 021-normative-clause-inventory binaries `clause_extraction` / `clause_determinism` /
 # `clause_baseline` / `clause_diff` / `clause_classification_join`, and the
 # 022-conformance-runner binaries `case_schema_valid` / `snapshot_staleness` /
-# `allowed_difference_scoping` / `normalization_semantics` (conformance crate) plus
+# `allowed_difference_scoping` / `normalization_semantics`, and the
+# 023-migrate-parity-to-conformance binaries `baseline_determinism` / `baseline_archive` /
+# `mapping_orphans` / `mapping_fixtures` / `residual_validation` /
+# `case_identity_stable` / `exception_migration` / `behavior_denominator` /
+# `behavior_duplicates` / `normalization_rules` / `conservation_report` /
+# `conservation_error_paths` / `conservation_determinism` / `conservation_antigaming` /
+# `legacy_ratchet` (conformance crate), the `equivalence_relations` /
+# `equivalence_gate` guards (parity-harness crate), plus
 # `runner_record_replay` (parity-harness crate) — carry NO override: they are fast,
 # non-docker, non-network, no-model tests that run in EVERY profile (default / dev-fast /
 # full / ci) by default (they are neither in any `default-filter` exclusion nor a
 # docker/smoke group; `runner_record_replay` does not match `binary(#parity_*)`, so it is
 # NOT captured by the live-parity exclusions). This is the standing convention for
 # conformance tests; the four new hermetic conformance binaries + `runner_record_replay`
-# follow it (T004). The live differential binary `parity_conformance_runner` (US1, T026)
-# is the ONLY 022 binary that gets per-profile overrides, added in US1 (T027).
+# follow it (T004), as do the seventeen 023 binaries (T011 for `baseline_*`, T026-T029 for
+# the mapping/residual/identity/exception guards, T049/T050/T057 for the
+# denominator/duplicate/normalization-rule guards, T066-T069 for the `conservation_*`
+# guards, T076-T079 for the equivalence/ratchet guards): the `equivalence-report` BIN is
+# not a test binary and is therefore neither registered in registry.json nor given a
+# nextest override — like `parity-report` and `conformance-snapshot`, it is reached
+# through `make test-parity-equivalence` and the parity workflow. These guards enumerate
+# the repository tree and
+# compare committed data — no Docker, no network, no oracle — so they gate every change,
+# including on the Windows `dev-fast` lane. The live differential
+# binary `parity_conformance_runner` (US1, T026) is the ONLY 022 binary that gets
+# per-profile overrides, added in US1 (T027).
 
 # Default profile: Balanced parallelization for local development
 [profile.default]
@@ -62,7 +79,7 @@ slow-timeout = "60s"
 status-level = "pass"
 # Live parity scenario binaries run ONLY under `--profile parity` (018-harden-parity-harness).
 # Exclude them here so the default lane is truthful by non-selection (FR-014).
-default-filter = 'not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner))'
+default-filter = 'not (binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner))'
 
 [[profile.default.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -130,9 +147,6 @@ filter = 'binary(=parity_state_diff)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
-[[profile.default.overrides]]
-filter = 'binary(=parity_read_configuration)'
-test-group = 'parity-cli'
 
 # consistency_remote_env_flags / consistency_env_probe_flag (renamed from
 # parity_* in US2, research D9): reclassified as internal-consistency (no oracle),
@@ -255,9 +269,6 @@ filter = 'binary(=parity_state_diff)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
-[[profile.dev-fast.overrides]]
-filter = 'binary(=parity_read_configuration)'
-test-group = 'parity-cli'
 
 # consistency_* binaries run ungrouped in dev-fast (no longer parity-cli; they no
 # longer match binary(#parity_*), so the rename makes them SELECTED in this fast
@@ -321,7 +332,7 @@ slow-timeout = { period = "90s", terminate-after = 1 }
 status-level = "none"
 # Live parity scenario binaries run ONLY under `--profile parity` (018-harden-parity-harness).
 # Exclude them here so even the "full" lane is truthful by non-selection (FR-014).
-default-filter = 'not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner))'
+default-filter = 'not (binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner))'
 
 # Profile for long-running integration tests (heavy end-to-end builds)
 [profile.long-running]
@@ -346,7 +357,7 @@ slow-timeout = { period = "30m", terminate-after = 1 }
 retries = 0
 slow-timeout = { period = "10m", terminate-after = 1 }
 status-level = "pass"
-default-filter = 'binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner))) | binary(#integration_*) | binary(=build_consistency) | binary(=up_dotfiles)'
+default-filter = 'binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner))) | binary(#integration_*) | binary(=build_consistency) | binary(=up_dotfiles)'
 
 [[profile.docker.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -387,9 +398,6 @@ filter = 'binary(=parity_state_diff)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
-[[profile.docker.overrides]]
-filter = 'binary(=parity_read_configuration)'
-test-group = 'parity-cli'
 
 # consistency_* binaries are hermetic (no Docker) and are not selected by the
 # docker profile filter; no parity-cli grouping remains after the US2 rename.
@@ -491,9 +499,6 @@ filter = 'binary(=parity_state_diff)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
-[[profile.full.overrides]]
-filter = 'binary(=parity_read_configuration)'
-test-group = 'parity-cli'
 
 # consistency_* binaries run ungrouped in full (renamed from parity_* in US2).
 
@@ -558,7 +563,7 @@ fail-fast = false
 global-timeout = "1h"
 # Live parity scenario binaries run ONLY under `--profile parity` (018); exclude
 # them from ci alongside smoke so this lane is truthful by non-selection (FR-014).
-default-filter = 'not (binary(#smoke_*) | binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner))'
+default-filter = 'not (binary(#smoke_*) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner))'
 
 # Throttle smoke and parity tests while allowing more overlap
 [[profile.ci.overrides]]
@@ -598,9 +603,6 @@ filter = 'binary(=parity_state_diff)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
-[[profile.ci.overrides]]
-filter = 'binary(=parity_read_configuration)'
-test-group = 'parity-cli'
 
 # consistency_* binaries run ungrouped in ci (renamed from parity_* in US2).
 
@@ -665,7 +667,7 @@ slow-timeout = { period = "5m", terminate-after = 1 }
 status-level = "pass"
 fail-fast = false
 # MVP integration tests: smoke, parity, and core integration tests for up/exec/down/read-configuration
-default-filter = 'binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner))) | binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_up_exec_identity) | binary(=integration_down) | binary(=integration_runtime_selection) | binary(=integration_read_configuration) | binary(=integration_read_configuration_output) | binary(=integration_config) | binary(=integration_custom_container_name) | binary(=integration_exec) | binary(=integration_exec_env) | binary(=integration_exec_pty) | binary(=integration_e2e) | binary(#integration_env_probe_*) | binary(=aggregator) | binary(=normalize_consistency) | binary(=raw_outputs)'
+default-filter = 'binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner))) | binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_up_exec_identity) | binary(=integration_down) | binary(=integration_runtime_selection) | binary(=integration_read_configuration) | binary(=integration_read_configuration_output) | binary(=integration_config) | binary(=integration_custom_container_name) | binary(=integration_exec) | binary(=integration_exec_env) | binary(=integration_exec_pty) | binary(=integration_e2e) | binary(#integration_env_probe_*) | binary(=aggregator) | binary(=normalize_consistency) | binary(=raw_outputs)'
 
 # Smoke test grouping
 [[profile.mvp-integration.overrides]]
@@ -707,9 +709,6 @@ filter = 'binary(=parity_state_diff)'
 test-group = 'parity'
 slow-timeout = { period = "15m", terminate-after = 1 }
 
-[[profile.mvp-integration.overrides]]
-filter = 'binary(=parity_read_configuration)'
-test-group = 'parity-cli'
 
 # Docker integration grouping
 [[profile.mvp-integration.overrides]]
@@ -734,13 +733,13 @@ test-group = 'fs-heavy'
 retries = 0
 slow-timeout = { period = "15m", terminate-after = 1 }
 status-level = "pass"
-default-filter = 'binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors) | binary(=parity_conformance_runner)'
+default-filter = 'binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner)'
 
 # Config-only parity runners → parity-cli group. `parity_conformance_runner` (022,
 # US1) drives the declarative runner over config-only read-configuration cases, so it
-# is CLI-throttled like `parity_read_configuration`.
+# is CLI-throttled (config-only, no Docker).
 [[profile.parity.overrides]]
-filter = 'binary(=parity_read_configuration) | binary(=parity_conformance_runner)'
+filter = 'binary(=parity_conformance_runner)'
 test-group = 'parity-cli'
 
 # Container-scenario parity runners → parity group (throttled, daemon-friendly).
@@ -748,11 +747,3 @@ test-group = 'parity-cli'
 filter = 'binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff)'
 test-group = 'parity'
 
-# Config-only corpus runners (US2, T032): each is ONE #[test] running ~20-23
-# cases across two CLIs, so the per-CLI 2 min / 15 min bounds are enforced INSIDE
-# the harness while the per-test slow-timeout must accommodate the whole batch —
-# 15 m, not the default. Config-only → parity-cli group.
-[[profile.parity.overrides]]
-filter = 'binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors)'
-test-group = 'parity-cli'
-slow-timeout = { period = "15m", terminate-after = 1 }

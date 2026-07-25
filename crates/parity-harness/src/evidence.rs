@@ -83,6 +83,19 @@ impl Outcome {
     /// runner-cli.md): `agree`/`allowed-difference` are clean (exit 0), then
     /// `no-reference-for-platform` (non-blocking coverage gap) < `diverge` (exit 1) <
     /// `stale` (exit 3) < `error` (exit 4).
+    /// The stable wire spelling, used wherever an outcome is compared or reported as
+    /// text (the equivalence ledger reduces both paths' outcomes through this).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Outcome::Agree => "agree",
+            Outcome::AllowedDifference => "allowed-difference",
+            Outcome::NoReferenceForPlatform => "no-reference-for-platform",
+            Outcome::Diverge => "diverge",
+            Outcome::Stale => "stale",
+            Outcome::Error => "error",
+        }
+    }
+
     pub fn severity(self) -> u8 {
         match self {
             Outcome::Agree => 0,

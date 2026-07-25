@@ -25,7 +25,7 @@ use parity_harness::workspace_root;
 fn registry_matches_test_files_both_directions() {
     let reg = ParityRegistry::load().unwrap_or_else(|e| panic!("registry.json: {e}"));
     let tests_dir = workspace_root().join("crates/deacon/tests");
-    let problems = reg.check_test_files(&tests_dir);
+    let problems = registry::check_test_files(&reg, &tests_dir);
     assert!(
         problems.is_empty(),
         "registry ↔ tests/*.rs mismatch:\n{}",
@@ -66,7 +66,7 @@ fn nextest_parity_profile_selects_exactly_live_binaries() {
         ".config/nextest.toml must declare [profile.parity]"
     );
 
-    let problems = reg.check_nextest_profiles(&profiles);
+    let problems = registry::check_nextest_profiles(&reg, &profiles);
     assert!(
         problems.is_empty(),
         "nextest.toml parity-selection problems:\n{}",
@@ -91,7 +91,7 @@ fn corpora_meet_registered_minimums() {
                 panic!("registry declares an unknown corpus id `{other}` with no discovery rule")
             }
         };
-        reg.check_corpus_min(corpus, discovered.len())
+        registry::check_corpus_min(&reg, corpus, discovered.len())
             .unwrap_or_else(|e| panic!("{e}"));
     }
 }
@@ -143,8 +143,12 @@ fn no_parity_source_uses_ignore_or_legacy_skip_idioms() {
         }
     }
 
+    // The floor tracks the surviving source set: 6 live `parity_*` binaries + 2 hermetic
+    // meta-test binaries + 2 `consistency_*` binaries. It exists so a scan that silently
+    // stopped finding files cannot pass by auditing nothing — it is NOT a coverage claim,
+    // and it drops as carriers retire (023 US7 removed four).
     assert!(
-        audited >= 10,
+        audited >= 9,
         "expected to audit the full parity/consistency source set, only saw {audited} file(s)"
     );
     assert!(
@@ -214,6 +218,94 @@ fn waivers_live_in_conformance_registry_not_legacy_locations() {
         "legacy per-case expect.json waiver file(s) must be removed (migrated to \
          conformance/registry/waivers/): {stragglers:?}"
     );
+
+    // 023-migrate-parity-to-conformance (T048, FR-025): a characterized exception must
+    // resolve from EXACTLY ONE authoritative location. Absence of the legacy paths
+    // (above) proves no SECOND location; this proves no second RECORD — two files
+    // claiming one id, or a `wvr-`/`ext-` id collision, would reintroduce the same
+    // ambiguity by another route, and a reader could not tell which one governs.
+    let mut per_id: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(&registry_waivers)
+        .unwrap_or_else(|e| panic!("read {registry_waivers:?}: {e}"))
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+        let value: serde_json::Value =
+            serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse {path:?}: {e}"));
+        let id = value
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("{path:?} has no `id`"))
+            .to_string();
+        // The file name must mirror the id, so "which file holds wvr-x?" has one answer.
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        assert_eq!(
+            stem, id,
+            "waiver file {path:?} must be named after its id so a record has exactly one \
+             discoverable home"
+        );
+        per_id.entry(id).or_default().push(stem);
+    }
+    let duplicated: Vec<_> = per_id.iter().filter(|(_, files)| files.len() > 1).collect();
+    assert!(
+        duplicated.is_empty(),
+        "a characterized exception must resolve from exactly one record: {duplicated:?}"
+    );
+
+    // `wvr-` and `ext-` namespaces must not collide either — an id that resolves to
+    // both a waiver and an extension has two authoritative meanings.
+    let extensions_raw = std::fs::read_to_string(root.join("conformance/registry/extensions.json"))
+        .expect("read extensions.json");
+    let extensions: serde_json::Value =
+        serde_json::from_str(&extensions_raw).expect("parse extensions.json");
+    let ext_ids: Vec<String> = extensions
+        .get("records")
+        .and_then(|v| v.as_array())
+        .map(|records| {
+            records
+                .iter()
+                .filter_map(|r| r.get("id").and_then(|v| v.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    for id in &ext_ids {
+        assert!(
+            !per_id.contains_key(id),
+            "`{id}` resolves as BOTH a waiver record and an extension record"
+        );
+    }
+
+    // Every characterized exception (waiver or extension) is dispositioned exactly once
+    // in the migration mapping — the record-level counterpart of FR-024/FR-028, checked
+    // here so a reintroduced second location cannot hide behind an unmapped exception.
+    let mapping_raw = std::fs::read_to_string(root.join("conformance/migration/mapping.json"))
+        .expect("read mapping.json");
+    let mapping: serde_json::Value =
+        serde_json::from_str(&mapping_raw).expect("parse mapping.json");
+    let mut mapped: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    if let Some(entries) = mapping.get("exceptions").and_then(|v| v.as_array()) {
+        for entry in entries {
+            if let Some(id) = entry.get("exception").and_then(|v| v.as_str()) {
+                *mapped.entry(id.to_string()).or_default() += 1;
+            }
+        }
+    }
+    let mut missing: Vec<&String> = per_id.keys().chain(ext_ids.iter()).collect();
+    missing.retain(|id| mapped.get(*id).copied().unwrap_or(0) != 1);
+    assert!(
+        missing.is_empty(),
+        "every characterized exception must be dispositioned EXACTLY ONCE in \
+         conformance/migration/mapping.json: {missing:?}"
+    );
 }
 
 /// Guard: the tests dir this file audits is the real one (fail loud if the anchor
@@ -226,4 +318,270 @@ fn tests_dir_anchor_is_valid() {
         "workspace_root()/crates/deacon/tests must contain this source file: {}",
         tests_dir.display()
     );
+}
+
+/// T089 (US6, FR-032): no surviving surface references a REMOVED one.
+///
+/// The migration deleted four carriers and their shared runner module. A reference left
+/// behind in a machine-consumed file is not cosmetic — nextest would select a binary that
+/// does not exist, the parity registry would claim coverage nothing provides, and the
+/// Makefile or workflow would fail at a step nobody reads until CI is already red.
+///
+/// Documentation is held to a softer rule on purpose: a doc line may name a removed
+/// surface **only while saying it is gone**. History is worth keeping; a doc that still
+/// describes a deleted binary as current architecture is a lie with a long half-life.
+#[test]
+fn no_surface_references_a_removed_binary() {
+    let root = workspace_root();
+
+    /// The surfaces retired by 023 US7.
+    const REMOVED: &[&str] = &[
+        "parity_corpus_tier1",
+        "parity_corpus_merged",
+        "parity_corpus_errors",
+        "parity_read_configuration",
+        "corpus_runner",
+        // Retired with the V25 baseline-drift gate (023 T099): both regenerated the
+        // baseline, which a carrier deletion necessarily invalidates. `baseline_archive`
+        // replaced them. `.config/nextest.toml`'s comment block still named
+        // `baseline_drift` weeks after the file was gone — a stale name in a
+        // machine-consumed file is exactly what this check exists to catch, so the two
+        // hermetic retirements belong here alongside the live carriers.
+        "baseline_drift",
+        "baseline_enumeration",
+    ];
+    /// Words that mark a mention as historical rather than current-state.
+    const RETIREMENT_MARKERS: &[&str] = &[
+        "retire",
+        "retired",
+        "delete",
+        "deleted",
+        "remove",
+        "removed",
+        "gone",
+        "former",
+        "formerly",
+        "was ",
+        "were ",
+        "gains no",
+        "gained",
+        "gave way",
+        "no longer",
+        "gone (",
+        "history",
+        "gone.",
+        "superseded",
+        "gone;",
+    ];
+
+    // Machine-consumed files: ZERO tolerance — a name here is executed, not read.
+    let mut problems: Vec<String> = Vec::new();
+    for rel in [
+        ".config/nextest.toml",
+        "fixtures/parity-corpus/registry.json",
+        "Makefile",
+        ".github/workflows/parity.yml",
+    ] {
+        let path = root.join(rel);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        for (line_no, line) in text.lines().enumerate() {
+            for removed in REMOVED {
+                if line.contains(removed) {
+                    problems.push(format!(
+                        "{rel}:{}: references removed surface `{removed}`",
+                        line_no + 1
+                    ));
+                }
+            }
+        }
+    }
+
+    // Documentation: a mention must be framed as history.
+    for rel in [
+        "CLAUDE.md",
+        "fixtures/parity-corpus/README.md",
+        "fixtures/parity-corpus/errors/README.md",
+        "conformance/RULES.md",
+    ] {
+        let path = root.join(rel);
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for (line_no, line) in text.lines().enumerate() {
+            for removed in REMOVED {
+                if !line.contains(removed) {
+                    continue;
+                }
+                let lowered = line.to_ascii_lowercase();
+                if !RETIREMENT_MARKERS.iter().any(|m| lowered.contains(m)) {
+                    problems.push(format!(
+                        "{rel}:{}: names removed surface `{removed}` as current-state; \
+                         either drop it or say it is gone",
+                        line_no + 1
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "dangling references to removed surfaces (FR-032):\n{}",
+        problems.join("\n")
+    );
+}
+
+/// T089 (third direction, 023 T116): no machine-consumed file globs or reads a PATH the
+/// migration deleted.
+///
+/// The name-based check above would not have caught the defect that motivated this one.
+/// The parity workflow pre-pulls fixture base images so a multi-GB first pull cannot blow
+/// the harness's per-invocation bound — and it globbed
+/// `fixtures/parity-corpus/*/.devcontainer/devcontainer.json`, which US7 deleted. The step
+/// kept succeeding while matching nothing, so the protection silently evaporated and the
+/// next cold run looked like a hang in deacon. A path can rot exactly as a name can, and
+/// it fails more quietly because a glob that matches nothing is not an error.
+#[test]
+fn no_surface_globs_a_removed_path() {
+    let root = workspace_root();
+
+    /// Paths the migration removed, as they would appear in a script or workflow.
+    const REMOVED_PATHS: &[&str] = &[
+        "fixtures/parity-corpus/*/",
+        "fixtures/parity-corpus/errors/*",
+        "fixtures/config/basic/devcontainer",
+        "fixtures/config/with-variables/devcontainer",
+    ];
+
+    let mut problems: Vec<String> = Vec::new();
+    for rel in [
+        "Makefile",
+        ".github/workflows/parity.yml",
+        "scripts/parity/prepull-fixture-images.sh",
+    ] {
+        let path = root.join(rel);
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for (line_no, line) in text.lines().enumerate() {
+            for removed in REMOVED_PATHS {
+                if line.contains(removed) {
+                    problems.push(format!(
+                        "{rel}:{}: reads removed path `{removed}`",
+                        line_no + 1
+                    ));
+                }
+            }
+        }
+    }
+
+    // And the surviving pre-pull must actually resolve to something: a warm-cache step
+    // that matches nothing is indistinguishable from no step at all.
+    let fixtures = root.join("conformance").join("fixtures");
+    let with_image = std::fs::read_dir(&fixtures)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| {
+                    let cfg = e.path().join(".devcontainer").join("devcontainer.json");
+                    std::fs::read_to_string(cfg)
+                        .map(|t| t.contains("\"image\""))
+                        .unwrap_or(false)
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    assert!(
+        with_image > 0,
+        "the pre-pull step globs conformance/fixtures/*/.devcontainer/devcontainer.json; \
+         no fixture there declares an `image`, so the step would warm nothing"
+    );
+
+    assert!(
+        problems.is_empty(),
+        "machine-consumed files reference removed paths:\n{}",
+        problems.join("\n")
+    );
+}
+
+/// T089 (second direction): every binary the registry and nextest still name has a
+/// source file, and every surviving `parity_*` source is still registered.
+///
+/// `check_test_files` already enforces this; asserting it HERE too states the
+/// post-cut-over invariant where a reader looking for it will be, and fails with a
+/// message about the cut-over rather than about generic registry drift.
+#[test]
+fn the_surviving_set_is_mutually_consistent() {
+    let reg = ParityRegistry::load().unwrap_or_else(|e| panic!("registry.json: {e}"));
+    let tests_dir = workspace_root().join("crates/deacon/tests");
+
+    assert_eq!(
+        reg.live_names().len(),
+        6,
+        "the surviving live set is 5 Docker scenario binaries + the declarative runner; \
+         found {:?}",
+        reg.live_names()
+    );
+    assert!(
+        reg.corpora.is_empty(),
+        "the corpora retired with the corpus binaries that drove them"
+    );
+    let problems = registry::check_test_files(&reg, &tests_dir);
+    assert!(
+        problems.is_empty(),
+        "registry ↔ tests/*.rs must agree after the cut-over:\n{}",
+        problems.join("\n")
+    );
+}
+
+/// T091 (US6, Constitution II): this entire feature adds NO subcommand to the shipped
+/// `deacon` CLI.
+///
+/// Every tool the migration built — `baseline`, `migration`, `validate`, `certify`,
+/// `inventory`, `clause`, `snapshot`, `equivalence-report` — is contributor tooling in
+/// `deacon-conformance` / `parity-harness`. The consumer surface is defined by the
+/// containers.dev spec, and a conformance-tracking command appearing in it would be a
+/// scope violation that ships to users and is then hard to withdraw.
+#[test]
+fn the_shipped_cli_gained_no_subcommand_from_this_feature() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_deacon"))
+        .arg("--help")
+        .output()
+        .expect("the deacon binary runs");
+    assert!(output.status.success(), "`deacon --help` must succeed");
+    let help = String::from_utf8_lossy(&output.stdout);
+
+    const DEV_ONLY: &[&str] = &[
+        "baseline",
+        "migration",
+        "conformance",
+        "equivalence",
+        "certify",
+        "inventory",
+        "clause",
+        "snapshot",
+        "residual",
+    ];
+    // Only the subcommand column matters: prose in a description may legitimately use one
+    // of these words.
+    let subcommands: Vec<&str> = help
+        .lines()
+        .skip_while(|l| !l.trim_start().starts_with("Commands:"))
+        .skip(1)
+        .take_while(|l| !l.trim().is_empty())
+        .filter_map(|l| l.split_whitespace().next())
+        .collect();
+    assert!(
+        !subcommands.is_empty(),
+        "expected to parse the subcommand list from `deacon --help`"
+    );
+
+    for dev_only in DEV_ONLY {
+        assert!(
+            !subcommands.contains(dev_only),
+            "`{dev_only}` reached the shipped consumer CLI; it is contributor tooling \
+             (constitution II). Subcommands found: {subcommands:?}"
+        );
+    }
 }

@@ -301,8 +301,20 @@ test-parity: install-nextest ## Run live parity certification (needs the pinned 
 	# oracle — there is no opt-in env gate). Step 2 aggregates the per-binary \
 	# report fragments and enforces the six completeness gates, exiting nonzero on \
 	# any gap. `set -e` stops at the first failing step. \
+	./scripts/parity/prepull-fixture-images.sh; \
 	cargo nextest run --profile parity; \
 	cargo run -p parity-harness --bin parity-report
+
+.PHONY: test-parity-equivalence
+test-parity-equivalence: ## Produce the equivalent-or-stricter ledger that gates deleting a superseded parity carrier
+	@set -euo pipefail; \
+	# 023-migrate-parity-to-conformance (US7, T082/T083): runs the SUPERSEDED path and \
+	# its REPLACEMENT over the same baseline units and writes \
+	# target/parity/equivalence.json. Deleting a carrier is gated on this ledger, so it \
+	# is a separate target from `test-parity` — you run it when you are about to delete \
+	# something, not on every parity run. Needs the pinned oracle; fails loud without it. \
+	cargo run -p parity-harness --bin equivalence-report; \
+	cargo run -p deacon-conformance -- migration check --ledger target/parity/equivalence.json
 
 .PHONY: test-parity-all
 test-parity-all: ## Alias for test-parity (live parity certification)

@@ -1,66 +1,56 @@
-# Parity corpus — differential testing against the reference CLI
+# Parity corpus — RETIRED, kept for its remaining pieces
 
-A curated set of realistic, VS Code-style `devcontainer.json` configs used to
-harden deacon against real-world inputs by diffing it against the pinned upstream
-reference CLI (`@devcontainers/cli`, the oracle). The pinned version lives in
-[`oracle.json`](./oracle.json); the claimed coverage (live binaries + corpora +
-minimum case counts) lives in [`registry.json`](./registry.json).
+The in-repo Tier-1 and error corpora, and the Rust runners that drove them, were
+**deleted** in 023-migrate-parity-to-conformance (US7) once the equivalence ledger proved
+their replacements lose nothing. These five sources were deleted, along with the 24
+Tier-1 and 9 error case directories they compared:
 
-## Layout
+- deleted: `crates/deacon/tests/parity_corpus_tier1.rs`
+- deleted: `crates/deacon/tests/parity_corpus_merged.rs`
+- deleted: `crates/deacon/tests/parity_corpus_errors.rs`
+- deleted: `crates/deacon/tests/parity_read_configuration.rs`
+- deleted: `crates/deacon/tests/corpus_runner/mod.rs`
 
-Each `<name>/.devcontainer/devcontainer.json` is a realistic config shape
-(image + features, Dockerfile build, compose, feature ordering, jsonc with
-comments, array/object lifecycle, extends chains, `${...}` substitution, etc.).
-Supporting files (Dockerfile, docker-compose.yml, package.json, base.json) live
-alongside as needed. `errors/` holds invalid / edge-case inputs (see
-[`errors/README.md`](./errors/README.md)). Waiver records (the accept/reject
-expectations and characterized divergences) now live in the **conformance
-registry** at `conformance/registry/waivers/wvr-*.json`, consumed through
-`deacon-conformance` — the legacy `waivers/` directory and the per-case
-`errors/*/expect.json` files were migrated there in 019-conformance-registry.
+Their coverage now lives as declarative cases in `conformance/registry/cases.json`,
+driven by the single `parity_conformance_runner`, with fixtures under
+`conformance/fixtures/`.
 
-## Running the parity suite
+Re-verification of that migration uses **git history**, not a retained copy: the frozen
+`conformance/migration/baseline.json` records what each removed unit asserted, and
+`conformance/migration/mapping.json` records where each one went.
 
-The three Python drivers (`run_tier1.py`, `run_tier1_merged.py`,
-`run_tier1_errors.py`) were **ported to Rust nextest binaries** and deleted
-(018-harden-parity-harness). There is one sanctioned entry point:
+## What remains here, and why
+
+| Path | Why it survives |
+|---|---|
+| `oracle.json` | the pinned `@devcontainers/cli` version every live comparison verifies against |
+| `registry.json` | the surviving live-binary enumeration (`parity_build`, `parity_exec`, `parity_up_exec`, `parity_observable_state`, `parity_state_diff`, `parity_conformance_runner`) plus the internal-consistency binaries. `corpora` is now empty — the corpora retired with the binaries that drove them |
+| `fetch_realworld_corpus.py` | a fetch utility, never a comparison runner; its 33 pinned entries are recorded as `external-corpus-entry` baseline units and covered by `res-realworld-corpus-not-vendored` (research D8) |
+| `errors/README.md` | prose describing the error-decision contract, which the declarative `case-errors-decl-*` cases now implement |
+| `REPORT.md` | the historical findings log |
+
+## Running the surviving parity suite
 
 ```bash
-make test-parity
+make test-parity              # cargo nextest run --profile parity, then the aggregator
+make test-parity-equivalence  # the equivalent-or-stricter ledger that gates a deletion
 ```
 
-which runs `cargo nextest run --profile parity` (the profile selects exactly the
-live parity binaries — nothing else runs them) and then the aggregator. The
-runners require the **pinned** oracle on `PATH`:
+Both need the **pinned** oracle on `PATH`:
 
 ```bash
 npm install -g @devcontainers/cli@$(jq -r .version fixtures/parity-corpus/oracle.json)
 ```
 
-Every runner FAILS LOUDLY (never silently skips) if the oracle is missing or the
-wrong version, if a fixture is missing, if a CLI crashes, if output cannot be
-normalized, or if a discovered corpus is below its `registry.json` minimum. Both
-CLIs' raw output is preserved under `target/parity/raw/` and each binary writes a
-report fragment under `target/parity/report/`.
-
-The Rust runners that drive this corpus:
-
-- `crates/deacon/tests/parity_corpus_tier1.rs` — `read-configuration`
-  differential (replaces `run_tier1.py`). Runs both CLIs over every case,
-  normalizes via `parity_harness::normalize::config` (unwrap the reference's
-  `{configuration}` wrapper, prune nulls/empties, drop `configFilePath`, sanitize
-  dynamic ids), and ranks divergences: ref-only (deacon drops data — highest
-  signal), value mismatch, deacon-only (usually default noise).
-- `crates/deacon/tests/parity_corpus_merged.rs` — the same over
-  `--include-merged-configuration`, comparing the normalized `mergedConfiguration`
-  block (replaces `run_tier1_merged.py`).
-- `crates/deacon/tests/parity_corpus_errors.rs` — the error-decision differential
-  over `errors/` (replaces `run_tier1_errors.py`); see `errors/README.md`.
+Every surviving runner still FAILS LOUDLY — never silently skips — if the oracle is
+missing or the wrong version, if a fixture is absent, if a CLI crashes, or if output
+cannot be normalized. Raw output is preserved under `target/parity/raw/` and each binary
+writes a report fragment under `target/parity/report/`.
 
 The single normalization/equivalence definition lives in
 `crates/parity-harness/src/normalize.rs`; the waiver record schema + loader in
-`crates/conformance/src/{model,load}.rs` (consumed via the thin query wrapper
-`crates/parity-harness/src/waiver.rs`); the parity registry loader in
+`crates/conformance/src/{model,load}.rs`; the parity registry model and the corpus
+discovery rule in `crates/conformance/src/parity_corpus.rs`, re-exported by
 `crates/parity-harness/src/registry.rs`.
 
 ## Tier 3 — pinned real-world corpus fetch

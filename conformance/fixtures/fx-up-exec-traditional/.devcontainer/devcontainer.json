@@ -1,0 +1,8 @@
+{
+  "name": "ParityUpExec",
+  "image": "alpine:3.19",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "containerEnv": { "PARITY_TOKEN": "tkn-42" },
+  "remoteEnv": { "REMOTE_ONLY": "from-devcontainer-json" },
+  "postCreateCommand": "sh -lc 'echo ready > /tmp/parity_marker; printf \"env=[%s]\\n\" \"${containerEnv:PARITY_TOKEN}\" > /tmp/parity_env_marker'"
+}

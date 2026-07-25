@@ -1,312 +1,216 @@
-//! Parity registry loading + completeness checks (research D5; FR-022, FR-024).
+//! Parity registry checks (research D5; FR-022, FR-024).
 //!
-//! `fixtures/parity-corpus/registry.json` is the authoritative enumeration of
-//! claimed parity coverage: every oracle-comparing live binary, the reclassified
-//! internal-consistency binaries (listed so a check can assert they never re-enter
-//! the parity profile), and every case corpus with its minimum expected case
-//! count. It is embedded at compile time via `include_str!` so a malformed
-//! registry fails loudly, and is also read as data by CI/the aggregator.
+//! The registry *data model* (`ParityRegistry` and friends) and the *production*
+//! corpus discovery functions now live in `deacon-conformance::parity_corpus`, so the
+//! hermetic baseline enumerator can call exactly the same discovery the live runners
+//! execute without a dependency cycle (023-migrate-parity-to-conformance, research
+//! D1/D6). They are re-exported here unchanged, so every existing
+//! `parity_harness::registry::…` caller is unaffected.
 //!
-//! This module provides the loader plus the pure validation helpers the
-//! (US5) `parity_registry_check` binary and the (US3) aggregator consume:
-//! bidirectional file↔registry match, the `[profile.parity]` filter cross-check,
-//! corpus discovery, and the corpus minimum-count gate.
+//! What stays on this side of the seam is the *checking* concern that needs harness
+//! types: the bidirectional file↔registry match, the `.config/nextest.toml`
+//! `[profile.*]` cross-check, and the corpus minimum gate expressed as a
+//! [`HarnessError`]. These are free functions (an inherent `impl` may only live in
+//! the crate that defines the type).
 
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-
 use crate::HarnessError;
 
-/// The compile-time-embedded registry. A malformed registry is a hard failure the
-/// moment any parity check loads it.
-pub const REGISTRY_JSON: &str = include_str!("../../../fixtures/parity-corpus/registry.json");
+pub use deacon_conformance::parity_corpus::{
+    Corpus, LiveBinary, LiveKind, ParityCorpusError, ParityRegistry, REGISTRY_JSON,
+};
 
 /// Hermetic harness self-test binaries that intentionally carry the `parity_`
 /// name prefix but are NOT oracle-comparing live binaries: they must never appear
 /// in `live_binaries` nor be selected by `[profile.parity]`. Their source files
 /// are expected under `crates/deacon/tests/` and are recognized by
-/// [`ParityRegistry::check_test_files`] so the file↔registry match does not flag
-/// them as "unregistered live binaries" (research D5, D10; FR-013).
+/// [`check_test_files`] so the file↔registry match does not flag them as
+/// "unregistered live binaries" (research D5, D10; FR-013).
 pub const META_TEST_BINARIES: &[&str] = &["parity_harness_faults", "parity_registry_check"];
 
-/// Whether a live binary compares a single scenario or drives a case corpus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LiveKind {
-    Scenario,
-    Corpus,
+/// Map a discovery/registry failure onto the harness's cause-specific vocabulary, so
+/// a missing corpus still reads as `FixtureMissing` and a short corpus as
+/// `CorpusTooSmall` at every call site.
+fn map_corpus_error(e: ParityCorpusError) -> HarnessError {
+    match e {
+        ParityCorpusError::FixtureMissing { path } => HarnessError::FixtureMissing { path },
+        ParityCorpusError::CorpusTooSmall { corpus, found, min } => {
+            HarnessError::CorpusTooSmall { corpus, found, min }
+        }
+    }
 }
 
-/// One live (oracle-comparing) parity binary.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LiveBinary {
-    pub name: String,
-    pub kind: LiveKind,
-    pub docker_required: bool,
-    /// The corpus this binary drives (required iff `kind == Corpus`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub corpus: Option<String>,
+/// Discover tier1 corpus case directories — the single production definition, shared
+/// with the baseline enumerator (see [`deacon_conformance::parity_corpus::discover_tier1_cases`]).
+pub fn discover_tier1_cases(root: &Path) -> Result<Vec<PathBuf>, HarnessError> {
+    deacon_conformance::parity_corpus::discover_tier1_cases(root).map_err(map_corpus_error)
 }
 
-/// A case corpus with its minimum expected case count.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Corpus {
-    pub id: String,
-    /// Workspace-root-relative path to the corpus directory.
-    pub path: String,
-    pub min_cases: usize,
+/// Discover error corpus case directories — the single production definition, shared
+/// with the baseline enumerator (see [`deacon_conformance::parity_corpus::discover_error_cases`]).
+pub fn discover_error_cases(errors_root: &Path) -> Result<Vec<PathBuf>, HarnessError> {
+    deacon_conformance::parity_corpus::discover_error_cases(errors_root).map_err(map_corpus_error)
 }
 
-/// The authoritative coverage enumeration (data-model §3).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ParityRegistry {
-    pub live_binaries: Vec<LiveBinary>,
-    pub internal_consistency_binaries: Vec<String>,
-    pub corpora: Vec<Corpus>,
+/// Enforce a corpus's minimum case count (FR-024), reported as a [`HarnessError`].
+pub fn check_corpus_min(
+    registry: &ParityRegistry,
+    corpus: &Corpus,
+    discovered: usize,
+) -> Result<(), HarnessError> {
+    registry
+        .check_corpus_min(corpus, discovered)
+        .map_err(map_corpus_error)
 }
 
-/// The (symbolic) location of the embedded registry, used in error messages.
-fn registry_path() -> PathBuf {
-    crate::workspace_root().join("fixtures/parity-corpus/registry.json")
-}
+/// Bidirectional file↔registry match for `parity_*` sources under `tests_dir`
+/// plus existence of the internal-consistency `consistency_*` sources. Returns
+/// human-readable problems (empty = OK). Consumed by `parity_registry_check`.
+pub fn check_test_files(registry: &ParityRegistry, tests_dir: &Path) -> Vec<String> {
+    let mut problems = Vec::new();
 
-impl ParityRegistry {
-    /// Load and validate the embedded registry.
-    pub fn load() -> Result<ParityRegistry, String> {
-        Self::parse(REGISTRY_JSON)
+    // Registry → file: every live binary has a source file.
+    for name in registry.live_names() {
+        if !tests_dir.join(format!("{name}.rs")).is_file() {
+            problems.push(format!(
+                "registered live binary `{name}` has no source file {name}.rs"
+            ));
+        }
+    }
+    // Registry → file: every internal-consistency binary has a source file.
+    for name in &registry.internal_consistency_binaries {
+        if !tests_dir.join(format!("{name}.rs")).is_file() {
+            problems.push(format!(
+                "registered internal-consistency binary `{name}` has no source file {name}.rs"
+            ));
+        }
+    }
+    // The hermetic harness self-test binaries must also exist (they are the
+    // structural + fault-injection guard themselves).
+    for name in META_TEST_BINARIES {
+        if !tests_dir.join(format!("{name}.rs")).is_file() {
+            problems.push(format!(
+                "hermetic meta-test binary `{name}` has no source file {name}.rs"
+            ));
+        }
     }
 
-    /// Parse an arbitrary registry document (exposed for unit tests). Unknown
-    /// fields are rejected; internal consistency (corpus kinds, corpus refs, no
-    /// duplicate/overlapping names) is validated.
-    pub fn parse(raw: &str) -> Result<ParityRegistry, String> {
-        let reg: ParityRegistry = serde_json::from_str(raw)
-            .map_err(|e| format!("malformed registry {:?}: {e}", registry_path()))?;
-        reg.validate_internal()?;
-        Ok(reg)
-    }
-
-    /// Structural self-consistency: corpus binaries reference a declared corpus,
-    /// scenario binaries do not carry a corpus, names are unique, and the live and
-    /// internal-consistency name sets are disjoint.
-    fn validate_internal(&self) -> Result<(), String> {
-        let mut seen = std::collections::HashSet::new();
-        for b in &self.live_binaries {
-            if !seen.insert(b.name.as_str()) {
-                return Err(format!("duplicate live binary `{}`", b.name));
-            }
-            match b.kind {
-                LiveKind::Corpus => match &b.corpus {
-                    Some(id) if self.corpus(id).is_some() => {}
-                    Some(id) => {
-                        return Err(format!(
-                            "corpus binary `{}` references undeclared corpus `{id}`",
-                            b.name
-                        ));
-                    }
-                    None => {
-                        return Err(format!("corpus binary `{}` has no `corpus`", b.name));
-                    }
-                },
-                LiveKind::Scenario => {
-                    if b.corpus.is_some() {
-                        return Err(format!(
-                            "scenario binary `{}` must not carry a `corpus`",
-                            b.name
+    // File → registry: every `parity_*.rs` source is a registered live binary
+    // (or a recognized hermetic meta-test binary — those carry the `parity_`
+    // prefix by design but are never live/oracle-comparing).
+    let live: std::collections::HashSet<&str> = registry.live_names().into_iter().collect();
+    match std::fs::read_dir(tests_dir) {
+        Ok(rd) => {
+            for entry in rd.filter_map(Result::ok) {
+                let file = entry.file_name();
+                let file = file.to_string_lossy();
+                if let Some(stem) = file.strip_suffix(".rs") {
+                    if stem.starts_with("parity_")
+                        && !live.contains(stem)
+                        && !META_TEST_BINARIES.contains(&stem)
+                    {
+                        problems.push(format!(
+                            "source file {file} looks like a live parity binary but is not \
+                             registered in registry.json live_binaries"
                         ));
                     }
                 }
             }
         }
-        for name in &self.internal_consistency_binaries {
-            if seen.contains(name.as_str()) {
-                return Err(format!(
-                    "`{name}` is both a live and an internal-consistency binary"
-                ));
-            }
+        Err(e) => problems.push(format!("could not read tests dir {tests_dir:?}: {e}")),
+    }
+    problems
+}
+
+/// Cross-check a nextest `[profile.parity]` default-filter expression: it must
+/// select EXACTLY the live binaries and NONE of the internal-consistency
+/// binaries (FR-013, FR-014). Returns problems (empty = OK).
+pub fn check_parity_profile_filter(registry: &ParityRegistry, filter_expr: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    let selected: std::collections::HashSet<String> =
+        extract_binary_eq_tokens(filter_expr).into_iter().collect();
+
+    for name in registry.live_names() {
+        if !selected.contains(name) {
+            problems.push(format!(
+                "[profile.parity] filter does not select live binary `{name}`"
+            ));
         }
-        let mut corpus_ids = std::collections::HashSet::new();
-        for c in &self.corpora {
-            if !corpus_ids.insert(c.id.as_str()) {
-                return Err(format!("duplicate corpus id `{}`", c.id));
-            }
+    }
+    for name in &registry.internal_consistency_binaries {
+        if selected.contains(name.as_str()) {
+            problems.push(format!(
+                "[profile.parity] filter selects internal-consistency binary `{name}` (it must not)"
+            ));
         }
-        Ok(())
+    }
+    let live: std::collections::HashSet<&str> = registry.live_names().into_iter().collect();
+    for name in &selected {
+        if !live.contains(name.as_str()) {
+            problems.push(format!(
+                "[profile.parity] filter selects `{name}`, which is not a registered live binary"
+            ));
+        }
+    }
+    problems
+}
+
+/// Full `.config/nextest.toml` cross-check (research D5; FR-013, FR-014):
+///
+/// - `[profile.parity]` selects EXACTLY the live set and none of the
+///   internal-consistency binaries (delegates to [`check_parity_profile_filter`],
+///   valid because the parity profile's `default-filter` is a pure `binary(=…)`
+///   allow-list);
+/// - NO OTHER profile's `default-filter` selects any live parity binary — the
+///   truthful-by-non-selection invariant (FR-014). This is evaluated by
+///   [`filter_selects`] over each profile's filter expression, so an exclusion
+///   written as `not (…)` or `binary(#parity_*) & not (…)` is honored exactly,
+///   not merely token-matched.
+///
+/// Returns human-readable problems (empty = OK).
+pub fn check_nextest_profiles(
+    registry: &ParityRegistry,
+    profiles: &NextestProfiles,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+
+    match profiles.default_filters.get("parity") {
+        Some(Some(filter)) => problems.extend(check_parity_profile_filter(registry, filter)),
+        Some(None) => problems.push(
+            "[profile.parity] has no default-filter; it must select exactly the live \
+             parity binaries"
+                .to_string(),
+        ),
+        None => problems
+            .push("nextest.toml has no [profile.parity] — live parity has no lane".to_string()),
     }
 
-    /// Look up a corpus by id.
-    pub fn corpus(&self, id: &str) -> Option<&Corpus> {
-        self.corpora.iter().find(|c| c.id == id)
+    for (name, filter) in &profiles.default_filters {
+        if name == "parity" {
+            continue;
+        }
+        let Some(expr) = filter else {
+            problems.push(format!(
+                "[profile.{name}] has no default-filter, so it selects every binary \
+                 including the live parity binaries (only [profile.parity] may)"
+            ));
+            continue;
+        };
+        for live in registry.live_names() {
+            match filter_selects(expr, live) {
+                Ok(true) => problems.push(format!(
+                    "[profile.{name}] selects live parity binary `{live}` — only \
+                     [profile.parity] may select live parity binaries (FR-014)"
+                )),
+                Ok(false) => {}
+                Err(e) => problems.push(format!(
+                    "[profile.{name}] default-filter could not be evaluated for `{live}`: {e}"
+                )),
+            }
+        }
     }
-
-    /// The names of every live binary.
-    pub fn live_names(&self) -> Vec<&str> {
-        self.live_binaries.iter().map(|b| b.name.as_str()).collect()
-    }
-
-    /// Bidirectional file↔registry match for `parity_*` sources under `tests_dir`
-    /// plus existence of the internal-consistency `consistency_*` sources. Returns
-    /// human-readable problems (empty = OK). Consumed by `parity_registry_check`.
-    pub fn check_test_files(&self, tests_dir: &Path) -> Vec<String> {
-        let mut problems = Vec::new();
-
-        // Registry → file: every live binary has a source file.
-        for name in self.live_names() {
-            if !tests_dir.join(format!("{name}.rs")).is_file() {
-                problems.push(format!(
-                    "registered live binary `{name}` has no source file {name}.rs"
-                ));
-            }
-        }
-        // Registry → file: every internal-consistency binary has a source file.
-        for name in &self.internal_consistency_binaries {
-            if !tests_dir.join(format!("{name}.rs")).is_file() {
-                problems.push(format!(
-                    "registered internal-consistency binary `{name}` has no source file {name}.rs"
-                ));
-            }
-        }
-        // The hermetic harness self-test binaries must also exist (they are the
-        // structural + fault-injection guard themselves).
-        for name in META_TEST_BINARIES {
-            if !tests_dir.join(format!("{name}.rs")).is_file() {
-                problems.push(format!(
-                    "hermetic meta-test binary `{name}` has no source file {name}.rs"
-                ));
-            }
-        }
-
-        // File → registry: every `parity_*.rs` source is a registered live binary
-        // (or a recognized hermetic meta-test binary — those carry the `parity_`
-        // prefix by design but are never live/oracle-comparing).
-        let live: std::collections::HashSet<&str> = self.live_names().into_iter().collect();
-        match std::fs::read_dir(tests_dir) {
-            Ok(rd) => {
-                for entry in rd.filter_map(Result::ok) {
-                    let file = entry.file_name();
-                    let file = file.to_string_lossy();
-                    if let Some(stem) = file.strip_suffix(".rs") {
-                        if stem.starts_with("parity_")
-                            && !live.contains(stem)
-                            && !META_TEST_BINARIES.contains(&stem)
-                        {
-                            problems.push(format!(
-                                "source file {file} looks like a live parity binary but is not \
-                                 registered in registry.json live_binaries"
-                            ));
-                        }
-                    }
-                }
-            }
-            Err(e) => problems.push(format!("could not read tests dir {tests_dir:?}: {e}")),
-        }
-        problems
-    }
-
-    /// Cross-check a nextest `[profile.parity]` default-filter expression: it must
-    /// select EXACTLY the live binaries and NONE of the internal-consistency
-    /// binaries (FR-013, FR-014). Returns problems (empty = OK).
-    pub fn check_parity_profile_filter(&self, filter_expr: &str) -> Vec<String> {
-        let mut problems = Vec::new();
-        let selected: std::collections::HashSet<String> =
-            extract_binary_eq_tokens(filter_expr).into_iter().collect();
-
-        for name in self.live_names() {
-            if !selected.contains(name) {
-                problems.push(format!(
-                    "[profile.parity] filter does not select live binary `{name}`"
-                ));
-            }
-        }
-        for name in &self.internal_consistency_binaries {
-            if selected.contains(name.as_str()) {
-                problems.push(format!(
-                    "[profile.parity] filter selects internal-consistency binary `{name}` (it must not)"
-                ));
-            }
-        }
-        let live: std::collections::HashSet<&str> = self.live_names().into_iter().collect();
-        for name in &selected {
-            if !live.contains(name.as_str()) {
-                problems.push(format!(
-                    "[profile.parity] filter selects `{name}`, which is not a registered live binary"
-                ));
-            }
-        }
-        problems
-    }
-
-    /// Full `.config/nextest.toml` cross-check (research D5; FR-013, FR-014):
-    ///
-    /// - `[profile.parity]` selects EXACTLY the live set and none of the
-    ///   internal-consistency binaries (delegates to
-    ///   [`Self::check_parity_profile_filter`], valid because the parity profile's
-    ///   `default-filter` is a pure `binary(=…)` allow-list);
-    /// - NO OTHER profile's `default-filter` selects any live parity binary — the
-    ///   truthful-by-non-selection invariant (FR-014). This is evaluated by
-    ///   [`filter_selects`] over each profile's filter expression, so an exclusion
-    ///   written as `not (…)` or `binary(#parity_*) & not (…)` is honored exactly,
-    ///   not merely token-matched.
-    ///
-    /// Returns human-readable problems (empty = OK).
-    pub fn check_nextest_profiles(&self, profiles: &NextestProfiles) -> Vec<String> {
-        let mut problems = Vec::new();
-
-        match profiles.default_filters.get("parity") {
-            Some(Some(filter)) => problems.extend(self.check_parity_profile_filter(filter)),
-            Some(None) => problems.push(
-                "[profile.parity] has no default-filter; it must select exactly the live \
-                 parity binaries"
-                    .to_string(),
-            ),
-            None => problems
-                .push("nextest.toml has no [profile.parity] — live parity has no lane".to_string()),
-        }
-
-        for (name, filter) in &profiles.default_filters {
-            if name == "parity" {
-                continue;
-            }
-            let Some(expr) = filter else {
-                problems.push(format!(
-                    "[profile.{name}] has no default-filter, so it selects every binary \
-                     including the live parity binaries (only [profile.parity] may)"
-                ));
-                continue;
-            };
-            for live in self.live_names() {
-                match filter_selects(expr, live) {
-                    Ok(true) => problems.push(format!(
-                        "[profile.{name}] selects live parity binary `{live}` — only \
-                         [profile.parity] may select live parity binaries (FR-014)"
-                    )),
-                    Ok(false) => {}
-                    Err(e) => problems.push(format!(
-                        "[profile.{name}] default-filter could not be evaluated for `{live}`: {e}"
-                    )),
-                }
-            }
-        }
-        problems
-    }
-
-    /// Enforce a corpus's minimum case count. `discovered` is the number of cases
-    /// found by the corpus's discovery rule; below the minimum is a
-    /// [`HarnessError::CorpusTooSmall`] (FR-024).
-    pub fn check_corpus_min(&self, corpus: &Corpus, discovered: usize) -> Result<(), HarnessError> {
-        if discovered < corpus.min_cases {
-            return Err(HarnessError::CorpusTooSmall {
-                corpus: corpus.id.clone(),
-                found: discovered,
-                min: corpus.min_cases,
-            });
-        }
-        Ok(())
-    }
+    problems
 }
 
 /// Extract each `binary(=NAME)` token from a nextest filter expression.
@@ -554,127 +458,9 @@ fn glob_match(pattern: &str, text: &str) -> bool {
     pi == p.len()
 }
 
-/// Discover tier1 corpus case directories: IMMEDIATE subdirectories of `root`
-/// containing a `.devcontainer/` directory, excluding `errors`, `waivers`,
-/// `__pycache__`, and any dot-directory. (`errors/*` cases also contain
-/// `.devcontainer/` but belong only to the errors runner; they are never reached
-/// because only immediate children are scanned and `errors` itself is excluded.)
-pub fn discover_tier1_cases(root: &Path) -> Result<Vec<PathBuf>, HarnessError> {
-    let mut out = Vec::new();
-    for path in immediate_subdirs(root)? {
-        let name = match path.file_name().and_then(|s| s.to_str()) {
-            Some(n) => n,
-            None => continue,
-        };
-        if name.starts_with('.') || matches!(name, "errors" | "waivers" | "__pycache__") {
-            continue;
-        }
-        if path.join(".devcontainer").is_dir() {
-            out.push(path);
-        }
-    }
-    out.sort();
-    Ok(out)
-}
-
-/// Discover error corpus cases: IMMEDIATE subdirectories of `errors_root`,
-/// excluding dot-directories.
-///
-/// Each case directory carries the test input (a `.devcontainer/`, or a `.gitkeep`
-/// for the "no config" / "bad `--config` path" cases that deliberately have no
-/// config). Its accept/reject expectation is a `corpus_case`-scoped `wvr-` record
-/// in the conformance registry (`conformance/registry/waivers/wvr-*.json`), no
-/// longer a per-case `expect.json` (019-conformance-registry, research D3) — the
-/// legacy `expect.json` files were migrated and removed.
-pub fn discover_error_cases(errors_root: &Path) -> Result<Vec<PathBuf>, HarnessError> {
-    let mut out = Vec::new();
-    for path in immediate_subdirs(errors_root)? {
-        let name = match path.file_name().and_then(|s| s.to_str()) {
-            Some(n) => n,
-            None => continue,
-        };
-        // Skip non-case artifacts: dot-directories and a stray Python `__pycache__`
-        // (mirrors `discover_tier1_cases`). Every remaining subdir is a real error
-        // case whose accept/reject expectation is a `wvr-` record in the conformance
-        // registry; a genuinely mis-named directory still surfaces loudly downstream
-        // as a missing expectation record.
-        if name.starts_with('.') || name == "__pycache__" {
-            continue;
-        }
-        out.push(path);
-    }
-    out.sort();
-    Ok(out)
-}
-
-/// The immediate subdirectories of `dir`. A missing directory is a
-/// [`HarnessError::FixtureMissing`].
-fn immediate_subdirs(dir: &Path) -> Result<Vec<PathBuf>, HarnessError> {
-    let rd = std::fs::read_dir(dir).map_err(|_| HarnessError::FixtureMissing {
-        path: dir.to_path_buf(),
-    })?;
-    Ok(rd
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.is_dir())
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn embedded_registry_parses_and_matches_expected() {
-        let reg = ParityRegistry::load().expect("embedded registry must parse");
-        assert_eq!(
-            reg.live_binaries.len(),
-            10,
-            "7 scenario (incl. parity_conformance_runner, 022) + 3 corpus"
-        );
-        assert_eq!(reg.internal_consistency_binaries.len(), 2);
-        assert!(reg.corpus("tier1").is_some());
-        assert!(reg.corpus("errors").is_some());
-        assert_eq!(reg.corpus("tier1").unwrap().min_cases, 20);
-        assert_eq!(reg.corpus("errors").unwrap().min_cases, 9);
-        // Corpus binaries carry their corpus id.
-        let tier1 = reg
-            .live_binaries
-            .iter()
-            .find(|b| b.name == "parity_corpus_tier1")
-            .unwrap();
-        assert_eq!(tier1.kind, LiveKind::Corpus);
-        assert_eq!(tier1.corpus.as_deref(), Some("tier1"));
-    }
-
-    #[test]
-    fn rejects_unknown_field_and_bad_corpus_ref() {
-        assert!(
-            ParityRegistry::parse(
-                r#"{"live_binaries":[],"internal_consistency_binaries":[],"corpora":[],"x":1}"#
-            )
-            .is_err()
-        );
-        let bad = r#"{
-          "live_binaries": [ { "name": "parity_corpus_x", "kind": "corpus", "docker_required": false, "corpus": "ghost" } ],
-          "internal_consistency_binaries": [],
-          "corpora": []
-        }"#;
-        assert!(
-            ParityRegistry::parse(bad).is_err(),
-            "corpus binary referencing an undeclared corpus must be rejected"
-        );
-    }
-
-    #[test]
-    fn rejects_overlapping_live_and_consistency() {
-        let bad = r#"{
-          "live_binaries": [ { "name": "dup", "kind": "scenario", "docker_required": false } ],
-          "internal_consistency_binaries": [ "dup" ],
-          "corpora": []
-        }"#;
-        assert!(ParityRegistry::parse(bad).is_err());
-    }
 
     #[test]
     fn extract_binary_tokens_works() {
@@ -683,8 +469,42 @@ mod tests {
     }
 
     #[test]
+    fn corpus_min_gate_maps_to_harness_error() {
+        // The corpora retired with the corpus binaries (023 US7), so this exercises the
+        // MAPPING from the shared gate onto the harness's cause-specific vocabulary,
+        // which is what this crate owns.
+        let reg = ParityRegistry::parse(
+            r#"{"live_binaries":[],"internal_consistency_binaries":[],
+                "corpora":[{"id":"probe","path":"fixtures/probe","min_cases":20}]}"#,
+        )
+        .expect("synthetic registry parses");
+        let probe = reg.corpus("probe").expect("declared");
+        assert!(check_corpus_min(&reg, probe, 20).is_ok());
+        let err = check_corpus_min(&reg, probe, 19).expect_err("below min fails");
+        assert!(matches!(err, HarnessError::CorpusTooSmall { .. }));
+    }
+
+    #[test]
+    fn discovery_is_the_shared_production_definition() {
+        // The re-exported wrappers must return exactly what the shared definition
+        // returns, and map its failures onto the harness's vocabulary.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("alpha").join(".devcontainer"))
+            .expect("create case");
+
+        let via_wrapper = discover_tier1_cases(dir.path()).expect("tier1 discovery");
+        let via_shared = deacon_conformance::parity_corpus::discover_tier1_cases(dir.path())
+            .expect("shared tier1 discovery");
+        assert_eq!(via_wrapper, via_shared);
+
+        let missing = discover_tier1_cases(Path::new("/definitely/not/a/corpus"))
+            .expect_err("a missing corpus root fails loud");
+        assert!(matches!(missing, HarnessError::FixtureMissing { .. }));
+    }
+
+    #[test]
     fn profile_filter_cross_check() {
-        let reg = ParityRegistry::load().unwrap();
+        let reg = ParityRegistry::load().expect("embedded registry must parse");
         let good = reg
             .live_names()
             .iter()
@@ -692,7 +512,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" | ");
         assert!(
-            reg.check_parity_profile_filter(&good).is_empty(),
+            check_parity_profile_filter(&reg, &good).is_empty(),
             "a filter selecting exactly the live set has no problems"
         );
 
@@ -704,11 +524,11 @@ mod tests {
             .map(|n| format!("binary(={n})"))
             .collect::<Vec<_>>()
             .join(" | ");
-        assert!(!reg.check_parity_profile_filter(&missing).is_empty());
+        assert!(!check_parity_profile_filter(&reg, &missing).is_empty());
 
         // Selecting a consistency binary → flagged.
         let with_consistency = format!("{good} | binary(=consistency_env_probe_flag)");
-        let problems = reg.check_parity_profile_filter(&with_consistency);
+        let problems = check_parity_profile_filter(&reg, &with_consistency);
         assert!(
             problems
                 .iter()
@@ -717,52 +537,14 @@ mod tests {
     }
 
     #[test]
-    fn corpus_min_gate() {
-        let reg = ParityRegistry::load().unwrap();
-        let tier1 = reg.corpus("tier1").unwrap();
-        assert!(reg.check_corpus_min(tier1, 20).is_ok());
-        assert!(reg.check_corpus_min(tier1, 23).is_ok());
-        let err = reg
-            .check_corpus_min(tier1, 19)
-            .expect_err("below min fails");
-        assert!(matches!(err, HarnessError::CorpusTooSmall { .. }));
-    }
-
-    #[test]
-    fn discovers_real_corpus_cases() {
-        let root = crate::workspace_root().join("fixtures/parity-corpus");
-        let tier1 = discover_tier1_cases(&root).expect("tier1 discovery");
-        assert!(
-            tier1.len() >= 20,
-            "expected >= 20 tier1 cases, got {}: {:?}",
-            tier1.len(),
-            tier1
-        );
-        // errors/ and dot-dirs are excluded from tier1 discovery.
-        assert!(!tier1.iter().any(|p| p.ends_with("errors")));
-        assert!(!tier1.iter().any(|p| {
-            p.file_name()
-                .and_then(|s| s.to_str())
-                .is_some_and(|n| n.starts_with('.'))
-        }));
-
-        let errors = discover_error_cases(&root.join("errors")).expect("errors discovery");
-        assert!(
-            errors.len() >= 9,
-            "expected >= 9 error cases, got {}",
-            errors.len()
-        );
-    }
-
-    #[test]
     fn check_test_files_against_real_tree() {
-        let reg = ParityRegistry::load().unwrap();
+        let reg = ParityRegistry::load().expect("embedded registry must parse");
         let tests_dir = crate::workspace_root().join("crates/deacon/tests");
-        // With US5 landed, the bidirectional match against the real tree must be
-        // clean: every registered live/consistency binary and every hermetic
-        // meta-test binary exists, and every `parity_*.rs` file is either
-        // registered or a recognized meta-test binary.
-        let problems = reg.check_test_files(&tests_dir);
+        // The bidirectional match against the real tree must be clean: every
+        // registered live/consistency binary and every hermetic meta-test binary
+        // exists, and every `parity_*.rs` file is either registered or a recognized
+        // meta-test binary.
+        let problems = check_test_files(&reg, &tests_dir);
         assert!(problems.is_empty(), "registry↔tests mismatch: {problems:?}");
     }
 
@@ -823,7 +605,7 @@ mod tests {
 
     #[test]
     fn parses_and_checks_the_real_nextest_toml() {
-        let reg = ParityRegistry::load().unwrap();
+        let reg = ParityRegistry::load().expect("embedded registry must parse");
         let toml_text =
             std::fs::read_to_string(crate::workspace_root().join(".config/nextest.toml"))
                 .expect("read nextest.toml");
@@ -832,7 +614,7 @@ mod tests {
             profiles.default_filters.contains_key("parity"),
             "the real nextest.toml must declare [profile.parity]"
         );
-        let problems = reg.check_nextest_profiles(&profiles);
+        let problems = check_nextest_profiles(&reg, &profiles);
         assert!(
             problems.is_empty(),
             "nextest.toml profile cross-check problems: {problems:?}"
@@ -841,7 +623,7 @@ mod tests {
 
     #[test]
     fn check_nextest_profiles_flags_leaked_live_binary() {
-        let reg = ParityRegistry::load().unwrap();
+        let reg = ParityRegistry::load().expect("embedded registry must parse");
         let parity_filter = reg
             .live_names()
             .iter()
@@ -857,7 +639,7 @@ mod tests {
             "rogue".to_string(),
             Some("binary(=parity_exec)".to_string()),
         );
-        let problems = reg.check_nextest_profiles(&profiles);
+        let problems = check_nextest_profiles(&reg, &profiles);
         assert!(
             problems
                 .iter()

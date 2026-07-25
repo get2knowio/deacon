@@ -1,0 +1,5 @@
+{
+  "name": "ParityExecWorkingDir",
+  "image": "alpine:3.19",
+  "workspaceFolder": "/root"
+}

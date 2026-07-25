@@ -19,11 +19,18 @@
 //! - the retired Rust key-allowlist `extract_core_config` exists nowhere (it was
 //!   deleted, not kept "because it was stable" — an allowlist silently ignores
 //!   divergences in every unlisted key);
-//! - `sanitize_dynamic_values` and the config `prune` helper live ONLY here (the
-//!   unrelated `core::port_forward::registry::prune`, which reaps dead daemon
-//!   records, is not normalization);
+//! - the blanket config `prune` and `sanitize_dynamic_values`/`replace_hex12` helpers
+//!   are GONE (023 T062/T063, research D3): `prune` removed every null/empty value at
+//!   every depth plus `configFilePath`, and `replace_hex12` rewrote any 12-char hex run
+//!   anywhere. They are replaced by the named, enumerated, justified rules
+//!   [`drop_absent_optional`] and [`devcontainer_id_token`]. (The unrelated
+//!   `core::port_forward::registry::prune`, which reaps dead daemon records, is not
+//!   normalization.);
 //! - the three Python corpus runners that carried duplicate `prune` copies were
-//!   deleted in T030 — no `fixtures/**` script normalizes output.
+//!   deleted in T030 — no `fixtures/**` script normalizes output;
+//! - the resolved-configuration rule chain is ONE function,
+//!   [`config_document_rules`], shared by the legacy `config`/`merged_config` entry
+//!   points and the declarative `chan-structured-output` channel.
 //!
 //! Cross-runner equivalence is proven by `tests/normalize_consistency.rs`
 //! (SC-005): the same output pair yields the same verdict regardless of which
@@ -37,9 +44,6 @@ use serde_json::{Map, Value};
 
 use crate::HarnessError;
 use crate::evidence::{NormalizedChannelEvidence, RawChannelEvidence};
-
-/// Keys the reference adds that carry no cross-CLI meaning (pure noise).
-const DROP_KEYS: &[&str] = &["configFilePath"];
 
 // ===========================================================================
 // Declarative conformance runner: THE single channel-normalization entry point
@@ -67,6 +71,81 @@ pub use deacon_conformance::snapshot::NORMALIZER_VERSION;
 /// The `<WORKSPACE>` / `<PROJECT>` path token substitution context for `path_token`
 /// (FR-024). Each `(path, token)` pair rewrites occurrences of an absolute temp path to
 /// a stable token so evidence is portable across machines/recordings. Substitutions are
+/// The FINITE, ENUMERATED key names [`drop_absent_optional`] may remove when their value
+/// carries no information (023 T062).
+///
+/// Measured, not guessed: these are exactly the keys observed to be present-but-absent
+/// in deacon's `read-configuration` output and omitted by the pinned reference across
+/// all 24 Tier-1 corpus workspaces in both plain and `--include-merged-configuration`
+/// modes. Every one is a modeled `devcontainer.json` property (or a nested property of
+/// `hostRequirements` / `portsAttributes`).
+///
+/// **This list is the whole safety property.** It is why the rule is not `prune`: a key
+/// not named here is compared, so a newly added property cannot silently disappear.
+/// Extending it is a reviewable, deliberate act — never a side effect.
+pub const ABSENT_OPTIONAL_KEYS: &[&str] = &[
+    "appPort",
+    "build",
+    "capAdd",
+    "containerEnv",
+    "containerUser",
+    "customizations",
+    "description",
+    "dockerComposeFile",
+    "dockerFile",
+    "elevateIfNeeded",
+    "features",
+    "forwardPorts",
+    "gpu",
+    "hostRequirements",
+    "image",
+    "init",
+    "initializeCommand",
+    "label",
+    "mounts",
+    "onAutoForward",
+    "onCreateCommand",
+    "openPreview",
+    "otherPortsAttributes",
+    "overrideCommand",
+    "overrideFeatureInstallOrder",
+    "portsAttributes",
+    "postAttachCommand",
+    "postCreateCommand",
+    "postStartCommand",
+    "privileged",
+    "protocol",
+    "remoteEnv",
+    "remoteUser",
+    "requireLocalPort",
+    "runArgs",
+    "runServices",
+    "secrets",
+    "securityOpt",
+    "service",
+    "shutdownAction",
+    "updateContentCommand",
+    "updateRemoteUserUID",
+    "userEnvProbe",
+    "waitFor",
+    "workspaceFolder",
+    "workspaceMount",
+];
+
+/// The FINITE, ENUMERATED properties inside which [`devcontainer_id_token`] applies its
+/// hex rewrite (023 T063) — the fields a substituted `${devcontainerId}` can reach.
+///
+/// Everywhere else a 12-char lowercase-hex run is left alone, so two genuinely different
+/// digests can no longer be collapsed to one token and mask a divergence.
+pub const DEVCONTAINER_ID_FIELDS: &[&str] = &[
+    "containerEnv",
+    "mounts",
+    "name",
+    "remoteEnv",
+    "runArgs",
+    "workspaceMount",
+];
+
 /// applied longest-path-first so a nested path tokenizes before its parent.
 #[derive(Debug, Clone, Default)]
 pub struct TokenMap {
@@ -237,7 +316,11 @@ fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap) -> Value
         // No rule: an exit code carries no path/label/PATH content.
         CHAN_EXIT_CODE => value.clone(),
         CHAN_STDOUT | CHAN_STDERR => path_token(value, tokens),
-        CHAN_STRUCTURED_OUTPUT | CHAN_FILE_CONTENT => null_preserving(&path_token(value, tokens)),
+        // The resolved-configuration document: the SAME named rule chain the legacy
+        // `config`/`merged_config` entry points apply, so the two comparison paths
+        // share ONE definition of equivalence (constitution VIII, 023 T062).
+        CHAN_STRUCTURED_OUTPUT => config_document_rules(&path_token(value, tokens)),
+        CHAN_FILE_CONTENT => null_preserving(&path_token(value, tokens)),
         CHAN_FILESYSTEM => path_token(value, tokens),
         CHAN_IMAGE => normalize_image(value, tokens),
         CHAN_PROCESS_GRAPH => normalize_process_graph(value, tokens),
@@ -289,7 +372,15 @@ fn normalize_injected_process(value: &Value, tokens: &TokenMap) -> Value {
 // ===========================================================================
 
 /// Normalize `read-configuration` output for comparison: unwrap the reference's
-/// `{configuration}` wrapper, prune noise, sanitize dynamic ids.
+/// `{configuration}` wrapper, then apply the SAME named rule chain the declarative
+/// `chan-structured-output` channel applies ([`config_document_rules`]).
+///
+/// `prune` is gone (023 T062, research D3). It removed every null, empty object, empty
+/// array and empty string ANYWHERE in the document, plus `configFilePath`
+/// unconditionally — an unbounded removal set that hid a deacon-only field simply for
+/// being empty, and hid `configFilePath` outright. What replaces it is
+/// [`drop_absent_optional`]: a finite, enumerated key list, dropped only when the value
+/// carries no information. A field NOT on that list now surfaces, which is the point.
 pub fn config(case: &str, raw: &str) -> Result<Value, HarnessError> {
     let v = parse(case, raw)?;
     let inner = match &v {
@@ -299,13 +390,11 @@ pub fn config(case: &str, raw: &str) -> Result<Value, HarnessError> {
         },
         _ => v.clone(),
     };
-    let mut pruned = prune(&inner);
-    sanitize_dynamic_values(&mut pruned);
-    Ok(pruned)
+    Ok(config_document_rules(&inner))
 }
 
-/// Normalize the `mergedConfiguration` block (Tier 1b): the same prune + sanitize
-/// rules applied to that block. A non-object top-level is a normalization failure.
+/// Normalize the `mergedConfiguration` block (Tier 1b): the same named rule chain
+/// applied to that block. A non-object top-level is a normalization failure.
 pub fn merged_config(case: &str, raw: &str) -> Result<Value, HarnessError> {
     let v = parse(case, raw)?;
     let block = match &v {
@@ -320,9 +409,115 @@ pub fn merged_config(case: &str, raw: &str) -> Result<Value, HarnessError> {
             });
         }
     };
-    let mut pruned = prune(&block);
-    sanitize_dynamic_values(&mut pruned);
-    Ok(pruned)
+    Ok(config_document_rules(&block))
+}
+
+/// THE named rule chain for a resolved-configuration document — the SINGLE definition
+/// shared by the legacy [`config`] / [`merged_config`] entry points and the declarative
+/// `chan-structured-output` channel (constitution VIII: one normalizer, not two).
+///
+/// In order: [`devcontainer_id_token`] (rewrite), [`drop_absent_optional`] (drop, finite
+/// enumerated key set), then [`null_preserving`] — which is identity and exists to state,
+/// at the end of the chain, that NOTHING else is removed.
+pub fn config_document_rules(value: &Value) -> Value {
+    null_preserving(&drop_absent_optional(&devcontainer_id_token(value)))
+}
+
+/// **Rule `drop_absent_optional`** (023 T062, action `drop`, scope
+/// `field:/configuration` + `field:/mergedConfiguration`).
+///
+/// Removes a key **named in [`ABSENT_OPTIONAL_KEYS`]** when its value carries no
+/// information (`null`, `[]`, `{}`, `""`). Nothing else, ever.
+///
+/// **Why it exists**: deacon serializes every modeled optional property of
+/// `devcontainer.json` unconditionally, while the reference omits keys that were not
+/// authored. The two documents therefore describe the SAME resolved configuration in
+/// different JSON shapes, and without this rule that one serializer difference produces
+/// ~48 spurious divergences per corpus case and buries the real ones.
+///
+/// **Why it is not `prune`**: the removal set is a finite, enumerated list of key names
+/// (FR-021). A property added to `DevContainerConfig` tomorrow is NOT on the list, so it
+/// surfaces as a divergence rather than vanishing — which is the exact regression
+/// `prune` made invisible. The value guard means a populated `appPort` is always
+/// compared; only an absent one is elided.
+///
+/// **It compensates for a deacon defect and is deleted when that defect is fixed** —
+/// deacon should apply `skip_serializing_if` so absent optionals are omitted, matching
+/// the reference. Tracked in `specs/023-migrate-parity-to-conformance/tasks.md#T111`.
+pub fn drop_absent_optional(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = Map::new();
+            for (k, v) in map {
+                if ABSENT_OPTIONAL_KEYS.contains(&k.as_str()) && carries_no_information(v) {
+                    continue;
+                }
+                out.insert(k.clone(), drop_absent_optional(v));
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(drop_absent_optional).collect()),
+        other => other.clone(),
+    }
+}
+
+/// Whether a value carries no information: JSON `null`, or an empty array / object /
+/// string. Deliberately exact — a `0`, a `false`, or a one-element array all carry
+/// information and are always compared.
+fn carries_no_information(v: &Value) -> bool {
+    match v {
+        Value::Null => true,
+        Value::Array(a) => a.is_empty(),
+        Value::Object(o) => o.is_empty(),
+        Value::String(s) => s.is_empty(),
+        _ => false,
+    }
+}
+
+/// **Rule `devcontainer_id_token`** (023 T063, action `rewrite`, scope
+/// `field:/configuration` + `field:/mergedConfiguration`).
+///
+/// Rewrites the literal `${devcontainerId}` template token to `<ID>` everywhere, and a
+/// 12-character lowercase-hex run to `<ID>` **only inside the enumerated
+/// [`DEVCONTAINER_ID_FIELDS`]** — the properties a substituted devcontainer id can
+/// legitimately reach.
+///
+/// The retired `replace_hex12` rewrote ANY 12-char lowercase-hex run in ANY string in
+/// the document. Applied to both sides it could not manufacture a false pass on equal
+/// inputs, but it could — and this is the defect research D3 names — collapse two
+/// GENUINELY DIFFERENT hex values (a short digest, a hash, a hex-looking identifier) to
+/// the same token and mask a real divergence. Scoping the hex rewrite to the fields that
+/// actually carry a devcontainer id removes that blast radius; the literal-token rewrite
+/// is an exact string match and was never open-ended.
+pub fn devcontainer_id_token(value: &Value) -> Value {
+    rewrite_ids(value, false)
+}
+
+/// Recursive worker: `in_id_field` is true once we are inside one of
+/// [`DEVCONTAINER_ID_FIELDS`], which is where the hex rewrite applies.
+fn rewrite_ids(value: &Value, in_id_field: bool) -> Value {
+    match value {
+        Value::String(s) => {
+            let literal = s.replace("${devcontainerId}", "<ID>");
+            Value::String(if in_id_field {
+                tokenize_hex12(&literal)
+            } else {
+                literal
+            })
+        }
+        Value::Array(items) => {
+            Value::Array(items.iter().map(|v| rewrite_ids(v, in_id_field)).collect())
+        }
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| {
+                    let inside = in_id_field || DEVCONTAINER_ID_FIELDS.contains(&k.as_str());
+                    (k.clone(), rewrite_ids(v, inside))
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 fn parse(case: &str, raw: &str) -> Result<Value, HarnessError> {
@@ -332,64 +527,14 @@ fn parse(case: &str, raw: &str) -> Result<Value, HarnessError> {
     })
 }
 
-/// Recursively drop nulls, empty arrays/objects/strings, and [`DROP_KEYS`] — but
-/// only when they are object *values*; list elements are preserved verbatim
-/// (mirroring the ported Python `prune`).
-fn prune(v: &Value) -> Value {
-    match v {
-        Value::Object(map) => {
-            let mut out = Map::new();
-            for (k, val) in map {
-                if DROP_KEYS.contains(&k.as_str()) {
-                    continue;
-                }
-                let pv = prune(val);
-                if pv.is_null() {
-                    continue;
-                }
-                let empty = match &pv {
-                    Value::Object(o) => o.is_empty(),
-                    Value::Array(a) => a.is_empty(),
-                    Value::String(s) => s.is_empty(),
-                    _ => false,
-                };
-                if empty {
-                    continue;
-                }
-                out.insert(k.clone(), pv);
-            }
-            Value::Object(out)
-        }
-        Value::Array(arr) => Value::Array(arr.iter().map(prune).collect()),
-        other => other.clone(),
-    }
-}
-
-/// Recursively sanitize dynamic ids so outputs are comparable: `${devcontainerId}`
-/// and any 12-char lowercase-hex run become `<ID>`. Applied identically to both
-/// CLIs' output, so a real divergence still surfaces.
-fn sanitize_dynamic_values(v: &mut Value) {
-    match v {
-        Value::Object(map) => {
-            for val in map.values_mut() {
-                sanitize_dynamic_values(val);
-            }
-        }
-        Value::Array(arr) => {
-            for val in arr.iter_mut() {
-                sanitize_dynamic_values(val);
-            }
-        }
-        Value::String(s) => {
-            let replaced = replace_hex12(&s.replace("${devcontainerId}", "<ID>"));
-            *s = replaced;
-        }
-        _ => {}
-    }
-}
-
-/// Replace each 12-char contiguous lowercase-hex run with `<ID>` (char-safe).
-fn replace_hex12(input: &str) -> String {
+/// Rewrite each 12-char contiguous lowercase-hex run to `<ID>` (char-safe).
+///
+/// Deliberately NOT named `replace_hex12` any more: that name belonged to the retired
+/// BLANKET rule that applied this to every string in the document (023 T063). This is
+/// the same mechanism confined to [`DEVCONTAINER_ID_FIELDS`] by
+/// [`devcontainer_id_token`], and the name says so — a scoped helper reading as a
+/// document-wide replacement is how the blanket behavior would creep back.
+fn tokenize_hex12(input: &str) -> String {
     let chars: Vec<char> = input.chars().collect();
     let mut out = String::with_capacity(input.len());
     let mut i = 0;
@@ -413,22 +558,33 @@ fn replace_hex12(input: &str) -> String {
 // Configuration diff (ranked): ref-only / value / deacon-only
 // ===========================================================================
 
-/// Divergence class, ranked most-significant first: a `ref-only` key means deacon
-/// dropped data the reference kept (highest signal); `deacon-only` is usually
-/// default noise (lowest).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Divergence class. **All three are reported with equal significance** (023 T065,
+/// FR-020).
+///
+/// This enum used to rank `deacon-only` LAST, documented as "usually default noise".
+/// That was the deacon-only-as-serialization-noise assumption research D3 identifies as
+/// the migration's central normalization defect: a field deacon emits and the reference
+/// does not is either a genuine extension or a genuine over-emission, and neither is
+/// noise. Combined with `prune` — which deleted such a field outright whenever it
+/// happened to be empty — it meant deacon-only data was hidden if empty and buried if
+/// populated.
+///
+/// Ordering is now a **display order only**, chosen for deterministic output, and no
+/// class sorts below another on the grounds of being less interesting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DiffKind {
     RefOnly,
-    Value,
     DeaconOnly,
+    Value,
 }
 
 impl DiffKind {
-    fn rank(self) -> u8 {
+    /// The stable wire spelling, used for deterministic ordering and reporting.
+    pub fn as_str(self) -> &'static str {
         match self {
-            DiffKind::RefOnly => 0,
-            DiffKind::Value => 1,
-            DiffKind::DeaconOnly => 2,
+            DiffKind::RefOnly => "ref-only",
+            DiffKind::DeaconOnly => "deacon-only",
+            DiffKind::Value => "value",
         }
     }
 }
@@ -442,11 +598,14 @@ pub struct ConfigDivergence {
     pub reference: Option<Value>,
 }
 
-/// Diff two normalized configs, ranked ref-only → value → deacon-only.
+/// Diff two normalized configs.
+///
+/// Output order is `(class, path)` — deterministic, and NOT a significance ranking: every
+/// class is reported, none is de-prioritized (023 T065, FR-020).
 pub fn diff(deacon: &Value, reference: &Value) -> Vec<ConfigDivergence> {
     let mut out = Vec::new();
     diff_rec(deacon, reference, "", &mut out);
-    out.sort_by_key(|d| d.kind.rank());
+    out.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.path.cmp(&b.path)));
     out
 }
 
@@ -516,7 +675,7 @@ pub fn summarize(divs: &[ConfigDivergence]) -> String {
                 d.reference.as_ref().map(snip).unwrap_or_default()
             )),
             DiffKind::DeaconOnly => lines.push(format!(
-                "deacon-only {loc} = {}",
+                "deacon-only {loc} = {} (the reference does not emit this)",
                 d.deacon.as_ref().map(snip).unwrap_or_default()
             )),
         }
@@ -1053,7 +1212,10 @@ mod tests {
 
     #[test]
     fn normalizer_version_is_bumped_for_named_rules() {
-        assert_eq!(NORMALIZER_VERSION, "2", "US3 named-rule normalizer");
+        assert_eq!(
+            NORMALIZER_VERSION, "3",
+            "023 T062/T063 retired the blanket prune/replace_hex12 rules"
+        );
     }
 
     #[test]
@@ -1066,28 +1228,52 @@ mod tests {
     }
 
     #[test]
-    fn prune_drops_nulls_empties_and_configfilepath() {
+    fn drop_absent_optional_removes_only_enumerated_absent_keys() {
         let raw = r#"{
             "configFilePath": "/x/.devcontainer/devcontainer.json",
             "name": "demo",
-            "empty_str": "",
-            "empty_obj": {},
-            "empty_arr": [],
-            "null_val": null,
-            "nested": { "keep": 1, "drop": null },
+            "image": "",
+            "customizations": {},
+            "forwardPorts": [],
+            "appPort": null,
+            "unlistedEmpty": {},
+            "unlistedNull": null,
+            "hostRequirements": { "gpu": null, "cpus": 4 },
             "list_keeps_nulls": [1, null, ""]
         }"#;
-        let normalized = config("prune", raw).expect("normalize");
+        let normalized = config("drop", raw).expect("normalize");
         let obj = normalized.as_object().expect("object");
+
+        // Enumerated + absent → removed.
+        for key in ["image", "customizations", "forwardPorts", "appPort"] {
+            assert!(!obj.contains_key(key), "{key} should be elided");
+        }
+        // Nested enumerated + absent → removed; its populated sibling survives.
+        assert_eq!(obj.get("hostRequirements"), Some(&json!({ "cpus": 4 })));
+
+        // NOT enumerated → preserved, even when empty. This is the property `prune`
+        // destroyed.
+        assert_eq!(obj.get("unlistedEmpty"), Some(&json!({})));
+        assert_eq!(obj.get("unlistedNull"), Some(&json!(null)));
+        // No longer dropped: `configFilePath` is a compared value now.
+        assert_eq!(
+            obj.get("configFilePath"),
+            Some(&json!("/x/.devcontainer/devcontainer.json"))
+        );
         assert_eq!(obj.get("name"), Some(&json!("demo")));
-        assert!(!obj.contains_key("configFilePath"));
-        assert!(!obj.contains_key("empty_str"));
-        assert!(!obj.contains_key("empty_obj"));
-        assert!(!obj.contains_key("empty_arr"));
-        assert!(!obj.contains_key("null_val"));
-        assert_eq!(obj.get("nested"), Some(&json!({ "keep": 1 })));
-        // List elements are preserved verbatim, including nulls/empties.
+        // List elements are preserved verbatim.
         assert_eq!(obj.get("list_keeps_nulls"), Some(&json!([1, null, ""])));
+    }
+
+    #[test]
+    fn the_enumerated_key_list_is_sorted_and_unique() {
+        // The list IS the safety property; keeping it sorted and duplicate-free keeps it
+        // reviewable.
+        let mut sorted = ABSENT_OPTIONAL_KEYS.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(ABSENT_OPTIONAL_KEYS, sorted.as_slice());
+        let unique: std::collections::BTreeSet<&&str> = ABSENT_OPTIONAL_KEYS.iter().collect();
+        assert_eq!(unique.len(), ABSENT_OPTIONAL_KEYS.len());
     }
 
     #[test]
@@ -1102,11 +1288,42 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_id_sanitization() {
-        let raw = r#"{ "a": "id-${devcontainerId}-x", "b": "vol_0123456789ab_tail" }"#;
+    fn dynamic_id_token_rewrites_the_literal_everywhere() {
+        // The literal `${devcontainerId}` is an EXACT string match, never a pattern, so
+        // it is safe to rewrite anywhere.
+        let raw = r#"{ "a": "id-${devcontainerId}-x", "name": "n-${devcontainerId}" }"#;
         let n = config("dyn", raw).unwrap();
         assert_eq!(n["a"], json!("id-<ID>-x"));
-        assert_eq!(n["b"], json!("vol_<ID>_tail"));
+        assert_eq!(n["name"], json!("n-<ID>"));
+    }
+
+    #[test]
+    fn hex_rewrite_is_confined_to_the_enumerated_id_fields() {
+        // 023 T063: the retired `replace_hex12` rewrote ANY 12-char lowercase-hex run in
+        // ANY string, which could collapse two genuinely different digests to one token
+        // and mask a divergence. It now applies ONLY inside DEVCONTAINER_ID_FIELDS.
+        let raw = r#"{
+            "mounts": [ "source=vol_0123456789ab_tail,target=/d,type=volume" ],
+            "customizations": { "vscode": { "digest": "0123456789ab" } }
+        }"#;
+        let n = config("dyn", raw).unwrap();
+        assert_eq!(
+            n["mounts"][0],
+            json!("source=vol_<ID>_tail,target=/d,type=volume"),
+            "a devcontainer id inside `mounts` is still tokenized"
+        );
+        assert_eq!(
+            n["customizations"]["vscode"]["digest"],
+            json!("0123456789ab"),
+            "a hex value OUTSIDE the enumerated fields is left alone, so two different \
+             digests still compare unequal"
+        );
+
+        // The masking the narrow rule prevents: two DIFFERENT digests outside the id
+        // fields must still diverge.
+        let a = config("a", r#"{ "customizations": { "d": "0123456789ab" } }"#).unwrap();
+        let b = config("b", r#"{ "customizations": { "d": "ffffffffffff" } }"#).unwrap();
+        assert_eq!(diff(&a, &b).len(), 1, "distinct digests must not collapse");
     }
 
     #[test]
@@ -1122,33 +1339,80 @@ mod tests {
 
     #[test]
     fn merged_config_extracts_block() {
-        let raw = r#"{ "configuration": {"name":"x"}, "mergedConfiguration": { "onCreateCommand": "echo hi", "empty": {} } }"#;
+        // `empty` is NOT on the enumerated list, so it survives — only listed keys with
+        // an absent value are elided (023 T062).
+        let raw = r#"{ "configuration": {"name":"x"}, "mergedConfiguration": { "onCreateCommand": "echo hi", "empty": {}, "image": null } }"#;
         let n = merged_config("m", raw).unwrap();
-        assert_eq!(n, json!({ "onCreateCommand": "echo hi" }));
+        assert_eq!(n, json!({ "onCreateCommand": "echo hi", "empty": {} }));
     }
 
     #[test]
-    fn diff_ranks_ref_only_first() {
+    fn diff_order_is_deterministic_and_deacon_only_is_not_last() {
         let deacon = json!({ "name": "x", "extra": 1 });
         let reference = json!({ "name": "y", "dropped": 2 });
         let divs = diff(&deacon, &reference);
-        // ref-only (dropped) ranks before value (name) before deacon-only (extra).
         let kinds: Vec<_> = divs.iter().map(|d| d.kind).collect();
+        // 023 T065 / FR-020: `deacon-only` no longer sorts below `value` as "default
+        // noise" — the order is a deterministic display order, nothing more.
         assert_eq!(
             kinds,
-            vec![DiffKind::RefOnly, DiffKind::Value, DiffKind::DeaconOnly]
+            vec![DiffKind::RefOnly, DiffKind::DeaconOnly, DiffKind::Value]
         );
         assert_eq!(divs[0].path, "dropped");
         let summary = summarize(&divs);
         assert!(summary.contains("ref-only"));
         assert!(summary.contains("deacon drops this"));
+        assert!(
+            summary.contains("the reference does not emit this"),
+            "deacon-only must be reported as a finding, not shrugged off: {summary}"
+        );
     }
 
     #[test]
-    fn diff_identical_after_prune_is_empty() {
-        let a = config("a", r#"{ "name": "x", "n": null }"#).unwrap();
+    fn an_absent_enumerated_optional_no_longer_diverges() {
+        // `image` IS on the enumerated list: absent on one side, omitted on the other →
+        // the same resolved configuration, so no divergence.
+        let a = config("a", r#"{ "name": "x", "image": null }"#).unwrap();
         let b = config("b", r#"{ "name": "x" }"#).unwrap();
         assert!(diff(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn an_absent_key_not_on_the_enumerated_list_still_diverges() {
+        // The whole safety property of retiring `prune` (023 T062): an unlisted key is
+        // COMPARED even when empty, so a newly added property cannot vanish silently.
+        let a = config("a", r#"{ "name": "x", "someNewProperty": null }"#).unwrap();
+        let b = config("b", r#"{ "name": "x" }"#).unwrap();
+        let divs = diff(&a, &b);
+        assert_eq!(divs.len(), 1, "{divs:?}");
+        assert_eq!(divs[0].kind, DiffKind::DeaconOnly);
+        assert_eq!(divs[0].path, "someNewProperty");
+    }
+
+    #[test]
+    fn a_populated_enumerated_optional_is_always_compared() {
+        // The value guard: the rule elides an ABSENT `appPort`, never a populated one.
+        let a = config("a", r#"{ "appPort": [3000] }"#).unwrap();
+        let b = config("b", r#"{ }"#).unwrap();
+        let divs = diff(&a, &b);
+        assert_eq!(divs.len(), 1);
+        assert_eq!(divs[0].path, "appPort");
+    }
+
+    #[test]
+    fn config_file_path_is_no_longer_dropped() {
+        // `prune` removed `configFilePath` unconditionally; it is now a compared value,
+        // so the reference emitting it and deacon not is REPORTED (research D3).
+        let deacon = config("a", r#"{ "name": "x" }"#).unwrap();
+        let reference = config(
+            "b",
+            r#"{ "name": "x", "configFilePath": "/w/.devcontainer/devcontainer.json" }"#,
+        )
+        .unwrap();
+        let divs = diff(&deacon, &reference);
+        assert_eq!(divs.len(), 1, "{divs:?}");
+        assert_eq!(divs[0].kind, DiffKind::RefOnly);
+        assert_eq!(divs[0].path, "configFilePath");
     }
 
     #[test]

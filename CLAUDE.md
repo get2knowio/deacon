@@ -362,49 +362,80 @@ oracle (version in `fixtures/parity-corpus/oracle.json`). The dev-only
 resolution + **exact**-version verification (`oracle`), Docker/fixture
 prerequisite checks (`prereq`), bounded CLI execution with raw stdout/stderr
 capture (`exec`), the **single** normalization/equivalence module (`normalize` —
-`config`/`merged_config`/`container_state`/`diff*`; there is no second copy), the
-waiver + registry loaders (`waiver`, `registry`), run-report fragments
-(`report`), and the `parity-report` aggregator bin. Live parity test binaries in
-`crates/deacon/tests/parity_*.rs` are thin shells over these helpers.
+one rule chain, `config_document_rules`, shared by the legacy `config`/
+`merged_config` entry points AND the declarative `chan-structured-output`
+channel), the waiver + registry loaders (`waiver`, `registry`), run-report
+fragments (`report`), the equivalent-or-stricter ledger (`equivalence`), and the
+`parity-report` / `conformance-snapshot` / `equivalence-report` bins. The parity
+registry MODEL and the corpus discovery rule live one crate down, in
+`deacon-conformance::parity_corpus`, so the hermetic tooling can call the same
+definitions without a dependency cycle; `parity_harness::registry` re-exports them.
 
 **Selection is profile-based, never an env-var opt-in.** The legacy
-`DEACON_PARITY=1` gate and the `cargo test` side-channel are retired. The **ten**
-live binaries (the nine original scenario/corpus binaries plus
-`parity_conformance_runner`, the 022 declarative-runner driver) run **only** under
-`cargo nextest run --profile parity` (whose `default-filter` is an explicit
-`binary(=…)` allow-list of exactly those ten — NOT a `parity_*` glob, which would
-wrongly capture the hermetic guards `parity_harness_faults` /
-`parity_registry_check`). Every other profile
-(`default`/`full`/`ci`/`dev-fast`/`mvp-integration`) excludes the ten, so those
-lanes are truthful by **non-selection**: a green fast/CI run never implies live
-parity ran. There is no silent skip — a missing/mismatched oracle, missing
-Docker, or a normalization failure **fails** the run with a cause-specific
-`HarnessError`. `make test-parity` is a thin alias:
+`DEACON_PARITY=1` gate and the `cargo test` side-channel are retired. The **six**
+surviving live binaries run **only** under `cargo nextest run --profile parity`
+(whose `default-filter` is an explicit `binary(=…)` allow-list — NOT a
+`parity_*` glob, which would wrongly capture the hermetic guards
+`parity_harness_faults` / `parity_registry_check`):
+
+| Surviving live binary | Status |
+|---|---|
+| `parity_conformance_runner` | the authoritative declarative runner — every migrated case runs here |
+| `parity_build` | 6/6 units residual (`res-build-image-discovery`, `res-build-tolerant-outcome`) |
+| `parity_exec` | 3/4 migrated; `res-exec-per-side-argv` blocks deletion |
+| `parity_up_exec` | equivalence-clean, but its legacy case is the ONLY evidence for `bhv-exec-container-id-metadata` |
+| `parity_observable_state` | 7/7 units residual (research D4) |
+| `parity_state_diff` | 8/8 units residual (research D4) |
+
+Four config-corpus carriers plus their shared runner module were **deleted** in
+023 (US7) once the equivalence ledger proved their declarative replacements lose
+nothing. Each is gone, not merely quiescent:
+
+- `parity_corpus_tier1` — deleted; its 24 units became 24 `case-tier1-decl-*`
+- `parity_corpus_merged` — deleted; its 24 units became 24 `case-merged-decl-*`
+- `parity_corpus_errors` — deleted; its 9 units became 11 `case-errors-decl-*`
+  (two rejections needed a second, spec-expectation twin case to pin the DIRECTION
+  the differential alone could not — see the T072 note in that spec's tasks.md)
+- `parity_read_configuration` — deleted; its 2 units became 2 `case-readconfig-decl-*`
+- `corpus_runner` — deleted (the shared module all four called)
+
+Their in-repo fixture trees went with them; `fetch_realworld_corpus.py` survives
+(research D8).
+
+Every other profile (`default`/`full`/`ci`/`dev-fast`/`mvp-integration`) excludes
+the live set, so those lanes are truthful by **non-selection**: a green fast/CI
+run never implies live parity ran. There is no silent skip — a missing/mismatched
+oracle, missing Docker, or a normalization failure **fails** the run with a
+cause-specific `HarnessError`. `make test-parity` is a thin alias:
 `cargo nextest run --profile parity` then `cargo run -p parity-harness --bin
-parity-report`. (The 022 declarative runner extends this crate along the same
-seams — `exec`/`normalize`/`oracle`/`report`/`waiver` — adding `runner`,
-`oracle_type`, `compare`, `evidence`, `observe/`, `workspace`, and the
-`conformance-snapshot` refresh bin; see the "Declarative conformance runner"
-subsection under Conformance Registry.)
+parity-report`.
 
 **Registry + waiver model.** `fixtures/parity-corpus/registry.json` enumerates
-the live binaries, the internal-consistency binaries, and the corpora (with
-`min_cases` floors); the hermetic `parity_registry_check` test enforces
-registry ↔ `tests/*.rs` ↔ `.config/nextest.toml` agreement structurally on every
-PR. Characterized divergences are **waiver records** under
-`conformance/registry/waivers/` (the conformance registry is the authoritative
-pin/waiver location as of 019-conformance-registry; the legacy
-`fixtures/parity-corpus/waivers/` and `errors/*/expect.json` files were retired) —
-each with `id`, `scope`, `expect`, required `rationale`, `added` — loaded by
-`waiver.rs` via the conformance loader. Waivers
+the surviving live binaries and the internal-consistency binaries (`corpora` is
+now empty — the corpora retired with the binaries that drove them); the hermetic
+`parity_registry_check` test enforces registry ↔ `tests/*.rs` ↔
+`.config/nextest.toml` agreement structurally on every PR, and (023 US6) that no
+Makefile / workflow / nextest / registry / docs reference points at a removed
+surface. Characterized divergences are **waiver records** under
+`conformance/registry/waivers/` — each with `id`, `scope`, `expect`, required
+`rationale`, `added` — loaded by `waiver.rs` via the conformance loader. Waivers
 are self-invalidating: one whose difference stops reproducing fails as *stale*.
 Never silently waive a real divergence; fix deacon or characterize with rationale.
 
+**A bin has no `CARGO_BIN_EXE_deacon`.** Any parity *bin* that runs deacon must
+BUILD it and take the path cargo reports (`cargo build -p deacon
+--message-format json`), never look for `target/{release,debug}/deacon` and use
+whichever exists. `equivalence-report` did the latter and silently judged a
+three-day-old release artifact against the current oracle, manufacturing a
+`stricter` verdict out of a binary nobody was testing (023 T115). The mirror
+image is worse: a stale build that happened to agree would have authorized
+deleting real coverage.
+
 **CI:** the `parity / live-certification` lane (`.github/workflows/parity.yml`)
-provisions the pinned oracle and runs the profile + aggregator; it is separate
-from the normal PR lanes. When adding a live binary, register it in
-`registry.json` AND add nextest overrides in ALL profiles (parity selection +
-the exclusions), or `parity_registry_check` fails. See
+provisions the pinned oracle and runs the profile + aggregator + the equivalence
+ledger; it is separate from the normal PR lanes. When adding a live binary,
+register it in `registry.json` AND add nextest overrides in ALL profiles (parity
+selection + the exclusions), or `parity_registry_check` fails. See
 `specs/018-harden-parity-harness/quickstart.md`.
 
 ## Conformance Registry (`conformance/`)
@@ -574,6 +605,61 @@ Rust function (SC-001). The hermetic data/validation/staleness logic lives in
   `certify` surfaces committed-snapshot coverage + `no-reference-for-platform` as
   NON-BLOCKING info (a snapshot is a reviewed artifact, not a release gate); it still blocks
   ONLY on gaps/uncovered/inventory/clause. See `specs/022-conformance-runner/quickstart.md`.
+
+## Migration Tooling (023-migrate-parity-to-conformance)
+
+The migration that moved parity coverage into the declarative record added three command
+groups. All are **dev-only** — `deacon --help` gains nothing from any of them, and
+`parity_registry_check` asserts that on every PR.
+
+**`cargo run -p deacon-conformance -- baseline <generate|check>`** — the frozen
+pre-migration inventory, `conformance/migration/baseline.json`. **Machine-owned**: one
+record per baseline unit, where a unit is *the finest granularity for which the
+pre-migration system reported an independent outcome*. Membership is derived (corpus
+units from the production discovery functions, guard units by scanning each program's
+real `#[test]` functions), so it cannot be gamed; each unit's `assertion` is authored
+once, at freeze, in `crates/conformance/src/baseline.rs` so regeneration reproduces it
+byte-for-byte. **Retained as evidence, never rewritten.** Its V25 drift gate is
+**retired** (T099): once a superseded carrier is deleted the enumeration cannot reproduce
+a pre-migration record by construction, so a permanent gate would forbid ever retiring
+the machinery the migration exists to retire. `baseline check` still reports drift
+informationally.
+
+**`cargo run -p deacon-conformance -- migration <report|check|scaffold>`** — the
+conservation accounting (`contracts/migration-report.md`), written to
+`target/conformance/migration-report.{json,md}` (git-ignored, byte-stable, no timestamps
+or absolute paths). `report`/`check` prove every baseline unit has exactly one
+disposition (`migrated` / `deduplicated` / `residual` / `retired`), that no rejection lost
+its direction or diagnostic, that the behavior denominator did not inflate, and which
+carriers are deletable. `scaffold` emits skeleton mapping/residual records to **stdout**
+with `UNREVIEWED` sentinels the loader rejects — generation never writes a hand-authored
+file. `--ledger <file>` folds in an equivalence ledger; it is **opt-in** because a
+git-ignored artifact must never change a hermetic command's exit code.
+
+**`cargo run -p parity-harness --bin equivalence-report [--carrier <name>]`** — the
+equivalent-or-stricter ledger (`target/parity/equivalence.json`) that gates deleting a
+superseded carrier. It runs each carrier's OWN test binary and reads the `ReportFragment`
+it already writes, so it re-implements no comparison (FR-030), then runs the declarative
+replacement and relates the two **on outcome, never message text**. `equivalent` and
+`stricter` permit deletion; `more-permissive` blocks it; a `stricter` with no
+`characterizedAs` is suppression, not an improvement, and also blocks. Reached via
+`make test-parity-equivalence`.
+
+**Two things the deletion predicate learned the hard way**, both encoded now:
+- A unit maps one-to-one to its replacement case, but a **legacy case may claim several
+  behaviors from one reported outcome** (research D2's inverse defect). Deleting such a
+  carrier silently uncovers the rest, which `validate` only reports as V5 *after* the
+  irreversible act. `deletion_status` therefore blocks any carrier that is the sole
+  evidence for a behavior.
+- Deleting a fixture directory because `fixtureMapping` says a migrated carrier consumed
+  it is not sufficient: the mapping records *which carrier used it*, not *that it was the
+  only user*. `fixtures/config/{basic,with-variables}` had to be restored because a
+  `deacon-core` test also reads them.
+
+**Residual vs gap** (`conformance/RULES.md`): a `res-` record admits missing
+*representation* — the coverage still exists, carried by a program not yet retired — so it
+never blocks certification, but it does block deleting its `blockedCarrier`. A `gap-`
+record admits missing *coverage* and always blocks. Do not conflate them.
 
 ## Parity & Conformance: Vocabulary, Gates, and the Build-Out Loop
 
@@ -780,9 +866,10 @@ rediscover-and-investigate loop:
   (`deacon-extension`, linked from `ext-extends-resolution`), each with a migrated
   `wvr-*` waiver. Conversely, deacon **preserving** unknown fields matches the reference
   (`bhv-readconfig-unknown-field-preserved`, `follow-spec`); silently dropping them WOULD
-  be a bug. The differential runner is `crates/deacon/tests/parity_corpus_errors.rs`
-  (Tier 1c error corpus under `fixtures/parity-corpus/errors/`); waivers load from
-  `conformance/registry/waivers/` via `deacon-conformance`.
+  be a bug. The differential runner (deleted in 023 US7: `parity_corpus_errors`) and its
+  Tier 1c corpus are gone; these are now the declarative `case-errors-decl-*` cases in
+  `conformance/registry/cases.json`, driven by `parity_conformance_runner`. Waivers still
+  load from `conformance/registry/waivers/` via `deacon-conformance`.
 
 ## Output Streams Contract
 
@@ -1001,7 +1088,16 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - strict-JSON + vendored Markdown — vendored prose under (021-normative-clause-inventory)
 - Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json`, `indexmap` (declaration order), `sha2` (already used in `deacon-conformance` for `hash8`/fingerprints → case/fixture hashing), `tokio` (bounded async exec + streamed capture, already in `parity-harness`), `thiserror` (`HarnessError`/domain errors), `tracing`, `toml` (nextest-profile drift check, already a `parity-harness` dep), `tempfile` (isolated external workspaces, dev-dep); no new runtime crates (022-conformance-runner)
 - strict-JSON, version-controlled — extend `conformance/registry/cases.json` (declarative case shape) + `channels.json` (new channels); new committed evidence tree `conformance/snapshots/<os>-<arch>/<case-id>/{provenance,raw,normalized}.json` (atomic temp-file + `fs::rename` writes) (022-conformance-runner)
+- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json` (strict-JSON records), `indexmap` (declaration order), `sha2` (unit/case/fixture hashing), `tokio` (bounded async exec in the harness), `thiserror` (domain errors), `tracing`, `toml` (nextest-profile drift check), `tempfile` (dev-dep, isolated workspaces). **No new crates, no new dependencies** (research D6). (023-migrate-parity-to-conformance)
+- strict-JSON, version-controlled. New: `conformance/migration/baseline.json` (frozen inventory), `conformance/migration/mapping.json` (unit → case/residual), `conformance/registry/residuals.json` (residual records). Extended: `conformance/registry/cases.json`. Generated (git-ignored): `target/conformance/migration-report.{json,md}`, `target/parity/equivalence.json`. All writes atomic (temp file + `fs::rename`). (023-migrate-parity-to-conformance)
 
 ## Recent Changes
+- 023-migrate-parity-to-conformance: Migrated the hand-written parity corpora into declarative
+  conformance cases under a conservation constraint. Froze `conformance/migration/baseline.json`,
+  added the `baseline` / `migration` command groups and the `equivalence-report` bin, added
+  residual records (`res-`) and violation classes V21–V24 (retiring V25), retired the blanket
+  `prune` normalization for named scoped rules (`NORMALIZER_VERSION` 2 → 3), and deleted four
+  superseded live carriers plus their fixtures once the equivalence ledger cleared them. See the
+  "Migration Tooling" section.
 - 018-harden-parity-harness: Added the dev-only `crates/parity-harness/` crate (oracle resolution + exact-version verify, bounded exec with raw capture, the single `normalize` module, waiver/registry loaders, report fragments + `parity-report` aggregator bin); moved live parity onto the dedicated `[profile.parity]` nextest profile; retired the `DEACON_PARITY=1` gate and the three Python corpus runners; added the `parity / live-certification` CI lane. See the "Parity Test Harness" section.
 - 009-complete-feature-support: Added Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing
