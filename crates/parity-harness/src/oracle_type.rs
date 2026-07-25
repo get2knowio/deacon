@@ -51,9 +51,19 @@ async fn spec_expectation(
     cfg: &RunConfig<'_>,
 ) -> Result<Evaluation, HarnessError> {
     let (ctx, _ws) = runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
-    let mut channels = Vec::with_capacity(case.expected.len());
+    // Capture every declared channel first, so the all-unobserved fault is diagnosed
+    // BEFORE any assertion is evaluated against evidence that does not exist (D-2).
+    let mut normalized = Vec::with_capacity(case.expected.len());
     for exp in &case.expected {
-        let normalized = runner::capture_normalized(case, exp, &ctx)?;
+        normalized.push(runner::capture_normalized(case, exp, &ctx)?);
+    }
+    require_some_observation(
+        case,
+        normalized.iter().map(|n| (n.channel.as_str(), n.present)),
+    )?;
+
+    let mut channels = Vec::with_capacity(case.expected.len());
+    for (exp, normalized) in case.expected.iter().zip(&normalized) {
         let assertion =
             exp.assertion
                 .as_ref()
@@ -64,7 +74,7 @@ async fn spec_expectation(
                         case.id, exp.channel
                     ),
                 })?;
-        let mut verdict = verdict_spec_expectation(&exp.channel, &normalized, assertion)?;
+        let mut verdict = verdict_spec_expectation(&exp.channel, normalized, assertion)?;
         runner::attach_failure_phase(&mut verdict, case, exp, &ctx);
         channels.push(verdict);
     }
@@ -89,21 +99,59 @@ async fn live_differential(
         ),
     })?;
 
-    let (deacon_ctx, _deacon_ws) =
+    // -- deacon's side, captured and then RELEASED before the reference side runs -----
+    //
+    // The two sides run SEQUENTIALLY, and deacon's container/network/volumes are reclaimed
+    // as soon as its evidence is in hand. Holding them across the reference run doubles the
+    // peak Docker footprint and makes any case that publishes a FIXED host port collide
+    // with itself (024 Phase 3, D-3).
+    //
+    // INVARIANT that makes this reordering correct: every Docker channel observer reads
+    // only the PRE-FETCHED `ctx.container_inspect` (the runner fetches it inside its op
+    // loop), never a live container; the filesystem observers read the workspace tree,
+    // which is why the capture below happens BEFORE cleanup. No observer re-probes docker,
+    // so nothing captured after this point depends on deacon's resources still existing.
+    let (deacon_ctx, deacon_ws) =
         runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
+    let mut deacon_norm = Vec::with_capacity(case.expected.len());
+    for exp in &case.expected {
+        deacon_norm.push(runner::capture_normalized(case, exp, &deacon_ctx)?);
+    }
+    if let Some(mut ws) = deacon_ws {
+        // Idempotent: the guard's `Drop` (running as `ws` falls out of scope here) will not
+        // re-reclaim, and the temp workspace directory is removed with it.
+        ws.cleanup_now();
+    }
+
+    // -- the reference side ----------------------------------------------------------
     let (oracle_ctx, _oracle_ws) =
         runner::execute_ops(Side::Oracle, &oracle.path, case, cfg).await?;
+    let mut oracle_norm = Vec::with_capacity(case.expected.len());
+    for exp in &case.expected {
+        oracle_norm.push(runner::capture_normalized(case, exp, &oracle_ctx)?);
+    }
+
+    // A channel neither side observed is not evidence of agreement (D-2). Individual
+    // channels keep FR-018's not-captured-matches-not-captured; only a case where NOTHING
+    // was observed is rejected — it proved nothing.
+    require_some_observation(
+        case,
+        deacon_norm
+            .iter()
+            .zip(&oracle_norm)
+            .map(|(d, o)| (d.channel.as_str(), d.present || o.present)),
+    )?;
 
     let tolerances = Tolerances::new(&case.allowed_differences, &case.behaviors);
     let mut consumed = std::collections::HashSet::new();
     let mut channels = Vec::with_capacity(case.expected.len());
-    for exp in &case.expected {
-        let deacon_norm = runner::capture_normalized(case, exp, &deacon_ctx)?;
-        let oracle_norm = runner::capture_normalized(case, exp, &oracle_ctx)?;
+    for ((exp, deacon_norm), oracle_norm) in
+        case.expected.iter().zip(&deacon_norm).zip(&oracle_norm)
+    {
         let mut verdict = verdict_differential(
             &exp.channel,
-            &deacon_norm,
-            &oracle_norm,
+            deacon_norm,
+            oracle_norm,
             &tolerances,
             &mut consumed,
         );
@@ -111,6 +159,39 @@ async fn live_differential(
         channels.push(verdict);
     }
     Ok((channels, tolerances.stale(&consumed)))
+}
+
+/// Fail loud when NOT ONE declared channel was observed (024 Phase 3, D-2).
+///
+/// `channels` yields `(channel-id, observed)` for each declared channel — for a
+/// differential, `observed` is true when EITHER side captured it. A case whose every
+/// channel came back `present:false` observed nothing, and a comparison of two absences is
+/// not agreement: every Docker observer reports `not-captured` when there is no container
+/// inspect, so a daemon fault would otherwise report a green pass. Individual channels
+/// keep the FR-018 semantics (not-captured matches not-captured); only the all-empty case
+/// is rejected. A case declaring NO channel is left to the other validators (V16).
+fn require_some_observation<'a>(
+    case: &TestCase,
+    channels: impl IntoIterator<Item = (&'a str, bool)>,
+) -> Result<(), HarnessError> {
+    let mut unobserved: Vec<&str> = Vec::new();
+    for (channel, observed) in channels {
+        if observed {
+            return Ok(());
+        }
+        unobserved.push(channel);
+    }
+    if unobserved.is_empty() {
+        return Ok(());
+    }
+    Err(HarnessError::ObservationFault {
+        case: case.id.clone(),
+        cause: format!(
+            "every declared channel came back not-captured ({}); a comparison of two \
+             absences is not agreement",
+            unobserved.join(", ")
+        ),
+    })
 }
 
 /// snapshot: resolve the committed snapshot for the current `os-arch`, gate on

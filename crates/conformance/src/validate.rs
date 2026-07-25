@@ -64,9 +64,9 @@ use crate::mapping::{CaseFacts, MechanismForm};
 use crate::model::{
     BehaviorUnit, CONSUMER_SUBCOMMANDS, CaseKind, CertificationProfile, Classification,
     ClauseClassification, ClauseInventory, ClauseUnit, Condition, ConstraintInventory,
-    ConstraintUnit, Decision, Disposition, DocumentScope, FILESYSTEM_CHANNELS, OracleType,
-    RecordType, ReferenceStatus, RevisionKind, SpecManifest, SpecStatus, Strength, Testability,
-    parse_id,
+    ConstraintUnit, Decision, Disposition, DocumentScope, FILESYSTEM_CHANNELS, OBSERVED_CHANNELS,
+    OracleType, RecordType, ReferenceStatus, RevisionKind, SpecManifest, SpecStatus, Strength,
+    Testability, parse_id,
 };
 use crate::prose::Document;
 use crate::prose::strength::{has_family, hides_mandatory_keyword};
@@ -2279,6 +2279,7 @@ impl<'a> Checker<'a> {
             // the spec-expectation assertion rule, which we can skip safely.
             self.check_case_subcommands(case);
             self.check_case_fs_allowlist(case);
+            self.check_case_observable_channels(case);
             return;
         };
 
@@ -2303,6 +2304,29 @@ impl<'a> Checker<'a> {
         }
 
         self.check_case_fs_allowlist(case);
+        self.check_case_observable_channels(case);
+    }
+
+    /// Every declared `expected[].channel` must be a channel the runner can actually
+    /// OBSERVE (024 Phase 3, D-2). Declaring an unobservable channel used to validate
+    /// cleanly and then fail at RUN time — the registry claimed coverage nothing could
+    /// ever produce. [`OBSERVED_CHANNELS`] is kept in lockstep with the harness's
+    /// `observer_for` by a `parity-harness` test.
+    fn check_case_observable_channels(&mut self, case: &crate::model::TestCase) {
+        for exp in &case.expected {
+            if !OBSERVED_CHANNELS.contains(&exp.channel.as_str()) {
+                self.push(
+                    "V16",
+                    &case.id,
+                    format!(
+                        "expected channel {:?} has no observer; a declarative case may only \
+                         declare an observable channel ({})",
+                        exp.channel,
+                        OBSERVED_CHANNELS.join(" | ")
+                    ),
+                );
+            }
+        }
     }
 
     /// Every `operations[].subcommand` must be in the consumer surface (Principle II).
@@ -3193,6 +3217,27 @@ mod tests {
             out.iter()
                 .any(|v| v.code == "V16" && v.record == "case-fs-stray-allowlist"),
             "an fsAllowlist with no filesystem expectation must be V16, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn v16_rejects_a_channel_with_no_observer() {
+        // `chan-container-state` is a legacy channel with no declarative observer: a case
+        // declaring it used to VALIDATE and then fail at run time (024 Phase 3, D-2).
+        let mut reg = Registry::default();
+        let mut case = declarative_case("case-unobservable-channel");
+        case.expected.push(crate::model::ExpectedObservable {
+            channel: crate::model::CHAN_CONTAINER_STATE.to_string(),
+            operation: Some("op-1".to_string()),
+            assertion: Some(serde_json::json!({ "jsonEquals": {} })),
+        });
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            out.iter().any(|v| v.code == "V16"
+                && v.record == "case-unobservable-channel"
+                && v.message.contains("no observer")),
+            "a case declaring a channel with no observer must be V16, got {out:?}"
         );
     }
 

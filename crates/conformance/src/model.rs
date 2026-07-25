@@ -520,6 +520,30 @@ pub const CHAN_INJECTED_PROCESS: &str = "chan-injected-process";
 /// Lifecycle ordering, first-create vs restart, resume, cleanup transitions.
 pub const CHAN_TEMPORAL: &str = "chan-temporal";
 
+/// The channel ids the declarative runner can actually OBSERVE — i.e. the ids for which
+/// `parity_harness::observe::observer_for` returns an observer (024 Phase 3, D-2).
+///
+/// A declarative case may only declare a channel from this set (**V16**): a case naming a
+/// channel with no observer used to validate cleanly and then fail at RUN time, which is
+/// the worst place to learn it — the registry says the behavior is covered while nothing
+/// can ever observe it. `chan-container-state` is deliberately absent: it is retained for
+/// LEGACY (binary-backed) cases and has no declarative observer yet.
+///
+/// This constant and `observer_for` are kept in lockstep by a `parity-harness` test
+/// (`observation_faults.rs`), the same discipline the normalization-rule registry uses.
+pub const OBSERVED_CHANNELS: &[&str] = &[
+    CHAN_EXIT_CODE,
+    CHAN_STDOUT,
+    CHAN_STDERR,
+    CHAN_STRUCTURED_OUTPUT,
+    CHAN_FILESYSTEM,
+    CHAN_FILE_CONTENT,
+    CHAN_IMAGE,
+    CHAN_PROCESS_GRAPH,
+    CHAN_INJECTED_PROCESS,
+    CHAN_TEMPORAL,
+];
+
 /// Which oracle a declarative [`TestCase`] is evaluated against (data-model §1,
 /// research D8). The four are semantically distinct verdicts; re-pointing a case at a
 /// different target changes only this field (FR-007).

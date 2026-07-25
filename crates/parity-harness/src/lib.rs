@@ -205,6 +205,18 @@ pub enum HarnessError {
     )]
     SnapshotStale { field: String },
 
+    /// A case ran but its declared channels observed NOTHING — the vacuity fault (024
+    /// Phase 3, D-2). Either every declared channel came back `present:false`, or a
+    /// successful Docker operation produced no discoverable container. Both mean the
+    /// OBSERVATION is broken, not that the two sides agree.
+    #[error(
+        "conformance case `{case}` observed nothing: {cause}. Remedy: fix the observation \
+         (a Docker/daemon fault, a container that was never discovered, or a mis-declared \
+         channel) — a case that observed nothing has proven nothing and must never pass \
+         vacuously."
+    )]
+    ObservationFault { case: String, cause: String },
+
     /// No committed snapshot exists for the current platform — a coverage gap, distinct
     /// from stale and from a silent skip (FR-016a).
     #[error(

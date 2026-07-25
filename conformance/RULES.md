@@ -59,7 +59,7 @@ checkable at a glance rather than by reading every section.
 | **V9** | an expected outcome referencing an undeclared observable channel | `validate.rs` |
 | **V10** | a case whose context has an empty intersection with a linked behavior's applicability | `validate.rs` |
 | **V11 – V15** | inventory join: stale / unclassified / malformed / provenance / clause↔source integrity | [Inventory join](#inventory-join-v11--v15--constraints-and-clauses) |
-| **V16** | declarative-case well-formedness (shape, `oracleType`, consumer subcommand, assertions, `fsAllowlist`) | `validate.rs` |
+| **V16** | declarative-case well-formedness (shape, `oracleType`, consumer subcommand, assertions, `fsAllowlist`, observable channel) | `validate.rs` |
 | **V17** | committed-snapshot integrity (orphan or malformed provenance) | `validate.rs` |
 | **V18** | a Docker case referencing a fixture with an unpinned image | `validate.rs` |
 | **V19** | an allowed-difference whose backing waiver/divergence id does not resolve | `validate.rs` |
@@ -186,6 +186,15 @@ The consumer surface stays exactly `up`/`down`/`exec`/`build`/`read-configuratio
 only consumer commands, never authoring ones. Do NOT add a `deacon conformance` /
 `deacon snapshot` command — that would drag test tooling into the shipped binary and
 violate the consumer-only scope.
+
+A declarative case may also only declare an **observable** channel — one the runner has an
+observer for (`model::OBSERVED_CHANNELS`, V16). This is stricter than V9, which only
+requires the channel to be *declared* in `channels.json`: a channel can be declared and
+still have no observer (`chan-container-state` is, until its declarative observer lands),
+in which case the case would validate cleanly and then fail at RUN time while the registry
+claimed the behavior was covered. `OBSERVED_CHANNELS` is held in lockstep with the
+harness's `observe::observer_for` by a `parity-harness` test, the same discipline the
+normalization-rule registry uses.
 
 ## Inventory join (V11 – V15) — constraints AND clauses
 

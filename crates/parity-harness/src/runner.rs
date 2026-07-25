@@ -172,7 +172,10 @@ pub(crate) async fn execute_ops(
             let this_ids =
                 tokio::task::spawn_blocking(move || containers_for_workspace(&ws_for_lookup))
                     .await
-                    .map_err(blocking_join_err)?;
+                    .map_err(blocking_join_err)??;
+            // The op SUCCEEDED, so a container must exist: finding none means the
+            // observation is broken, not that there is nothing to see (D-2).
+            require_observed_container(&case.id, &op.id, &this_ids, &workspace)?;
             let this_id = this_ids.first().cloned();
             let inspect = match this_id.clone() {
                 Some(id) => {
@@ -345,26 +348,49 @@ fn image_digest(reference: &str) -> Result<Option<String>, ()> {
     Ok(if s.is_empty() { None } else { Some(s) })
 }
 
+/// The container-runtime CLI the runner probes with.
+const DOCKER_BIN: &str = "docker";
+
 /// Find EVERY container deacon created for `workspace` via its `devcontainer.local_folder`
 /// label (unique per isolated workspace, so collision-safe), sorted+deduped for a
 /// deterministic result. Returning the full set — not just the first match — lets the
 /// metamorphic oracle detect a non-idempotent op that left a second container behind
-/// (finding #3). Empty when none is found or `docker` cannot run.
-fn containers_for_workspace(workspace: &Path) -> Vec<String> {
+/// (finding #3).
+///
+/// A `docker ps` FAULT (unspawnable CLI, non-zero exit) is a cause-specific
+/// [`HarnessError::DockerUnavailable`], never an empty vec (024 Phase 3, D-2): swallowing
+/// it turned a daemon hiccup into `not-captured` on every Docker channel, which the
+/// differential then read as agreement — a silent green pass (constitution IV). An empty
+/// `Ok` means the probe RAN and matched nothing, which is a different claim entirely.
+///
+/// BLOCKING (shells out to `docker`); async callers offload it via `spawn_blocking`.
+fn containers_for_workspace(workspace: &Path) -> Result<Vec<String>, HarnessError> {
+    containers_for_workspace_with(DOCKER_BIN, workspace)
+}
+
+/// [`containers_for_workspace`] with an injectable container-CLI program — the seam the
+/// hermetic fault tests drive (a stub that cannot spawn / exits non-zero / prints ids), so
+/// the fault path is demonstrated without a Docker daemon or process-wide `PATH` mutation.
+pub fn containers_for_workspace_with(
+    docker: &str,
+    workspace: &Path,
+) -> Result<Vec<String>, HarnessError> {
     let ws = workspace.to_string_lossy();
-    let Ok(output) = std::process::Command::new("docker")
-        .args([
-            "ps",
-            "-aq",
-            "--filter",
-            &format!("label=devcontainer.local_folder={ws}"),
-        ])
+    let filter = format!("label=devcontainer.local_folder={ws}");
+    let output = std::process::Command::new(docker)
+        .args(["ps", "-aq", "--filter", &filter])
         .output()
-    else {
-        return Vec::new();
-    };
+        .map_err(|e| HarnessError::DockerUnavailable {
+            cause: format!("could not run `docker ps -aq --filter {filter}`: {e}"),
+        })?;
     if !output.status.success() {
-        return Vec::new();
+        return Err(HarnessError::DockerUnavailable {
+            cause: format!(
+                "`docker ps -aq --filter {filter}` exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        });
     }
     let mut ids: Vec<String> = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -374,7 +400,31 @@ fn containers_for_workspace(workspace: &Path) -> Vec<String> {
         .collect();
     ids.sort();
     ids.dedup();
-    ids
+    Ok(ids)
+}
+
+/// A SUCCESSFUL Docker operation must leave a discoverable container. Finding none is an
+/// observation fault, not an absence of state (024 Phase 3, D-2): the container the op
+/// certainly created was not discovered by its workspace label, so every Docker channel
+/// would report `not-captured` and the differential would vacuously agree. Fail loud.
+pub fn require_observed_container(
+    case_id: &str,
+    op_id: &str,
+    ids: &[String],
+    workspace: &Path,
+) -> Result<(), HarnessError> {
+    if !ids.is_empty() {
+        return Ok(());
+    }
+    Err(HarnessError::ObservationFault {
+        case: case_id.to_string(),
+        cause: format!(
+            "operation {op_id:?} succeeded but no container carries the label \
+             `devcontainer.local_folder={}` — the container it created was not discovered, \
+             so every Docker channel would report not-captured",
+            workspace.to_string_lossy()
+        ),
+    })
 }
 
 /// Which operation produced an expected observable: the explicit `operation`, else the
