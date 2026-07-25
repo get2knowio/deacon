@@ -7,7 +7,9 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "errors/bad-config-path",
       "summary": "With an explicit --config pointing at a nonexistent file, the reference CLI rejects (no silent discovery fallback).",
-      "behaviors": ["bhv-readconfig-bad-config-path"]
+      "behaviors": [
+        "bhv-readconfig-bad-config-path"
+      ]
     },
     {
       "id": "src-obs-compose-project-name",
@@ -15,7 +17,19 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "com.docker.compose.project label",
       "summary": "The reference CLI derives the compose project name as <folder>_devcontainer verbatim, which can be invalid (e.g. leading separators) or collide with deacon's project.",
-      "behaviors": ["bhv-compose-project-name-robust"]
+      "behaviors": [
+        "bhv-compose-project-name-robust"
+      ]
+    },
+    {
+      "id": "src-obs-container-identity-labels",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "up/container-labels",
+      "summary": "On the same fixture (fx-up-basic, image alpine:3.19), `docker inspect .Config.Labels` shows the reference CLI setting exactly three labels \u2014 devcontainer.metadata, devcontainer.local_folder, devcontainer.config_file \u2014 while deacon sets those three plus five it alone defines: devcontainer.configHash, devcontainer.config_name, devcontainer.name, devcontainer.source (value \"deacon\"), devcontainer.workspaceHash. devcontainer.metadata is byte-identical between the two; local_folder and config_file differ only by each side's own workspace path.",
+      "behaviors": [
+        "bhv-container-identity-labels"
+      ]
     },
     {
       "id": "src-obs-duplicate-keys",
@@ -23,7 +37,9 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "errors/duplicate-keys",
       "summary": "The reference CLI accepts an object with a duplicate top-level key and applies last-wins.",
-      "behaviors": ["bhv-readconfig-duplicate-keys"]
+      "behaviors": [
+        "bhv-readconfig-duplicate-keys"
+      ]
     },
     {
       "id": "src-obs-extends-child",
@@ -31,7 +47,9 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "tier1/extends-child (merged)",
       "summary": "The reference CLI v0.87.0 does not resolve extends; --include-merged-configuration errors with 'No image information specified'.",
-      "behaviors": ["bhv-readconfig-extends-merged"]
+      "behaviors": [
+        "bhv-readconfig-extends-merged"
+      ]
     },
     {
       "id": "src-obs-extends-cycle",
@@ -39,7 +57,9 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "errors/extends-cycle",
       "summary": "The reference CLI does not resolve extends at read-configuration, so a cyclic extends chain is accepted (echoed literally).",
-      "behaviors": ["bhv-readconfig-extends-cycle-rejected"]
+      "behaviors": [
+        "bhv-readconfig-extends-cycle-rejected"
+      ]
     },
     {
       "id": "src-obs-extends-missing",
@@ -47,7 +67,9 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "errors/extends-missing",
       "summary": "The reference CLI does not resolve extends at read-configuration, so an extends pointing at a nonexistent file is accepted (echoed literally).",
-      "behaviors": ["bhv-readconfig-extends-missing-rejected"]
+      "behaviors": [
+        "bhv-readconfig-extends-missing-rejected"
+      ]
     },
     {
       "id": "src-obs-malformed-json",
@@ -55,7 +77,9 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "errors/malformed-json",
       "summary": "The reference CLI recovers from a hard JSONC syntax error by dropping the broken property and accepting the file.",
-      "behaviors": ["bhv-readconfig-malformed-jsonc-rejected"]
+      "behaviors": [
+        "bhv-readconfig-malformed-jsonc-rejected"
+      ]
     },
     {
       "id": "src-obs-missing-config",
@@ -63,7 +87,9 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "errors/missing-config",
       "summary": "With no devcontainer configuration present at all, the reference CLI rejects rather than inventing an empty config.",
-      "behaviors": ["bhv-readconfig-missing-config"]
+      "behaviors": [
+        "bhv-readconfig-missing-config"
+      ]
     },
     {
       "id": "src-obs-unknown-field-preserved",
@@ -71,7 +97,9 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "errors/unknown-field-preserved",
       "summary": "The reference CLI accepts and preserves unknown / forward-compatible top-level fields verbatim in read-configuration output.",
-      "behaviors": ["bhv-readconfig-unknown-field-preserved"]
+      "behaviors": [
+        "bhv-readconfig-unknown-field-preserved"
+      ]
     },
     {
       "id": "src-obs-wrong-type-features",
@@ -79,7 +107,9 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "errors/wrong-type-features",
       "summary": "The reference CLI keeps a bare-string `features` value as raw JSON and accepts it.",
-      "behaviors": ["bhv-readconfig-wrong-type-features-rejected"]
+      "behaviors": [
+        "bhv-readconfig-wrong-type-features-rejected"
+      ]
     },
     {
       "id": "src-obs-wrong-type-forwardports",
@@ -87,7 +117,9 @@
       "revision": "rev-oracle-0-87-0",
       "locator": "errors/wrong-type-forwardports",
       "summary": "The reference CLI keeps a bare-string `forwardPorts` value as raw JSON and accepts it.",
-      "behaviors": ["bhv-readconfig-wrong-type-forwardports-rejected"]
+      "behaviors": [
+        "bhv-readconfig-wrong-type-forwardports-rejected"
+      ]
     }
   ]
 }

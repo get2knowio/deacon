@@ -58,7 +58,7 @@
         "parity_exec::env-propagation"
       ],
       "blockedCarrier": "parity_exec",
-      "missingCapability": "a declarative case for `parity_exec::env-propagation`. NOTE: the previously recorded need for per-side argument vectors was DISPROVEN in 024 planning — deacon's `exec` declares `--remote-env` as the primary flag with `--env` as a legacy alias, so the single shared argv `--remote-env FOO=BAR` runs on both CLIs and no runner capability is missing. Only the case itself is outstanding.",
+      "missingCapability": "a declarative case for `parity_exec::env-propagation`. NOTE: the previously recorded need for per-side argument vectors was DISPROVEN in 024 planning \u2014 deacon's `exec` declares `--remote-env` as the primary flag with `--env` as a legacy alias, so the single shared argv `--remote-env FOO=BAR` runs on both CLIs and no runner capability is missing. Only the case itself is outstanding.",
       "followUp": "specs/024-drain-parity-residuals/tasks.md#P6",
       "behaviors": [
         "bhv-exec-command-parity"
@@ -86,7 +86,7 @@
         "parity_harness_faults::q_stale_snapshot_is_reported_naming_the_drifted_field"
       ],
       "blockedCarrier": "parity_harness_faults",
-      "missingCapability": "fault injection against the harness itself: these units assert how the COMPARISON MACHINERY reports a missing oracle, a version mismatch, a crash, a timeout, a malformed output, a waived difference, a stale waiver, each difference class (ref-only / deacon-only / value / accept-vs-reject with direction) and each declarative outcome (allowed-difference / no-reference-for-platform / stale) — they observe the harness, not a devcontainer, so they have no observable channel and no oracle to compare against",
+      "missingCapability": "fault injection against the harness itself: these units assert how the COMPARISON MACHINERY reports a missing oracle, a version mismatch, a crash, a timeout, a malformed output, a waived difference, a stale waiver, each difference class (ref-only / deacon-only / value / accept-vs-reject with direction) and each declarative outcome (allowed-difference / no-reference-for-platform / stale) \u2014 they observe the harness, not a devcontainer, so they have no observable channel and no oracle to compare against",
       "disposition": "permanent",
       "outOfScopeRationale": "These units observe the COMPARISON MACHINERY, not a devcontainer: they assert how the harness reports a missing oracle, a crash, a timeout, a stale waiver and each difference class. A declarative case compares deacon to a reference across an observable channel, so a self-test of the comparator has no oracle and no observable channel to name. Out of scope structurally, not pending a feature.",
       "behaviors": []
@@ -102,9 +102,9 @@
         "parity_registry_check::waivers_live_in_conformance_registry_not_legacy_locations"
       ],
       "blockedCarrier": "parity_registry_check",
-      "missingCapability": "structural self-checks of the repository's own test wiring: these units assert registry-to-test-file agreement, nextest profile selection, corpus minimums and the no-silent-skip idiom scan — repository structure, not consumer behavior, so no declarative case can express them",
+      "missingCapability": "structural self-checks of the repository's own test wiring: these units assert registry-to-test-file agreement, nextest profile selection, corpus minimums and the no-silent-skip idiom scan \u2014 repository structure, not consumer behavior, so no declarative case can express them",
       "disposition": "permanent",
-      "outOfScopeRationale": "These units assert repository structure — registry-to-test-file agreement, nextest profile selection, corpus minimums, the no-silent-skip idiom scan. That is a property of the repository, not consumer behavior against the spec, so no observable channel and no reference exist. Out of scope structurally, not pending a feature.",
+      "outOfScopeRationale": "These units assert repository structure \u2014 registry-to-test-file agreement, nextest profile selection, corpus minimums, the no-silent-skip idiom scan. That is a property of the repository, not consumer behavior against the spec, so no observable channel and no reference exist. Out of scope structurally, not pending a feature.",
       "behaviors": []
     },
     {
@@ -127,7 +127,7 @@
       "blockedCarrier": "parity_observable_state",
       "missingCapability": "reference-CLI feature-authoring interop: the unit feeds a deacon-generated lockfile to the reference's `features resolve-dependencies`, and the declarative operation surface is deliberately restricted to the consumer subcommands (Principle II)",
       "disposition": "permanent",
-      "outOfScopeRationale": "Constitution II: feature authoring is permanently out of scope for deacon, and this unit needs deacon `upgrade` plus the reference's `features resolve-dependencies` — both outside the consumer subcommand surface a declarative operation may name. The principle forbids it, so no capability will ever unblock it.",
+      "outOfScopeRationale": "Constitution II: feature authoring is permanently out of scope for deacon, and this unit needs deacon `upgrade` plus the reference's `features resolve-dependencies` \u2014 both outside the consumer subcommand surface a declarative operation may name. The principle forbids it, so no capability will ever unblock it.",
       "behaviors": [
         "bhv-state-container-parity"
       ]
@@ -150,7 +150,6 @@
     {
       "id": "res-observable-state-runtime-vs-merged",
       "units": [
-        "parity_observable_state::container-and-image-labels",
         "parity_observable_state::merged-config-vs-runtime"
       ],
       "blockedCarrier": "parity_observable_state",
@@ -199,7 +198,7 @@
       ],
       "missingCapability": "vendored fixtures for the pinned third-party workspaces: the manifest fetches 33 public workspace snapshots over the network on demand, and vendoring third-party content into this repository is deliberately out of scope, so no case can materialize them",
       "disposition": "permanent",
-      "outOfScopeRationale": "Vendoring third-party content into this repository is out of scope by decision (research D8): the manifest names 33 public workspace snapshots fetched over the network on demand, and a declarative fixture must be committed, content-hashed input. These entries are inventoried as a recorded coverage SOURCE, never executed, so there is no capability to add — only a decision already taken.",
+      "outOfScopeRationale": "Vendoring third-party content into this repository is out of scope by decision (research D8): the manifest names 33 public workspace snapshots fetched over the network on demand, and a declarative fixture must be committed, content-hashed input. These entries are inventoried as a recorded coverage SOURCE, never executed, so there is no capability to add \u2014 only a decision already taken.",
       "behaviors": []
     },
     {

@@ -16,7 +16,8 @@
 //! network, no oracle.
 
 use deacon_conformance::conservation::{
-    PRE_MIGRATION_BEHAVIORS, denominator_counts, registry_variant_groups,
+    POST_BRANCH_BEHAVIORS, PRE_MIGRATION_BEHAVIORS, denominator_counts, registry_variant_groups,
+    stale_post_branch_behaviors,
 };
 use deacon_conformance::default_registry_dir;
 use deacon_conformance::load::Registry;
@@ -45,14 +46,40 @@ fn the_behavior_denominator_did_not_grow() {
     assert!(
         !counts.denominator_inflated(),
         "the migration must not inflate the behavior denominator: {} behaviors now, \
-         {PRE_MIGRATION_BEHAVIORS} before (SC-005). A variant authored as a new behavior \
-         is the usual cause.",
-        counts.behaviors
+         {PRE_MIGRATION_BEHAVIORS} before (SC-005), plus {} explicitly accounted in \
+         POST_BRANCH_BEHAVIORS. A variant authored as a new behavior is the usual cause.",
+        counts.behaviors,
+        POST_BRANCH_BEHAVIORS.len()
     );
     assert_eq!(
-        counts.behaviors, PRE_MIGRATION_BEHAVIORS,
-        "the behavior count is expected to hold at the frozen pre-migration total"
+        counts.behaviors,
+        PRE_MIGRATION_BEHAVIORS + POST_BRANCH_BEHAVIORS.len(),
+        "the behavior count holds at the frozen pre-migration total plus the behaviors \
+         explicitly accounted for as newly OBSERVED (not re-described) facts"
     );
+}
+
+/// Every accounted post-branch behavior must still exist, and must carry a reason.
+///
+/// An allowance for a behavior since deleted or renamed raises the ceiling by one
+/// permanently — the "number the claimant can move" the frozen denominator exists to
+/// prevent, re-entering through the exception list. Same self-invalidating discipline as
+/// a waiver whose difference stopped reproducing.
+#[test]
+fn the_post_branch_allowance_cannot_go_stale() {
+    let registry = registry();
+    assert!(
+        stale_post_branch_behaviors(&registry).is_empty(),
+        "POST_BRANCH_BEHAVIORS names behaviors that no longer resolve: {:?}",
+        stale_post_branch_behaviors(&registry)
+    );
+    for (id, reason) in POST_BRANCH_BEHAVIORS {
+        assert!(
+            reason.split_whitespace().count() >= 20,
+            "{id} must say why it is not a variant of an existing behavior, in enough \
+             detail to review; got {reason:?}"
+        );
+    }
 }
 
 #[test]
@@ -71,8 +98,9 @@ fn the_case_count_rose_while_the_behavior_count_held() {
         counts.legacy_cases
     );
     assert!(
-        counts.behaviors <= PRE_MIGRATION_BEHAVIORS,
-        "…while the behavior count holds or falls"
+        counts.behaviors <= PRE_MIGRATION_BEHAVIORS + POST_BRANCH_BEHAVIORS.len(),
+        "…while the behavior count holds, falls, or grows only by an explicitly \
+         accounted post-branch behavior"
     );
 }
 
@@ -146,10 +174,13 @@ fn a_variant_wrongly_authored_as_a_new_behavior_is_reported() {
     let mut counts = denominator_counts(&registry());
     assert!(!counts.denominator_inflated());
 
-    counts.behaviors += 1; // as if one variant had been given its own behavior
+    // As if one variant had been given its own behavior — one PAST the accounted
+    // allowance, so this stays a real inflation test as the allowance list grows.
+    counts.behaviors = PRE_MIGRATION_BEHAVIORS + POST_BRANCH_BEHAVIORS.len() + 1;
     assert!(
         counts.denominator_inflated(),
-        "one extra behavior beyond the frozen total must be reported as inflation"
+        "one extra behavior beyond the frozen total plus the accounted allowance must be \
+         reported as inflation"
     );
 }
 

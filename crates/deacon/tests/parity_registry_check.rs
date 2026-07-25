@@ -299,7 +299,16 @@ fn waivers_live_in_conformance_registry_not_legacy_locations() {
             }
         }
     }
+    // Exceptions authored AFTER the branch point have no pre-migration form to preserve,
+    // so they are legitimately unmapped. The predicate is the SHARED one — this test was
+    // the fourth place encoding it, and the first three had each been patched separately.
+    let registry =
+        deacon_conformance::load::Registry::load(&deacon_conformance::default_registry_dir())
+            .expect("the real registry loads cleanly");
+    let post_branch = deacon_conformance::conservation::post_branch_exceptions(&registry);
+
     let mut missing: Vec<&String> = per_id.keys().chain(ext_ids.iter()).collect();
+    missing.retain(|id| !post_branch.contains(*id));
     missing.retain(|id| mapped.get(*id).copied().unwrap_or(0) != 1);
     assert!(
         missing.is_empty(),

@@ -11,6 +11,7 @@
 
 mod support;
 
+use deacon_conformance::conservation::POST_BRANCH_BEHAVIORS;
 use deacon_conformance::conservation::ReportError;
 use support::Fixture;
 
@@ -146,8 +147,10 @@ fn every_before_behavior_still_has_a_counterpart() {
         report.violations
     );
     assert_eq!(
-        report.totals.after.behaviors, report.totals.before.behaviors,
-        "the behavior denominator holds"
+        report.totals.after.behaviors,
+        report.totals.before.behaviors + POST_BRANCH_BEHAVIORS.len(),
+        "the behavior denominator holds, except for behaviors explicitly accounted as \
+         newly OBSERVED rather than re-described (conservation::POST_BRANCH_BEHAVIORS)"
     );
 }
 

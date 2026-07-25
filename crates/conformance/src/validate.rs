@@ -361,7 +361,24 @@ pub fn check_mapping(registry: &Registry) -> Vec<Violation> {
         &unit_fixtures,
         &cases,
     ));
-    let (known_exceptions, mechanisms) = exception_mechanisms(registry);
+    let (mut known_exceptions, mechanisms) = exception_mechanisms(registry);
+    // V21 requires every characterized exception to be dispositioned in `mapping.json`,
+    // because a PRE-migration tolerance that quietly vanished is a loss the accounting
+    // must catch. Its own message says "pre-migration" — but the check saw every
+    // exception, which silently assumed no exception could ever be authored after the
+    // branch point. That assumption stopped holding the moment better observation
+    // surfaced a NEW divergence: such a record has no pre-migration form to preserve, so
+    // demanding one is unsatisfiable, and the only ways out would be to fabricate an
+    // entry or not record the divergence at all.
+    //
+    // The discriminator is DERIVED, not a second hand-maintained list: an exception is
+    // post-branch exactly when every behavior it characterizes is accounted in
+    // `POST_BRANCH_BEHAVIORS`. It therefore cannot drift out of step with that list, and
+    // an exception mixing pre- and post-branch behaviors stays in scope — the safe way
+    // round.
+    for id in crate::conservation::post_branch_exceptions(registry) {
+        known_exceptions.remove(&id);
+    }
     problems.extend(crate::mapping::check_exception_mappings(
         &registry.mapping_exceptions,
         &known_exceptions,

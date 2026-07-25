@@ -40,6 +40,42 @@ use crate::model::{BehaviorUnit, CaseKind};
 /// Lowering it to make a report pass is the anti-gaming case US5 (T069) guards.
 pub const PRE_MIGRATION_BEHAVIORS: usize = 25;
 
+/// Behaviors legitimately DECLARED after the branch point, each paired with the reason it
+/// is not a variant of an existing claim.
+///
+/// [`PRE_MIGRATION_BEHAVIORS`] exists to stop the migration faking progress by giving each
+/// new *variant* its own behavior — 24 per-workspace cases proving one claim must count as
+/// one behavior, not 24. That guard is about **re-describing** existing coverage.
+///
+/// It is not about **newly observed** conformance facts, and conflating the two would make
+/// the guard forbid the thing the migration is for. `chan-container-state` became an
+/// observed channel in 024 Phase 4, which retired a blanket rule that had been hiding
+/// whole label namespaces from comparison; what it exposed is a real, previously
+/// unrecorded difference between the two CLIs. Refusing to record it would keep the
+/// denominator pretty at the cost of the registry being silent about something we now
+/// know — the exact trade the whole conformance model rejects.
+///
+/// This mirrors the reasoning [`PRE_MIGRATION_UNITS`] already applies to baseline units:
+/// coverage added after the branch point is not coverage that needed conserving. The
+/// mechanism is an ENUMERATED list, not a raised number, for the same reason every other
+/// allowance in this repository is a finite list: raising the constant would silently
+/// re-arm the guard one notch higher forever, while each entry here is a reviewed diff
+/// that must say why it is not a variant. Entries are self-invalidating — an id that no
+/// longer resolves in the registry is reported, so a deleted behavior cannot leave its
+/// allowance behind (the `waiver.rs` staleness pattern).
+pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[(
+    "bhv-container-identity-labels",
+    "deacon stamps five identity/bookkeeping labels the reference CLI does not set at \
+     all (`devcontainer.configHash`, `.config_name`, `.name`, `.source`, \
+     `.workspaceHash`), measured directly against the pinned oracle 0.87.0 on \
+     fx-up-basic. This is a deacon EXTENSION, not a variant of any pre-migration claim: \
+     no existing behavior describes what either CLI labels a container with, because the \
+     retired `strip_intentional_labels` rule removed the whole `devcontainer.*` namespace \
+     before comparison. The three shared keys are NOT part of this behavior — \
+     `devcontainer.metadata` compares byte-equal, and `.local_folder` / `.config_file` \
+     differ only by each side's own temp workspace path and are normalized, not tolerated.",
+)];
+
 /// The observable-channel count at the branch point (research §1g).
 pub const PRE_MIGRATION_CHANNELS: usize = 11;
 
@@ -90,10 +126,14 @@ pub struct DenominatorCounts {
 }
 
 impl DenominatorCounts {
-    /// Whether the behavior denominator grew relative to the frozen pre-migration total
-    /// (SC-005). Growth means a variant was authored as a new behavior.
+    /// Whether the behavior denominator grew beyond the frozen pre-migration total plus
+    /// the explicitly accounted post-branch behaviors (SC-005).
+    ///
+    /// Growth past that allowance means a variant was authored as a new behavior — the
+    /// gaming case. Growth WITHIN it is a newly observed conformance fact that named
+    /// itself in [`POST_BRANCH_BEHAVIORS`] and said why it is not a variant.
     pub fn denominator_inflated(&self) -> bool {
-        self.behaviors > PRE_MIGRATION_BEHAVIORS
+        self.behaviors > PRE_MIGRATION_BEHAVIORS + POST_BRANCH_BEHAVIORS.len()
     }
 }
 
@@ -120,6 +160,51 @@ pub fn denominator_counts(registry: &Registry) -> DenominatorCounts {
         legacy_cases: cases.len() - declarative_cases,
         variants,
     }
+}
+
+/// Characterized exceptions authored AFTER the migration's branch point, id-sorted.
+///
+/// An exception qualifies when it characterizes at least one behavior and EVERY behavior
+/// it names is accounted in [`POST_BRANCH_BEHAVIORS`]. Such a record describes something
+/// the pre-migration system never knew, so it has no pre-migration form for
+/// `mapping.json` to preserve, and the "every exception must be dispositioned" rules do
+/// not apply to it.
+///
+/// This lives here, public, because FOUR separate places encode that rule — `validate`'s
+/// V21, the migration report's condition 2, and two test binaries — and the first three
+/// were each patched inline before the fourth surfaced. Four copies of one predicate is
+/// three chances for them to disagree.
+///
+/// A record naming no behavior, or mixing pre- and post-branch behaviors, is NOT exempt:
+/// the conservative reading, so a genuinely pre-migration tolerance can never slip out of
+/// the accounting by acquiring a post-branch behavior.
+pub fn post_branch_exceptions(registry: &Registry) -> BTreeSet<String> {
+    let post_branch: BTreeSet<&str> = POST_BRANCH_BEHAVIORS.iter().map(|(id, _)| *id).collect();
+    registry
+        .extensions
+        .iter()
+        .filter(|e| {
+            !e.behaviors.is_empty() && e.behaviors.iter().all(|b| post_branch.contains(b.as_str()))
+        })
+        .map(|e| e.id.clone())
+        .collect()
+}
+
+/// [`POST_BRANCH_BEHAVIORS`] entries that no longer resolve in the registry, id-sorted.
+///
+/// An allowance for a behavior that has since been deleted or renamed silently raises the
+/// ceiling by one forever, which is precisely the "number the claimant can move" that
+/// [`PRE_MIGRATION_BEHAVIORS`] was frozen to prevent. Reported the same way a waiver whose
+/// difference stopped reproducing is reported: stale, and named.
+pub fn stale_post_branch_behaviors(registry: &Registry) -> Vec<&'static str> {
+    let known: BTreeSet<&str> = registry.behaviors.iter().map(|b| b.id.as_str()).collect();
+    let mut stale: Vec<&'static str> = POST_BRANCH_BEHAVIORS
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| !known.contains(id))
+        .collect();
+    stale.sort_unstable();
+    stale
 }
 
 /// The variant groups of a loaded registry, ID-sorted by behavior (T051/T053).
@@ -385,7 +470,11 @@ mod tests {
             variants: 60,
         };
         assert!(!counts.denominator_inflated());
-        counts.behaviors = PRE_MIGRATION_BEHAVIORS + 1;
+        // Within the explicitly accounted allowance: still not inflation.
+        counts.behaviors = PRE_MIGRATION_BEHAVIORS + POST_BRANCH_BEHAVIORS.len();
+        assert!(!counts.denominator_inflated());
+        // One past it: inflation, whatever the allowance currently holds.
+        counts.behaviors = PRE_MIGRATION_BEHAVIORS + POST_BRANCH_BEHAVIORS.len() + 1;
         assert!(counts.denominator_inflated());
     }
 }
@@ -1252,14 +1341,35 @@ pub fn migration_report(
     };
 
     // Failure condition 4: denominator inflation.
-    if totals.after.behaviors > totals.before.behaviors {
+    //
+    // The ceiling is the frozen `before` count PLUS the behaviors explicitly accounted in
+    // `POST_BRANCH_BEHAVIORS` — newly OBSERVED facts, each naming why it is not a variant.
+    // Using the bare `before` count here would contradict `denominator_inflated()`, which
+    // is the same rule enforced from the registry side; two copies of one threshold that
+    // disagree is worse than either.
+    let allowance = POST_BRANCH_BEHAVIORS.len();
+    if totals.after.behaviors > totals.before.behaviors + allowance {
         violations.push(ReportViolation {
             condition: 4,
             item: "totals.after.behaviors".to_string(),
             message: format!(
-                "the behavior denominator grew from {} to {} — a variant was authored as \
+                "the behavior denominator grew from {} to {}, beyond the {allowance} \
+                 explicitly accounted post-branch behavior(s) — a variant was authored as \
                  a new behavior (SC-005)",
                 totals.before.behaviors, totals.after.behaviors
+            ),
+        });
+    }
+
+    // An allowance whose behavior no longer exists silently raises the ceiling forever.
+    for stale in stale_post_branch_behaviors(registry) {
+        violations.push(ReportViolation {
+            condition: 4,
+            item: stale.to_string(),
+            message: format!(
+                "POST_BRANCH_BEHAVIORS accounts for `{stale}`, which no longer resolves in \
+                 the registry — a stale allowance raises the denominator ceiling for a \
+                 behavior that is gone"
             ),
         });
     }
@@ -1483,11 +1593,18 @@ fn missing_counterparts(
         .iter()
         .map(|e| (e.exception.as_str(), e))
         .collect();
+    // POST-branch exceptions are exempt, by the same DERIVED rule `validate.rs` uses: an
+    // exception every one of whose behaviors is accounted in `POST_BRANCH_BEHAVIORS`
+    // characterizes something the pre-migration system never knew, so it has no
+    // pre-migration counterpart to record. Requiring one would be unsatisfiable, and the
+    // only ways to satisfy it would be to invent an entry or not record the divergence.
+    let post_branch = post_branch_exceptions(registry);
     let known_exceptions: Vec<&str> = registry
         .waivers
         .iter()
         .map(|w| w.id.as_str())
         .chain(registry.extensions.iter().map(|e| e.id.as_str()))
+        .filter(|id| !post_branch.contains(*id))
         .collect();
     for exception in known_exceptions {
         match mapped_exceptions.get(exception) {

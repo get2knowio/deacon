@@ -12,6 +12,16 @@
       "notes": "Robustness differentiator (issue #265; docs/DIFFERENTIATORS.md). The reference derives <folder>_devcontainer verbatim, so a folder like `-myproj` yields an invalid --project-name docker compose rejects. deacon's derived name is always valid and isolated. Backed by case-compose-project-name (parity_observable_state, which observes com.docker.compose.project)."
     },
     {
+      "id": "bhv-container-identity-labels",
+      "area": "observable-state",
+      "statement": "deacon stamps five identity/bookkeeping labels onto a created container that the reference CLI does not set at all (devcontainer.configHash, devcontainer.config_name, devcontainer.name, devcontainer.source, devcontainer.workspaceHash); the three labels both CLIs set (devcontainer.metadata, devcontainer.local_folder, devcontainer.config_file) agree once each side's own workspace path is tokenized.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "Measured against the pinned oracle 0.87.0 on fx-up-basic (024 Phase 5), not inferred. Newly RECORDABLE rather than newly true: the retired strip_intentional_labels rule dropped the whole devcontainer.* namespace before comparison, so no behavior described container labels at all until chan-container-state became an observed channel in 024 Phase 4. Accounted in conservation::POST_BRANCH_BEHAVIORS as an observed fact, not a variant of an existing claim. Recorded by ext-container-identity-labels. TWO FURTHER DIVERGENCES were measured when the live differential first ran (024 Phase 5) and are NOT yet characterized, so case-up-container-identity-labels reports `diverge` on them by design rather than tolerating them: (a) `labels.devcontainer.metadata` \u2014 the reference always stamps the label, using \"[]\" when there is nothing to record, while deacon omits it entirely (build_container_metadata_label returns None, which also avoids clobbering a label inherited from the image, so the fix is not simply always-emit); (b) `cmd` \u2014 deacon keeps the container alive with `sleep infinity || tail -f /dev/null`, the reference with an echo/trap/wait loop. Both are deacon-behind or intentional-divergence candidates needing their own three-axis records; tracked in specs/023-migrate-parity-to-conformance/tasks.md#T114."
+    },
+    {
       "id": "bhv-state-container-parity",
       "area": "observable-state",
       "statement": "The observable container state after up (running status, labels, mounts, environment) matches the reference for the observed fixtures.",

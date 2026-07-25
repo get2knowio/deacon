@@ -246,12 +246,16 @@ fn every_real_exception_is_mapped_to_exactly_one_preserved_mechanism() {
     let registry =
         Registry::load(&default_registry_dir()).expect("the real registry loads cleanly");
 
-    let expected = registry.waivers.len() + registry.extensions.len();
+    // Post-branch exceptions have no pre-migration form to preserve, so they are not
+    // mapped — see `validate::post_branch_exceptions` for the derived rule.
+    let post_branch_exceptions =
+        deacon_conformance::conservation::post_branch_exceptions(&registry).len();
+    let expected = registry.waivers.len() + registry.extensions.len() - post_branch_exceptions;
     assert_eq!(
         registry.mapping_exceptions.len(),
         expected,
-        "all {expected} characterized exceptions ({} waivers + {} extensions) must be \
-         mapped",
+        "all {expected} PRE-migration characterized exceptions ({} waivers + {} extensions, \
+         less {post_branch_exceptions} authored after the branch point) must be mapped",
         registry.waivers.len(),
         registry.extensions.len()
     );

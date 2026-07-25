@@ -1012,8 +1012,17 @@
     },
     {
       "unit": "parity_observable_state::container-and-image-labels",
-      "disposition": "residual",
-      "residualId": "res-observable-state-runtime-vs-merged"
+      "disposition": "migrated",
+      "caseIds": [
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:parity_container_and_image_labels_isolated",
+          "to": "conformance/fixtures/fx-up-container-labels"
+        }
+      ]
     },
     {
       "unit": "parity_observable_state::handoff-no-reuse",
