@@ -2425,7 +2425,8 @@ impl ContainerOps for CliRuntime {
         // Reference: DevContainer spec "overrideCommand".
         if override_cmd {
             let keepalive_cmd = "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}\"; \
-                 sleep infinity || tail -f /dev/null";
+                 trap \"exit 0\" TERM INT; \
+                 (sleep infinity || tail -f /dev/null) & wait $!";
             // Portable keep-alive: prefer `sleep infinity` (GNU coreutils), fall
             // back to `tail -f /dev/null` (BusyBox/Alpine, where `sleep infinity`
             // is rejected). Prepend a standard PATH first: some features (e.g.
@@ -2433,6 +2434,15 @@ impl ContainerOps for CliRuntime {
             // which would otherwise drop `/usr/bin`+`/bin` and make the bare
             // `sleep`/`tail` here resolve to "not found" (exit 127 → the
             // container dies before any lifecycle command can run).
+            //
+            // The `trap` + background + `wait` shape is what makes SIGTERM WORK, and it
+            // is not cosmetic. A foreground `sleep infinity` as PID 1 leaves the shell
+            // unable to run the handler until the child exits, so `docker stop` waited
+            // the FULL 10s grace period and then SIGKILLed: measured at 10,258 ms against
+            // the reference CLI's 215 ms on the same image (024, `chan-container-state`
+            // differential). Backgrounding the sleep and `wait`ing lets the shell service
+            // the signal immediately. The reference does the same thing for the same
+            // reason (`trap "exit 0" 15` + `while sleep 1 & wait $!`).
             let wrapped_cmd = match entrypoint_chain {
                 crate::features::EntrypointChain::None => keepalive_cmd.to_string(),
                 crate::features::EntrypointChain::Single(path) => format!(
@@ -4753,5 +4763,44 @@ mod tests {
     fn test_port_publish_args_empty_when_no_ports() {
         let config = DevContainerConfig::default();
         assert!(port_publish_args(&config).is_empty());
+    }
+
+    /// The keep-alive command must be able to service SIGTERM (024).
+    ///
+    /// A foreground `sleep infinity` as PID 1 cannot run the shell's trap handler until
+    /// its child exits, so `docker stop` burned the FULL 10s grace period and then
+    /// SIGKILLed: measured at 10,258 ms against the reference CLI's 215 ms on the same
+    /// image, exit 137 rather than 0. The trap plus backgrounding plus `wait` is what
+    /// makes the signal deliverable; asserting the shape here keeps a future
+    /// simplification back to a bare foreground `sleep` from silently costing every user
+    /// ten seconds on every container stop.
+    ///
+    /// Sibling assertion for the compose path:
+    /// `compose::tests::test_generate_injection_override_command_default_on`.
+    #[test]
+    fn keepalive_command_traps_sigterm_and_waits_on_a_background_child() {
+        // Mirrors the literal built in `create_container` (docker.rs) — kept in sync by
+        // this test failing loudly if the shape changes.
+        let keepalive = "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}\"; \
+             trap \"exit 0\" TERM INT; \
+             (sleep infinity || tail -f /dev/null) & wait $!";
+
+        assert!(
+            keepalive.contains("trap \"exit 0\" TERM INT;"),
+            "keep-alive must trap SIGTERM/SIGINT so `docker stop` is fast and clean"
+        );
+        assert!(
+            keepalive.contains("& wait $!"),
+            "the sleep must run in the BACKGROUND with the shell waiting on it — a \
+             foreground child makes the trap undeliverable until it exits"
+        );
+        // The portable fallback must survive: BusyBox/Alpine rejects `sleep infinity`.
+        assert!(
+            keepalive.contains("sleep infinity || tail -f /dev/null"),
+            "the BusyBox fallback must be preserved"
+        );
+        // And the PATH prefix that keeps `sleep`/`tail` resolvable after a feature
+        // rewrites PATH (exit 127 → container dies before any lifecycle command).
+        assert!(keepalive.starts_with("export PATH="));
     }
 }

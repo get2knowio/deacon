@@ -878,13 +878,22 @@ pub struct StateSnapshot {
     pub exposed_ports: BTreeSet<String>,
     /// `HostConfig.PortBindings` keys actually PUBLISHED to the host.
     pub published_ports: BTreeSet<String>,
-    /// The container process shape: a keep-alive/entrypoint-wrapper detail with no
-    /// observable behavioral difference — both CLIs keep the container running so
-    /// `exec`, lifecycle hooks and feature entrypoints work identically. deacon uses a
-    /// PATH-robust `sh -c '… sleep infinity || tail -f /dev/null'`; the reference an
-    /// `exec "$@"` keep-alive loop. Intentional, characterized divergence (#290); the
-    /// behaviorally-significant cases (overrideCommand exit #291, feature entrypoint
-    /// composition #292) ARE observable and covered elsewhere.
+    /// The container process shape: the keep-alive/entrypoint wrapper each CLI installs.
+    ///
+    /// This was recorded as "a keep-alive detail with NO observable behavioral
+    /// difference … intentional, characterized divergence (#290)". **That was wrong, and
+    /// the claim is what hid the defect.** deacon ran a foreground
+    /// `sleep infinity || tail -f /dev/null` as PID 1, which cannot service SIGTERM, so
+    /// `docker stop` waited the full 10s grace period and then SIGKILLed the container:
+    /// 10,258 ms versus the reference CLI's 215 ms, exit 137 versus exit 0. Measured the
+    /// first time a declarative case actually COMPARED this field (024) — the legacy
+    /// `diff_states` captured it and skipped it, on the strength of the same assumption.
+    /// deacon now uses the same `trap` + background + `wait` shape, and both paths stop in
+    /// ~200 ms.
+    ///
+    /// The lesson generalizes: "captured but not compared, because it cannot matter" is a
+    /// claim about behavior, and an uncompared field is exactly where such a claim never
+    /// gets tested.
     ///
     /// EMITTED on `chan-container-state` and therefore COMPARED (024 Phase 4). The legacy
     /// `diff_states` documented it as "captured but NOT diffed" — an undeclared
