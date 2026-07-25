@@ -22,11 +22,14 @@ use std::path::{Path, PathBuf};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
+use crate::baseline::BaselineFile;
+use crate::mapping::{ExceptionMapping, MappingFile, MigrationMapping};
 use crate::model::{
     BehaviorUnit, CertificationProfile, Classification, ClauseClassification, ClauseInventory,
     Collection, ConstraintInventory, ContextDimension, DeaconExtension, Gap, ObservableChannel,
     SchemasManifest, SourceRevision, SourceUnit, SpecManifest, TestCase, Waiver,
 };
+use crate::residual::{ResidualFile, ResidualRecord};
 
 /// A schema-class load failure for a single file: an unreadable file, malformed
 /// JSON, or a record that violates the schema (unknown field, bad enum, missing
@@ -210,6 +213,21 @@ pub struct Registry {
     /// one file per document key plus `authoring.json` for document-scope defaults
     /// (021-normative-clause-inventory). A missing directory is empty.
     pub clause_classifications: Vec<ClauseClassification>,
+    /// Hand-authored residual records — `residuals.json`
+    /// (023-migrate-parity-to-conformance). Representation debt that never blocks
+    /// certification, unlike `gaps`. A missing file is empty.
+    pub residuals: Vec<ResidualRecord>,
+    /// The machine-owned frozen baseline — `../migration/baseline.json`, a SIBLING of
+    /// the registry directory (mirroring the inventory/clause sibling resolution).
+    /// `None` before the baseline is generated, or for a fixture registry that ships
+    /// none. A present-but-malformed file is a schema error, never silently `None`.
+    pub baseline: Option<BaselineFile>,
+    /// Hand-authored unit → destination mapping — `../migration/mapping.json`, a
+    /// sibling of the registry directory. A missing file is empty.
+    pub mapping: Vec<MigrationMapping>,
+    /// Hand-authored characterized-exception correspondences, from the same
+    /// `mapping.json` file (FR-024, FR-051). A missing file is empty.
+    pub mapping_exceptions: Vec<ExceptionMapping>,
 }
 
 impl Registry {
@@ -227,6 +245,8 @@ impl Registry {
         }
 
         let mut errors: Vec<SchemaError> = Vec::new();
+        let (baseline_path, mapping_path) = crate::migration_paths_for(root);
+        let mapping_file = load_mapping_file(&mapping_path, &mut errors);
 
         // The four source-inventory files (each a collection of source units),
         // concatenated in a stable order.
@@ -261,6 +281,12 @@ impl Registry {
                 &root.join("clause-classifications"),
                 &mut errors,
             ),
+            // residuals.json — hand-authored representation debt (023).
+            residuals: load_residuals_collection(&root.join("residuals.json"), &mut errors),
+            // ../migration/{baseline,mapping}.json — siblings of the registry dir (023).
+            baseline: load_baseline_file(&baseline_path, &mut errors),
+            mapping: mapping_file.records,
+            mapping_exceptions: mapping_file.exceptions,
         };
 
         // 022-conformance-runner (T007, FR-003): every case record MUST be exactly one
@@ -343,6 +369,76 @@ fn check_allowed_differences(cases_file: &Path, cases: &[TestCase], errors: &mut
             }
         }
     }
+}
+
+/// Load `residuals.json` (023). A missing file yields an empty vector; a malformed one
+/// pushes a located [`SchemaError`]. Duplicate ids are reported per record so two
+/// records can never silently claim the same identity.
+fn load_residuals_collection(path: &Path, errors: &mut Vec<SchemaError>) -> Vec<ResidualRecord> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    let records =
+        match read_file(path).and_then(|raw| deserialize_located::<ResidualFile>(path, &raw)) {
+            Ok(file) => file.records,
+            Err(err) => {
+                errors.push(err);
+                return Vec::new();
+            }
+        };
+    errors.extend(crate::residual::duplicate_id_errors(path, &records));
+    records
+}
+
+/// Load the committed baseline at `path` (a sibling of the registry dir, 023). A
+/// missing file yields `None`; a malformed one pushes a located [`SchemaError`] and
+/// yields `None` — never a silently empty baseline, which would make every
+/// conservation claim vacuously true.
+fn load_baseline_file(path: &Path, errors: &mut Vec<SchemaError>) -> Option<BaselineFile> {
+    if !path.exists() {
+        return None;
+    }
+    match read_file(path).and_then(|raw| deserialize_located::<BaselineFile>(path, &raw)) {
+        Ok(baseline) => Some(baseline),
+        Err(err) => {
+            errors.push(err);
+            None
+        }
+    }
+}
+
+/// Load `mapping.json` (a sibling of the registry dir, 023). A missing file yields an
+/// empty vector; a malformed one pushes a located [`SchemaError`]. A duplicate `unit`
+/// entry is reported here: every baseline unit must appear EXACTLY once, and a second
+/// entry for the same unit is a shape error rather than a V21 orphan. The file also
+/// carries the characterized-exception correspondences (`exceptions`).
+fn load_mapping_file(path: &Path, errors: &mut Vec<SchemaError>) -> MappingFile {
+    if !path.exists() {
+        return MappingFile::default();
+    }
+    let file = match read_file(path).and_then(|raw| deserialize_located::<MappingFile>(path, &raw))
+    {
+        Ok(file) => file,
+        Err(err) => {
+            errors.push(err);
+            return MappingFile::default();
+        }
+    };
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for record in &file.records {
+        if !seen.insert(record.unit.as_str()) {
+            errors.push(SchemaError {
+                file: path.to_path_buf(),
+                location: Some(record.unit.clone()),
+                message: format!(
+                    "duplicate mapping entry for baseline unit `{}` — every unit must appear \
+                     exactly once",
+                    record.unit
+                ),
+            });
+        }
+    }
+    file
 }
 
 /// Load a single collection file `dir/name`. A missing file yields an empty vector
@@ -453,7 +549,7 @@ fn json_files_sorted(dir: &Path, errors: &mut Vec<SchemaError>) -> Vec<PathBuf> 
 }
 
 /// Read a file's contents, mapping IO failure to a [`SchemaError`].
-fn read_file(path: &Path) -> Result<String, SchemaError> {
+pub(crate) fn read_file(path: &Path) -> Result<String, SchemaError> {
     std::fs::read_to_string(path).map_err(|e| SchemaError {
         file: path.to_path_buf(),
         location: None,
@@ -463,7 +559,10 @@ fn read_file(path: &Path) -> Result<String, SchemaError> {
 
 /// Deserialize `raw` as `T`, mapping a serde_json error to a [`SchemaError`] that
 /// carries the `line:column` location when the error exposes one.
-fn deserialize_located<T: DeserializeOwned>(path: &Path, raw: &str) -> Result<T, SchemaError> {
+pub(crate) fn deserialize_located<T: DeserializeOwned>(
+    path: &Path,
+    raw: &str,
+) -> Result<T, SchemaError> {
     serde_json::from_str::<T>(raw).map_err(|e| {
         // serde_json reports 0:0 when the position is unknown; suppress that.
         let location = if e.line() == 0 && e.column() == 0 {

@@ -1,0 +1,4 @@
+{
+  "name": "ParityExecTTY",
+  "image": "alpine:3.19"
+}

@@ -1,0 +1,1516 @@
+{
+  "records": [
+    {
+      "unit": "consistency_env_probe_flag::exec_honors_default_user_env_probe_login_shell",
+      "disposition": "residual",
+      "residualId": "res-consistency-env-probe"
+    },
+    {
+      "unit": "consistency_env_probe_flag::up_shared_probe_helper_uses_login_shell",
+      "disposition": "residual",
+      "residualId": "res-consistency-env-probe"
+    },
+    {
+      "unit": "consistency_remote_env_flags::remote_env_accepts_empty_values_for_up_and_exec",
+      "disposition": "residual",
+      "residualId": "res-consistency-remote-env"
+    },
+    {
+      "unit": "consistency_remote_env_flags::remote_env_validation_message_matches_for_up_and_exec",
+      "disposition": "residual",
+      "residualId": "res-consistency-remote-env"
+    },
+    {
+      "unit": "parity_build::buildkit-only-features",
+      "disposition": "residual",
+      "residualId": "res-build-tolerant-outcome"
+    },
+    {
+      "unit": "parity_build::creates-discoverable-image",
+      "disposition": "residual",
+      "residualId": "res-build-image-discovery"
+    },
+    {
+      "unit": "parity_build::image-reference",
+      "disposition": "residual",
+      "residualId": "res-build-image-discovery"
+    },
+    {
+      "unit": "parity_build::output-json-format",
+      "disposition": "residual",
+      "residualId": "res-build-tolerant-outcome"
+    },
+    {
+      "unit": "parity_build::push-json-output",
+      "disposition": "residual",
+      "residualId": "res-build-tolerant-outcome"
+    },
+    {
+      "unit": "parity_build::with-build-args",
+      "disposition": "residual",
+      "residualId": "res-build-image-discovery"
+    },
+    {
+      "unit": "parity_conformance_runner::case-readconfig-parity-exit",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-readconfig-parity-exit"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "conformance/fixtures/fx-config-with-unknown-field",
+          "to": "conformance/fixtures/fx-config-with-unknown-field"
+        }
+      ]
+    },
+    {
+      "unit": "parity_conformance_runner::case-readconfig-snapshot",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-readconfig-snapshot"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "conformance/fixtures/fx-config-with-unknown-field",
+          "to": "conformance/fixtures/fx-config-with-unknown-field"
+        }
+      ]
+    },
+    {
+      "unit": "parity_conformance_runner::case-readconfig-unknown-field-echo",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-readconfig-unknown-field-echo"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "conformance/fixtures/fx-config-with-unknown-field",
+          "to": "conformance/fixtures/fx-config-with-unknown-field"
+        }
+      ]
+    },
+    {
+      "unit": "parity_conformance_runner::case-readconfig-workspace-file-present",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-readconfig-workspace-file-present"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "conformance/fixtures/fx-config-with-unknown-field",
+          "to": "conformance/fixtures/fx-config-with-unknown-field"
+        }
+      ]
+    },
+    {
+      "unit": "parity_conformance_runner::case-up-docker-channels",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-up-docker-channels"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "conformance/fixtures/fx-up-basic",
+          "to": "conformance/fixtures/fx-up-basic"
+        }
+      ]
+    },
+    {
+      "unit": "parity_conformance_runner::case-up-idempotent",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-up-idempotent"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "conformance/fixtures/fx-up-basic",
+          "to": "conformance/fixtures/fx-up-basic"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_errors::bad-config-path",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-errors-decl-bad-config-path",
+        "case-errors-decl-bad-config-path-decision"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/errors/bad-config-path",
+          "to": "conformance/fixtures/fx-errors-bad-config-path"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_errors::duplicate-keys",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-errors-decl-duplicate-keys"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/errors/duplicate-keys",
+          "to": "conformance/fixtures/fx-errors-duplicate-keys"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_errors::extends-cycle",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-errors-decl-extends-cycle"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/errors/extends-cycle",
+          "to": "conformance/fixtures/fx-errors-extends-cycle"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_errors::extends-missing",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-errors-decl-extends-missing"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/errors/extends-missing",
+          "to": "conformance/fixtures/fx-errors-extends-missing"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_errors::malformed-json",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-errors-decl-malformed-json"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/errors/malformed-json",
+          "to": "conformance/fixtures/fx-errors-malformed-json"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_errors::missing-config",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-errors-decl-missing-config",
+        "case-errors-decl-missing-config-decision"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/errors/missing-config",
+          "to": "conformance/fixtures/fx-errors-missing-config"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_errors::unknown-field-preserved",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-errors-decl-unknown-field-preserved"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/errors/unknown-field-preserved",
+          "to": "conformance/fixtures/fx-errors-unknown-field-preserved"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_errors::wrong-type-features",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-errors-decl-wrong-type-features"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/errors/wrong-type-features",
+          "to": "conformance/fixtures/fx-errors-wrong-type-features"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_errors::wrong-type-forwardports",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-errors-decl-wrong-type-forwardports"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/errors/wrong-type-forwardports",
+          "to": "conformance/fixtures/fx-errors-wrong-type-forwardports"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::bare-base-node-feature",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-bare-base-node-feature"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/bare-base-node-feature",
+          "to": "conformance/fixtures/fx-tier1-bare-base-node-feature"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::build-args-subst",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-build-args-subst"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/build-args-subst",
+          "to": "conformance/fixtures/fx-tier1-build-args-subst"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::compose-array",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-compose-array"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/compose-array",
+          "to": "conformance/fixtures/fx-tier1-compose-array"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::compose-postgres",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-compose-postgres"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/compose-postgres",
+          "to": "conformance/fixtures/fx-tier1-compose-postgres"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::containerenv-subst",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-containerenv-subst"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/containerenv-subst",
+          "to": "conformance/fixtures/fx-tier1-containerenv-subst"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::dependson-autoinstall",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-dependson-autoinstall"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/dependson-autoinstall",
+          "to": "conformance/fixtures/fx-tier1-dependson-autoinstall"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::dockerfile-build",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-dockerfile-build"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/dockerfile-build",
+          "to": "conformance/fixtures/fx-tier1-dockerfile-build"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::dotnet-mounts",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-dotnet-mounts"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/dotnet-mounts",
+          "to": "conformance/fixtures/fx-tier1-dotnet-mounts"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::extends-child",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-extends-child"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/extends-child",
+          "to": "conformance/fixtures/fx-tier1-extends-child"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::feature-order",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-feature-order"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/feature-order",
+          "to": "conformance/fixtures/fx-tier1-feature-order"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::go-minimal",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-go-minimal"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/go-minimal",
+          "to": "conformance/fixtures/fx-tier1-go-minimal"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::init-privileged",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-init-privileged"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/init-privileged",
+          "to": "conformance/fixtures/fx-tier1-init-privileged"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::lifecycle-arrays",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-lifecycle-arrays"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/lifecycle-arrays",
+          "to": "conformance/fixtures/fx-tier1-lifecycle-arrays"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::lifecycle-mixed",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-lifecycle-mixed"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/lifecycle-mixed",
+          "to": "conformance/fixtures/fx-tier1-lifecycle-mixed"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::mounts-bind-localenv",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-mounts-bind-localenv"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/mounts-bind-localenv",
+          "to": "conformance/fixtures/fx-tier1-mounts-bind-localenv"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::name-subst",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-name-subst"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/name-subst",
+          "to": "conformance/fixtures/fx-tier1-name-subst"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::node-ts",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-node-ts"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/node-ts",
+          "to": "conformance/fixtures/fx-tier1-node-ts"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::object-form-metadata",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-object-form-metadata"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/object-form-metadata",
+          "to": "conformance/fixtures/fx-tier1-object-form-metadata"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::ports-mixed",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-ports-mixed"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/ports-mixed",
+          "to": "conformance/fixtures/fx-tier1-ports-mixed"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::python-features",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-python-features"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/python-features",
+          "to": "conformance/fixtures/fx-tier1-python-features"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::ruby-node-feature",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-ruby-node-feature"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/ruby-node-feature",
+          "to": "conformance/fixtures/fx-tier1-ruby-node-feature"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::universal-jsonc",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-universal-jsonc"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/universal-jsonc",
+          "to": "conformance/fixtures/fx-tier1-universal-jsonc"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::user-mapping",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-user-mapping"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/user-mapping",
+          "to": "conformance/fixtures/fx-tier1-user-mapping"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_merged::workspacefolder-custom",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-merged-decl-workspacefolder-custom"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/workspacefolder-custom",
+          "to": "conformance/fixtures/fx-tier1-workspacefolder-custom"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::bare-base-node-feature",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-bare-base-node-feature"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/bare-base-node-feature",
+          "to": "conformance/fixtures/fx-tier1-bare-base-node-feature"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::build-args-subst",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-build-args-subst"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/build-args-subst",
+          "to": "conformance/fixtures/fx-tier1-build-args-subst"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::compose-array",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-compose-array"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/compose-array",
+          "to": "conformance/fixtures/fx-tier1-compose-array"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::compose-postgres",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-compose-postgres"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/compose-postgres",
+          "to": "conformance/fixtures/fx-tier1-compose-postgres"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::containerenv-subst",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-containerenv-subst"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/containerenv-subst",
+          "to": "conformance/fixtures/fx-tier1-containerenv-subst"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::dependson-autoinstall",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-dependson-autoinstall"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/dependson-autoinstall",
+          "to": "conformance/fixtures/fx-tier1-dependson-autoinstall"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::dockerfile-build",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-dockerfile-build"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/dockerfile-build",
+          "to": "conformance/fixtures/fx-tier1-dockerfile-build"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::dotnet-mounts",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-dotnet-mounts"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/dotnet-mounts",
+          "to": "conformance/fixtures/fx-tier1-dotnet-mounts"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::extends-child",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-extends-child"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/extends-child",
+          "to": "conformance/fixtures/fx-tier1-extends-child"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::feature-order",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-feature-order"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/feature-order",
+          "to": "conformance/fixtures/fx-tier1-feature-order"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::go-minimal",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-go-minimal"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/go-minimal",
+          "to": "conformance/fixtures/fx-tier1-go-minimal"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::init-privileged",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-init-privileged"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/init-privileged",
+          "to": "conformance/fixtures/fx-tier1-init-privileged"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::lifecycle-arrays",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-lifecycle-arrays"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/lifecycle-arrays",
+          "to": "conformance/fixtures/fx-tier1-lifecycle-arrays"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::lifecycle-mixed",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-lifecycle-mixed"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/lifecycle-mixed",
+          "to": "conformance/fixtures/fx-tier1-lifecycle-mixed"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::mounts-bind-localenv",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-mounts-bind-localenv"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/mounts-bind-localenv",
+          "to": "conformance/fixtures/fx-tier1-mounts-bind-localenv"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::name-subst",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-name-subst"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/name-subst",
+          "to": "conformance/fixtures/fx-tier1-name-subst"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::node-ts",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-node-ts"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/node-ts",
+          "to": "conformance/fixtures/fx-tier1-node-ts"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::object-form-metadata",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-object-form-metadata"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/object-form-metadata",
+          "to": "conformance/fixtures/fx-tier1-object-form-metadata"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::ports-mixed",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-ports-mixed"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/ports-mixed",
+          "to": "conformance/fixtures/fx-tier1-ports-mixed"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::python-features",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-python-features"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/python-features",
+          "to": "conformance/fixtures/fx-tier1-python-features"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::ruby-node-feature",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-ruby-node-feature"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/ruby-node-feature",
+          "to": "conformance/fixtures/fx-tier1-ruby-node-feature"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::universal-jsonc",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-universal-jsonc"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/universal-jsonc",
+          "to": "conformance/fixtures/fx-tier1-universal-jsonc"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::user-mapping",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-user-mapping"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/user-mapping",
+          "to": "conformance/fixtures/fx-tier1-user-mapping"
+        }
+      ]
+    },
+    {
+      "unit": "parity_corpus_tier1::workspacefolder-custom",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-tier1-decl-workspacefolder-custom"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/parity-corpus/workspacefolder-custom",
+          "to": "conformance/fixtures/fx-tier1-workspacefolder-custom"
+        }
+      ]
+    },
+    {
+      "unit": "parity_exec::env-propagation",
+      "disposition": "residual",
+      "residualId": "res-exec-per-side-argv"
+    },
+    {
+      "unit": "parity_exec::tty",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-exec-decl-tty"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:parity_exec#tty",
+          "to": "conformance/fixtures/fx-exec-tty"
+        }
+      ]
+    },
+    {
+      "unit": "parity_exec::user",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-exec-decl-user"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:parity_exec#user",
+          "to": "conformance/fixtures/fx-exec-user"
+        }
+      ]
+    },
+    {
+      "unit": "parity_exec::working-directory",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-exec-decl-working-directory"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:parity_exec#working-directory",
+          "to": "conformance/fixtures/fx-exec-working-directory"
+        }
+      ]
+    },
+    {
+      "unit": "parity_harness_faults::a_wrong_version_stub_reports_mismatch",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::b_nonexistent_override_reports_missing",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::c_failing_docker_stub_reports_docker_missing",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::d_crash_stub_is_oracle_failure",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::e_garbage_output_is_malformed",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::f_hang_stub_times_out_with_partial_output",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::g_injected_difference_is_unwaived_divergence",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::h_matching_waiver_yields_pass_waived",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::i_kept_waiver_without_difference_is_stale",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::j_normalization_failure_has_no_raw_fallback",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::k_reference_only_difference_is_classified_as_ref_only",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::l_deacon_only_difference_is_classified_and_not_deprioritized",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::m_value_difference_is_classified_with_both_sides",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::n_accept_vs_reject_difference_preserves_direction",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::o_allowed_difference_is_distinct_from_agree_and_names_its_backing_id",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::p_no_reference_for_platform_is_its_own_outcome",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_harness_faults::q_stale_snapshot_is_reported_naming_the_drifted_field",
+      "disposition": "residual",
+      "residualId": "res-harness-fault-injection"
+    },
+    {
+      "unit": "parity_observable_state::compose-config-mounts",
+      "disposition": "residual",
+      "residualId": "res-observable-state-rendered-compose"
+    },
+    {
+      "unit": "parity_observable_state::compose-project-name-isolated",
+      "disposition": "residual",
+      "residualId": "res-observable-state-rendered-compose"
+    },
+    {
+      "unit": "parity_observable_state::container-and-image-labels",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:parity_container_and_image_labels_isolated",
+          "to": "conformance/fixtures/fx-up-container-labels"
+        }
+      ]
+    },
+    {
+      "unit": "parity_observable_state::handoff-no-reuse",
+      "disposition": "residual",
+      "residualId": "res-observable-state-container-handoff"
+    },
+    {
+      "unit": "parity_observable_state::lockfile-manifest-digest",
+      "disposition": "residual",
+      "residualId": "res-observable-state-lockfile-interop"
+    },
+    {
+      "unit": "parity_observable_state::merged-config-vs-runtime",
+      "disposition": "residual",
+      "residualId": "res-observable-state-runtime-vs-merged"
+    },
+    {
+      "unit": "parity_observable_state::rendered-compose-state",
+      "disposition": "residual",
+      "residualId": "res-observable-state-rendered-compose"
+    },
+    {
+      "unit": "parity_read_configuration::basic",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-readconfig-decl-basic"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/config/basic",
+          "to": "conformance/fixtures/fx-readconfig-basic"
+        }
+      ]
+    },
+    {
+      "unit": "parity_read_configuration::with-variables",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-readconfig-decl-with-variables"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "fixtures/config/with-variables",
+          "to": "conformance/fixtures/fx-readconfig-with-variables"
+        }
+      ]
+    },
+    {
+      "unit": "parity_registry_check::corpora_meet_registered_minimums",
+      "disposition": "residual",
+      "residualId": "res-harness-registry-structural"
+    },
+    {
+      "unit": "parity_registry_check::nextest_parity_profile_selects_exactly_live_binaries",
+      "disposition": "residual",
+      "residualId": "res-harness-registry-structural"
+    },
+    {
+      "unit": "parity_registry_check::no_parity_source_uses_ignore_or_legacy_skip_idioms",
+      "disposition": "residual",
+      "residualId": "res-harness-registry-structural"
+    },
+    {
+      "unit": "parity_registry_check::registry_matches_test_files_both_directions",
+      "disposition": "residual",
+      "residualId": "res-harness-registry-structural"
+    },
+    {
+      "unit": "parity_registry_check::tests_dir_anchor_is_valid",
+      "disposition": "residual",
+      "residualId": "res-harness-registry-structural"
+    },
+    {
+      "unit": "parity_registry_check::waivers_live_in_conformance_registry_not_legacy_locations",
+      "disposition": "residual",
+      "residualId": "res-harness-registry-structural"
+    },
+    {
+      "unit": "parity_state_diff::appport-published-ports",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-state-appport"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:state_diff_appport_published_ports",
+          "to": "conformance/fixtures/fx-state-appport"
+        }
+      ]
+    },
+    {
+      "unit": "parity_state_diff::compose-parity-with-feature-mount-gap",
+      "disposition": "residual",
+      "residualId": "res-state-diff-cross-cli-snapshot"
+    },
+    {
+      "unit": "parity_state_diff::compose-sidecar-and-named-volume",
+      "disposition": "residual",
+      "residualId": "res-state-diff-cross-cli-snapshot"
+    },
+    {
+      "unit": "parity_state_diff::default-workspace-mount-target-parity",
+      "disposition": "residual",
+      "residualId": "res-state-diff-cross-cli-snapshot"
+    },
+    {
+      "unit": "parity_state_diff::dockerfile-build-and-nonroot-user",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-state-dockerfile-nonroot"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:state_diff_dockerfile_build_and_nonroot_user",
+          "to": "conformance/fixtures/fx-state-dockerfile-nonroot"
+        }
+      ]
+    },
+    {
+      "unit": "parity_state_diff::intra-deacon-single-vs-compose",
+      "disposition": "residual",
+      "residualId": "res-state-diff-intra-deacon-comparison"
+    },
+    {
+      "unit": "parity_state_diff::mount-variety-readonly-and-tmpfs",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-state-mount-variety"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:state_diff_mount_variety_readonly_and_tmpfs",
+          "to": "conformance/fixtures/fx-state-mount-variety"
+        }
+      ]
+    },
+    {
+      "unit": "parity_state_diff::single-container-parity",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-state-single-container"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:state_diff_single_container_parity",
+          "to": "conformance/fixtures/fx-state-single-container"
+        }
+      ]
+    },
+    {
+      "unit": "parity_up_exec::traditional",
+      "disposition": "migrated",
+      "caseIds": [
+        "case-up-exec-decl-traditional"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:parity_up_and_exec_traditional",
+          "to": "conformance/fixtures/fx-up-exec-traditional"
+        }
+      ]
+    },
+    {
+      "unit": "realworld::images-go",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::images-java",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::images-javascript-node",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::images-php",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::images-python",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::images-rust",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-agentic-cookbook",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-autogen",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-code-with-engineering-playbook",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-fhir-server",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-fluentui",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-generative-ai-for-beginners",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-gh-cli",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-ml-for-beginners",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-monaco-editor",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-presidio-anonymizer",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-procdump-linux",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-promptflow",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-ruff",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-sample-app-aoai-chatgpt",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-typescript",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-vscode",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::oss-web-dev-for-beginners",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::templates-go-postgres",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::templates-javascript-node-postgres",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::try-cpp",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::try-dotnetcore",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::try-go",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::try-java",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::try-node",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::try-php",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::try-python",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    },
+    {
+      "unit": "realworld::try-rust",
+      "disposition": "residual",
+      "residualId": "res-realworld-corpus-not-vendored"
+    }
+  ],
+  "exceptions": [
+    {
+      "exception": "ext-auto-forward-ports",
+      "disposition": "preserved",
+      "mechanisms": [
+        "ext-auto-forward-ports"
+      ],
+      "preservedDirection": "none",
+      "preservedScope": "record:ext-auto-forward-ports",
+      "rationale": "Preserved in place: a deacon-extension record is a non-directional classification of a capability the reference does not model, scoped to itself. This migration neither merges it with another mechanism nor widens what it covers."
+    },
+    {
+      "exception": "ext-extends-resolution",
+      "disposition": "preserved",
+      "mechanisms": [
+        "ext-extends-resolution"
+      ],
+      "preservedDirection": "none",
+      "preservedScope": "record:ext-extends-resolution",
+      "rationale": "Preserved in place: a deacon-extension record is a non-directional classification of a capability the reference does not model, scoped to itself. This migration neither merges it with another mechanism nor widens what it covers."
+    },
+    {
+      "exception": "ext-host-ca-injection",
+      "disposition": "preserved",
+      "mechanisms": [
+        "ext-host-ca-injection"
+      ],
+      "preservedDirection": "none",
+      "preservedScope": "record:ext-host-ca-injection",
+      "rationale": "Preserved in place: a deacon-extension record is a non-directional classification of a capability the reference does not model, scoped to itself. This migration neither merges it with another mechanism nor widens what it covers."
+    },
+    {
+      "exception": "ext-secrets-file-env-format",
+      "disposition": "preserved",
+      "mechanisms": [
+        "ext-secrets-file-env-format"
+      ],
+      "preservedDirection": "none",
+      "preservedScope": "record:ext-secrets-file-env-format",
+      "rationale": "Preserved in place: a deacon-extension record is a non-directional classification of a capability the reference does not model, scoped to itself. This migration neither merges it with another mechanism nor widens what it covers."
+    },
+    {
+      "exception": "ext-user-profiles",
+      "disposition": "preserved",
+      "mechanisms": [
+        "ext-user-profiles"
+      ],
+      "preservedDirection": "none",
+      "preservedScope": "record:ext-user-profiles",
+      "rationale": "Preserved in place: a deacon-extension record is a non-directional classification of a capability the reference does not model, scoped to itself. This migration neither merges it with another mechanism nor widens what it covers."
+    },
+    {
+      "exception": "ext-workspace-trust-gate",
+      "disposition": "preserved",
+      "mechanisms": [
+        "ext-workspace-trust-gate"
+      ],
+      "preservedDirection": "none",
+      "preservedScope": "record:ext-workspace-trust-gate",
+      "rationale": "Preserved in place: a deacon-extension record is a non-directional classification of a capability the reference does not model, scoped to itself. This migration neither merges it with another mechanism nor widens what it covers."
+    },
+    {
+      "exception": "wvr-bad-config-path",
+      "disposition": "preserved",
+      "mechanisms": [
+        "wvr-bad-config-path"
+      ],
+      "preservedDirection": "both-reject",
+      "preservedScope": "corpus_case:errors/bad-config-path",
+      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+    },
+    {
+      "exception": "wvr-duplicate-keys",
+      "disposition": "preserved",
+      "mechanisms": [
+        "wvr-duplicate-keys"
+      ],
+      "preservedDirection": "both-accept",
+      "preservedScope": "corpus_case:errors/duplicate-keys",
+      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+    },
+    {
+      "exception": "wvr-extends-child-merged",
+      "disposition": "preserved",
+      "mechanisms": [
+        "wvr-extends-child-merged"
+      ],
+      "preservedDirection": "reference-stricter",
+      "preservedScope": "corpus_case:tier1/extends-child",
+      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+    },
+    {
+      "exception": "wvr-extends-cycle",
+      "disposition": "preserved",
+      "mechanisms": [
+        "wvr-extends-cycle"
+      ],
+      "preservedDirection": "deacon-stricter",
+      "preservedScope": "corpus_case:errors/extends-cycle",
+      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+    },
+    {
+      "exception": "wvr-extends-missing",
+      "disposition": "preserved",
+      "mechanisms": [
+        "wvr-extends-missing"
+      ],
+      "preservedDirection": "deacon-stricter",
+      "preservedScope": "corpus_case:errors/extends-missing",
+      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+    },
+    {
+      "exception": "wvr-malformed-json",
+      "disposition": "preserved",
+      "mechanisms": [
+        "wvr-malformed-json"
+      ],
+      "preservedDirection": "deacon-stricter",
+      "preservedScope": "corpus_case:errors/malformed-json",
+      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+    },
+    {
+      "exception": "wvr-missing-config",
+      "disposition": "preserved",
+      "mechanisms": [
+        "wvr-missing-config"
+      ],
+      "preservedDirection": "both-reject",
+      "preservedScope": "corpus_case:errors/missing-config",
+      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+    },
+    {
+      "exception": "wvr-unknown-field-preserved",
+      "disposition": "preserved",
+      "mechanisms": [
+        "wvr-unknown-field-preserved"
+      ],
+      "preservedDirection": "both-accept",
+      "preservedScope": "corpus_case:errors/unknown-field-preserved",
+      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+    },
+    {
+      "exception": "wvr-wrong-type-features",
+      "disposition": "preserved",
+      "mechanisms": [
+        "wvr-wrong-type-features"
+      ],
+      "preservedDirection": "deacon-stricter",
+      "preservedScope": "corpus_case:errors/wrong-type-features",
+      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+    },
+    {
+      "exception": "wvr-wrong-type-forwardports",
+      "disposition": "preserved",
+      "mechanisms": [
+        "wvr-wrong-type-forwardports"
+      ],
+      "preservedDirection": "deacon-stricter",
+      "preservedScope": "corpus_case:errors/wrong-type-forwardports",
+      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+    }
+  ]
+}

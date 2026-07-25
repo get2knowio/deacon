@@ -46,3 +46,12 @@ conformance/fixtures/** -text
 
 # Committed provenance/raw/normalized snapshot evidence (byte-exact committed artifacts).
 conformance/snapshots/** -text
+
+# The migration conservation record (023-migrate-parity-to-conformance) applies the same
+# discipline to the frozen baseline: `baseline check` regenerates it in memory and
+# byte-compares against the committed file, and `baseline_determinism` explicitly rejects
+# any CR byte. On a Windows checkout autocrlf rewrote LF to CRLF and both checks failed —
+# the baseline is the SUBJECT of the "no coverage was lost" claim, so its bytes must be
+# identical on every platform or the claim is measured against a different artifact than
+# the one committed.
+conformance/migration/** -text

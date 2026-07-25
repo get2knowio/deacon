@@ -20,8 +20,20 @@ use serde_json::Value;
 /// provenance and participating in staleness (FR-030). `parity-harness`'s
 /// `normalize::NORMALIZER_VERSION` re-exports THIS constant so the two never drift
 /// (`parity-harness` depends on `deacon-conformance`, not the reverse). Bumped in
-/// lockstep with any named-normalization-rule change (US3 set it to `"2"`).
-pub const NORMALIZER_VERSION: &str = "2";
+/// lockstep with any named-normalization-rule change (022 US3 set it to `"2"`;
+/// 023 T062/T063 set it to `"3"` when the blanket `prune` and `replace_hex12` rules were
+/// retired in favour of the enumerated `drop_absent_optional` and `devcontainer_id_token`
+/// — a rule change alters what "equal" means, so every recorded snapshot must go stale
+/// and be re-reviewed rather than silently replayed against new semantics). 024 Phase 4
+/// set it to `"4"`: `chan-container-state` became an observed declarative channel with
+/// its own rule chain (`workspace_basename_token` + `path_token` + `null_preserving`),
+/// and the non-compliant `strip_intentional_labels` drop was retired in favour of
+/// emitting labels verbatim. The 024 review set it to `"5"`: `drop_absent_optional` was
+/// bounded to the configuration document's top level plus `hostRequirements` /
+/// `portsAttributes`, where its key list was measured — it previously walked the whole
+/// document, eliding an enumerated key NAME at any depth (including inside
+/// `customizations`, arbitrary user data), which is the unbounded reach FR-029 forbids.
+pub const NORMALIZER_VERSION: &str = "5";
 
 /// The `provenance.json` record — the FR-017 identity/environment elements (data-model
 /// §7, contract snapshot-provenance.md). Thirteen fields: twelve identity/environment

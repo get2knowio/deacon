@@ -1,0 +1,4 @@
+{
+  "name": "ParityLabels",
+  "image": "debian:bookworm-slim"
+}

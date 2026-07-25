@@ -78,6 +78,19 @@ pub enum Outcome {
 }
 
 impl Outcome {
+    /// The stable wire spelling, used wherever an outcome is compared or reported as
+    /// text (the equivalence ledger reduces both paths' outcomes through this).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Outcome::Agree => "agree",
+            Outcome::AllowedDifference => "allowed-difference",
+            Outcome::NoReferenceForPlatform => "no-reference-for-platform",
+            Outcome::Diverge => "diverge",
+            Outcome::Stale => "stale",
+            Outcome::Error => "error",
+        }
+    }
+
     /// Severity rank for `CaseVerdict.overall = worst channel outcome` (data-model §9).
     /// Higher is worse. Ordered to match the runner's exit-code severity (contract
     /// runner-cli.md): `agree`/`allowed-difference` are clean (exit 0), then

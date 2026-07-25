@@ -131,8 +131,19 @@ async fn preserves_all_four_raw_files_and_fragment_paths_resolve() {
         vec![CaseResult::pass(case, raw.clone())],
         vec![],
     );
-    let frag_path = frag.write_under(&root).await.expect("fragment write");
-    assert!(frag_path.is_file(), "fragment must be written");
+    // `write_under` returns the per-binary DIRECTORY: one file per case plus `_meta.json`
+    // (024 D-1 — a single per-binary file let concurrent test processes overwrite each
+    // other's evidence).
+    let frag_dir = frag.write_under(&root).await.expect("fragment write");
+    assert!(frag_dir.is_dir(), "fragment directory must be written");
+    assert!(
+        frag_dir.join("_meta.json").is_file(),
+        "run metadata must be recorded"
+    );
+    assert!(
+        frag_dir.join(format!("{case}.json")).is_file(),
+        "the case must have its OWN file, so a sibling test process cannot clobber it"
+    );
 
     for rel in [
         &raw.deacon_stdout,
@@ -239,4 +250,136 @@ async fn read_only_raw_dir_fails_the_run_not_pass() {
     let mut perms = std::fs::metadata(&raw_dir).unwrap().permissions();
     perms.set_mode(0o755);
     std::fs::set_permissions(&raw_dir, perms).unwrap();
+}
+
+// ===========================================================================
+// T058 (US4, FR-022): raw and normalized evidence are BOTH preserved and
+// SEPARATELY locatable for every compared case.
+// ===========================================================================
+
+/// FR-022: normalization must never be destructive of the record. Whatever a rule
+/// rewrote, dropped or reshaped, the verbatim capture stays available beside it — so a
+/// reviewer can always ask "what did the CLI actually emit?" independently of "what did
+/// we compare?".
+///
+/// This matters most exactly where US4 tightens the rules: the named
+/// `drop_absent_optional` rule elides an absent optional from the COMPARISON, and the raw
+/// evidence must still show that deacon emitted it. If normalization overwrote the raw
+/// record, retiring a rule later would be unreviewable.
+#[test]
+fn raw_and_normalized_evidence_are_both_preserved_and_separately_locatable() {
+    use parity_harness::evidence::{CaseEvidence, RawChannelEvidence};
+    use parity_harness::normalize::{self, TokenMap};
+
+    let workspace = Path::new("/tmp/some-run-1234/ws");
+    let tokens = TokenMap::workspace(workspace);
+
+    // A structured-output document exercising BOTH kinds of rule: a path that
+    // `path_token` rewrites, and an absent optional that `drop_absent_optional` elides.
+    let raw_value = serde_json::json!({
+        "configuration": {
+            "name": "demo",
+            "workspaceMount": null,
+            "initializeCommand": null,
+            "unlistedProperty": {},
+            "mounts": ["source=/tmp/some-run-1234/ws,target=/w,type=bind"],
+        }
+    });
+    let raw = RawChannelEvidence {
+        channel: "chan-structured-output".to_string(),
+        operation: "op-read".to_string(),
+        present: true,
+        value: raw_value.clone(),
+    };
+    let normalized = normalize::normalize_channel("chan-structured-output", &raw, &tokens);
+
+    let mut evidence = CaseEvidence::new();
+    evidence.push(raw.clone(), normalized.clone());
+
+    // BOTH are present, in separate collections, addressable by channel.
+    assert_eq!(evidence.raw.len(), 1);
+    assert_eq!(evidence.normalized.len(), 1);
+    let stored_raw = evidence
+        .raw
+        .iter()
+        .find(|e| e.channel == "chan-structured-output")
+        .expect("raw evidence is locatable by channel");
+    let stored_norm = evidence
+        .normalized
+        .iter()
+        .find(|e| e.channel == "chan-structured-output")
+        .expect("normalized evidence is locatable by channel");
+
+    // The raw record is VERBATIM — the temp path is intact and the elided optionals are
+    // still there. Normalization did not overwrite the capture.
+    assert_eq!(
+        stored_raw.value, raw_value,
+        "raw evidence must be byte-faithful to what the CLI emitted"
+    );
+    assert_eq!(
+        stored_raw.value["configuration"]["workspaceMount"],
+        serde_json::Value::Null,
+        "an optional elided from the COMPARISON must remain visible in the RAW record"
+    );
+    assert!(
+        stored_raw.value["configuration"]["mounts"][0]
+            .as_str()
+            .is_some_and(|s| s.contains("/tmp/some-run-1234/ws")),
+        "the raw record keeps the un-tokenized path"
+    );
+
+    // The normalized record is the compared form: path tokenized, enumerated absent
+    // optionals elided, everything else preserved.
+    assert!(
+        stored_norm.value["configuration"]["workspaceMount"].is_null()
+            && stored_norm.value["configuration"]
+                .get("workspaceMount")
+                .is_none(),
+        "`workspaceMount` is on the enumerated list and absent, so it is elided from the \
+         comparison"
+    );
+    assert_eq!(
+        stored_norm.value["configuration"]["unlistedProperty"],
+        serde_json::json!({}),
+        "an UNLISTED empty value is preserved in the comparison (023 T062)"
+    );
+    assert!(
+        stored_norm.value["configuration"]["mounts"][0]
+            .as_str()
+            .is_some_and(|s| !s.contains("/tmp/some-run-1234")),
+        "the normalized record has the path rewritten to a stable token"
+    );
+
+    // And the two are genuinely DIFFERENT documents — the separation is real, not a
+    // pair of aliases to one value.
+    assert_ne!(
+        stored_raw.value, stored_norm.value,
+        "raw and normalized must be stored separately, not aliased (FR-016/FR-022)"
+    );
+    assert_eq!(
+        stored_raw.present, stored_norm.present,
+        "`present` is preserved"
+    );
+}
+
+/// A not-captured channel stays not-captured on both sides — `present:false` is never
+/// laundered into a captured-empty value by normalization (FR-018).
+#[test]
+fn not_captured_evidence_stays_not_captured_through_normalization() {
+    use parity_harness::evidence::RawChannelEvidence;
+    use parity_harness::normalize::{self, TokenMap};
+
+    let raw = RawChannelEvidence {
+        channel: "chan-image".to_string(),
+        operation: "op-up".to_string(),
+        present: false,
+        value: serde_json::Value::Null,
+    };
+    let normalized =
+        normalize::normalize_channel("chan-image", &raw, &TokenMap::workspace(Path::new("/w")));
+    assert!(
+        !normalized.present,
+        "a channel that could not be observed must stay distinguishable from one \
+         observed as empty"
+    );
 }

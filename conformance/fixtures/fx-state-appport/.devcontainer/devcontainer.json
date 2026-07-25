@@ -1,0 +1,8 @@
+{
+  "name": "StateDiffAppPort",
+  "image": "debian:bookworm-slim",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "appPort": [3000],
+  "containerEnv": { "AP_ENV": "yes" }
+}

@@ -323,6 +323,70 @@ mod tests {
         assert!(matches!(err, HarnessError::WaiverInvalid { .. }));
     }
 
+    /// T046 (023-migrate-parity-to-conformance, FR-026): every MIGRATED characterized
+    /// exception is still self-invalidating.
+    ///
+    /// The migration re-homed nothing — the `wvr-` records already live in the
+    /// conformance registry — but "still works" is a claim, and this is its evidence:
+    /// load the REAL registry's waivers and assert that each one, when its
+    /// characterized difference is not observed, is reported STALE naming its id.
+    /// A tolerance that survives without its difference is a tolerance nobody is
+    /// checking, which is exactly how a fixed divergence turns into a permanent
+    /// exemption.
+    #[test]
+    fn every_migrated_registry_waiver_is_reported_stale_when_unconsumed() {
+        let set = WaiverSet::load(&crate::conformance_registry_root())
+            .expect("the real conformance registry's waivers load");
+        assert!(
+            set.records().len() >= 10,
+            "expected the migrated waiver set, found {}",
+            set.records().len()
+        );
+
+        // Nothing consumed → every record is stale, each named individually.
+        let none = HashSet::new();
+        let stale = set.stale_among(|_| true, &none);
+        let mut expected: Vec<String> = set.records().iter().map(|w| w.id.clone()).collect();
+        expected.sort();
+        let mut got = stale.clone();
+        got.sort();
+        assert_eq!(
+            got, expected,
+            "an unconsumed migrated exception must be reported stale, never silently \
+             retained (FR-026)"
+        );
+
+        // Consuming exactly one removes exactly that one from the stale set — the
+        // self-invalidation is per-record, not all-or-nothing.
+        let first = set.records()[0].id.clone();
+        let mut consumed = HashSet::new();
+        consumed.insert(first.clone());
+        let stale = set.stale_among(|_| true, &consumed);
+        assert!(!stale.contains(&first));
+        assert_eq!(stale.len(), expected.len() - 1);
+    }
+
+    /// The corpus-case scope predicate the migrated error-corpus runner uses must
+    /// still select every migrated `errors` waiver — a scope that stopped matching
+    /// would silently take those records out of staleness range.
+    #[test]
+    fn the_migrated_error_corpus_waivers_are_all_in_staleness_scope() {
+        let set = WaiverSet::load(&crate::conformance_registry_root())
+            .expect("the real conformance registry's waivers load");
+        let in_scope =
+            |w: &Waiver| matches!(&w.scope, Scope::CorpusCase { corpus, .. } if corpus == "errors");
+        let errors: Vec<&Waiver> = set.records().iter().filter(|w| in_scope(w)).collect();
+        assert_eq!(
+            errors.len(),
+            9,
+            "the 9 migrated error-corpus expectations must all be corpus_case-scoped"
+        );
+
+        let none = HashSet::new();
+        let stale = set.stale_among(in_scope, &none);
+        assert_eq!(stale.len(), 9, "each is independently self-invalidating");
+    }
+
     #[test]
     fn lookup_and_staleness() {
         let a = parse(valid_corpus_record());

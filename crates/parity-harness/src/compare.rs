@@ -16,8 +16,9 @@
 use serde_json::{Value, json};
 
 use deacon_conformance::model::{
-    CHAN_EXIT_CODE, CHAN_FILE_CONTENT, CHAN_FILESYSTEM, CHAN_IMAGE, CHAN_INJECTED_PROCESS,
-    CHAN_PROCESS_GRAPH, CHAN_STDERR, CHAN_STDOUT, CHAN_STRUCTURED_OUTPUT, CHAN_TEMPORAL,
+    CHAN_CONTAINER_STATE, CHAN_EXIT_CODE, CHAN_FILE_CONTENT, CHAN_FILESYSTEM, CHAN_IMAGE,
+    CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_STDERR, CHAN_STDOUT, CHAN_STRUCTURED_OUTPUT,
+    CHAN_TEMPORAL,
 };
 
 use crate::HarnessError;
@@ -235,10 +236,18 @@ fn evaluate_assertion(
     match channel {
         CHAN_EXIT_CODE => exit_code_assertion(channel, key, expected, evidence),
         CHAN_STDOUT | CHAN_STDERR => text_assertion(channel, key, expected, evidence),
-        // JSON-object channels (structured output, file content, and the four Docker
+        // JSON-object channels (structured output, file content, and the five Docker
         // channels) share the `jsonEquals`/`jsonSubset` evaluator.
+        //
+        // `chan-container-state` joined this list when it gained an observer (024 Phase 4
+        // added the observer; the evaluator was missed, so a spec-expectation naming the
+        // channel VALIDATED cleanly and then failed at run time with "no evaluator" —
+        // found only by a live run). Its evidence is the serialized StateSnapshot, an
+        // ordinary JSON object, so `jsonSubset` applies unchanged: pinning a few labels
+        // needs no new predicate.
         CHAN_STRUCTURED_OUTPUT
         | CHAN_FILE_CONTENT
+        | CHAN_CONTAINER_STATE
         | CHAN_IMAGE
         | CHAN_PROCESS_GRAPH
         | CHAN_INJECTED_PROCESS

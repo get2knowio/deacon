@@ -39,6 +39,50 @@ A **waiver** counts as evidence for a `divergent` status because the parity harn
 reproducing fails the run as *stale*. So waiver-only coverage legitimately backs
 `reference: divergent` without forcing an `unresolved-gap` decision.
 
+## Violation-class index
+
+The complete set `validate` can emit, in one place. Each row links to the section that
+states the rule; this table exists so the lockstep between `validate.rs` and this file is
+checkable at a glance rather than by reading every section.
+
+| Class | Statement | Where |
+|---|---|---|
+| `SCHEMA` | a registry file is unreadable, malformed, or violates its record schema | loader (`load.rs`) |
+| **V1** | dangling reference: a record id, dimension value, orphan behavior, or a case naming a test binary with no source under `crates/*/tests/` | `validate.rs` |
+| **V2** | duplicate stable id anywhere, an id-format violation, or a prefix↔type mismatch | `validate.rs` |
+| **V3** | a test case linked to no behavior | `validate.rs` |
+| **V4** | a source unit with empty `behaviors` and no `outOfScope` | `validate.rs` |
+| **V5** | an in-profile behavior with no case, no waiver AND no gap | `validate.rs` |
+| **V6** | a waiver whose `expires` is earlier than today | `validate.rs` |
+| **V7** | a source revision whose `pin` disagrees with its `verifiedAgainst` file | `validate.rs` |
+| **V8** | a disposition contradiction — rules R1 – R8 | [Contradiction rules](#contradiction-rules-r1--r8) |
+| **V9** | an expected outcome referencing an undeclared observable channel | `validate.rs` |
+| **V10** | a case whose context has an empty intersection with a linked behavior's applicability | `validate.rs` |
+| **V11 – V15** | inventory join: stale / unclassified / malformed / provenance / clause↔source integrity | [Inventory join](#inventory-join-v11--v15--constraints-and-clauses) |
+| **V16** | declarative-case well-formedness (shape, `oracleType`, consumer subcommand, assertions, `fsAllowlist`, observable channel, Docker `resourceGroup`) | `validate.rs` |
+| **V17** | committed-snapshot integrity (orphan or malformed provenance) | `validate.rs` |
+| **V18** | a Docker case referencing a fixture with an unpinned image | `validate.rs` |
+| **V19** | an allowed-difference whose backing waiver/divergence id does not resolve | `validate.rs` |
+| **V20** | invariant-metamorphic arity (≥2 operations + a relationship naming a sibling) | `validate.rs` |
+| **V21** | migration mapping integrity, both directions, incl. exception correspondence | [Migration mapping](#migration-mapping-v21--v23--transitional) |
+| **V22** | fixture correspondence and unreferenced migrated fixtures | [Migration mapping](#migration-mapping-v21--v23--transitional) |
+| **V23** | malformed residual | [Migration mapping](#migration-mapping-v21--v23--transitional) |
+| **V24** | unscoped or unjustified normalization rule | [Normalization rules](#normalization-rules-v24--transitional) |
+| ~~**V25**~~ | baseline provenance — **RETIRED** (FR-053); the artifact is retained, the gate is gone | [Baseline provenance](#migration-baseline-provenance-v25--retired) |
+
+**Three distinctions this file keeps apart**, because conflating any pair makes a status
+unfalsifiable:
+
+- **gap vs. waiver** — missing coverage versus a characterized divergence. See
+  [Gap vs. waiver](#gap-vs-waiver).
+- **residual vs. gap** — missing *representation* (the coverage exists, carried by a
+  program not yet retired; never blocks certification, does block deleting its carrier)
+  versus missing *coverage* (always blocks). See
+  [Residual vs gap](#residual-vs-gap-do-not-conflate).
+- **declared vs. undeclared deficiency** — an admitted, tracked normalization deficiency is
+  reported debt; an unadmitted blanket rule is V24 and blocks. See
+  [Normalization rules](#normalization-rules-v24--transitional).
+
 ## Contradiction rules (R1 – R8)
 
 Validation reports any violated rule under class **V8**, naming the record and the
@@ -143,6 +187,26 @@ only consumer commands, never authoring ones. Do NOT add a `deacon conformance` 
 `deacon snapshot` command — that would drag test tooling into the shipped binary and
 violate the consumer-only scope.
 
+A declarative case may also only declare an **observable** channel — one the runner has an
+observer for (`model::OBSERVED_CHANNELS`, V16). This is stricter than V9, which only
+requires the channel to be *declared* in `channels.json`: a channel can be declared and
+still have no observer (`chan-container-state` is, until its declarative observer lands),
+in which case the case would validate cleanly and then fail at RUN time while the registry
+claimed the behavior was covered. `OBSERVED_CHANNELS` is held in lockstep with the
+harness's `observe::observer_for` by a `parity-harness` test, the same discipline the
+normalization-rule registry uses.
+
+**A case invoking a container-creating subcommand must declare a Docker `resourceGroup`**
+(`model::CONTAINER_SUBCOMMANDS` = `up`/`down`/`exec`/`build`/`run-user-commands`; V16).
+The field reads like nextest scheduling metadata, but it is the *only* discriminator both
+the runner and the validator use to decide a case is Docker-backed. Omit it on a case that
+runs `up` and three protections switch off at once, silently: the runner builds no isolated
+`DockerWorkspace` (so both sides run against the committed fixture tree and stamp an
+identical `devcontainer.local_folder` label — deacon's container and the oracle's become
+indistinguishable, as do two cases running in parallel), no RAII cleanup guard is created
+(container, network and volume leak), and V18 skips the case's image inputs because it is
+`is_docker_case`-gated too. The case still runs, and may well pass.
+
 ## Inventory join (V11 – V15) — constraints AND clauses
 
 This section is the human-readable companion to the two inventory joins enforced in
@@ -225,8 +289,266 @@ re-vendor at the new pin  →  inventory generate  →  inventory diff old new (
 | `conformance/schemas/<pin>/` | vendored, byte-exact upstream copies + manifest | the human, only when re-vendoring at a new pin (never in place) |
 | `conformance/inventory/constraints.json` | **machine-owned** — canonical output of `inventory generate` | `inventory generate` ONLY; hand edits are caught as V14 |
 | `conformance/registry/classifications/<doc>.json` | **hand-authored** — one file per manifest document key | humans; `inventory generate` NEVER touches these |
+| `conformance/migration/baseline.json` | **machine-owned** — canonical output of `baseline generate`, retained as frozen evidence | `baseline generate` ONLY. Its V25 gate is **retired**, so a hand edit is caught by REVIEW of the diff, not by `validate`; `baseline_archive.rs` still checks the artifact's internal integrity |
+| `conformance/migration/mapping.json` | **hand-authored** — the unit → destination mapping | humans; no generator ever writes it |
+| `conformance/registry/residuals.json` | **hand-authored** — representation debt, non-blocking | humans; no generator ever writes it |
 
 Generation and classification are strictly separated: regenerating the inventory can add
 or remove `cst-` units (surfacing V11/V12 for review) but can never rewrite a human's
 disposition. Never delete a unit to go green — units are machine-owned; classify it, or
 accept the honest blocking gap.
+
+---
+
+## Migration baseline provenance (V25) — **RETIRED**
+
+This section documented `check_baseline` in `crates/conformance/src/validate.rs`
+(023-migrate-parity-to-conformance, US1). That function is **gone**, so this section is
+kept as the record of a retired class rather than as a live rule — the lockstep discipline
+still holds, and retiring the enforcement in the same change that retired the prose is what
+it required.
+
+`conformance/migration/baseline.json` is the frozen, mechanically enumerated inventory of
+pre-migration coverage — **151** records today: 118 executable units (91 `live-per-case`,
+23 `hermetic-guard`, 4 `internal-consistency`) plus 33 recorded-only
+`external-corpus-entry` manifest entries. At the original freeze it was 144 (111
+executable); US4 deliberately added 7 fault-injection guard units, each re-frozen with
+`--force`. It is the **subject** of the sentence "no coverage was lost". If it is wrong,
+the conservation claim is unfalsifiable — which is why it is retained untouched and read,
+never rewritten, by every command that measures against it.
+
+> **V25 is retired (023 T099, FR-053).** It is documented here because the artifact it
+> guarded is retained and the reasoning still governs how that artifact is read.
+>
+> The gate compared the committed `baseline.json` against a fresh enumeration of the
+> repository tree. That comparison is only meaningful while the tree still contains the
+> pre-migration machinery: the moment a superseded carrier is deleted, its units drop out
+> of the enumeration and the two can never agree again. A permanent gate would therefore
+> forbid ever retiring the machinery this migration exists to retire — it would have to be
+> broken to make progress, which is the definition of a gate nobody can obey.
+>
+> **What is retained**: `conformance/migration/baseline.json` itself, untouched, and the
+> final migration report. They are the evidence for the conservation claim. **What is
+> gone**: only the live checking gate — `validate` no longer emits V25, and the
+> regeneration-vs-committed tests retired with it. `baseline generate` / `baseline check`
+> remain as tooling; `baseline check` now reports drift informationally, which after any
+> carrier deletion is the expected state, not a failure.
+>
+> **What still guards the artifact**: it is version-controlled, so lowering it is a
+> reviewed diff — and `crates/conformance/tests/baseline_archive.rs` still fails on a
+> record that loses its assertion, its id uniqueness, its sort order, or a channel that no
+> longer resolves.
+>
+> **Its PRESENCE is guarded by V21**, and deliberately so. Retiring V25 removed the only
+> check that the file exists at all, and `Registry::load` reads a missing baseline as
+> `None` rather than as an error — so deleting it made `check_mapping`, `check_residuals`
+> and the harness's reported-granularity gate each scope themselves out, and `validate`
+> went green while every conservation claim became vacuously true. Retiring a *drift* gate
+> was correct; retiring the *existence* requirement along with it was not, and V21 now
+> carries it: a registry holding mapping or residual records with no baseline to reference
+> is incoherent and is reported.
+
+Membership is derived, not authored, so it cannot be gamed: corpus units come from the
+*production* discovery functions (`discover_tier1_cases` / `discover_error_cases` in
+`deacon-conformance::parity_corpus`, shared with the live runners — re-walking directories
+is exactly how 24 Tier-1 cases were once counted as 25), guard units from scanning each
+program's real `#[test]`/`#[tokio::test]` functions, and the external entries from the
+pinned manifest. Each unit's `assertion` is authored **once, at freeze**, in
+`crates/conformance/src/baseline.rs` (so regeneration reproduces it byte-for-byte) and is
+**immutable** thereafter: rewriting it post hoc would let the coverage proof be satisfied
+by lowering the bar.
+
+**V25 was deliberately transitional, and was retired earlier than planned.** FR-053
+scheduled its removal for feature completion, "once the deletion predicate holds for every
+non-residual carrier". In practice the gate and the first deletion are mutually exclusive:
+deleting a proven-safe carrier necessarily breaks the gate, so waiting for *every* carrier
+would have left verified-safe deletions permanently undone. It was retired at the point
+the first carriers cleared the predicate. See the reordering note in
+`specs/023-migrate-parity-to-conformance/tasks.md` (T099).
+
+## The parity carriers this migration retired
+
+023-migrate-parity-to-conformance moved parity coverage into this registry. Four
+config-corpus carriers cleared the equivalence gate and were deleted in US7 —
+deleted: `parity_corpus_tier1`; deleted: `parity_corpus_merged`; deleted:
+`parity_corpus_errors`; deleted: `parity_read_configuration` — together with their shared
+runner module and their in-repo fixture trees. Their coverage is now the `case-tier1-decl-*`,
+`case-merged-decl-*`, `case-errors-decl-*` and `case-readconfig-decl-*` records here,
+driven by `parity_conformance_runner`.
+
+Five carriers survive, each for a recorded reason: `parity_build` and
+`parity_observable_state` / `parity_state_diff` are fully residual (research D4 predicted
+exactly this); `parity_exec` carries one residual; and `parity_up_exec` is
+equivalence-clean but is the ONLY evidence for `bhv-exec-container-id-metadata`, so
+deleting it would uncover that behavior. Every one of those reasons is a `res-` record or
+a coverage fact this file's rules already govern — none of them is a note someone has to
+remember.
+
+## Migration mapping (V21 – V23) — transitional
+
+The human-readable companion to `check_mapping` / `check_residuals` in
+`crates/conformance/src/validate.rs` and the rules in `crates/conformance/src/mapping.rs`
+(023-migrate-parity-to-conformance, US2). Same validate.rs/RULES.md lockstep as every
+other class. Like the retired V25 these are **transitional**: they exist to make the
+parity→conformance migration falsifiable and retire with it (FR-053). Unlike V25 they are
+still live — the migration is not finished while any residual still blocks a carrier.
+
+`conformance/migration/mapping.json` is the *proof* that no coverage was lost. Equal
+counts prove nothing — two sets of the same size can still have lost an item and gained
+another (research D7) — so every baseline unit carries an explicit destination, and every
+destination is reachable from a unit.
+
+| Class | Statement | Remedy |
+|-------|-----------|--------|
+| **V21** | **mapping integrity, both directions**: a baseline unit with no mapping entry (an orphan *test*); a mapping naming a unit or case that does not exist; a **declarative** case no mapping entry reaches (an orphan *case*); a disposition whose arity is wrong (`migrated`/`deduplicated` without `caseIds`, `residual`/`retired` with them, `residual` without a resolvable `residualId`, `deduplicated`/`retired` without a `rationale`); a destination case that resolves to no behavior or declares no observable channel, or names a dangling behavior/channel id; and, for a characterized **exception**, a mapping to zero or to more than one mechanism, a missing mapping entry, or a mechanism whose current direction/scope is BROADER than the recorded pre-migration form. **Also: a registry that carries mapping or residual records with NO committed `baseline.json`** | Give the unit a destination, the case a reachable mapping, the exception exactly one mechanism. A tolerance may be narrowed, never widened. Restore the baseline (or, if the records are genuinely obsolete, delete them too). |
+| **V22** | **fixture correspondence**: a `from` split across two `to`s; a `to` fed by two `from`s (a silent merge); a `from` that is not one of the unit's baseline fixtures; a baseline fixture of a migrated unit with no `fixtureMapping` entry (a silent drop); and a migrated fixture no case references (an unreferenced orphan) | Make the correspondence one-to-one and account for every fixture the unit consumed. Declaring the SAME `(from, to)` pair from two units is fine — two modes of one workspace legitimately share one fixture. |
+| **V23** | **malformed residual**: a vague `missingCapability` (a filler phrase, or too short to name a mechanism); a `followUp` that is not a tracked reference; an `outOfScopeRationale` that names no ground for permanent exclusion (024 — see [Queued vs permanent](#queued-vs-permanent-residuals-024)); a `blockedCarrier` that is absent on a residual whose units are not ALL `external-corpus-entry`, that names no baseline program, or that is present on an `external-corpus-entry` residual; a `units`/`behaviors` entry that does not resolve; and a unit claimed by a residual while its mapping says it was migrated | Name the specific missing capability, and either a tracked follow-up (`queued`) or the principle that forbids expression (`permanent`); name the carrier the residual pins. A residual never blocks certification, which is exactly why its shape must be strict. |
+
+**Legacy pointer cases are exempt from V21's orphan-case direction.** They are the
+pre-migration *carriers*, not destinations; they are retired in US7/US6 once the
+equivalence gate clears them, not mapped into.
+
+**Direction and scope breadth are structural orders, not string comparisons** (FR-027).
+Direction: `none` < agreement (`both-reject`/`both-accept`) < one-directional
+(`reference-stricter`/`deacon-stricter`) < `field-divergence`. Scope: a single case
+(`corpus_case:` / `case:` / `record:`) < a corpus (`corpus:`) < a behavior (`behavior:`).
+Anything unrecognized is treated as maximally broad — fail-closed, so an unreviewed
+spelling can never pass as narrow.
+
+## Normalization rules (V24) — transitional
+
+The human-readable companion to `conservation::check_normalization_rules` and the
+`NORMALIZATION_RULES` registry in `crates/conformance/src/conservation.rs`
+(023-migrate-parity-to-conformance, US4). Same validate.rs/RULES.md lockstep as every
+other class.
+
+A normalization rule decides what a comparison is allowed to **ignore**. Left
+unconstrained it is the most effective way to make a parity suite pass while proving
+less — and, unlike a weakened assertion, it is invisible in the test data: the case still
+declares the channel and still reports `agree`. So every rule the harness applies is
+registered with its scope, action, removal set and justification, and the registry is
+checked.
+
+| Class | Statement | Remedy |
+|-------|-----------|--------|
+| **V24** | **unscoped or unjustified normalization rule**: no scope, an `all`-style scope, or a scope that is neither `channel:<chan-id>` nor `field:<json-pointer>`; a `drop` with no justification or an empty `removes`; a `removes` entry that is open-ended (a glob, a prefix, or a category predicate such as "every empty value") rather than a field name; a non-`drop` rule that declares `removes`; or a rule declared `known_non_compliant` without a reason naming a tracked follow-up | Scope the rule and enumerate what it removes, or declare the deficiency honestly with a tracked follow-up. |
+
+**Only a `drop` loses information**, so only a `drop` needs an enumerated `removes` and a
+justification. The removal set must be a finite list of **field names**: an open-ended set
+removes a *category*, which means a field added tomorrow disappears without anyone
+deciding it should — the exact regression FR-021 exists to prevent.
+
+### Declared deficiency vs undeclared blanket rule
+
+This mirrors residual-vs-gap. An **undeclared** blanket rule fires V24 and blocks: the
+problem is unadmitted. A **declared** one (`known_non_compliant`, carrying a reason that
+names a tracked follow-up) is reported by `certify` as non-blocking debt, exactly like a
+residual — it is admitted, explained and queued. Declaring is a conspicuous source edit
+with a mandatory tracked reason, so it is not a cheap escape from the guard.
+
+There are currently **no** declared deficiencies (024 Phase 4). The last one,
+`strip_intentional_labels`, subtracted labels by four namespace PREFIXES rather than an
+enumerated list — a category, so a label a future release added under `devcontainer.` /
+`com.docker.` / `desktop.` / `dev.containers.` would have vanished from the comparison
+with nobody deciding it should. It was **retired, not narrowed** (tasks.md#T112 closed):
+container-state capture now keeps every label, and the per-CLI identity labels are
+characterized where a reader can see them — a scoped, backed `allowedDifference` on the
+case that compares them, and, until those cases land, an explicit named allowance inside
+the one legacy carrier that still diffs labels (`parity_state_diff`), which dies with it.
+
+The same change registered **`workspace_basename_token`** (rewrite, scope
+`channel:chan-container-state`, removes nothing): each side of a differential runs in its
+own isolated temp workspace, so a config with no explicit `workspaceFolder` yields
+`/workspaces/<tmpA>` versus `/workspaces/<tmpB>`, and the full-path token cannot reach a
+container-side path that never contains the host path. Without it every container-state
+comparison would report a divergence that is an artifact of the runner's own isolation.
+
+### `chan-container-state` is not snapshot-oracle material
+
+The `snapshot` oracle replays committed evidence, so it requires evidence that is
+byte-stable across recordings. `chan-container-state` is **not**: container ids, compose
+project names and image ids survive tokenization, and they change on every run. A case on
+this channel therefore belongs on `live-differential` (compare two sides in the same run)
+or `spec-expectation` (assert a declared shape), never on `snapshot` — recording one would
+produce a snapshot that replays stale on the next run for reasons that carry no meaning.
+This is a property of the evidence, not a gap to close.
+
+### What US4 retired (research D3)
+
+`prune` — which removed every null, empty object, empty array and empty string anywhere in
+a configuration document, plus `configFilePath` unconditionally — and `replace_hex12`,
+which rewrote any 12-character lowercase-hex run in any string. Both had unbounded
+removal sets and are **V24 by construction**; neither can be re-registered.
+
+They are replaced by two named rules with finite, enumerated scope:
+
+- **`drop_absent_optional`** — removes one of 46 enumerated `devcontainer.json` property
+  names, and only when its value carries no information. An unlisted property is always
+  compared, so a newly added one cannot vanish.
+- **`devcontainer_id_token`** — rewrites the literal `${devcontainerId}`, and a 12-hex run
+  only inside six enumerated id-bearing fields, so two genuinely different digests
+  elsewhere can no longer be collapsed into one token.
+
+Both are the *single* definition: `normalize::config_document_rules` is shared by the
+legacy `config`/`merged_config` entry points and the declarative `chan-structured-output`
+channel. `NORMALIZER_VERSION` was bumped `2` → `3`, so every committed snapshot goes stale
+and is re-reviewed rather than silently replayed under new semantics.
+
+Retiring them surfaced four genuine divergences that were previously hidden; they are
+characterized on `bhv-readconfig-tier1-corpus` / `bhv-readconfig-merged-configuration`
+(`reference: divergent`) and left **reporting**. No tolerance was authored and no blanket
+rule reinstated (FR-036).
+
+### `deacon-only` is not noise (FR-020)
+
+`DiffKind` used to rank `deacon-only` last, documented as "usually default noise". A field
+deacon emits and the reference does not is either a real extension or a real
+over-emission; neither is noise, and combined with `prune` it meant such a field was
+hidden when empty and buried when populated. All three difference classes are now reported
+with equal significance; the ordering is a deterministic display order only.
+
+### Residual vs gap (do not conflate)
+
+| | `gaps.json` | `residuals.json` |
+|---|---|---|
+| What it admits | missing **coverage** — no evidence exists | missing **representation** — the coverage exists, carried by a program not yet retired |
+| Blocks `certify`? | **Yes**, always | **No**, never (FR-054) — it is listed as information |
+| What it does block | nothing else | deleting its `blockedCarrier` program (FR-013) |
+| Resolution | add real evidence and delete the record | express the unit as data, then delete the record |
+
+A residual must name a **specific** missing capability (never a vague "not supported
+yet"). `blockedCarrier` is optional only for `external-corpus-entry` residuals, which block
+no program because no program runs them.
+
+#### Queued vs permanent residuals (024)
+
+Not every residual is *debt*. Some units can never be expressed as data:
+
+| | `disposition: queued` | `disposition: permanent` |
+|---|---|---|
+| What it means | migratable once a named capability exists | never migratable — a principle or a category mismatch forbids it |
+| Requires | `followUp` (a tracked reference) | `outOfScopeRationale` (the ground) |
+| Forbids | `outOfScopeRationale` | `followUp` — there is nothing to track |
+| Expected trajectory | count falls to **zero** | count is stable; it is not a queue |
+
+Exactly-one-of is enforced at **deserialize** time (`residual.rs`), not deferred to a
+validation pass: a permanent residual carrying a tracked follow-up promises work that cannot
+happen, and a queued one carrying a rationale claims to be excluded while asking to be fixed.
+`disposition` defaults to `queued`, so a record written before this field existed keeps its
+meaning.
+
+**Why the split exists.** Folding permanent exclusions into the queue makes the queue
+asymptote at a nonzero floor forever, and a number that can never reach zero cannot be read
+as progress. `certify` therefore reports `residualQueue` and `permanentResiduals` separately,
+and the migration report renders them under separate headings.
+
+**V23 requires the rationale to name a ground**, not restate the exclusion: cite the
+principle (e.g. "Constitution II: feature authoring is out of scope") or the specific
+unmodellable mechanism (e.g. "no reference side, so the three-axis disposition has nothing to
+record"). A bare "out of scope" is rejected — it is indistinguishable from unqueued debt.
+
+The permanent set at 024 P1 is 61 units across 6 records: the 33 network-fetched real-world
+corpus entries (research D8), the 17 harness fault-injection and 6 registry-structural units
+(they observe the comparison machinery and the repository, not consumer behavior, so they have
+no oracle and no observable channel), the 4 intra-deacon consistency units (no reference side,
+hence `behaviors: []`), and the lockfile interop unit (Constitution II).

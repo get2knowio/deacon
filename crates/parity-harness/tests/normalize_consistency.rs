@@ -47,8 +47,8 @@ fn config_verdict(case: &str, deacon_raw: &str, reference_raw: &str) -> Verdict 
 }
 
 /// One row of the equivalence table: a (deacon, reference) output pair — the
-/// reference side carries the CLI's real `{configuration}` wrapper + `configFilePath`
-/// noise the runners must normalize away — and the verdict every runner MUST reach.
+/// reference side carries the CLI's real `{configuration}` wrapper — and the verdict
+/// every runner MUST reach.
 struct Row {
     name: &'static str,
     deacon: &'static str,
@@ -58,14 +58,33 @@ struct Row {
 
 fn table() -> Vec<Row> {
     vec![
-        // Identical after prune: reference's wrapper, configFilePath, and empty
-        // container are all dropped; nothing left to diverge.
+        // Equal after the named rules: the reference's wrapper is unwrapped and an
+        // ENUMERATED absent optional (`customizations: {}`) is elided by
+        // `drop_absent_optional`; nothing else differs. (023 T062 — `prune` used to
+        // drop ANY empty value and `configFilePath` too; both are now compared unless
+        // the key is on the enumerated list.)
         Row {
-            name: "equal-after-prune",
+            name: "equal-after-named-rules",
             deacon: r#"{ "name": "demo" }"#,
-            reference: r#"{ "configuration": { "name": "demo", "empty": {} },
-                           "configFilePath": "/w/.devcontainer/devcontainer.json" }"#,
+            reference: r#"{ "configuration": { "name": "demo", "customizations": {} } }"#,
             expected: Verdict::Equal,
+        },
+        // An UNLISTED empty value is now compared rather than silently dropped — the
+        // regression `prune` made invisible (023 T062).
+        Row {
+            name: "unlisted-empty-is-compared",
+            deacon: r#"{ "name": "demo", "someNewProperty": {} }"#,
+            reference: r#"{ "configuration": { "name": "demo" } }"#,
+            expected: Verdict::Divergent(vec![DiffKind::DeaconOnly]),
+        },
+        // `configFilePath` is no longer dropped: the reference emits it and deacon does
+        // not, and that is now REPORTED (research D3).
+        Row {
+            name: "config-file-path-is-compared",
+            deacon: r#"{ "name": "demo" }"#,
+            reference: r#"{ "configuration": { "name": "demo",
+                           "configFilePath": "/w/.devcontainer/devcontainer.json" } }"#,
+            expected: Verdict::Divergent(vec![DiffKind::RefOnly]),
         },
         // The reference keeps a key deacon dropped: highest-signal ref-only.
         Row {
@@ -74,7 +93,8 @@ fn table() -> Vec<Row> {
             reference: r#"{ "configuration": { "name": "demo", "remoteUser": "vscode" } }"#,
             expected: Verdict::Divergent(vec![DiffKind::RefOnly]),
         },
-        // deacon emits a key the reference lacks: lowest-signal deacon-only.
+        // deacon emits a key the reference lacks: a deacon-only finding, reported with
+        // the same significance as any other class (023 T065, FR-020).
         Row {
             name: "deacon-only-key",
             deacon: r#"{ "name": "demo", "extra": 1 }"#,
@@ -88,14 +108,23 @@ fn table() -> Vec<Row> {
             reference: r#"{ "configuration": { "name": "demo-b" } }"#,
             expected: Verdict::Divergent(vec![DiffKind::Value]),
         },
-        // The ONLY difference is a dynamic id (deacon emits a 12-hex hash where the
-        // reference emits the `${devcontainerId}` template). Both sanitize to <ID>,
-        // so a runner must NOT flag this as a divergence.
+        // The ONLY difference is a dynamic id inside an ENUMERATED id-bearing field
+        // (`mounts`): deacon emits a 12-hex hash where the reference emits the
+        // `${devcontainerId}` template. Both tokenize to <ID>, so this is not a
+        // divergence.
         Row {
             name: "dynamic-id-only",
-            deacon: r#"{ "mount": "vol_0123456789ab_data" }"#,
-            reference: r#"{ "configuration": { "mount": "vol_${devcontainerId}_data" } }"#,
+            deacon: r#"{ "mounts": ["vol_0123456789ab_data"] }"#,
+            reference: r#"{ "configuration": { "mounts": ["vol_${devcontainerId}_data"] } }"#,
             expected: Verdict::Equal,
+        },
+        // …but a 12-hex run OUTSIDE the enumerated id fields is NOT collapsed, so two
+        // genuinely different digests still diverge (023 T063).
+        Row {
+            name: "hex-outside-id-fields-still-diverges",
+            deacon: r#"{ "customizations": { "d": "0123456789ab" } }"#,
+            reference: r#"{ "configuration": { "customizations": { "d": "ffffffffffff" } } }"#,
+            expected: Verdict::Divergent(vec![DiffKind::Value]),
         },
         // Malformed JSON on one side: a hard normalization failure, never a
         // fall-through to raw comparison.
@@ -141,13 +170,13 @@ fn config_verdict_is_identical_across_caller_contexts() {
 fn merged_config_agrees_with_config_on_the_shared_block() {
     // For any configuration body, the block extracted by `merged_config` from a
     // `{mergedConfiguration: body}` document must normalize IDENTICALLY to the body
-    // unwrapped by `config` from a `{configuration: body}` document — same prune,
-    // same dynamic-id sanitization. Reusing the equivalence-table bodies keeps the
-    // two entry points provably in lockstep on the shared block.
+    // unwrapped by `config` from a `{configuration: body}` document — the same named
+    // rule chain, the same dynamic-id tokenization. Reusing the equivalence-table
+    // bodies keeps the two entry points provably in lockstep on the shared block.
     let bodies = [
-        json!({ "name": "demo", "empty": {}, "n": null }),
+        json!({ "name": "demo", "customizations": {}, "image": null, "unlisted": {} }),
         json!({ "name": "demo", "remoteUser": "vscode" }),
-        json!({ "mount": "vol_0123456789ab_data", "id": "${devcontainerId}" }),
+        json!({ "mounts": ["vol_0123456789ab_data"], "name": "${devcontainerId}" }),
         json!({ "forwardPorts": [3000, 8080], "runArgs": ["--rm"] }),
     ];
 
@@ -181,9 +210,11 @@ fn merged_config_agrees_with_config_on_the_shared_block() {
 }
 
 #[test]
-fn diff_ranking_is_stable_regardless_of_input_order() {
-    // A pair carrying all three divergence classes at once must rank identically no
-    // matter which caller normalizes it: ref-only → value → deacon-only.
+fn diff_ordering_is_stable_regardless_of_input_order() {
+    // A pair carrying all three divergence classes at once must order identically no
+    // matter which caller normalizes it. Order is deterministic (class, then path) and
+    // NOT a significance ranking — `deacon-only` no longer sorts last as "default
+    // noise" (023 T065, FR-020).
     let deacon = r#"{ "name": "a", "extra": 1 }"#;
     let reference = r#"{ "configuration": { "name": "b", "dropped": 2 } }"#;
     let a = config_verdict("runner-a", deacon, reference);
@@ -193,9 +224,194 @@ fn diff_ranking_is_stable_regardless_of_input_order() {
         a,
         Verdict::Divergent(vec![
             DiffKind::RefOnly,
-            DiffKind::Value,
-            DiffKind::DeaconOnly
+            DiffKind::DeaconOnly,
+            DiffKind::Value
         ]),
-        "ranked divergence order must be single-sourced and stable"
+        "divergence order must be single-sourced and stable"
+    );
+}
+
+/// 023 T061: the `drop_absent_optional` rule's registered `removes` list MUST equal the
+/// key list the implementation actually uses.
+///
+/// The registry is the reviewable statement of what the comparison elides; if it can
+/// drift from the code, it documents a fiction. The two live in different crates
+/// (`deacon-conformance` owns the registry, `parity-harness` owns the normalizer), so
+/// this test is the only place they can be compared — and it belongs here, in the crate
+/// that can see both.
+#[test]
+fn the_registered_removes_list_matches_the_implementation() {
+    let registered = deacon_conformance::conservation::NORMALIZATION_RULES
+        .iter()
+        .find(|r| r.name == "drop_absent_optional")
+        .expect("`drop_absent_optional` is registered");
+
+    assert_eq!(
+        registered.removes,
+        normalize::ABSENT_OPTIONAL_KEYS,
+        "the registered `removes` list and `normalize::ABSENT_OPTIONAL_KEYS` must stay in \
+         lockstep — a registry that can drift from the code documents a fiction"
+    );
+    assert_eq!(
+        registered.action,
+        deacon_conformance::conservation::RuleAction::Drop
+    );
+}
+
+/// 023 T063: the `devcontainer_id_token` rule is registered as a REWRITE with an empty
+/// `removes` — it substitutes, it never deletes.
+#[test]
+fn the_dynamic_id_rule_is_registered_as_a_rewrite() {
+    let registered = deacon_conformance::conservation::NORMALIZATION_RULES
+        .iter()
+        .find(|r| r.name == "devcontainer_id_token")
+        .expect("`devcontainer_id_token` is registered");
+    assert_eq!(
+        registered.action,
+        deacon_conformance::conservation::RuleAction::Rewrite
+    );
+    assert!(
+        registered.removes.is_empty(),
+        "a rewrite removes nothing (FR-024)"
+    );
+    assert!(
+        !normalize::DEVCONTAINER_ID_FIELDS.is_empty(),
+        "the hex rewrite must be confined to an enumerated, non-empty field set"
+    );
+}
+
+// ===========================================================================
+// T090 (US6, FR-029/FR-030, Constitution VIII): ONE comparison implementation.
+// ===========================================================================
+
+/// The migration's end state is one normalizer and one diff. A second implementation is
+/// the failure this guards, and it is insidious rather than obvious: two normalizers that
+/// agree today drift apart later, and the drift shows up as a parity result that changes
+/// depending on which caller produced it — exactly the class of bug that made the
+/// `equivalence-report` stale-binary defect so hard to see.
+///
+/// Checked structurally, on the property that matters: every entry point that normalizes a
+/// resolved-configuration document must route through the SAME rule chain, so the same
+/// body cannot compare differently depending on who asked.
+#[test]
+fn every_config_entry_point_routes_through_one_rule_chain() {
+    let body = json!({
+        "name": "demo",
+        "image": null,
+        "customizations": {},
+        "unlistedEmpty": {},
+        "mounts": ["vol_0123456789ab_data"],
+        "forwardPorts": [3000],
+    });
+
+    // 1. the legacy `configuration` entry point
+    let via_config = normalize::config(
+        "one",
+        &Value::Object(
+            [("configuration".to_string(), body.clone())]
+                .into_iter()
+                .collect(),
+        )
+        .to_string(),
+    )
+    .expect("config normalizes");
+
+    // 2. the legacy `mergedConfiguration` entry point
+    let via_merged = normalize::merged_config(
+        "one",
+        &Value::Object(
+            [("mergedConfiguration".to_string(), body.clone())]
+                .into_iter()
+                .collect(),
+        )
+        .to_string(),
+    )
+    .expect("merged_config normalizes");
+
+    // 3. the rule chain the declarative `chan-structured-output` channel applies
+    let via_rules = normalize::config_document_rules(&body);
+
+    assert_eq!(
+        via_config, via_merged,
+        "the two legacy entry points must share one definition of equivalence"
+    );
+    assert_eq!(
+        via_config, via_rules,
+        "the legacy entry points and the declarative channel must share ONE rule chain — \
+         a second implementation is what Constitution VIII forbids (FR-030)"
+    );
+}
+
+/// No second implementation of a comparison or normalization rule exists in the tree.
+///
+/// A source scan, because the property is about what EXISTS, not about what a particular
+/// call returns: a duplicate that nothing currently calls is still a duplicate waiting to
+/// be called. The retired blanket rules are named explicitly — they were deleted rather
+/// than renamed, and a function reappearing under those names would mean research D3's
+/// defect came back wearing a label.
+#[test]
+fn no_second_normalization_or_comparison_implementation_exists() {
+    /// Signatures that would constitute a second implementation.
+    const FORBIDDEN_DEFINITIONS: &[&str] = &[
+        "fn prune(",
+        "fn replace_hex12(",
+        "fn sanitize_dynamic_values(",
+        "fn drop_empty_values(",
+    ];
+    /// The ONE file allowed to define the normalization rules.
+    const NORMALIZER: &str = "crates/parity-harness/src/normalize.rs";
+
+    let root = parity_harness::workspace_root();
+    let mut offenders: Vec<String> = Vec::new();
+    let mut scanned = 0usize;
+
+    for dir in ["crates/parity-harness/src", "crates/conformance/src"] {
+        let mut stack = vec![root.join(dir)];
+        while let Some(current) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&current) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|s| s.to_str()) != Some("rs") {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                scanned += 1;
+                let rel = path
+                    .strip_prefix(&root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                for forbidden in FORBIDDEN_DEFINITIONS {
+                    if text.contains(forbidden) {
+                        offenders.push(format!(
+                            "{rel}: defines `{forbidden}` — a retired blanket rule (023 \
+                             T062/T063) must not return under any name"
+                        ));
+                    }
+                }
+                // `normalize::diff` is the single ranked config differ.
+                if rel != NORMALIZER && text.contains("pub fn diff(deacon:") {
+                    offenders.push(format!("{rel}: defines a second config `diff`"));
+                }
+            }
+        }
+    }
+
+    assert!(
+        scanned > 10,
+        "expected to scan the harness + conformance sources, only saw {scanned} file(s)"
+    );
+    assert!(
+        offenders.is_empty(),
+        "a second comparison/normalization implementation exists (FR-030):\n{}",
+        offenders.join("\n")
     );
 }

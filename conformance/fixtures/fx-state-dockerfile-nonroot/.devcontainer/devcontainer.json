@@ -1,0 +1,9 @@
+{
+  "name": "StateDiffDockerfile",
+  "build": { "dockerfile": "Dockerfile" },
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "containerUser": "dev",
+  "remoteUser": "dev",
+  "containerEnv": { "DF_ENV": "yes" }
+}

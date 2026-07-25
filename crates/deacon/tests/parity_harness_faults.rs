@@ -470,3 +470,398 @@ fn j_normalization_failure_has_no_raw_fallback() {
     // there is no raw-byte comparison path a caller could take instead.
     assert!(normalize::config("j", "{ broken").is_err());
 }
+
+// ===========================================================================
+// T055 (US4, FR-018 / FR-056): one hermetic case per DIFFERENCE class.
+//
+// The fault-injection binary already proves the process-level causes (a–f) and the
+// waiver/normalization pipeline (g–j). What it did not prove is that each
+// *difference* class is reported with its own classification — which is exactly
+// what research D3 says was being lost: `deacon-only` was ranked last as "usually
+// default noise" and `prune` deleted it outright when empty. Each leg below injects
+// one class synthetically and asserts it is classified AS that class and named.
+// ===========================================================================
+
+/// (k) `ref-only` — the reference emits a key deacon does not. Historically framed as
+/// the highest-signal class ("deacon drops data"), and it must stay reported as its own
+/// class rather than folded into a generic "differs".
+#[test]
+fn k_reference_only_difference_is_classified_as_ref_only() {
+    let deacon = normalize::config("k", r#"{ "name": "demo" }"#).expect("normalize");
+    let reference =
+        normalize::config("k", r#"{ "name": "demo", "remoteUser": "vscode" }"#).expect("normalize");
+
+    let divergences = normalize::diff(&deacon, &reference);
+    assert_eq!(divergences.len(), 1, "{divergences:?}");
+    assert_eq!(divergences[0].kind, normalize::DiffKind::RefOnly);
+    assert_eq!(divergences[0].path, "remoteUser");
+    assert!(divergences[0].deacon.is_none() && divergences[0].reference.is_some());
+
+    let summary = normalize::summarize(&divergences);
+    assert!(
+        summary.contains("ref-only") && summary.contains("remoteUser"),
+        "the class and the path must both be named: {summary}"
+    );
+}
+
+/// (l) `deacon-only` — deacon emits a key the reference does not. **This is the class
+/// FR-020 protects.** It must be reported with its own classification, and (023 T065) it
+/// must no longer sort below `value` on the grounds of being noise.
+#[test]
+fn l_deacon_only_difference_is_classified_and_not_deprioritized() {
+    // `someNewProperty` is deliberately NOT on the enumerated `ABSENT_OPTIONAL_KEYS`
+    // list, so it is compared — the property retiring `prune` restored (023 T062).
+    let deacon =
+        normalize::config("l", r#"{ "name": "demo", "someNewProperty": {} }"#).expect("normalize");
+    let reference = normalize::config("l", r#"{ "name": "demo" }"#).expect("normalize");
+
+    let divergences = normalize::diff(&deacon, &reference);
+    assert_eq!(
+        divergences.len(),
+        1,
+        "an unlisted empty deacon-only key must be REPORTED, not pruned away: \
+         {divergences:?}"
+    );
+    assert_eq!(divergences[0].kind, normalize::DiffKind::DeaconOnly);
+    assert_eq!(divergences[0].path, "someNewProperty");
+
+    let summary = normalize::summarize(&divergences);
+    assert!(
+        summary.contains("deacon-only") && summary.contains("the reference does not emit"),
+        "deacon-only must read as a finding, not a shrug: {summary}"
+    );
+
+    // FR-020 / 023 T065: ordering must not place deacon-only last as "default noise".
+    let mixed_deacon =
+        normalize::config("l", r#"{ "name": "a", "someNewProperty": 1 }"#).expect("normalize");
+    let mixed_reference =
+        normalize::config("l", r#"{ "name": "b", "remoteUser": "vscode" }"#).expect("normalize");
+    let kinds: Vec<_> = normalize::diff(&mixed_deacon, &mixed_reference)
+        .iter()
+        .map(|d| d.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            normalize::DiffKind::RefOnly,
+            normalize::DiffKind::DeaconOnly,
+            normalize::DiffKind::Value
+        ],
+        "deacon-only must not be ranked last as noise (FR-020)"
+    );
+}
+
+/// (m) `value` — the same key, different values. Must not be collapsed into either
+/// one-sided class, and must report BOTH sides so the difference is diagnosable.
+#[test]
+fn m_value_difference_is_classified_with_both_sides() {
+    let deacon = normalize::config("m", r#"{ "name": "demo-a" }"#).expect("normalize");
+    let reference = normalize::config("m", r#"{ "name": "demo-b" }"#).expect("normalize");
+
+    let divergences = normalize::diff(&deacon, &reference);
+    assert_eq!(divergences.len(), 1);
+    assert_eq!(divergences[0].kind, normalize::DiffKind::Value);
+    assert_eq!(
+        (
+            divergences[0].deacon.clone(),
+            divergences[0].reference.clone()
+        ),
+        (
+            Some(serde_json::json!("demo-a")),
+            Some(serde_json::json!("demo-b"))
+        ),
+        "a value difference must carry both sides to be diagnosable"
+    );
+
+    let summary = normalize::summarize(&divergences);
+    assert!(
+        summary.contains("value") && summary.contains("demo-a") && summary.contains("demo-b"),
+        "{summary}"
+    );
+}
+
+/// (n) accept-vs-reject, WITH DIRECTION — the decision-class difference the error corpus
+/// turns on. `deacon-stricter` and `reference-stricter` are distinct outcomes and a
+/// waiver characterizing one must NOT waive the other; only the right direction applies.
+#[test]
+fn n_accept_vs_reject_difference_preserves_direction() {
+    use parity_harness::waiver::{Expect, Waiver};
+
+    fn waiver(id: &str, expect: Expect) -> Waiver {
+        Waiver {
+            id: id.to_string(),
+            behaviors: vec!["bhv-readconfig-malformed-jsonc-rejected".to_string()],
+            scope: Scope::CorpusCase {
+                corpus: "errors".to_string(),
+                case: "n".to_string(),
+            },
+            expect,
+            rationale: "fault-injection probe".to_string(),
+            added: "2026-07-25".to_string(),
+            expires: "2027-07-25".to_string(),
+            config: None,
+        }
+    }
+
+    // The direction predicate every corpus runner applies, mirrored here so the
+    // classification is asserted rather than assumed.
+    fn applies(expect: &Expect, deacon_ok: bool, oracle_ok: bool) -> bool {
+        match expect {
+            Expect::ReferenceStricter { .. } => deacon_ok && !oracle_ok,
+            Expect::DeaconStricter { .. } => !deacon_ok && oracle_ok,
+            Expect::BothReject {} | Expect::BothAccept {} | Expect::FieldDivergence { .. } => false,
+        }
+    }
+
+    let deacon_stricter = waiver("wvr-probe-deacon", Expect::DeaconStricter { signal: None });
+    let reference_stricter = waiver(
+        "wvr-probe-reference",
+        Expect::ReferenceStricter { signal: None },
+    );
+
+    // deacon rejects, the reference accepts → only `deacon-stricter` characterizes it.
+    assert!(applies(&deacon_stricter.expect, false, true));
+    assert!(
+        !applies(&reference_stricter.expect, false, true),
+        "a reference-stricter waiver must NOT waive a deacon-stricter difference — the \
+         direction IS the finding"
+    );
+
+    // The inverse direction, symmetrically.
+    assert!(applies(&reference_stricter.expect, true, false));
+    assert!(!applies(&deacon_stricter.expect, true, false));
+
+    // An agreement expectation never characterizes a decision DIFFERENCE at all.
+    for agreement in [Expect::BothReject {}, Expect::BothAccept {}] {
+        let w = waiver("wvr-probe-agree", agreement);
+        assert!(!applies(&w.expect, false, true));
+        assert!(!applies(&w.expect, true, false));
+    }
+
+    // An unwaived decision difference is a hard failure carrying its own cause.
+    let result = CaseResult::fail(
+        "n",
+        Cause::Divergence,
+        Some("deacon rejected, the reference accepted".to_string()),
+        sample_raw(),
+    );
+    assert_eq!(result.outcome, Outcome::Fail);
+    assert_eq!(result.cause, Some(Cause::Divergence));
+}
+
+// ===========================================================================
+// T056 (US4, FR-019 / FR-023 / FR-056): one hermetic case per DECLARATIVE
+// process-level outcome not covered by (a)–(j).
+//
+// Legs (a)–(f) cover the legacy `report::Cause` vocabulary. The declarative runner
+// has its own outcome vocabulary (`evidence::Outcome`), and three of its members —
+// `AllowedDifference`, `NoReferenceForPlatform`, `Stale` — had no hermetic proof
+// that they stay DISTINCT from `Agree` and from `Diverge`. Conflating any of them
+// with `Agree` is precisely the "reported a pass when no comparison happened"
+// failure FR-023 forbids.
+// ===========================================================================
+
+/// (o) `AllowedDifference` — a divergence fully covered by a scoped tolerance is its OWN
+/// outcome, distinct from `Agree` (a real difference was found) and from `Diverge` (it is
+/// characterized). The backing identity must be named, and an UNCOVERED path must keep
+/// the verdict at `Diverge`.
+#[test]
+fn o_allowed_difference_is_distinct_from_agree_and_names_its_backing_id() {
+    use deacon_conformance::model::AllowedDifference;
+    use parity_harness::compare::{Tolerances, verdict_differential};
+    use parity_harness::evidence::{NormalizedChannelEvidence, Outcome as DeclOutcome};
+
+    fn evidence(value: serde_json::Value) -> NormalizedChannelEvidence {
+        NormalizedChannelEvidence {
+            channel: "chan-structured-output".to_string(),
+            operation: "op-read".to_string(),
+            present: true,
+            value,
+        }
+    }
+
+    let deacon = evidence(serde_json::json!({ "a": 1, "b": 1 }));
+    let reference = evidence(serde_json::json!({ "a": 2, "b": 1 }));
+
+    let tolerance = AllowedDifference {
+        behavior: "bhv-probe".to_string(),
+        context: Vec::new(),
+        observable_path: "chan-structured-output.a".to_string(),
+        rationale: "fault-injection probe".to_string(),
+        waiver_id: Some("wvr-probe".to_string()),
+        divergence_id: None,
+    };
+    let behaviors = vec!["bhv-probe".to_string()];
+
+    // Covered → `allowed-difference`, naming the backing id. NOT `agree`: a difference
+    // WAS found.
+    let tolerances = Tolerances::new(std::slice::from_ref(&tolerance), &behaviors);
+    let mut consumed = HashSet::new();
+    let verdict = verdict_differential(
+        "chan-structured-output",
+        &deacon,
+        &reference,
+        &tolerances,
+        &mut consumed,
+    );
+    assert_eq!(verdict.outcome, DeclOutcome::AllowedDifference);
+    assert_ne!(
+        verdict.outcome,
+        DeclOutcome::Agree,
+        "a tolerated difference is NOT agreement — conflating them reports a pass where a \
+         difference exists (FR-023)"
+    );
+    let detail = verdict
+        .detail
+        .expect("an allowed difference carries its backing id");
+    assert!(
+        detail.to_string().contains("wvr-probe"),
+        "the backing waiver id must appear in the detail: {detail}"
+    );
+    assert_eq!(consumed.len(), 1, "the tolerance is recorded as consumed");
+
+    // UNCOVERED path → stays `diverge`. A tolerance is scoped, never global (FR-032).
+    let elsewhere = AllowedDifference {
+        observable_path: "chan-structured-output.zzz".to_string(),
+        ..tolerance.clone()
+    };
+    let narrow = Tolerances::new(std::slice::from_ref(&elsewhere), &behaviors);
+    let mut unconsumed = HashSet::new();
+    let strict = verdict_differential(
+        "chan-structured-output",
+        &deacon,
+        &reference,
+        &narrow,
+        &mut unconsumed,
+    );
+    assert_eq!(
+        strict.outcome,
+        DeclOutcome::Diverge,
+        "a tolerance for a different path must not absorb this divergence"
+    );
+
+    // An unconsumed tolerance is reported STALE — the same self-invalidation as a waiver
+    // (FR-034).
+    assert_eq!(
+        narrow.stale(&unconsumed).len(),
+        1,
+        "a tolerance whose difference did not reproduce must be reported stale"
+    );
+    assert!(
+        tolerances.stale(&consumed).is_empty(),
+        "a consumed tolerance is not stale"
+    );
+}
+
+/// (p) `NoReferenceForPlatform` — no committed snapshot exists for this `os-arch`. It is a
+/// COVERAGE GAP with its own outcome, and must never be reported as `Agree` (nothing was
+/// compared) nor as `Stale` (nothing drifted).
+#[test]
+fn p_no_reference_for_platform_is_its_own_outcome() {
+    use parity_harness::evidence::{ChannelVerdict, Outcome as DeclOutcome};
+
+    let verdict = ChannelVerdict {
+        channel: "chan-exit-code".to_string(),
+        outcome: DeclOutcome::NoReferenceForPlatform,
+        detail: Some(serde_json::json!({ "platform": "linux-aarch64" })),
+    };
+    assert_ne!(
+        verdict.outcome,
+        DeclOutcome::Agree,
+        "no reference means NO COMPARISON HAPPENED; reporting agreement would be the \
+         silent pass FR-023 forbids"
+    );
+    assert_ne!(
+        verdict.outcome,
+        DeclOutcome::Stale,
+        "absent is not stale — a missing snapshot is a coverage gap, a stale one is drift"
+    );
+    assert_ne!(verdict.outcome, DeclOutcome::Diverge);
+
+    // The wire spelling is stable, so a report consumer can tell the three apart.
+    for (outcome, wire) in [
+        (DeclOutcome::Agree, "\"agree\""),
+        (DeclOutcome::Diverge, "\"diverge\""),
+        (DeclOutcome::AllowedDifference, "\"allowed-difference\""),
+        (
+            DeclOutcome::NoReferenceForPlatform,
+            "\"no-reference-for-platform\"",
+        ),
+        (DeclOutcome::Stale, "\"stale\""),
+        (DeclOutcome::Error, "\"error\""),
+    ] {
+        assert_eq!(
+            serde_json::to_string(&outcome).expect("outcome serializes"),
+            wire,
+            "each declarative outcome needs a distinct, stable spelling"
+        );
+    }
+}
+
+/// (q) `Stale` — a committed snapshot whose evidence-determining provenance drifted. It
+/// must be reported as `Stale`, naming the drifted field, and never silently replayed as
+/// `Agree`.
+#[test]
+fn q_stale_snapshot_is_reported_naming_the_drifted_field() {
+    use deacon_conformance::snapshot::{Provenance, Staleness, compare_staleness};
+
+    // Built by deserialization so this test needs no `indexmap` dependency of its own —
+    // the shape is the committed `provenance.json` shape.
+    let recorded: Provenance = serde_json::from_value(serde_json::json!({
+        "caseHash": "aaaa",
+        "fixtureHash": "bbbb",
+        "oracleVersion": "0.87.0",
+        "sourceRevision": "113500f4",
+        "nodeVersion": "v22.0.0",
+        "dockerVersion": "29.0.0",
+        "composeVersion": "2.0.0",
+        "imageDigests": {},
+        "normalizerVersion": deacon_conformance::snapshot::NORMALIZER_VERSION,
+        "argv": ["read-configuration"],
+        "platform": "linux",
+        "arch": "x86_64",
+        "capturedAt": "2026-01-01T00:00:00Z",
+    }))
+    .expect("provenance shape");
+
+    // Fresh against itself.
+    assert_eq!(
+        compare_staleness(&recorded, &recorded),
+        Staleness::Fresh,
+        "identical provenance is not stale"
+    );
+
+    // An EVIDENCE-DETERMINING field drifting must be reported as stale, NAMING the field
+    // — a boolean would leave the reviewer to guess what changed.
+    let mut drifted = recorded.clone();
+    drifted.case_hash = "cccc".to_string();
+    match compare_staleness(&recorded, &drifted) {
+        Staleness::Stale { field, .. } => assert_eq!(field, "caseHash"),
+        Staleness::Fresh => panic!("a drifted caseHash must be stale, never replayed as agree"),
+    }
+
+    let mut normalizer_drift = recorded.clone();
+    normalizer_drift.normalizer_version = "999".to_string();
+    match compare_staleness(&recorded, &normalizer_drift) {
+        Staleness::Stale { field, .. } => assert_eq!(
+            field, "normalizerVersion",
+            "a normalizer change invalidates recorded evidence — this is why retiring \
+             `prune` and narrowing the id rule (023 T062/T063) bumps NORMALIZER_VERSION"
+        ),
+        Staleness::Fresh => panic!("a normalizer change must invalidate the snapshot"),
+    }
+
+    // A SELECTOR / informational field drifting is NOT staleness: gating on the host's
+    // node/docker versions or the capture time would make every snapshot stale on every
+    // machine but the recorder's, breaking cross-machine replay.
+    let mut informational = recorded.clone();
+    informational.node_version = "v20.0.0".to_string();
+    informational.docker_version = "1.0.0".to_string();
+    informational.compose_version = "9.9.9".to_string();
+    informational.captured_at = "2020-01-01T00:00:00Z".to_string();
+    assert_eq!(
+        compare_staleness(&recorded, &informational),
+        Staleness::Fresh,
+        "host tool versions and capture time are informational, not evidence-determining"
+    );
+}

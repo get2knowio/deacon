@@ -1,4 +1,4 @@
-# Error corpus — Tier 1c differential
+# Error-decision contract (formerly the Tier 1c corpus)
 
 Invalid / edge-case `devcontainer.json` inputs, diffed for **error-decision
 parity**: do deacon and the reference CLI (`@devcontainers/cli` v0.87.0) *agree
@@ -6,23 +6,36 @@ on whether the input is an error?* The valid-config tiers diff successful
 output; this tier diffs the accept/reject decision (and, when both accept, the
 resolved value after pruning).
 
-Run it (the Python `run_tier1_errors.py` driver was ported to Rust and deleted —
-018-harden-parity-harness):
+**This directory no longer holds cases or a runner.** The Python
+`run_tier1_errors.py` driver was ported to Rust in 018-harden-parity-harness; that Rust
+runner and the nine `errors/<name>/` case directories were in turn **deleted** in
+023-migrate-parity-to-conformance (US7), once the equivalence ledger proved the
+replacements lose nothing. The file you are reading survives because the *contract* below
+outlived both implementations of it — the findings, the two deliberate refinements, and
+the `extends` reasoning are the durable part.
+
+What replaced them:
+
+| Was | Is now |
+|---|---|
+| `crates/deacon/tests/parity_corpus_errors.rs` (deleted) | the shared `parity_conformance_runner` |
+| nine `errors/<name>/` case directories (deleted) | eleven `case-errors-decl-*` records in `conformance/registry/cases.json` |
+| the corpus's fixture trees (deleted) | `conformance/fixtures/fx-errors-*/` |
+
+Nine units became eleven cases: two rejections needed a second `spec-expectation` twin to
+pin the DIRECTION of the difference, which a differential where both sides reject cannot
+express on its own.
 
 ```bash
 make test-parity            # cargo nextest run --profile parity, then the aggregator
 ```
 
-The runner is `crates/deacon/tests/parity_corpus_errors.rs`. It FAILS the run
-naming the case when a fixture's decision no longer matches its recorded
-expectation, and names any stale waiver record (FR-011). Each case is a directory
-`errors/<name>/` holding the test input — a `.devcontainer/` (or a `.gitkeep` for
-the deliberately config-less `bad-config-path` / `missing-config` cases). Its
-accept/reject expectation is a `corpus_case`-scoped `wvr-<name>` record in the
-**conformance registry** (`conformance/registry/waivers/wvr-<name>.json`), linked
-to a `bhv-readconfig-<name>` behavior with its three-axis disposition — no longer a
-per-case `expect.json` (migrated in 019-conformance-registry; see the "Waiver
-records" section below).
+Each case's accept/reject expectation remains a `corpus_case`-scoped `wvr-<name>` record
+in the **conformance registry** (`conformance/registry/waivers/wvr-<name>.json`), linked
+to a `bhv-readconfig-<name>` behavior with its three-axis disposition — as of
+019-conformance-registry, not a per-case `expect.json`. A waiver whose difference stops
+reproducing still fails as *stale* (FR-011); the migration changed what runs the
+comparison, not the self-invalidating discipline.
 
 ## Headline finding
 
@@ -126,19 +139,26 @@ The nine records are `wvr-bad-config-path`, `wvr-duplicate-keys`,
 and `wvr-wrong-type-forwardports`. `config` (optional, string) carries an explicit
 `--config` argument for a case and plays no part in waiver semantics.
 
-## Adding a fixture
+## Adding a case
 
-1. `errors/<name>/.devcontainer/devcontainer.json` (or supporting files; add a
-   `.gitkeep` instead for a deliberately "no config" case).
+Since 023 this is a **pure data edit — no new Rust function** (SC-001). Nothing is added
+under this directory any more.
+
+1. `conformance/fixtures/fx-errors-<name>/.devcontainer/devcontainer.json` (or supporting
+   files; a deliberately "no config" case just omits the `.devcontainer/`).
 2. A `bhv-readconfig-<name>` behavior and a `wvr-<name>` waiver in the conformance
    registry (see `conformance/RULES.md` and
-   `specs/019-conformance-registry/quickstart.md` for the record-a-divergence
-   recipe); a `case-errors-<name>` record in `conformance/registry/cases.json`.
-3. Run `make test-parity`; if it flags a DIVERGENCE, triage whether it's a deacon
-   bug or a defensible characterized divergence, and set the behavior's dispositions
-   + `wvr` `expect.kind` accordingly (`errors/` cases require `min_cases` ≥ 9 in
-   `registry.json`). Run `cargo run -p deacon-conformance -- validate` to check the
-   new records.
+   `specs/019-conformance-registry/quickstart.md` for the record-a-divergence recipe).
+3. A `case-errors-decl-<name>` record in `conformance/registry/cases.json` with
+   `operations` + `oracleType` + `expected`. Use `live-differential` when the interesting
+   fact is *whether the two CLIs agree*; add a `-decision` twin with
+   `oracleType: "spec-expectation"` when both sides reject and the interesting fact is
+   *which* rejection deacon must produce — a both-reject differential agrees no matter
+   what deacon says, so the direction has to be pinned separately.
+4. `cargo run -p deacon-conformance -- validate` (hermetic; V16 checks the case shape),
+   then `make test-parity` for the live comparison. If it flags a DIVERGENCE, triage
+   whether it is a deacon bug or a defensible characterized divergence, and set the
+   behavior's dispositions + the waiver's `expect.kind` accordingly.
 
 ## Natural next step
 

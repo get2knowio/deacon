@@ -197,9 +197,11 @@ LABEL parity.token={}
                 Some(msg.clone()),
                 raw,
             ));
+            flush_progress(&cases, &oracle, &started).await;
             failures.push(format!("[{case}] {msg}"));
         } else {
             cases.push(CaseResult::pass(case, raw));
+            flush_progress(&cases, &oracle, &started).await;
         }
         for id in &deacon_ids {
             docker_rmi(id);
@@ -288,6 +290,7 @@ LABEL build.arg.value=$BUILD_ARG_VALUE
         let raw = raw_paths(&deacon_inv, &oracle_inv);
         if deacon_has_arg {
             cases.push(CaseResult::pass(case, raw));
+            flush_progress(&cases, &oracle, &started).await;
         } else {
             let msg = "deacon image should carry build.arg.value=parity-test label".to_string();
             cases.push(CaseResult::fail(
@@ -296,6 +299,7 @@ LABEL build.arg.value=$BUILD_ARG_VALUE
                 Some(msg.clone()),
                 raw,
             ));
+            flush_progress(&cases, &oracle, &started).await;
             failures.push(format!("[{case}] {msg}"));
         }
         for id in &deacon_ids {
@@ -365,6 +369,7 @@ LABEL test.push=true
 
             if problems.is_empty() {
                 cases.push(CaseResult::pass(case, raw));
+                flush_progress(&cases, &oracle, &started).await;
             } else {
                 let msg = problems.join("; ");
                 cases.push(CaseResult::fail(
@@ -373,6 +378,7 @@ LABEL test.push=true
                     Some(msg.clone()),
                     raw,
                 ));
+                flush_progress(&cases, &oracle, &started).await;
                 failures.push(format!("[{case}] {msg}"));
             }
         } else {
@@ -383,6 +389,7 @@ LABEL test.push=true
                 || stderr.contains("Docker");
             if ok {
                 cases.push(CaseResult::pass(case, raw));
+                flush_progress(&cases, &oracle, &started).await;
             } else {
                 let msg = "Expected BuildKit or Docker error in failure case".to_string();
                 cases.push(CaseResult::fail(
@@ -391,6 +398,7 @@ LABEL test.push=true
                     Some(msg.clone()),
                     raw,
                 ));
+                flush_progress(&cases, &oracle, &started).await;
                 failures.push(format!("[{case}] {msg}"));
             }
         }
@@ -458,6 +466,7 @@ LABEL test.export=true
 
             if problems.is_empty() {
                 cases.push(CaseResult::pass(case, raw));
+                flush_progress(&cases, &oracle, &started).await;
             } else {
                 let msg = problems.join("; ");
                 cases.push(CaseResult::fail(
@@ -466,6 +475,7 @@ LABEL test.export=true
                     Some(msg.clone()),
                     raw,
                 ));
+                flush_progress(&cases, &oracle, &started).await;
                 failures.push(format!("[{case}] {msg}"));
             }
         } else {
@@ -475,6 +485,7 @@ LABEL test.export=true
                 || stderr.contains("Docker");
             if ok {
                 cases.push(CaseResult::pass(case, raw));
+                flush_progress(&cases, &oracle, &started).await;
             } else {
                 let msg = "Expected BuildKit or Docker error in failure case".to_string();
                 cases.push(CaseResult::fail(
@@ -483,6 +494,7 @@ LABEL test.export=true
                     Some(msg.clone()),
                     raw,
                 ));
+                flush_progress(&cases, &oracle, &started).await;
                 failures.push(format!("[{case}] {msg}"));
             }
         }
@@ -567,6 +579,7 @@ LABEL test.buildkit=true
         });
         if problems.is_empty() {
             cases.push(CaseResult::pass(case, raw));
+            flush_progress(&cases, &oracle, &started).await;
         } else {
             let msg = problems.join("; ");
             cases.push(CaseResult::fail(
@@ -575,6 +588,7 @@ LABEL test.buildkit=true
                 Some(msg.clone()),
                 raw,
             ));
+            flush_progress(&cases, &oracle, &started).await;
             failures.push(format!("[{case}] {msg}"));
         }
     }
@@ -644,6 +658,7 @@ LABEL test.buildkit=true
 
         if tag_ok && image_ok {
             cases.push(CaseResult::pass(case, raw));
+            flush_progress(&cases, &oracle, &started).await;
         } else {
             let mut problems: Vec<String> = Vec::new();
             if !tag_ok {
@@ -665,6 +680,7 @@ LABEL test.buildkit=true
                 Some(msg.clone()),
                 raw,
             ));
+            flush_progress(&cases, &oracle, &started).await;
             failures.push(format!("[{case}] {msg}"));
         }
 
@@ -675,21 +691,33 @@ LABEL test.buildkit=true
         docker_rmi(&custom_tag);
     }
 
-    let finished = now_rfc3339();
-    let fragment = ReportFragment::new(
-        BINARY,
-        OracleInfo::from(&oracle),
-        started,
-        finished,
-        cases,
-        Vec::new(),
-    );
-    ff(fragment.write().await);
-
     assert!(
         failures.is_empty(),
         "build parity divergence(s) vs oracle {}:\n{}",
         oracle.version,
         failures.join("\n\n"),
     );
+}
+
+/// Write the cases recorded SO FAR (024 D-1).
+///
+/// This binary asserts mid-stream — an oracle-side precondition that fails aborts the whole
+/// test — and the fragment used to be written only at the very end, so one late panic
+/// discarded the evidence for every case that had already completed. `write_under` now emits
+/// one file per case, so re-flushing after each case is cheap and idempotent: earlier cases
+/// keep their files whatever happens later.
+async fn flush_progress(
+    cases: &[CaseResult],
+    oracle: &parity_harness::oracle::VerifiedOracle,
+    started: &str,
+) {
+    let fragment = ReportFragment::new(
+        BINARY,
+        OracleInfo::from(oracle),
+        started.to_string(),
+        now_rfc3339(),
+        cases.to_vec(),
+        Vec::new(),
+    );
+    ff(fragment.write().await);
 }

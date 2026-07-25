@@ -12,6 +12,26 @@
       "notes": "Robustness differentiator (issue #265; docs/DIFFERENTIATORS.md). The reference derives <folder>_devcontainer verbatim, so a folder like `-myproj` yields an invalid --project-name docker compose rejects. deacon's derived name is always valid and isolated. Backed by case-compose-project-name (parity_observable_state, which observes com.docker.compose.project)."
     },
     {
+      "id": "bhv-container-identity-labels",
+      "area": "observable-state",
+      "statement": "deacon stamps five identity/bookkeeping labels onto a created container that the reference CLI does not set at all (devcontainer.configHash, devcontainer.config_name, devcontainer.name, devcontainer.source, devcontainer.workspaceHash); the three labels both CLIs set (devcontainer.metadata, devcontainer.local_folder, devcontainer.config_file) agree once each side's own workspace path is tokenized.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "Measured against the pinned oracle 0.87.0 on fx-up-basic (024 Phase 5), not inferred. Newly RECORDABLE rather than newly true: the retired strip_intentional_labels rule dropped the whole devcontainer.* namespace before comparison, so no behavior described container labels at all until chan-container-state became an observed channel in 024 Phase 4. Accounted in conservation::POST_BRANCH_BEHAVIORS as an observed fact, not a variant of an existing claim. Recorded by ext-container-identity-labels. TWO FURTHER DIVERGENCES surfaced on the first live run and were RESOLVED by fixing deacon, not by tolerating them (024, T114): the reference always stamps `devcontainer.metadata` (using \"[]\" when empty) where deacon omitted the label, and deacon's foreground keep-alive could not service SIGTERM so `docker stop` took 10,258 ms and SIGKILLed versus the reference's 215 ms. Both were deacon defects; neither needed a waiver."
+    },
+    {
+      "id": "bhv-container-keepalive-command",
+      "area": "observable-state",
+      "statement": "Both CLIs override the container command with a shell keep-alive that holds the container open for exec/lifecycle work and exits cleanly on SIGTERM; the command STRINGS differ. deacon uses `trap \"exit 0\" TERM INT; (sleep infinity || tail -f /dev/null) & wait $!`, the reference `echo Container started; trap \"exit 0\" 15; exec \"$@\"; while sleep 1 & wait $!; do :; done`.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Classified as intentional ONLY because the observable behavior was measured equal, not because the difference looks cosmetic. `docker stop`: deacon 245 ms (single-container) / 138 ms (compose), reference 215 ms; exit code 0 on both sides. deacon's form additionally keeps the BusyBox fallback (`sleep infinity` is rejected on Alpine) and a PATH prefix that survives a feature rewriting PATH. An EARLIER version of this same field was recorded as intentional on the assumption that a keep-alive cannot matter behaviorally \u2014 that assumption was false and hid a 10,258 ms `docker stop` stall with a SIGKILL exit (fixed in e243921, T114). The difference between then and now is that the equivalence is measured."
+    },
+    {
       "id": "bhv-state-container-parity",
       "area": "observable-state",
       "statement": "The observable container state after up (running status, labels, mounts, environment) matches the reference for the observed fixtures.",

@@ -51,9 +51,19 @@ async fn spec_expectation(
     cfg: &RunConfig<'_>,
 ) -> Result<Evaluation, HarnessError> {
     let (ctx, _ws) = runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
-    let mut channels = Vec::with_capacity(case.expected.len());
+    // Capture every declared channel first, so the all-unobserved fault is diagnosed
+    // BEFORE any assertion is evaluated against evidence that does not exist (D-2).
+    let mut normalized = Vec::with_capacity(case.expected.len());
     for exp in &case.expected {
-        let normalized = runner::capture_normalized(case, exp, &ctx)?;
+        normalized.push(runner::capture_normalized(case, exp, &ctx)?);
+    }
+    require_some_observation(
+        case,
+        normalized.iter().map(|n| (n.channel.as_str(), n.present)),
+    )?;
+
+    let mut channels = Vec::with_capacity(case.expected.len());
+    for (exp, normalized) in case.expected.iter().zip(&normalized) {
         let assertion =
             exp.assertion
                 .as_ref()
@@ -64,7 +74,7 @@ async fn spec_expectation(
                         case.id, exp.channel
                     ),
                 })?;
-        let mut verdict = verdict_spec_expectation(&exp.channel, &normalized, assertion)?;
+        let mut verdict = verdict_spec_expectation(&exp.channel, normalized, assertion)?;
         runner::attach_failure_phase(&mut verdict, case, exp, &ctx);
         channels.push(verdict);
     }
@@ -89,21 +99,68 @@ async fn live_differential(
         ),
     })?;
 
-    let (deacon_ctx, _deacon_ws) =
+    // -- deacon's side, captured and then RELEASED before the reference side runs -----
+    //
+    // The two sides run SEQUENTIALLY, and deacon's container/network/volumes are reclaimed
+    // as soon as its evidence is in hand. Holding them across the reference run doubles the
+    // peak Docker footprint and makes any case that publishes a FIXED host port collide
+    // with itself (024 Phase 3, D-3).
+    //
+    // INVARIANT that makes this reordering correct: every Docker channel observer reads
+    // only the PRE-FETCHED `ctx.container_inspect` (the runner fetches it inside its op
+    // loop), never a live container; the filesystem observers read the workspace tree,
+    // which is why the capture below happens BEFORE cleanup. No observer re-probes docker,
+    // so nothing captured after this point depends on deacon's resources still existing.
+    let (deacon_ctx, deacon_ws) =
         runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
+    let mut deacon_norm = Vec::with_capacity(case.expected.len());
+    for exp in &case.expected {
+        deacon_norm.push(runner::capture_normalized(case, exp, &deacon_ctx)?);
+    }
+    if let Some(mut ws) = deacon_ws {
+        // Reclamation shells out to `deacon down` plus several `docker` calls, all via
+        // blocking `std::process::Command::output`. Running that on the async executor
+        // would stall the runtime for seconds per case — under `--profile parity` with
+        // concurrent cases, for every teardown — so it is offloaded, exactly as the
+        // runner's far cheaper `docker ps` probe already is (constitution V).
+        //
+        // `ws` MOVES into the blocking task: `cleanup_now` is idempotent and the guard's
+        // `Drop` runs there too, so the temp workspace directory is removed on the
+        // blocking pool rather than here.
+        tokio::task::spawn_blocking(move || ws.cleanup_now())
+            .await
+            .map_err(runner::blocking_join_err)?;
+    }
+
+    // -- the reference side ----------------------------------------------------------
     let (oracle_ctx, _oracle_ws) =
         runner::execute_ops(Side::Oracle, &oracle.path, case, cfg).await?;
+    let mut oracle_norm = Vec::with_capacity(case.expected.len());
+    for exp in &case.expected {
+        oracle_norm.push(runner::capture_normalized(case, exp, &oracle_ctx)?);
+    }
+
+    // A channel neither side observed is not evidence of agreement (D-2). Individual
+    // channels keep FR-018's not-captured-matches-not-captured; only a case where NOTHING
+    // was observed is rejected — it proved nothing.
+    require_some_observation(
+        case,
+        deacon_norm
+            .iter()
+            .zip(&oracle_norm)
+            .map(|(d, o)| (d.channel.as_str(), d.present || o.present)),
+    )?;
 
     let tolerances = Tolerances::new(&case.allowed_differences, &case.behaviors);
     let mut consumed = std::collections::HashSet::new();
     let mut channels = Vec::with_capacity(case.expected.len());
-    for exp in &case.expected {
-        let deacon_norm = runner::capture_normalized(case, exp, &deacon_ctx)?;
-        let oracle_norm = runner::capture_normalized(case, exp, &oracle_ctx)?;
+    for ((exp, deacon_norm), oracle_norm) in
+        case.expected.iter().zip(&deacon_norm).zip(&oracle_norm)
+    {
         let mut verdict = verdict_differential(
             &exp.channel,
-            &deacon_norm,
-            &oracle_norm,
+            deacon_norm,
+            oracle_norm,
             &tolerances,
             &mut consumed,
         );
@@ -111,6 +168,92 @@ async fn live_differential(
         channels.push(verdict);
     }
     Ok((channels, tolerances.stale(&consumed)))
+}
+
+/// Channels whose evidence comes from the RUNTIME (a container or the filesystem) rather
+/// than from the CLI process itself.
+///
+/// The distinction is what makes the vacuity guard bite. A CLI-process channel
+/// (`chan-exit-code`, `chan-stdout`, …) is captured from the invocation and is therefore
+/// present on essentially every run, including a run where Docker fell over. A
+/// runtime-derived channel is present only if the container or file tree was actually
+/// inspected. Requiring "at least one channel overall" is satisfied by `chan-exit-code`
+/// alone, which is why it must be required PER GROUP instead.
+const RUNTIME_DERIVED_CHANNELS: &[&str] = &[
+    deacon_conformance::model::CHAN_CONTAINER_STATE,
+    deacon_conformance::model::CHAN_IMAGE,
+    deacon_conformance::model::CHAN_PROCESS_GRAPH,
+    deacon_conformance::model::CHAN_INJECTED_PROCESS,
+    deacon_conformance::model::CHAN_TEMPORAL,
+    deacon_conformance::model::CHAN_FILESYSTEM,
+    deacon_conformance::model::CHAN_FILE_CONTENT,
+];
+
+/// Fail loud when a case's declared channels were not actually observed (024 Phase 3,
+/// D-2).
+///
+/// `channels` yields `(channel-id, observed)` for each declared channel — for a
+/// differential, `observed` is true when EITHER side captured it. Two rules:
+///
+/// 1. **Nothing at all was observed.** A comparison of two absences is not agreement.
+/// 2. **Runtime-derived channels were declared and NONE of them was observed.** This is
+///    the rule that matters in practice. Rule 1 alone is nearly vacuous for a Docker case:
+///    such a case also declares `chan-exit-code`, which is captured from the CLI process
+///    and is present even when the daemon is dead — so a run where `docker inspect` came
+///    back empty for every observer would satisfy rule 1 on the exit code alone, compare
+///    not-captured to not-captured across all four Docker channels, and report `agree`.
+///    That is exactly the silent green pass this guard exists to eliminate, surviving the
+///    guard.
+///
+/// Individual channels keep the FR-018 semantics (not-captured matches not-captured) —
+/// a case may legitimately observe 3 of its 4 Docker channels. What is rejected is a
+/// whole GROUP coming back empty, because that indicates the observation itself failed
+/// rather than the evidence being genuinely absent. A case declaring NO channel is left to
+/// the other validators (V16).
+fn require_some_observation<'a>(
+    case: &TestCase,
+    channels: impl IntoIterator<Item = (&'a str, bool)>,
+) -> Result<(), HarnessError> {
+    let mut any_observed = false;
+    let mut all: Vec<&str> = Vec::new();
+    let mut runtime: Vec<&str> = Vec::new();
+    let mut any_runtime_observed = false;
+
+    for (channel, observed) in channels {
+        all.push(channel);
+        any_observed |= observed;
+        if RUNTIME_DERIVED_CHANNELS.contains(&channel) {
+            runtime.push(channel);
+            any_runtime_observed |= observed;
+        }
+    }
+
+    if all.is_empty() {
+        return Ok(());
+    }
+    if !any_observed {
+        return Err(HarnessError::ObservationFault {
+            case: case.id.clone(),
+            cause: format!(
+                "every declared channel came back not-captured ({}); a comparison of two \
+                 absences is not agreement",
+                all.join(", ")
+            ),
+        });
+    }
+    if !runtime.is_empty() && !any_runtime_observed {
+        return Err(HarnessError::ObservationFault {
+            case: case.id.clone(),
+            cause: format!(
+                "no runtime-derived channel was captured ({}) — only CLI-process channels \
+                 were, which are present even when the container runtime is unavailable; \
+                 comparing these absences would report agreement about a container nobody \
+                 inspected",
+                runtime.join(", ")
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// snapshot: resolve the committed snapshot for the current `os-arch`, gate on

@@ -202,29 +202,138 @@ impl ReportFragment {
         Ok(())
     }
 
-    /// Serialize and write this fragment atomically to
-    /// `<report_root>/report/<binary>.json`, returning the absolute path written.
+    /// Serialize and write this fragment atomically under
+    /// `<report_root>/report/<binary>/`, returning the directory written.
     /// A write failure is [`HarnessError::Report`] — the caller fails the test.
     pub async fn write(&self) -> Result<PathBuf, HarnessError> {
         self.write_under(&crate::report_root()).await
     }
 
     /// As [`write`], but under an explicit report root (for tests / custom dirs).
+    ///
+    /// **One file per case** — reported (`<binary>/<case-id>.json`) *or* omitted
+    /// (`<binary>/<case-id>.omitted.json`) — plus a `_meta.json` carrying only the run
+    /// metadata.
+    ///
+    /// This shape exists because the previous one silently destroyed evidence. A fragment
+    /// used to be written to a single `report/<binary>.json`, but a binary like
+    /// `parity_state_diff` has EIGHT `#[tokio::test]` functions, each building a fragment
+    /// holding ONE case — and under nextest each is a separate process. Last writer won, so
+    /// the on-disk fragment held 1 case of 8, and the aggregator's per-binary index
+    /// collapsed same-binary fragments the same way. That is the exact
+    /// reported-granularity-below-asserted-granularity defect spec 023 existed to fix,
+    /// living on unguarded in the carriers 023 did not retire (024 D-1).
+    ///
+    /// Per-case files make concurrent writers additive instead of destructive: two
+    /// processes writing different cases of one binary touch different paths, and
+    /// [`crate::aggregate::read_fragments`] merges them back.
+    ///
+    /// **Omissions are per-case files too, and that is not incidental.** Parking them on a
+    /// shared `_meta.json` reintroduced the very defect above one level down: every writer
+    /// of a binary rewrites that file wholesale, so the last process to finish — typically
+    /// one with nothing omitted — erased the omission lists of all the others. An omission
+    /// is evidence (gate 3 requires each to carry a reason, and gate 7 reads them to tell a
+    /// deliberate skip from an unreported unit), so losing it is losing evidence. What
+    /// remains in `_meta.json` is only data every writer produces identically, or that
+    /// merges monotonically: the binary name, the oracle (a disagreement is a hard error),
+    /// and the run timestamps (which widen).
     pub async fn write_under(
         &self,
         report_root: &std::path::Path,
     ) -> Result<PathBuf, HarnessError> {
         self.validate()
             .map_err(|cause| HarnessError::Report { cause })?;
-        let bytes = serde_json::to_vec_pretty(self).map_err(|e| HarnessError::Report {
-            cause: format!("could not serialize fragment for `{}`: {e}", self.binary),
-        })?;
-        let path = report_root
-            .join("report")
-            .join(format!("{}.json", self.binary));
-        crate::atomic_write(&path, &bytes).await?;
-        Ok(path)
+        let dir = report_root.join("report").join(&self.binary);
+
+        // Metadata ONLY — no cases, no omissions. See the doc comment: anything
+        // per-process stored here is destroyed by the next process to write.
+        let meta = ReportFragment {
+            cases: Vec::new(),
+            omitted: Vec::new(),
+            ..self.clone()
+        };
+        write_json(&dir.join("_meta.json"), &meta, &self.binary).await?;
+
+        for case in &self.cases {
+            let single = ReportFragment {
+                cases: vec![case.clone()],
+                omitted: Vec::new(),
+                ..self.clone()
+            };
+            write_json(&dir.join(case_file_name(&case.case)), &single, &self.binary).await?;
+        }
+        for omission in &self.omitted {
+            let single = ReportFragment {
+                cases: Vec::new(),
+                omitted: vec![omission.clone()],
+                ..self.clone()
+            };
+            write_json(
+                &dir.join(omitted_file_name(&omission.case)),
+                &single,
+                &self.binary,
+            )
+            .await?;
+        }
+        Ok(dir)
     }
+}
+
+/// Serialize `fragment` and write it atomically to `path`.
+async fn write_json(
+    path: &std::path::Path,
+    fragment: &ReportFragment,
+    binary: &str,
+) -> Result<(), HarnessError> {
+    let bytes = serde_json::to_vec_pretty(fragment).map_err(|e| HarnessError::Report {
+        cause: format!("could not serialize fragment for `{binary}`: {e}"),
+    })?;
+    crate::atomic_write(path, &bytes).await
+}
+
+/// A filesystem-safe file name for a case id.
+///
+/// Case ids are authored slugs, but a path separator or `..` in one would escape the
+/// report directory, so every character outside `[A-Za-z0-9.-]` is escaped.
+///
+/// **The escape is INJECTIVE, deliberately.** The obvious version — map every unsafe
+/// character to `_` — is lossy, and lossy is not safe here: `exec/tty` and `exec:tty` both
+/// become `exec_tty.json`, so the second write renames over the first and one case's
+/// result vanishes. The aggregator then reports N-1 cases and gate 7 flags the missing
+/// baseline unit as unreported. That is the same evidence loss the per-case layout was
+/// introduced to fix, re-entering through the file name. Escaping each unsafe byte as
+/// `_<hex>` (and `_` itself as `_5f`) keeps distinct ids in distinct files.
+fn case_file_name(case: &str) -> String {
+    let mut out = String::with_capacity(case.len() + 8);
+    for byte in case.bytes() {
+        let safe = byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-';
+        if safe {
+            out.push(byte as char);
+        } else {
+            // `_` is the escape character, so it must escape itself to stay injective.
+            out.push_str(&format!("_{byte:02x}"));
+        }
+    }
+    // `_meta` is reserved for the metadata file, and a leading dot would hide this one.
+    // Neither can arise from the escaping above (`_` and `.` at position 0 are handled),
+    // but guard explicitly so the reservation survives a future change to the safe set.
+    if out == "_meta" || out.starts_with('.') {
+        out.insert(0, 'c');
+    }
+    out.push_str(".json");
+    out
+}
+
+/// The file name recording that a case was OMITTED rather than compared.
+///
+/// A distinct suffix rather than a shared name: a case is normally either reported or
+/// omitted, but two test functions of one binary disagreeing about that is exactly the
+/// kind of thing the report should surface, not resolve by overwrite.
+fn omitted_file_name(case: &str) -> String {
+    let mut out = case_file_name(case);
+    out.truncate(out.len() - ".json".len());
+    out.push_str(".omitted.json");
+    out
 }
 
 /// Current UTC time as an RFC3339 second-precision `Z` timestamp.
@@ -341,16 +450,34 @@ mod tests {
             ],
             vec![],
         );
-        let path = frag.write_under(dir.path()).await.expect("write");
-        assert!(path.ends_with("report/parity_corpus_tier1.json"));
+        // `write_under` writes ONE FILE PER CASE under `report/<binary>/` plus a
+        // `_meta.json`, and returns that directory — the per-case granularity D-1 fixed
+        // (a single shared file made concurrent test processes overwrite each other).
+        let dir_path = frag.write_under(dir.path()).await.expect("write");
+        assert!(
+            dir_path.ends_with("report/parity_corpus_tier1"),
+            "write_under returns the per-binary DIRECTORY: {dir_path:?}"
+        );
+        assert!(
+            dir_path.join("_meta.json").is_file(),
+            "metadata is recorded"
+        );
 
-        let text = std::fs::read_to_string(&path).expect("read back");
-        assert!(text.contains("\"mode\": \"live\""));
-        assert!(text.contains("\"outcome\": \"pass-waived\""));
-        assert!(text.contains("\"cause\": \"divergence\""));
-
-        let parsed: ReportFragment = serde_json::from_str(&text).expect("roundtrip");
-        assert_eq!(parsed, frag);
+        // Every case is independently readable and round-trips.
+        let mut round_tripped = Vec::new();
+        for case in &frag.cases {
+            let path = dir_path.join(format!("{}.json", case.case));
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read back {path:?}: {e}"));
+            let parsed: ReportFragment = serde_json::from_str(&text).expect("roundtrip");
+            assert_eq!(parsed.cases.len(), 1, "one case per file");
+            assert_eq!(&parsed.cases[0], case, "the case round-trips verbatim");
+            round_tripped.push(text);
+        }
+        let all = round_tripped.join("\n");
+        assert!(all.contains("\"mode\": \"live\""));
+        assert!(all.contains("\"outcome\": \"pass-waived\""));
+        assert!(all.contains("\"cause\": \"divergence\""));
     }
 
     #[tokio::test]

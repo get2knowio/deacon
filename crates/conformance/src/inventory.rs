@@ -262,27 +262,11 @@ pub fn render(inventory: &ConstraintInventory) -> String {
     out
 }
 
-/// Atomically write the rendered inventory to `path` (temp file + rename), creating the
-/// parent directory if needed. Never leaves a partial file (contracts/inventory-schema
-/// §5). Mirrors `cache/disk.rs::save_index`.
+/// Atomically write the rendered inventory to `path`, delegating to the single
+/// [`crate::atomic_write`] primitive (temp file + rename). Never leaves a partial file
+/// (contracts/inventory-schema §5).
 pub fn write_inventory(path: &Path, inventory: &ConstraintInventory) -> std::io::Result<()> {
-    let contents = render(inventory);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("constraints.json");
-
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = parent.join(format!("{file_name}.tmp.{}.{}", std::process::id(), seq));
-
-    std::fs::write(&tmp, contents)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+    crate::atomic_write(path, &render(inventory))
 }
 
 // ---------------------------------------------------------------------------

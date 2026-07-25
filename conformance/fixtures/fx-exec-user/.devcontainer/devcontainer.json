@@ -1,0 +1,5 @@
+{
+  "name": "ParityExecUser",
+  "image": "alpine:3.19",
+  "containerUser": "root"
+}

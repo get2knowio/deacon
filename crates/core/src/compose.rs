@@ -1346,8 +1346,16 @@ impl ComposeProject {
             // for BusyBox/Alpine. Only command is overridden; the image's
             // entrypoint is preserved so multi-stage entrypoints (e.g. tini)
             // still receive our command as args.
+            //
+            // The `trap` + background + `wait` shape must MATCH docker.rs: without it a
+            // foreground `sleep` as PID 1 cannot service SIGTERM, so `docker stop` /
+            // `compose down` waits the full 10s grace period and then SIGKILLs (measured
+            // at 10,258 ms vs the reference CLI's 215 ms before the fix). Keeping the two
+            // paths symmetric is the point — a compose container that took 10s to stop
+            // while the single-container path took 245ms would be a silent asymmetry.
             yaml.push_str(
-                "    command: [\"/bin/sh\", \"-c\", \"sleep infinity || tail -f /dev/null\"]\n",
+                "    command: [\"/bin/sh\", \"-c\", \"trap \\\"exit 0\\\" TERM INT; \
+                 (sleep infinity || tail -f /dev/null) & wait $$!\"]\n",
             );
         }
 
@@ -2536,10 +2544,16 @@ mod tests {
             .expect("override command should produce override yaml even with no env/mounts");
 
         assert!(override_yaml.contains("services:\n  app:\n"));
+        // The keep-alive must carry the SIGTERM trap and the background+`wait` shape,
+        // not a bare foreground `sleep`: without them PID 1 cannot service SIGTERM and
+        // `docker stop` burns the full 10s grace period before SIGKILL (024).
         assert!(
-            override_yaml.contains(
-                "command: [\"/bin/sh\", \"-c\", \"sleep infinity || tail -f /dev/null\"]"
-            )
+            override_yaml.contains("trap \\\"exit 0\\\" TERM INT;"),
+            "keep-alive must trap SIGTERM: {override_yaml}"
+        );
+        assert!(
+            override_yaml.contains("(sleep infinity || tail -f /dev/null) & wait $$!"),
+            "keep-alive must background the sleep and wait on it: {override_yaml}"
         );
     }
 
@@ -2590,10 +2604,16 @@ mod tests {
 
         let override_yaml = project.generate_injection_override().unwrap();
 
+        // The keep-alive must carry the SIGTERM trap and the background+`wait` shape,
+        // not a bare foreground `sleep`: without them PID 1 cannot service SIGTERM and
+        // `docker stop` burns the full 10s grace period before SIGKILL (024).
         assert!(
-            override_yaml.contains(
-                "command: [\"/bin/sh\", \"-c\", \"sleep infinity || tail -f /dev/null\"]"
-            )
+            override_yaml.contains("trap \\\"exit 0\\\" TERM INT;"),
+            "keep-alive must trap SIGTERM: {override_yaml}"
+        );
+        assert!(
+            override_yaml.contains("(sleep infinity || tail -f /dev/null) & wait $$!"),
+            "keep-alive must background the sleep and wait on it: {override_yaml}"
         );
         assert!(override_yaml.contains("environment:"));
         assert!(override_yaml.contains("FOO: \"bar\""));

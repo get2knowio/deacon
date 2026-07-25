@@ -49,22 +49,24 @@
 //! and no path-string parsing, so the crate compiles and validates identically on
 //! the Windows `dev-fast` lane.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use serde::Serialize;
 
+use crate::baseline::UnitCategory;
 use crate::clause::{generate_clauses, render as render_clauses};
 use crate::inventory::{generate_inventory, render};
 use crate::load::{
     LoadError, Registry, SchemaError, load_clause_inventory, load_inventory, load_spec_manifest,
 };
+use crate::mapping::{CaseFacts, MechanismForm};
 use crate::model::{
-    BehaviorUnit, CONSUMER_SUBCOMMANDS, CaseKind, CertificationProfile, Classification,
-    ClauseClassification, ClauseInventory, ClauseUnit, Condition, ConstraintInventory,
-    ConstraintUnit, Decision, Disposition, DocumentScope, FILESYSTEM_CHANNELS, OracleType,
-    RecordType, ReferenceStatus, RevisionKind, SpecManifest, SpecStatus, Strength, Testability,
-    parse_id,
+    BehaviorUnit, CONSUMER_SUBCOMMANDS, CONTAINER_SUBCOMMANDS, CaseKind, CertificationProfile,
+    Classification, ClauseClassification, ClauseInventory, ClauseUnit, Condition,
+    ConstraintInventory, ConstraintUnit, Decision, Disposition, DocumentScope, FILESYSTEM_CHANNELS,
+    OBSERVED_CHANNELS, OracleType, RecordType, ReferenceStatus, RevisionKind, SpecManifest,
+    SpecStatus, Strength, Testability, parse_id,
 };
 use crate::prose::Document;
 use crate::prose::strength::{has_family, hides_mandatory_keyword};
@@ -83,6 +85,14 @@ pub struct Violation {
 }
 
 impl Violation {
+    /// A **V24** violation naming the offending normalization rule
+    /// (023-migrate-parity-to-conformance, T060). Exposed so
+    /// [`crate::conservation::check_normalization_rules`] — which owns the rule registry
+    /// and therefore the rules — can construct violations without a parallel type.
+    pub fn v24(rule: impl Into<String>, message: impl Into<String>) -> Violation {
+        Violation::new("V24", rule, message)
+    }
+
     fn new(code: &str, record: impl Into<String>, message: impl Into<String>) -> Violation {
         Violation {
             code: code.to_string(),
@@ -186,6 +196,25 @@ pub fn validate_path_with_inventory(
                 .map(|p| p.join("snapshots"))
                 .unwrap_or_else(|| root.join("snapshots"));
             violations.extend(check_snapshots(&registry, &snapshots_dir));
+            // V25: baseline provenance — the committed frozen inventory must still match
+            // a fresh enumeration of the repository tree (023, US1).
+            // **V25 (baseline provenance) is RETIRED** — 023 T099, FR-053. The frozen
+            // baseline describes the PRE-migration world, so once a superseded carrier is
+            // deleted the enumeration can no longer reproduce it BY CONSTRUCTION. A
+            // permanent gate would forbid ever retiring the machinery the migration
+            // exists to retire. `conformance/migration/baseline.json` is retained,
+            // untouched, as the evidence for the conservation claim; only the live
+            // checking gate is gone (see `conformance/RULES.md`).
+            // V21/V22: migration mapping integrity + fixture correspondence (023, US2).
+            violations.extend(check_mapping(&registry));
+            // V23: residual well-formedness (023, US2).
+            violations.extend(check_residuals(&registry));
+            // V24: normalization-rule scope/justification (023, US4). The rule registry
+            // is code, not registry data, so this check is registry-independent — it runs
+            // here so `validate` reports every class in one pass.
+            violations.extend(crate::conservation::check_normalization_rules(
+                crate::conservation::NORMALIZATION_RULES,
+            ));
             sort_violations(&mut violations);
             Ok(violations)
         }
@@ -265,6 +294,457 @@ pub fn check_snapshots(registry: &Registry, snapshots_dir: &Path) -> Vec<Violati
         }
     }
     out
+}
+
+/// The migration-mapping violation classes **V21** (mapping integrity, both
+/// directions, incl. characterized-exception correspondence) and **V22** (fixture
+/// correspondence and unreferenced fixtures) —
+/// 023-migrate-parity-to-conformance, US2.
+///
+/// Pure over a loaded [`Registry`]: it lifts the registry's records into the
+/// vocabulary-free inputs `crate::mapping` checks, so the RULES are stated once, next
+/// to their class, and this function only adapts. A registry with no committed baseline
+/// (a fixture registry, or the tree before the baseline is generated) yields no
+/// violations — but a registry carrying mapping/residual records with NO baseline to
+/// reference is reported as V21 (V25, which used to own baseline provenance, is retired).
+pub fn check_mapping(registry: &Registry) -> Vec<Violation> {
+    let Some(baseline) = registry.baseline.as_ref() else {
+        // V25 (baseline provenance) is retired, and with it went the only check that the
+        // committed baseline EXISTS. That left a hole: `Registry::load` treats a missing
+        // `baseline.json` as `None` rather than an error, so deleting it made this check,
+        // `check_residuals` and the harness's granularity gate all scope themselves out —
+        // and `validate` went green while every conservation claim became vacuously true.
+        //
+        // A registry with NO mapping and NO residual records genuinely has nothing to
+        // conserve (fixture registries are shaped that way, and so was the tree before
+        // the baseline was first frozen). But a registry that carries records whose whole
+        // purpose is to reference baseline units, with no baseline to reference, is
+        // incoherent — report it rather than falling silent.
+        if registry.mapping.is_empty() && registry.residuals.is_empty() {
+            return Vec::new();
+        }
+        return vec![Violation::new(
+            "V21",
+            "migration/baseline.json".to_string(),
+            format!(
+                "no committed baseline, but the registry carries {} mapping record(s) and \
+                 {} residual record(s) that reference baseline units — every conservation \
+                 check reads the baseline and would silently pass with nothing to check",
+                registry.mapping.len(),
+                registry.residuals.len()
+            ),
+        )];
+    };
+
+    let unit_ids: Vec<String> = baseline.records.iter().map(|u| u.id.clone()).collect();
+    let unit_fixtures: BTreeMap<String, Vec<String>> = baseline
+        .records
+        .iter()
+        .map(|u| (u.id.clone(), u.fixtures.clone()))
+        .collect();
+    let cases = case_facts(registry);
+    let residual_ids: BTreeSet<String> = registry.residuals.iter().map(|r| r.id.clone()).collect();
+    let known_behaviors: BTreeSet<String> =
+        registry.behaviors.iter().map(|b| b.id.clone()).collect();
+    let known_channels: BTreeSet<String> = registry.channels.iter().map(|c| c.id.clone()).collect();
+
+    let mut problems = crate::mapping::check_mapping(
+        &unit_ids,
+        &registry.mapping,
+        &cases,
+        &residual_ids,
+        &known_behaviors,
+        &known_channels,
+    );
+    problems.extend(crate::mapping::check_fixture_mappings(
+        &registry.mapping,
+        &unit_fixtures,
+        &cases,
+    ));
+    let (mut known_exceptions, mechanisms) = exception_mechanisms(registry);
+    // V21 requires every characterized exception to be dispositioned in `mapping.json`,
+    // because a PRE-migration tolerance that quietly vanished is a loss the accounting
+    // must catch. Its own message says "pre-migration" — but the check saw every
+    // exception, which silently assumed no exception could ever be authored after the
+    // branch point. That assumption stopped holding the moment better observation
+    // surfaced a NEW divergence: such a record has no pre-migration form to preserve, so
+    // demanding one is unsatisfiable, and the only ways out would be to fabricate an
+    // entry or not record the divergence at all.
+    //
+    // The discriminator is DERIVED, not a second hand-maintained list: an exception is
+    // post-branch exactly when every behavior it characterizes is accounted in
+    // `POST_BRANCH_BEHAVIORS`. It therefore cannot drift out of step with that list, and
+    // an exception mixing pre- and post-branch behaviors stays in scope — the safe way
+    // round.
+    for id in crate::conservation::post_branch_exceptions(registry) {
+        known_exceptions.remove(&id);
+    }
+    problems.extend(crate::mapping::check_exception_mappings(
+        &registry.mapping_exceptions,
+        &known_exceptions,
+        &mechanisms,
+    ));
+    // V21 (T051, FR-015): two cases sharing a behavior must differ on a variant axis.
+    problems.extend(crate::mapping::check_variants(&cases));
+
+    problems
+        .into_iter()
+        .map(|p| Violation::new(p.code, p.record, p.message))
+        .collect()
+}
+
+/// Lift every case into the mapping module's vocabulary-free [`CaseFacts`].
+fn case_facts(registry: &Registry) -> Vec<CaseFacts> {
+    registry
+        .cases
+        .iter()
+        .map(|case| {
+            let declarative = matches!(case.classify(), Ok(CaseKind::Declarative));
+            let mut channels: Vec<String> = case
+                .expected
+                .iter()
+                .map(|e| e.channel.clone())
+                .chain(case.outcomes.iter().map(|o| o.channel.clone()))
+                .collect();
+            channels.sort();
+            channels.dedup();
+            let mut fixtures: Vec<String> = case
+                .operations
+                .iter()
+                .flat_map(|op| op.fixtures.iter().cloned())
+                .collect();
+            fixtures.sort();
+            fixtures.dedup();
+            // Variant axes (T051): the oracle a case is evaluated against, and a
+            // canonical rendering of what it runs. For a legacy pointer case both
+            // collapse to its binary — the binary IS the oracle and the input shape.
+            let oracle = match (&case.oracle_type, &case.executable) {
+                (Some(kind), _) => format!("{kind:?}"),
+                (None, Some(exe)) => format!("binary:{}", exe.binary),
+                (None, None) => "unspecified".to_string(),
+            };
+            let input_shape = if case.operations.is_empty() {
+                oracle.clone()
+            } else {
+                case.operations
+                    .iter()
+                    .map(|op| {
+                        format!(
+                            "{} {} [{}]",
+                            op.subcommand,
+                            op.argv.join(" "),
+                            op.fixtures.join(",")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ; ")
+            };
+            let context: Vec<String> = case.context.iter().map(|c| format!("{c:?}")).collect();
+
+            CaseFacts {
+                id: case.id.clone(),
+                behaviors: case.behaviors.clone(),
+                channels,
+                fixtures,
+                declarative,
+                context,
+                oracle,
+                input_shape,
+            }
+        })
+        .collect()
+}
+
+/// The exception-mapping inputs: the known exception ids (`wvr-` waivers + `ext-`
+/// extension records) and each mechanism's CURRENT direction/scope form, rendered in
+/// the same canonical vocabulary the hand-authored mapping records.
+fn exception_mechanisms(
+    registry: &Registry,
+) -> (BTreeSet<String>, BTreeMap<String, MechanismForm>) {
+    let mut known: BTreeSet<String> = BTreeSet::new();
+    let mut mechanisms: BTreeMap<String, MechanismForm> = BTreeMap::new();
+
+    for waiver in &registry.waivers {
+        known.insert(waiver.id.clone());
+        mechanisms.insert(
+            waiver.id.clone(),
+            MechanismForm {
+                id: waiver.id.clone(),
+                direction: expect_direction(&waiver.expect).to_string(),
+                scope: canonical_scope(&waiver.scope),
+            },
+        );
+    }
+    for extension in &registry.extensions {
+        known.insert(extension.id.clone());
+        mechanisms.insert(
+            extension.id.clone(),
+            MechanismForm {
+                id: extension.id.clone(),
+                // An extension record is a classification, not a directional tolerance.
+                direction: "none".to_string(),
+                scope: format!("record:{}", extension.id),
+            },
+        );
+    }
+    (known, mechanisms)
+}
+
+/// A waiver expectation's direction, in the `preservedDirection` vocabulary.
+fn expect_direction(expect: &crate::model::Expect) -> &'static str {
+    use crate::model::Expect;
+    match expect {
+        Expect::BothReject {} => "both-reject",
+        Expect::BothAccept {} => "both-accept",
+        Expect::DeaconStricter { .. } => "deacon-stricter",
+        Expect::ReferenceStricter { .. } => "reference-stricter",
+        Expect::FieldDivergence { .. } => "field-divergence",
+    }
+}
+
+/// A waiver scope rendered canonically, in the `preservedScope` vocabulary.
+fn canonical_scope(scope: &crate::model::Scope) -> String {
+    use crate::model::Scope;
+    match scope {
+        Scope::CorpusCase { corpus, case } => format!("corpus_case:{corpus}/{case}"),
+        Scope::StateField {
+            binary,
+            fixture,
+            field,
+        } => format!("state_field:{binary}/{fixture}/{field}"),
+    }
+}
+
+/// **V23 — malformed residual** (023-migrate-parity-to-conformance, US2).
+///
+/// A residual is *representation debt*, not a coverage gap, so it never blocks
+/// certification (FR-054). That is precisely why its shape must be strict: a residual is
+/// the one record type that can absorb work indefinitely without a gate noticing.
+///
+/// Flags: a vague `missingCapability`; a `followUp` that is not a tracked reference; a
+/// `blockedCarrier` that is absent on a residual whose units are not ALL
+/// `external-corpus-entry` (those alone have no carrier to block — research D8), or that
+/// names a program no baseline unit belongs to; a `units` entry that does not resolve;
+/// a `behaviors` entry that does not resolve; and a unit claimed by a residual while its
+/// mapping says it was migrated (a residual counted as migrated).
+pub fn check_residuals(registry: &Registry) -> Vec<Violation> {
+    let mut out = Vec::new();
+
+    let (unit_index, programs, external_units) = match registry.baseline.as_ref() {
+        Some(baseline) => {
+            let index: BTreeSet<&str> = baseline.records.iter().map(|u| u.id.as_str()).collect();
+            let programs: BTreeSet<&str> = baseline
+                .records
+                .iter()
+                .map(|u| u.program.as_str())
+                .collect();
+            let external: BTreeSet<&str> = baseline
+                .records
+                .iter()
+                .filter(|u| u.category == UnitCategory::ExternalCorpusEntry)
+                .map(|u| u.id.as_str())
+                .collect();
+            (index, programs, external)
+        }
+        None => (BTreeSet::new(), BTreeSet::new(), BTreeSet::new()),
+    };
+    let known_behaviors: BTreeSet<&str> =
+        registry.behaviors.iter().map(|b| b.id.as_str()).collect();
+    let migrated_units: BTreeSet<&str> = registry
+        .mapping
+        .iter()
+        .filter(|m| m.disposition.requires_cases())
+        .map(|m| m.unit.as_str())
+        .collect();
+
+    for residual in &registry.residuals {
+        if is_vague_capability(&residual.missing_capability) {
+            out.push(Violation::new(
+                "V23",
+                &residual.id,
+                format!(
+                    "`missingCapability` {:?} is vague — name the SPECIFIC capability the \
+                     declarative system lacks (e.g. \"cross-CLI container-state snapshot \
+                     comparison\"), never a generic \"not supported yet\"",
+                    residual.missing_capability
+                ),
+            ));
+        }
+        // The `queued` / `permanent` field rules themselves are enforced at deserialize
+        // time (residual.rs), so by here a queued residual HAS a `followUp` and a
+        // permanent one HAS a rationale. What is left is whether each says anything.
+        if let Some(follow_up) = residual.follow_up.as_deref()
+            && !is_tracked_reference(follow_up)
+        {
+            out.push(Violation::new(
+                "V23",
+                &residual.id,
+                format!(
+                    "`followUp` {follow_up:?} is not a tracked reference — use an issue \
+                     reference (`#123`), a URL, or a `specs/<feature>/tasks.md#T123` task \
+                     anchor so the debt is queued rather than parked"
+                ),
+            ));
+        }
+        if let Some(rationale) = residual.out_of_scope_rationale.as_deref()
+            && !names_an_exclusion_ground(rationale)
+        {
+            out.push(Violation::new(
+                "V23",
+                &residual.id,
+                format!(
+                    "`outOfScopeRationale` {rationale:?} does not name WHY the unit is \
+                     permanently inexpressible — cite the principle that forbids it (e.g. \
+                     \"Constitution II: feature authoring is out of scope\") or the specific \
+                     unmodellable mechanism (e.g. \"no reference side, so the three-axis \
+                     model has nothing to record\"). A permanent exclusion that only asserts \
+                     itself is indistinguishable from unqueued debt"
+                ),
+            ));
+        }
+
+        // Unit resolution + the migrated/residual contradiction.
+        let mut all_external = !residual.units.is_empty();
+        for unit in &residual.units {
+            if !unit_index.is_empty() && !unit_index.contains(unit.as_str()) {
+                out.push(Violation::new(
+                    "V23",
+                    &residual.id,
+                    format!("covers baseline unit {unit:?}, which does not exist"),
+                ));
+            }
+            if !external_units.contains(unit.as_str()) {
+                all_external = false;
+            }
+            if migrated_units.contains(unit.as_str()) {
+                out.push(Violation::new(
+                    "V23",
+                    &residual.id,
+                    format!(
+                        "covers baseline unit {unit:?}, whose mapping says it was migrated \
+                         — a residual may not be counted as migrated"
+                    ),
+                ));
+            }
+        }
+
+        match residual.blocked_carrier.as_deref() {
+            None if !all_external => out.push(Violation::new(
+                "V23",
+                &residual.id,
+                "`blockedCarrier` is required: only an `external-corpus-entry` residual \
+                 may omit it (those entries block no program because no program runs \
+                 them — research D8)",
+            )),
+            Some(carrier) if !programs.is_empty() && !programs.contains(carrier) => {
+                out.push(Violation::new(
+                    "V23",
+                    &residual.id,
+                    format!(
+                        "`blockedCarrier` {carrier:?} does not resolve — no baseline unit \
+                         belongs to that program"
+                    ),
+                ));
+            }
+            Some(_) if all_external => out.push(Violation::new(
+                "V23",
+                &residual.id,
+                "an `external-corpus-entry` residual must NOT name a `blockedCarrier` — \
+                 it blocks no program (research D8)",
+            )),
+            _ => {}
+        }
+
+        for behavior in &residual.behaviors {
+            if !known_behaviors.contains(behavior.as_str()) {
+                out.push(Violation::new(
+                    "V23",
+                    &residual.id,
+                    format!("names behavior {behavior:?}, which does not exist"),
+                ));
+            }
+        }
+    }
+
+    out
+}
+
+/// Phrases that make a `missingCapability` unactionable. A capability statement must
+/// name a mechanism, not a mood.
+const VAGUE_CAPABILITY_MARKERS: &[&str] = &[
+    "not supported",
+    "unsupported",
+    "not yet",
+    "yet to be",
+    "tbd",
+    "todo",
+    "later",
+    "someday",
+    "unknown",
+    "n/a",
+];
+
+/// Whether a `missingCapability` is too vague to act on: a known filler phrase, or too
+/// short to name anything specific.
+fn is_vague_capability(capability: &str) -> bool {
+    let lowered = capability.trim().to_ascii_lowercase();
+    if lowered.split_whitespace().count() < 3 {
+        return true;
+    }
+    VAGUE_CAPABILITY_MARKERS
+        .iter()
+        .any(|marker| lowered.contains(marker))
+}
+
+/// Grounds a permanent exclusion may legitimately rest on: a named principle, or a named
+/// structural reason the claim cannot be modelled. Deliberately a *substance* check rather
+/// than a length check — "out of scope" is short AND empty, but so is a 200-word rationale
+/// that never says why.
+const EXCLUSION_GROUND_MARKERS: &[&str] = &[
+    "constitution",
+    "principle",
+    "out of scope",
+    "authoring",
+    "no reference",
+    "no oracle",
+    "no observable",
+    "not a conformance",
+    "three-axis",
+    "spec expectation",
+    "intra-deacon",
+    "isolation",
+    "vendor",
+    "network",
+    "expression language",
+    "predicate",
+];
+
+/// Whether an `outOfScopeRationale` names an actual ground for permanent exclusion (024
+/// P1), rather than restating that the unit is excluded.
+///
+/// Requires BOTH a recognized ground and enough prose to have explained it: a bare
+/// "out of scope" hits a marker but says nothing, which is exactly the assertion-of-itself
+/// this rule exists to reject.
+fn names_an_exclusion_ground(rationale: &str) -> bool {
+    let lowered = rationale.trim().to_ascii_lowercase();
+    if lowered.split_whitespace().count() < 6 {
+        return false;
+    }
+    EXCLUSION_GROUND_MARKERS
+        .iter()
+        .any(|marker| lowered.contains(marker))
+}
+
+/// Whether a `followUp` is a tracked reference: a `#123` issue, a URL, or a repository
+/// path anchor (`specs/…#T123`).
+fn is_tracked_reference(follow_up: &str) -> bool {
+    let value = follow_up.trim();
+    if let Some(rest) = value.strip_prefix('#') {
+        return !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit());
+    }
+    value.starts_with("http://")
+        || value.starts_with("https://")
+        || (value.contains('/') && value.contains('#'))
 }
 
 /// The join of the committed inventory against the hand-authored classification
@@ -1841,6 +2321,8 @@ impl<'a> Checker<'a> {
             // the spec-expectation assertion rule, which we can skip safely.
             self.check_case_subcommands(case);
             self.check_case_fs_allowlist(case);
+            self.check_case_observable_channels(case);
+            self.check_case_resource_group(case);
             return;
         };
 
@@ -1865,6 +2347,30 @@ impl<'a> Checker<'a> {
         }
 
         self.check_case_fs_allowlist(case);
+        self.check_case_observable_channels(case);
+        self.check_case_resource_group(case);
+    }
+
+    /// Every declared `expected[].channel` must be a channel the runner can actually
+    /// OBSERVE (024 Phase 3, D-2). Declaring an unobservable channel used to validate
+    /// cleanly and then fail at RUN time — the registry claimed coverage nothing could
+    /// ever produce. [`OBSERVED_CHANNELS`] is kept in lockstep with the harness's
+    /// `observer_for` by a `parity-harness` test.
+    fn check_case_observable_channels(&mut self, case: &crate::model::TestCase) {
+        for exp in &case.expected {
+            if !OBSERVED_CHANNELS.contains(&exp.channel.as_str()) {
+                self.push(
+                    "V16",
+                    &case.id,
+                    format!(
+                        "expected channel {:?} has no observer; a declarative case may only \
+                         declare an observable channel ({})",
+                        exp.channel,
+                        OBSERVED_CHANNELS.join(" | ")
+                    ),
+                );
+            }
+        }
     }
 
     /// Every `operations[].subcommand` must be in the consumer surface (Principle II).
@@ -2079,6 +2585,46 @@ impl<'a> Checker<'a> {
             ),
             _ => {}
         }
+    }
+
+    /// A case invoking a container-creating subcommand must declare a Docker
+    /// `resourceGroup` (024 review finding).
+    ///
+    /// `resourceGroup` reads like scheduling metadata, but it is the ONLY discriminator
+    /// the runner and this validator use to decide a case is Docker-backed. Omit it on a
+    /// case that runs `up`, and: `execute_ops` builds no isolated `DockerWorkspace`, so
+    /// both sides run against the committed fixture tree in the repo and stamp an
+    /// IDENTICAL `devcontainer.local_folder` label — deacon's container and the oracle's
+    /// become indistinguishable, as do two cases running in parallel; no cleanup guard is
+    /// created, so the container, network and volume leak; and V18's pinned-image rule
+    /// skips the case, because it is `is_docker_case`-gated too.
+    ///
+    /// Nothing else catches this. The case runs, and may well pass.
+    fn check_case_resource_group(&mut self, case: &crate::model::TestCase) {
+        if is_docker_case(case) {
+            return;
+        }
+        let mut offenders: Vec<&str> = case
+            .operations
+            .iter()
+            .filter(|op| CONTAINER_SUBCOMMANDS.contains(&op.subcommand.as_str()))
+            .map(|op| op.subcommand.as_str())
+            .collect();
+        offenders.sort_unstable();
+        offenders.dedup();
+        if offenders.is_empty() {
+            return;
+        }
+        self.push(
+            "V16",
+            &case.id,
+            format!(
+                "case invokes container-creating subcommand(s) {} but declares no Docker \
+                 `resourceGroup`; without it the case gets no isolated workspace, no \
+                 cleanup guard, and V18 does not check its image inputs",
+                offenders.join(", ")
+            ),
+        );
     }
 }
 
@@ -2755,6 +3301,30 @@ mod tests {
             out.iter()
                 .any(|v| v.code == "V16" && v.record == "case-fs-stray-allowlist"),
             "an fsAllowlist with no filesystem expectation must be V16, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn v16_rejects_a_channel_with_no_observer() {
+        // A case declaring a channel the harness cannot observe used to VALIDATE and then
+        // fail at run time (024 Phase 3, D-2). Every channel `channels.json` declares now
+        // HAS an observer (`chan-container-state` gained one in 024 Phase 4), so the
+        // violator here is a channel id outside the observable set — which is exactly the
+        // shape a newly-declared, not-yet-observable channel would have.
+        let mut reg = Registry::default();
+        let mut case = declarative_case("case-unobservable-channel");
+        case.expected.push(crate::model::ExpectedObservable {
+            channel: "chan-not-yet-observable".to_string(),
+            operation: Some("op-1".to_string()),
+            assertion: Some(serde_json::json!({ "jsonEquals": {} })),
+        });
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            out.iter().any(|v| v.code == "V16"
+                && v.record == "case-unobservable-channel"
+                && v.message.contains("no observer")),
+            "a case declaring a channel with no observer must be V16, got {out:?}"
         );
     }
 

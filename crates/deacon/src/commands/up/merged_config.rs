@@ -501,9 +501,16 @@ pub(crate) fn config_metadata_entry(config: &DevContainerConfig) -> serde_json::
 /// LABEL, which the feature-extended image inherits from the base) followed by
 /// the config entry from [`config_metadata_entry`].
 ///
-/// Returns `None` when there's nothing config-only to preserve (no image label
-/// and an empty config entry) — the container then just keeps the base image's
-/// inherited label, which is already correct.
+/// Always returns a JSON array, matching the reference CLI, which stamps
+/// `devcontainer.metadata` on every container it creates and uses `[]` when there is
+/// nothing to record.
+///
+/// This used to return `None` in that case, on the reasoning that the container "just
+/// keeps the base image's inherited label". That reasoning does not apply to the branch it
+/// guarded: `entries` is populated FROM the image's label, so the empty-and-empty case is
+/// exactly the one where no inherited label exists — the container ended up with no
+/// `devcontainer.metadata` label at all where the reference has `[]`. Measured against the
+/// pinned oracle 0.87.0 by the declarative `chan-container-state` differential (024).
 pub(crate) async fn build_container_metadata_label(
     docker: &impl Docker,
     image_ref: &str,
@@ -526,10 +533,6 @@ pub(crate) async fn build_container_metadata_label(
         .as_object()
         .map(|o| !o.is_empty())
         .unwrap_or(false);
-    // Nothing config-only to add and no image entries → leave the inherited label.
-    if !cfg_nonempty && entries.is_empty() {
-        return None;
-    }
     if cfg_nonempty {
         entries.push(cfg_entry);
     }

@@ -11,18 +11,22 @@
 //! evaluates the strict release gate. `anyhow` is used only here at the binary
 //! boundary (constitution V).
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 
+use deacon_conformance::baseline::{
+    self, BaselineDrift, BaselineFile, generate_baseline, load_baseline, write_baseline,
+};
 use deacon_conformance::case_hash::hashes_for_case;
 use deacon_conformance::certify::certify;
 use deacon_conformance::clause::{generate_clauses, render as render_clauses, write_clauses};
 use deacon_conformance::clause_diff::{
     diff as clause_diff, render_json as render_clause_diff_json, render_md as render_clause_diff_md,
 };
+use deacon_conformance::conservation;
 use deacon_conformance::diff::{
     diff, render_json as render_diff_json, render_md as render_diff_md,
 };
@@ -34,6 +38,7 @@ use deacon_conformance::load::{
 };
 use deacon_conformance::model::{ClauseInventory, ConstraintInventory, DocumentScope};
 use deacon_conformance::report::write_reports;
+use deacon_conformance::residual::UNREVIEWED_SENTINEL as SCAFFOLD_SENTINEL;
 use deacon_conformance::snapshot;
 use deacon_conformance::validate::{
     ClauseInputs, InventoryInputs, Violation, validate_path, validate_path_with_inventory,
@@ -41,7 +46,7 @@ use deacon_conformance::validate::{
 use deacon_conformance::{
     CURRENT_SCHEMA_PIN, CURRENT_SPEC_PIN, clause_paths_for, default_clauses_file,
     default_inventory_file, default_pinned_schemas_dir, default_pinned_spec_dir,
-    default_registry_dir, workspace_root,
+    default_registry_dir, migration_paths_for, workspace_root,
 };
 
 /// Structural conformance-registry tooling (dev-only).
@@ -106,6 +111,101 @@ enum Command {
     Snapshot {
         #[command(subcommand)]
         command: SnapshotCommand,
+    },
+    /// Migration mapping tooling (023-migrate-parity-to-conformance). Hermetic.
+    Migration {
+        #[command(subcommand)]
+        command: MigrationCommand,
+    },
+    /// Pre-migration coverage baseline tooling (023-migrate-parity-to-conformance).
+    /// Hermetic: reads the repository tree, the parity registry, and the conformance
+    /// registry. No Docker, no network, no oracle.
+    Baseline {
+        #[command(subcommand)]
+        command: BaselineCommand,
+    },
+}
+
+/// `migration <scaffold>` — hand-authored mapping/residual tooling
+/// (contracts/cli-commands.md). Generation NEVER writes a hand-authored file: `scaffold`
+/// emits skeletons to **stdout** only. `migration report` / `migration check` (the
+/// conservation accounting) land with User Story 5.
+#[derive(Debug, Subcommand)]
+enum MigrationCommand {
+    /// Produce the deterministic before-and-after conservation accounting and write
+    /// `migration-report.{json,md}`.
+    Report {
+        /// Output format for the stdout document. Defaults to `json`.
+        #[arg(long, value_name = "FORMAT", default_value = "json")]
+        format: DiffFormat,
+        /// Directory to write `migration-report.json` + `.md` into. Defaults to
+        /// `<workspace>/target/conformance/`.
+        #[arg(long, value_name = "DIR")]
+        out_dir: Option<PathBuf>,
+        /// Fold in an equivalence ledger (`target/parity/equivalence.json`), enabling the
+        /// strictness-improvement and deletable-carrier sections. OPT-IN by design: the
+        /// ledger is a git-ignored artifact of a live parity run, and a hermetic command
+        /// whose exit code depends on whether someone happened to produce one locally
+        /// would not be deterministic (FR-043).
+        #[arg(long, value_name = "FILE")]
+        ledger: Option<PathBuf>,
+    },
+    /// The gating form of `report`: the same computation, NO file output, failing while
+    /// naming each unaccounted item, missing counterpart, weakened error path, or
+    /// inflated behavior denominator.
+    Check {
+        /// Fold in an equivalence ledger (see `report --ledger`).
+        #[arg(long, value_name = "FILE")]
+        ledger: Option<PathBuf>,
+    },
+    /// Emit skeleton `mapping.json` / `residuals.json` records to **stdout** for every
+    /// unmapped baseline unit and every unmapped characterized exception, each carrying
+    /// the `UNREVIEWED` sentinel the loader REJECTS. Never writes the registry.
+    Scaffold {
+        /// Committed baseline file to scaffold from. Defaults to
+        /// `<registry>/../migration/baseline.json`.
+        #[arg(long, value_name = "FILE")]
+        baseline: Option<PathBuf>,
+    },
+}
+
+/// `baseline <generate|check>` — the machine-owned frozen pre-migration inventory
+/// (contracts/cli-commands.md). `generate` is its ONLY writer; `check` never writes.
+#[derive(Debug, Subcommand)]
+enum BaselineCommand {
+    /// Enumerate the pre-migration inventory and write `conformance/migration/baseline.json`.
+    Generate {
+        /// Record this commit as the freeze `revision`. Defaults to the committed
+        /// baseline's existing revision, or `unfrozen` when there is none.
+        #[arg(long, value_name = "SHA")]
+        freeze: Option<String>,
+        /// Overwrite an already-frozen baseline. Without this, re-running can never
+        /// silently relax the bar the conservation claim is measured against (FR-045).
+        #[arg(long)]
+        force: bool,
+        /// Output baseline file. Defaults to
+        /// `<registry>/../migration/baseline.json`.
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+        /// Repository root to enumerate. Defaults to the workspace root.
+        #[arg(long, value_name = "DIR")]
+        repo_root: Option<PathBuf>,
+    },
+    /// Recompute the inventory in memory and byte-compare it against the committed
+    /// file. NEVER writes. Exit `0` on match; `1` naming each added, removed, or
+    /// changed unit (FR-004).
+    Check {
+        /// Committed baseline file to compare against (see `generate --out`).
+        #[arg(long, value_name = "FILE")]
+        baseline: Option<PathBuf>,
+        /// Assert the committed freeze `revision` is exactly this commit. Without it the
+        /// regeneration adopts whatever revision the committed file records, so only the
+        /// unit records are compared; with it, a tampered freeze label is reported too.
+        #[arg(long, value_name = "SHA")]
+        freeze: Option<String>,
+        /// Repository root to enumerate. Defaults to the workspace root.
+        #[arg(long, value_name = "DIR")]
+        repo_root: Option<PathBuf>,
     },
 }
 
@@ -293,6 +393,28 @@ fn run(cli: Cli) -> i32 {
             InventoryCommand::Scaffold { inventory } => {
                 inventory_scaffold(&registry_dir, inventory)
             }
+        },
+        Command::Migration { command } => match command {
+            MigrationCommand::Report {
+                format,
+                out_dir,
+                ledger,
+            } => migration_report_cmd(&registry_dir, format, out_dir, ledger),
+            MigrationCommand::Check { ledger } => migration_check(&registry_dir, ledger),
+            MigrationCommand::Scaffold { baseline } => migration_scaffold(&registry_dir, baseline),
+        },
+        Command::Baseline { command } => match command {
+            BaselineCommand::Generate {
+                freeze,
+                force,
+                out,
+                repo_root,
+            } => baseline_generate(&registry_dir, freeze, force, out, repo_root),
+            BaselineCommand::Check {
+                baseline,
+                freeze,
+                repo_root,
+            } => baseline_check(&registry_dir, baseline, freeze, repo_root),
         },
         Command::Clause { command } => match command {
             ClauseCommand::Generate { spec, clauses } => clause_generate(spec, clauses),
@@ -803,6 +925,500 @@ impl ClauseScaffoldRecord {
             notes: None,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// baseline (023-migrate-parity-to-conformance)
+// ---------------------------------------------------------------------------
+
+/// Compute the conservation report over the registry at `registry_dir`.
+///
+/// The equivalence ledger is a LIVE artifact produced only under the parity profile; it
+/// is read when present and its ABSENCE is reported as such, never treated as "every
+/// unit is equivalent" (that conflation is how a more-permissive replacement gets
+/// deleted into).
+fn compute_migration_report(
+    registry_dir: &Path,
+    ledger_path: Option<PathBuf>,
+) -> Result<deacon_conformance::conservation::MigrationReport, i32> {
+    let registry = match Registry::load(registry_dir) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: could not load {}: {e}", registry_dir.display());
+            return Err(2);
+        }
+    };
+    let fixtures_root = registry_dir
+        .parent()
+        .unwrap_or(registry_dir)
+        .join("fixtures");
+    let ledger = ledger_path.and_then(|path| load_equivalence_facts(&path));
+
+    match conservation::migration_report(&registry, &fixtures_root, ledger.as_ref()) {
+        Ok(report) => Ok(report),
+        Err(e) => {
+            eprintln!("error: {e}");
+            Err(2)
+        }
+    }
+}
+
+/// Read `target/parity/equivalence.json` when it exists. A missing ledger yields `None`
+/// (nothing has been proven yet); a malformed one is reported and also yields `None`,
+/// because a ledger we cannot read has proven nothing either.
+fn load_equivalence_facts(path: &Path) -> Option<conservation::EquivalenceFacts> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(e) => {
+            eprintln!(
+                "warning: could not read the equivalence ledger {} ({e}); nothing is \
+                 proven equivalent",
+                path.display()
+            );
+            return None;
+        }
+    };
+    let doc: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "warning: {} is malformed ({e}); treating the ledger as absent — nothing \
+                 is proven equivalent",
+                path.display()
+            );
+            return None;
+        }
+    };
+    let mut facts = conservation::EquivalenceFacts::default();
+    for entry in doc.get("entries").and_then(|v| v.as_array())? {
+        let Some(unit) = entry.get("unit").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        match entry.get("relation").and_then(|v| v.as_str()) {
+            Some("equivalent") => {
+                facts.cleared.insert(unit.to_string());
+            }
+            Some("stricter") => {
+                // A `stricter` relation permits deletion ONLY once its newly detected
+                // difference is characterized (FR-036). An uncharacterized one is
+                // suppression, so it does not clear the unit — the report then reports it
+                // under failure condition 7 AND leaves the carrier blocked, rather than
+                // the two disagreeing.
+                if entry
+                    .get("characterizedAs")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|c| !c.trim().is_empty())
+                {
+                    facts.cleared.insert(unit.to_string());
+                }
+                facts.stricter.push((
+                    unit.to_string(),
+                    entry
+                        .get("detail")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    entry
+                        .get("characterizedAs")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                ));
+            }
+            Some("more-permissive") => {
+                facts.more_permissive.insert(unit.to_string());
+            }
+            _ => {}
+        }
+    }
+    Some(facts)
+}
+
+/// `migration report` (contracts/cli-commands.md): write the deterministic accounting to
+/// `target/conformance/` and emit the document on stdout.
+///
+/// Exit `0` only when every baseline item is accounted for; `1` with the violations
+/// otherwise; `2` on an IO/load failure. Diagnostics go to stderr, the document to
+/// stdout (constitution VI).
+fn migration_report_cmd(
+    registry_dir: &Path,
+    format: DiffFormat,
+    out_dir: Option<PathBuf>,
+    ledger: Option<PathBuf>,
+) -> i32 {
+    let report = match compute_migration_report(registry_dir, ledger) {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+
+    let dir = out_dir.unwrap_or_else(|| workspace_root().join("target").join("conformance"));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("error: could not create {}: {e}", dir.display());
+        return 2;
+    }
+    let (json_path, md_path) = match conservation::write_reports(&dir, &report) {
+        Ok(paths) => paths,
+        Err(e) => {
+            eprintln!(
+                "error: could not write the report into {}: {e}",
+                dir.display()
+            );
+            return 2;
+        }
+    };
+
+    match format {
+        DiffFormat::Json => print!("{}", conservation::render_report_json(&report)),
+        DiffFormat::Md => print!("{}", conservation::render_report_md(&report)),
+    }
+
+    eprintln!("wrote {} and {}", json_path.display(), md_path.display());
+    report_accounting_summary(&report);
+    if report.is_clean() { 0 } else { 1 }
+}
+
+/// `migration check` (contracts/cli-commands.md): the gating form — the same computation,
+/// NO file output, failing while naming each item.
+fn migration_check(registry_dir: &Path, ledger: Option<PathBuf>) -> i32 {
+    let report = match compute_migration_report(registry_dir, ledger) {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    for violation in &report.violations {
+        println!(
+            "condition {} {}: {}",
+            violation.condition, violation.item, violation.message
+        );
+    }
+    report_accounting_summary(&report);
+    if report.is_clean() { 0 } else { 1 }
+}
+
+/// The one-line accounting summary both commands emit on stderr.
+fn report_accounting_summary(report: &deacon_conformance::conservation::MigrationReport) {
+    let acc = &report.accounting;
+    eprintln!(
+        "conservation: {} unit(s) — migrated {}, deduplicated {}, residual {}, retired {}, \
+         unaccounted {}; error paths {}/{} preserved; {} violation(s)",
+        report.totals.before.units,
+        acc.migrated,
+        acc.deduplicated,
+        acc.residual,
+        acc.retired,
+        acc.unaccounted.len(),
+        report.error_paths.preserved,
+        report.error_paths.before,
+        report.violations.len()
+    );
+}
+
+/// `migration scaffold` (contracts/cli-commands.md): emit skeleton mapping/residual/
+/// exception records to **stdout** for everything not yet mapped. Mirrors `inventory
+/// scaffold` / `clause scaffold` — it NEVER writes into the registry, and every emitted
+/// record carries the `UNREVIEWED` sentinel the loader rejects, so scaffolded output
+/// cannot be committed unedited.
+///
+/// Exit `0` when something was emitted or nothing needs scaffolding, `2` when the
+/// baseline or registry cannot be read.
+fn migration_scaffold(registry_dir: &Path, baseline_file: Option<PathBuf>) -> i32 {
+    let committed_file = resolve_baseline_file(registry_dir, baseline_file);
+    let baseline = match load_baseline(&committed_file) {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            eprintln!(
+                "error: no committed baseline at {} — run `baseline generate --freeze \
+                 <sha>` first; there is nothing to scaffold against.",
+                committed_file.display()
+            );
+            return 2;
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    };
+
+    let registry = match Registry::load(registry_dir) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: could not load {}: {e}", registry_dir.display());
+            return 2;
+        }
+    };
+
+    let mapped: HashSet<&str> = registry.mapping.iter().map(|m| m.unit.as_str()).collect();
+    let mut unmapped: Vec<&deacon_conformance::baseline::BaselineUnit> = baseline
+        .records
+        .iter()
+        .filter(|u| !mapped.contains(u.id.as_str()))
+        .collect();
+    unmapped.sort_by(|a, b| a.id.cmp(&b.id));
+
+    // One skeleton mapping record per unmapped unit. `disposition` carries the sentinel:
+    // the closed `Disposition` enum rejects it at load, so this can never be committed.
+    let records: Vec<serde_json::Value> = unmapped
+        .iter()
+        .map(|unit| {
+            serde_json::json!({
+                "unit": unit.id,
+                "disposition": SCAFFOLD_SENTINEL,
+                "caseIds": [SCAFFOLD_SENTINEL],
+                "rationale": SCAFFOLD_SENTINEL,
+                "fixtureMapping": unit
+                    .fixtures
+                    .iter()
+                    .map(|from| serde_json::json!({ "from": from, "to": SCAFFOLD_SENTINEL }))
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
+    // One skeleton residual per program that still has unmapped units — the shape a
+    // reviewer fills in when the unit cannot be expressed as data.
+    let mut by_program: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for unit in &unmapped {
+        by_program
+            .entry(unit.program.as_str())
+            .or_default()
+            .push(unit.id.as_str());
+    }
+    let residuals: Vec<serde_json::Value> = by_program
+        .iter()
+        .map(|(program, units)| {
+            serde_json::json!({
+                "id": format!("res-{program}-UNREVIEWED"),
+                "units": units,
+                "blockedCarrier": program,
+                "missingCapability": SCAFFOLD_SENTINEL,
+                "followUp": SCAFFOLD_SENTINEL,
+                "behaviors": [],
+            })
+        })
+        .collect();
+
+    // Skeleton exception correspondences for every unmapped characterized exception.
+    let mapped_exceptions: HashSet<&str> = registry
+        .mapping_exceptions
+        .iter()
+        .map(|e| e.exception.as_str())
+        .collect();
+    let mut known_exceptions: Vec<&str> = registry
+        .waivers
+        .iter()
+        .map(|w| w.id.as_str())
+        .chain(registry.extensions.iter().map(|e| e.id.as_str()))
+        .filter(|id| !mapped_exceptions.contains(id))
+        .collect();
+    known_exceptions.sort_unstable();
+    let exceptions: Vec<serde_json::Value> = known_exceptions
+        .iter()
+        .map(|id| {
+            serde_json::json!({
+                "exception": id,
+                "disposition": SCAFFOLD_SENTINEL,
+                "mechanisms": [SCAFFOLD_SENTINEL],
+                "preservedDirection": SCAFFOLD_SENTINEL,
+                "preservedScope": SCAFFOLD_SENTINEL,
+                "rationale": SCAFFOLD_SENTINEL,
+            })
+        })
+        .collect();
+
+    let document = serde_json::json!({
+        "mapping": { "records": records, "exceptions": exceptions },
+        "residuals": { "records": residuals },
+    });
+    match serde_json::to_string_pretty(&document) {
+        Ok(text) => println!("{text}"),
+        Err(e) => {
+            eprintln!("error: could not render the scaffold: {e}");
+            return 2;
+        }
+    }
+    eprintln!(
+        "scaffolded {} unmapped unit(s) across {} program(s) and {} unmapped exception(s); \
+         stdout only — nothing was written. Every field carries the `{SCAFFOLD_SENTINEL}` \
+         sentinel the loader rejects.",
+        unmapped.len(),
+        by_program.len(),
+        exceptions.len()
+    );
+    0
+}
+
+/// Resolve the committed baseline path: the explicit `--out`/`--baseline` flag, else
+/// the migration sibling of the registry directory.
+fn resolve_baseline_file(registry_dir: &Path, explicit: Option<PathBuf>) -> PathBuf {
+    explicit.unwrap_or_else(|| migration_paths_for(registry_dir).0)
+}
+
+/// The freeze sentinel recorded when `--freeze` is omitted and no committed baseline
+/// exists. A baseline carrying it is explicitly NOT frozen, so `--force` is not needed
+/// to regenerate over it. (`validate` no longer reports drift at all — V25 is retired;
+/// `baseline check` reports it informationally.)
+use deacon_conformance::baseline::UNFROZEN_REVISION as UNFROZEN;
+
+/// `baseline generate` (contracts/cli-commands.md): enumerate the pre-migration
+/// inventory and write it atomically. Exit `0` on write, `1` on an enumeration failure
+/// or a refused overwrite, `2` on an IO failure.
+fn baseline_generate(
+    registry_dir: &Path,
+    freeze: Option<String>,
+    force: bool,
+    out: Option<PathBuf>,
+    repo_root: Option<PathBuf>,
+) -> i32 {
+    let out_file = resolve_baseline_file(registry_dir, out);
+    let root = repo_root.unwrap_or_else(workspace_root);
+
+    let committed = match load_baseline(&out_file) {
+        Ok(existing) => existing,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    };
+
+    // FR-045: a frozen baseline is the bar the conservation claim is measured against.
+    // Re-running must never silently lower it.
+    if let Some(existing) = &committed {
+        let frozen = existing.revision != UNFROZEN;
+        if frozen && !force {
+            eprintln!(
+                "error: {} is frozen at revision `{}`. Refusing to overwrite it — the \
+                 baseline is the bar \"no coverage was lost\" is measured against \
+                 (FR-045). Remedy: pass --force if the overwrite is deliberate and \
+                 reviewed.",
+                out_file.display(),
+                existing.revision
+            );
+            return 1;
+        }
+    }
+
+    let revision = freeze
+        .or_else(|| committed.as_ref().map(|b| b.revision.clone()))
+        .unwrap_or_else(|| UNFROZEN.to_string());
+
+    let baseline = match generate_baseline(&root, &revision) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: baseline enumeration failed: {e}");
+            return 1;
+        }
+    };
+
+    match write_baseline(&out_file, &baseline) {
+        Ok(()) => {
+            println!("{}", out_file.display());
+            eprintln!(
+                "wrote {} baseline unit(s) ({} executable + {} recorded-only) at revision \
+                 `{}` to {}",
+                baseline.records.len(),
+                baseline.executable_count(),
+                baseline.count(deacon_conformance::baseline::UnitCategory::ExternalCorpusEntry),
+                baseline.revision,
+                out_file.display()
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!(
+                "error: could not write baseline to {}: {e}",
+                out_file.display()
+            );
+            2
+        }
+    }
+}
+
+/// `baseline check` (contracts/cli-commands.md): recompute in memory and byte-compare
+/// against the committed file. NEVER writes. Exit `0` on match, `1` naming each drifted
+/// item, `2` when the committed file is absent or unreadable.
+fn baseline_check(
+    registry_dir: &Path,
+    baseline_file: Option<PathBuf>,
+    freeze: Option<String>,
+    repo_root: Option<PathBuf>,
+) -> i32 {
+    let committed_file = resolve_baseline_file(registry_dir, baseline_file);
+    let root = repo_root.unwrap_or_else(workspace_root);
+
+    let committed_raw = match std::fs::read_to_string(&committed_file) {
+        Ok(raw) => raw,
+        Err(e) => {
+            eprintln!(
+                "error: could not read committed baseline {}: {e}. Remedy: run \
+                 `baseline generate --freeze <sha>` and commit the result.",
+                committed_file.display()
+            );
+            return 2;
+        }
+    };
+    let committed: BaselineFile = match serde_json::from_str(&committed_raw) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!(
+                "error: committed baseline {} is malformed: {e}",
+                committed_file.display()
+            );
+            return 2;
+        }
+    };
+
+    // Without `--freeze`, the regeneration adopts the committed freeze label so only the
+    // unit records are compared; with it, a tampered label is reported as drift too.
+    let expected_revision = freeze.unwrap_or_else(|| committed.revision.clone());
+    let regenerated = match generate_baseline(&root, &expected_revision) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: baseline regeneration failed: {e}");
+            return 1;
+        }
+    };
+
+    if committed_raw == baseline::render(&regenerated) {
+        eprintln!(
+            "ok: {} matches regeneration ({} unit(s))",
+            committed_file.display(),
+            committed.records.len()
+        );
+        return 0;
+    }
+
+    report_baseline_drift(
+        &committed_file,
+        &compare_baselines(&committed, &regenerated),
+    );
+    1
+}
+
+/// Thin alias keeping the drift comparison's origin explicit at the call site.
+fn compare_baselines(committed: &BaselineFile, regenerated: &BaselineFile) -> BaselineDrift {
+    baseline::compare(committed, regenerated)
+}
+
+/// Print the drift, naming each added, removed, or changed unit (FR-004). Diagnostics go
+/// to stderr per the output-stream contract.
+fn report_baseline_drift(path: &Path, drift: &BaselineDrift) {
+    eprintln!(
+        "error: {} is out of date with respect to the repository tree.",
+        path.display()
+    );
+    let lines = drift.lines();
+    if lines.is_empty() {
+        // Byte-difference with no record-level drift: formatting or envelope only.
+        eprintln!(
+            "  the record set matches but the file bytes differ (envelope or formatting \
+             drift) — regenerate to normalize"
+        );
+    }
+    for line in lines {
+        eprintln!("  {line}");
+    }
+    eprintln!(
+        "Remedy: `cargo run -p deacon-conformance -- baseline generate --force` and review \
+         the diff — a baseline change must be a conscious, reviewed act."
+    );
 }
 
 /// `inventory generate` (contracts/cli-inventory.md): load + fingerprint-verify the
@@ -1347,6 +1963,47 @@ fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
         }
         for id in &result.no_reference {
             println!("info no-reference-for-platform: {id} (no committed snapshot yet)");
+        }
+        // NON-BLOCKING residual queue (023 T035, FR-054): representation debt, listed
+        // with what it pins, never a blocker.
+        for residual in &result.residual_queue {
+            println!(
+                "info residual: {} blocks {} ({} unit(s)) — missing: {} [follow-up {}]",
+                residual.id,
+                residual
+                    .blocked_carrier
+                    .as_deref()
+                    .unwrap_or("<no carrier>"),
+                residual.units,
+                residual.missing_capability,
+                residual.follow_up.as_deref().unwrap_or("<untracked>")
+            );
+        }
+        // NON-BLOCKING permanent exclusions (024 P1): reported under a DIFFERENT label so
+        // they are never read as a stalled queue — each names why it can never migrate.
+        for residual in &result.permanent_residuals {
+            println!(
+                "info residual (permanent): {} pins {} ({} unit(s)) — missing: {} — out of \
+                 scope: {}",
+                residual.id,
+                residual
+                    .blocked_carrier
+                    .as_deref()
+                    .unwrap_or("<no carrier>"),
+                residual.units,
+                residual.missing_capability,
+                residual
+                    .out_of_scope_rationale
+                    .as_deref()
+                    .unwrap_or("<unjustified>")
+            );
+        }
+        // NON-BLOCKING declared normalization-rule deficiencies (023 T061).
+        for rule in &result.non_compliant_rules {
+            println!(
+                "info normalization-rule non-compliant: {} — {}",
+                rule.name, rule.reason
+            );
         }
         if result.certified {
             println!("certified: {}", result.profile);

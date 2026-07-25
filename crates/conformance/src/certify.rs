@@ -79,6 +79,34 @@ pub struct SnapshotCoverage {
     pub platforms: Vec<String>,
 }
 
+/// One residual record surfaced as NON-BLOCKING certification information
+/// (023-migrate-parity-to-conformance, FR-054).
+///
+/// A residual is *representation debt*, not a coverage gap: the behavior is still
+/// covered — by the carrier program that has not been retired yet. It is therefore
+/// listed so a reviewer sees the queue and what it blocks, but it NEVER contributes to
+/// `blocking`. Only a `gap-` record admits missing coverage, and only a gap blocks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResidualInfo {
+    /// The `res-` record id.
+    pub id: String,
+    /// The program that cannot be deleted while this residual stands (absent for the
+    /// `external-corpus-entry` residuals, which block no program — research D8).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_carrier: Option<String>,
+    /// The specific named capability the declarative system lacks.
+    pub missing_capability: String,
+    /// The tracked follow-up reference — present iff this is a QUEUED residual (024 P1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follow_up: Option<String>,
+    /// Why the unit is permanently inexpressible — present iff PERMANENT (024 P1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub out_of_scope_rationale: Option<String>,
+    /// How many baseline units this residual covers.
+    pub units: usize,
+}
+
 /// The certification verdict for the active profile (contracts/cli.md `certify`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Certification {
@@ -101,6 +129,37 @@ pub struct Certification {
     /// (FR-016a/042), ID-sorted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub no_reference: Vec<String>,
+    /// NON-BLOCKING info (023-migrate-parity-to-conformance, T035, FR-054): the residual
+    /// queue — representation debt that is still MIGRATABLE, ID-sorted. Listed so the queue
+    /// is visible and its blocked carriers are known; NEVER a certification blocker (only
+    /// gaps admit missing coverage).
+    ///
+    /// Permanent exclusions are deliberately NOT here (024 P1): mixing them in would make
+    /// the queue asymptote at a nonzero floor forever, and a number that can never reach
+    /// zero cannot be read as progress. See [`permanent_residuals`](Self::permanent_residuals).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub residual_queue: Vec<ResidualInfo>,
+    /// NON-BLOCKING info (024 P1): residuals that can NEVER be expressed as data, each
+    /// carrying the principle or category mismatch that forbids it, ID-sorted. Separated
+    /// from `residual_queue` so "the queue reaches zero" stays a meaningful claim.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permanent_residuals: Vec<ResidualInfo>,
+    /// NON-BLOCKING info (023 T061): normalization rules registered with a DECLARED
+    /// FR-021 deficiency — `(rule name, reason)`, name-sorted. Surfaced for the same
+    /// reason as the residual queue: an admitted, tracked deficiency is debt, not a
+    /// missing-coverage claim. An UNDECLARED blanket rule is V24 and blocks a PR.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub non_compliant_rules: Vec<NonCompliantRule>,
+}
+
+/// A normalization rule registered with a declared FR-021 deficiency (T061).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NonCompliantRule {
+    /// The rule's name.
+    pub name: String,
+    /// Why it does not satisfy FR-021, and where the narrowing work is tracked.
+    pub reason: String,
 }
 
 /// Evaluate strict certification over a VALIDATED registry plus its committed
@@ -176,17 +235,71 @@ pub fn certify(
     waived.sort();
 
     let (snapshot_coverage, no_reference) = snapshot_coverage(registry, snapshots_dir);
+    let (residual_queue, permanent_residuals) = residuals_by_disposition(registry);
+    let non_compliant_rules =
+        crate::conservation::declared_non_compliant_rules(crate::conservation::NORMALIZATION_RULES)
+            .into_iter()
+            .map(|(name, reason)| NonCompliantRule {
+                name: name.to_string(),
+                reason: reason.to_string(),
+            })
+            .collect();
 
     Certification {
-        // Snapshot coverage / no-reference are NON-BLOCKING info — `certified` depends
-        // ONLY on `blocking` (gaps/uncovered/inventory/clause), unchanged.
+        // Snapshot coverage / no-reference / the residual queue are NON-BLOCKING info —
+        // `certified` depends ONLY on `blocking` (gaps/uncovered/inventory/clause),
+        // unchanged.
         certified: blocking.is_empty(),
         profile,
         blocking,
         waived,
         snapshot_coverage,
         no_reference,
+        residual_queue,
+        permanent_residuals,
+        non_compliant_rules,
     }
+}
+
+/// Partition the NON-BLOCKING residuals into `(queued, permanent)` (T035, FR-054; 024 P1),
+/// each ID-sorted. Reported alongside the blockers so a reviewer sees the representation
+/// debt and which carriers it pins, but never folded into `blocking`: residuals are debt,
+/// gaps are missing coverage, and only the latter can block a release.
+///
+/// The partition is the point. Queued residuals are work, and their count is meant to fall
+/// to zero; permanent ones never will, so counting them together would produce a number
+/// that looks like a stalled queue forever.
+fn residuals_by_disposition(registry: &Registry) -> (Vec<ResidualInfo>, Vec<ResidualInfo>) {
+    let (mut permanent, mut queued): (Vec<ResidualInfo>, Vec<ResidualInfo>) = registry
+        .residuals
+        .iter()
+        .map(|r| {
+            (
+                r.disposition.is_permanent(),
+                ResidualInfo {
+                    id: r.id.clone(),
+                    blocked_carrier: r.blocked_carrier.clone(),
+                    missing_capability: r.missing_capability.clone(),
+                    follow_up: r.follow_up.clone(),
+                    out_of_scope_rationale: r.out_of_scope_rationale.clone(),
+                    units: r.units.len(),
+                },
+            )
+        })
+        .fold(
+            (Vec::new(), Vec::new()),
+            |(mut perm, mut queue), (is_permanent, info)| {
+                if is_permanent {
+                    perm.push(info);
+                } else {
+                    queue.push(info);
+                }
+                (perm, queue)
+            },
+        );
+    queued.sort_by(|a, b| a.id.cmp(&b.id));
+    permanent.sort_by(|a, b| a.id.cmp(&b.id));
+    (queued, permanent)
 }
 
 /// Compute the NON-BLOCKING committed-snapshot coverage (T073): for every declarative

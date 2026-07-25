@@ -19,7 +19,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "#322: up writes the merged devcontainer.metadata label (single-container, Dockerfile, and compose paths); exec/read-configuration/set-up read it back via the shared container_metadata::config_from_metadata_label helper. Backed by case-exec-container-id-metadata (parity_up_exec)."
+      "notes": "#322: up writes the merged devcontainer.metadata label (single-container, Dockerfile, and compose paths); exec/read-configuration/set-up read it back via the shared container_metadata::config_from_metadata_label helper. Evidence: case-up-exec-parity (parity_up_exec) — which reports ONE outcome covering this behavior AND bhv-up-exec-parity (research D2's inverse defect, characterized in 023 T054). An independently-reported case needs a runtime-resolved container-id token in an operation's argv; deferred as tasks.md#T110."
     }
   ]
 }

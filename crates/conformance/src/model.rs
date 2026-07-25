@@ -489,6 +489,19 @@ pub const CONSUMER_SUBCOMMANDS: &[&str] = &[
     "doctor",
 ];
 
+/// The subset of [`CONSUMER_SUBCOMMANDS`] that makes the runner TOUCH the container
+/// runtime.
+///
+/// A case declaring one of these must declare a Docker `resourceGroup`, because that
+/// field — not the subcommand — is what the runner and the validator both key isolation
+/// off (`runner::is_docker_case`, `validate::is_docker_case`). Without it the case runs
+/// against the committed fixture tree with no isolated workspace, no RAII cleanup guard
+/// and no pinned-image check: three protections, all silently off. Enforced as V16.
+///
+/// `read-configuration`, `templates-apply` and `doctor` are absent deliberately — they
+/// read configuration and never create a container.
+pub const CONTAINER_SUBCOMMANDS: &[&str] = &["up", "down", "exec", "build", "run-user-commands"];
+
 /// The observable-channel ids whose expectations require an `fsAllowlist` (data-model
 /// §1 / contract observer-channel.md). Filesystem capture is allowlist-scoped, never a
 /// full-tree diff (clarify Q1).
@@ -507,7 +520,11 @@ pub const CHAN_STDERR: &str = "chan-stderr";
 pub const CHAN_FILESYSTEM: &str = "chan-filesystem";
 /// Contents of an allowlisted file.
 pub const CHAN_FILE_CONTENT: &str = "chan-file-content";
-/// Container lifecycle state (retained for legacy cases).
+/// Whole-container observable state — mounts, env, labels, user, working dir, ports,
+/// entrypoint/cmd, networks, and the derived workspace bind targets. Declarative as of
+/// 024 Phase 4; its evidence is NOT byte-stable across runs (container ids, compose
+/// project names, image ids), so it belongs on `live-differential` / `spec-expectation`,
+/// never on the `snapshot` oracle (conformance/RULES.md).
 pub const CHAN_CONTAINER_STATE: &str = "chan-container-state";
 /// Parsed structured (JSON) result document, distinct from raw stdout.
 pub const CHAN_STRUCTURED_OUTPUT: &str = "chan-structured-output";
@@ -519,6 +536,32 @@ pub const CHAN_PROCESS_GRAPH: &str = "chan-process-graph";
 pub const CHAN_INJECTED_PROCESS: &str = "chan-injected-process";
 /// Lifecycle ordering, first-create vs restart, resume, cleanup transitions.
 pub const CHAN_TEMPORAL: &str = "chan-temporal";
+
+/// The channel ids the declarative runner can actually OBSERVE — i.e. the ids for which
+/// `parity_harness::observe::observer_for` returns an observer (024 Phase 3, D-2).
+///
+/// A declarative case may only declare a channel from this set (**V16**): a case naming a
+/// channel with no observer used to validate cleanly and then fail at RUN time, which is
+/// the worst place to learn it — the registry says the behavior is covered while nothing
+/// can ever observe it. `chan-container-state` JOINED the set in 024 Phase 4, when its
+/// declarative observer landed; until then it was declarable-but-unobservable, which is
+/// precisely the state this constant exists to make impossible.
+///
+/// This constant and `observer_for` are kept in lockstep by a `parity-harness` test
+/// (`observation_faults.rs`), the same discipline the normalization-rule registry uses.
+pub const OBSERVED_CHANNELS: &[&str] = &[
+    CHAN_EXIT_CODE,
+    CHAN_STDOUT,
+    CHAN_STDERR,
+    CHAN_STRUCTURED_OUTPUT,
+    CHAN_FILESYSTEM,
+    CHAN_FILE_CONTENT,
+    CHAN_CONTAINER_STATE,
+    CHAN_IMAGE,
+    CHAN_PROCESS_GRAPH,
+    CHAN_INJECTED_PROCESS,
+    CHAN_TEMPORAL,
+];
 
 /// Which oracle a declarative [`TestCase`] is evaluated against (data-model §1,
 /// research D8). The four are semantically distinct verdicts; re-pointing a case at a
