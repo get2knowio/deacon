@@ -59,7 +59,7 @@ checkable at a glance rather than by reading every section.
 | **V9** | an expected outcome referencing an undeclared observable channel | `validate.rs` |
 | **V10** | a case whose context has an empty intersection with a linked behavior's applicability | `validate.rs` |
 | **V11 – V15** | inventory join: stale / unclassified / malformed / provenance / clause↔source integrity | [Inventory join](#inventory-join-v11--v15--constraints-and-clauses) |
-| **V16** | declarative-case well-formedness (shape, `oracleType`, consumer subcommand, assertions, `fsAllowlist`, observable channel) | `validate.rs` |
+| **V16** | declarative-case well-formedness (shape, `oracleType`, consumer subcommand, assertions, `fsAllowlist`, observable channel, Docker `resourceGroup`) | `validate.rs` |
 | **V17** | committed-snapshot integrity (orphan or malformed provenance) | `validate.rs` |
 | **V18** | a Docker case referencing a fixture with an unpinned image | `validate.rs` |
 | **V19** | an allowed-difference whose backing waiver/divergence id does not resolve | `validate.rs` |
@@ -196,6 +196,17 @@ claimed the behavior was covered. `OBSERVED_CHANNELS` is held in lockstep with t
 harness's `observe::observer_for` by a `parity-harness` test, the same discipline the
 normalization-rule registry uses.
 
+**A case invoking a container-creating subcommand must declare a Docker `resourceGroup`**
+(`model::CONTAINER_SUBCOMMANDS` = `up`/`down`/`exec`/`build`/`run-user-commands`; V16).
+The field reads like nextest scheduling metadata, but it is the *only* discriminator both
+the runner and the validator use to decide a case is Docker-backed. Omit it on a case that
+runs `up` and three protections switch off at once, silently: the runner builds no isolated
+`DockerWorkspace` (so both sides run against the committed fixture tree and stamp an
+identical `devcontainer.local_folder` label — deacon's container and the oracle's become
+indistinguishable, as do two cases running in parallel), no RAII cleanup guard is created
+(container, network and volume leak), and V18 skips the case's image inputs because it is
+`is_docker_case`-gated too. The case still runs, and may well pass.
+
 ## Inventory join (V11 – V15) — constraints AND clauses
 
 This section is the human-readable companion to the two inventory joins enforced in
@@ -327,6 +338,15 @@ never rewritten, by every command that measures against it.
 > reviewed diff — and `crates/conformance/tests/baseline_archive.rs` still fails on a
 > record that loses its assertion, its id uniqueness, its sort order, or a channel that no
 > longer resolves.
+>
+> **Its PRESENCE is guarded by V21**, and deliberately so. Retiring V25 removed the only
+> check that the file exists at all, and `Registry::load` reads a missing baseline as
+> `None` rather than as an error — so deleting it made `check_mapping`, `check_residuals`
+> and the harness's reported-granularity gate each scope themselves out, and `validate`
+> went green while every conservation claim became vacuously true. Retiring a *drift* gate
+> was correct; retiring the *existence* requirement along with it was not, and V21 now
+> carries it: a registry holding mapping or residual records with no baseline to reference
+> is incoherent and is reported.
 
 Membership is derived, not authored, so it cannot be gamed: corpus units come from the
 *production* discovery functions (`discover_tier1_cases` / `discover_error_cases` in
@@ -380,7 +400,7 @@ destination is reachable from a unit.
 
 | Class | Statement | Remedy |
 |-------|-----------|--------|
-| **V21** | **mapping integrity, both directions**: a baseline unit with no mapping entry (an orphan *test*); a mapping naming a unit or case that does not exist; a **declarative** case no mapping entry reaches (an orphan *case*); a disposition whose arity is wrong (`migrated`/`deduplicated` without `caseIds`, `residual`/`retired` with them, `residual` without a resolvable `residualId`, `deduplicated`/`retired` without a `rationale`); a destination case that resolves to no behavior or declares no observable channel, or names a dangling behavior/channel id; and, for a characterized **exception**, a mapping to zero or to more than one mechanism, a missing mapping entry, or a mechanism whose current direction/scope is BROADER than the recorded pre-migration form | Give the unit a destination, the case a reachable mapping, the exception exactly one mechanism. A tolerance may be narrowed, never widened. |
+| **V21** | **mapping integrity, both directions**: a baseline unit with no mapping entry (an orphan *test*); a mapping naming a unit or case that does not exist; a **declarative** case no mapping entry reaches (an orphan *case*); a disposition whose arity is wrong (`migrated`/`deduplicated` without `caseIds`, `residual`/`retired` with them, `residual` without a resolvable `residualId`, `deduplicated`/`retired` without a `rationale`); a destination case that resolves to no behavior or declares no observable channel, or names a dangling behavior/channel id; and, for a characterized **exception**, a mapping to zero or to more than one mechanism, a missing mapping entry, or a mechanism whose current direction/scope is BROADER than the recorded pre-migration form. **Also: a registry that carries mapping or residual records with NO committed `baseline.json`** | Give the unit a destination, the case a reachable mapping, the exception exactly one mechanism. A tolerance may be narrowed, never widened. Restore the baseline (or, if the records are genuinely obsolete, delete them too). |
 | **V22** | **fixture correspondence**: a `from` split across two `to`s; a `to` fed by two `from`s (a silent merge); a `from` that is not one of the unit's baseline fixtures; a baseline fixture of a migrated unit with no `fixtureMapping` entry (a silent drop); and a migrated fixture no case references (an unreferenced orphan) | Make the correspondence one-to-one and account for every fixture the unit consumed. Declaring the SAME `(from, to)` pair from two units is fine — two modes of one workspace legitimately share one fixture. |
 | **V23** | **malformed residual**: a vague `missingCapability` (a filler phrase, or too short to name a mechanism); a `followUp` that is not a tracked reference; an `outOfScopeRationale` that names no ground for permanent exclusion (024 — see [Queued vs permanent](#queued-vs-permanent-residuals-024)); a `blockedCarrier` that is absent on a residual whose units are not ALL `external-corpus-entry`, that names no baseline program, or that is present on an `external-corpus-entry` residual; a `units`/`behaviors` entry that does not resolve; and a unit claimed by a residual while its mapping says it was migrated | Name the specific missing capability, and either a tracked follow-up (`queued`) or the principle that forbids expression (`permanent`); name the carrier the residual pins. A residual never blocks certification, which is exactly why its shape must be strict. |
 
@@ -426,9 +446,32 @@ names a tracked follow-up) is reported by `certify` as non-blocking debt, exactl
 residual — it is admitted, explained and queued. Declaring is a conspicuous source edit
 with a mandatory tracked reason, so it is not a cheap escape from the guard.
 
-There is currently **one** declared deficiency: `strip_intentional_labels`, which subtracts
-labels by four prefix matches rather than an enumerated list. It is scoped to the legacy
-`chan-container-state` channel and retires with its carriers (tasks.md#T112).
+There are currently **no** declared deficiencies (024 Phase 4). The last one,
+`strip_intentional_labels`, subtracted labels by four namespace PREFIXES rather than an
+enumerated list — a category, so a label a future release added under `devcontainer.` /
+`com.docker.` / `desktop.` / `dev.containers.` would have vanished from the comparison
+with nobody deciding it should. It was **retired, not narrowed** (tasks.md#T112 closed):
+container-state capture now keeps every label, and the per-CLI identity labels are
+characterized where a reader can see them — a scoped, backed `allowedDifference` on the
+case that compares them, and, until those cases land, an explicit named allowance inside
+the one legacy carrier that still diffs labels (`parity_state_diff`), which dies with it.
+
+The same change registered **`workspace_basename_token`** (rewrite, scope
+`channel:chan-container-state`, removes nothing): each side of a differential runs in its
+own isolated temp workspace, so a config with no explicit `workspaceFolder` yields
+`/workspaces/<tmpA>` versus `/workspaces/<tmpB>`, and the full-path token cannot reach a
+container-side path that never contains the host path. Without it every container-state
+comparison would report a divergence that is an artifact of the runner's own isolation.
+
+### `chan-container-state` is not snapshot-oracle material
+
+The `snapshot` oracle replays committed evidence, so it requires evidence that is
+byte-stable across recordings. `chan-container-state` is **not**: container ids, compose
+project names and image ids survive tokenization, and they change on every run. A case on
+this channel therefore belongs on `live-differential` (compare two sides in the same run)
+or `spec-expectation` (assert a declared shape), never on `snapshot` — recording one would
+produce a snapshot that replays stale on the next run for reasons that carry no meaning.
+This is a property of the evidence, not a gap to close.
 
 ### What US4 retired (research D3)
 

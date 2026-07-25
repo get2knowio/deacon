@@ -42,7 +42,7 @@ use parity_harness::equivalence::{
 };
 use parity_harness::oracle::Oracle;
 use parity_harness::registry::ParityRegistry;
-use parity_harness::report::{CaseResult, Outcome as LegacyOutcome, ReportFragment};
+use parity_harness::report::{CaseResult, Outcome as LegacyOutcome};
 use parity_harness::runner::{RunConfig, run_case};
 use parity_harness::{HarnessError, report_root};
 
@@ -122,18 +122,28 @@ fn usage(message: &str) -> ExitCode {
 /// reports.
 ///
 /// This re-implements nothing: every live parity binary already writes a
-/// `ReportFragment` to `target/parity/report/<binary>.json` carrying one `CaseResult`
-/// per case it compared. Reading that fragment is therefore the legacy path's own verdict,
-/// in its own words — which is the only way to compare against it without building a
-/// second comparison implementation (FR-030).
+/// `ReportFragment` per case it compared, under `target/parity/report/<binary>/`. Reading
+/// those fragments is therefore the legacy path's own verdict, in its own words — which is
+/// the only way to compare against it without building a second comparison implementation
+/// (FR-030).
+///
+/// Reading goes through [`aggregate::read_fragments`], the SAME reassembly the run report
+/// uses, rather than a second hand-rolled path read. That is not tidiness: a carrier's
+/// cases are written by separate nextest processes into separate files (024 D-1), so
+/// "the fragment" is a merge, and a bin that opened one path would see one case. An
+/// earlier revision of this bin did exactly that against the retired flat layout and
+/// reported every carrier as having produced no verdict at all.
 ///
 /// The nextest run is allowed to FAIL: a carrier reporting a difference is exactly the
 /// state a relation is computed over. What is not tolerated is a missing fragment — that
 /// means the binary never produced a verdict, and no verdict is not a pass.
 fn run_legacy_carrier(carrier: &str) -> Result<Vec<CaseResult>, HarnessError> {
-    let fragment = report_root().join("report").join(format!("{carrier}.json"));
-    // A stale fragment from an earlier run would silently stand in for this one.
-    let _ = std::fs::remove_file(&fragment);
+    // Stale evidence from an earlier run would silently stand in for this one, so clear
+    // BOTH layouts: the per-case tree this carrier writes now, and the retired flat file
+    // an older checkout may have left behind (`read_fragments` still merges it).
+    let report_dir = report_root().join("report");
+    let _ = std::fs::remove_dir_all(report_dir.join(carrier));
+    let _ = std::fs::remove_file(report_dir.join(format!("{carrier}.json")));
 
     let status = std::process::Command::new("cargo")
         .args([
@@ -151,16 +161,17 @@ fn run_legacy_carrier(carrier: &str) -> Result<Vec<CaseResult>, HarnessError> {
         })?;
     eprintln!("legacy `{carrier}` finished with {status} (a difference is a valid outcome here)");
 
-    let raw = std::fs::read_to_string(&fragment).map_err(|e| HarnessError::Report {
-        cause: format!(
-            "`{carrier}` produced no report fragment at {} ({e}) — it reported no verdict, \
-             and no verdict is not a pass",
-            fragment.display()
-        ),
-    })?;
-    let parsed: ReportFragment = serde_json::from_str(&raw).map_err(|e| HarnessError::Report {
-        cause: format!("malformed fragment {}: {e}", fragment.display()),
-    })?;
+    let fragments = parity_harness::aggregate::read_fragments(&report_root())?;
+    let parsed = fragments
+        .into_iter()
+        .find(|f| f.binary == carrier)
+        .ok_or_else(|| HarnessError::Report {
+            cause: format!(
+                "`{carrier}` produced no report fragment under {} — it reported no verdict, \
+                 and no verdict is not a pass",
+                report_dir.join(carrier).display()
+            ),
+        })?;
     Ok(parsed.cases)
 }
 
@@ -484,7 +495,13 @@ fn characterization_for(
 ) -> Option<String> {
     let case_ids = destinations.get(unit)?;
     for case_id in case_ids {
-        let case = cases.get(case_id.as_str())?;
+        // An id that resolves to no case is not an answer for THIS destination, but it
+        // must not abort the search: the waiver and behavior fallbacks below are
+        // independent sources, and skipping them would report a real `stricter` relation
+        // as uncharacterized — which reads as suppression and blocks the deletion.
+        let Some(case) = cases.get(case_id.as_str()) else {
+            continue;
+        };
         if let Some(ad) = case.allowed_differences.first() {
             if let Some(id) = ad.waiver_id.as_deref().or(ad.divergence_id.as_deref()) {
                 return Some(id.to_string());

@@ -461,7 +461,10 @@ pub(crate) fn capture_channel(
         cause: "no observer for this channel yet (Docker channels land in US5)".to_string(),
     })?;
     let raw = observer.capture(ctx, op)?;
-    let tokens = crate::normalize::TokenMap::workspace(&ctx.workspace);
+    // The token policy is per-channel and lives in the normalizer, not here (Constitution
+    // VIII): `chan-container-state` also tokenizes the workspace BASENAME, since each side
+    // runs in its own temp workspace and the container-side paths carry only that name.
+    let tokens = crate::normalize::tokens_for_channel(&exp.channel, &ctx.workspace);
     let normalized = crate::normalize::normalize_channel(&exp.channel, &raw, &tokens);
     Ok((raw, normalized))
 }

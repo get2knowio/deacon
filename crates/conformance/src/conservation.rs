@@ -538,9 +538,14 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
              serializes unconditionally while the reference omits it when unauthored; the \
              rule removes it ONLY when its value carries no information (null, [], {}, \
              \"\"), so a populated value is always compared. The two documents describe \
-             the same resolved configuration in different JSON shapes. This compensates \
-             for a deacon serializer defect (it should apply `skip_serializing_if`) and \
-             is deleted when that lands — tracked at \
+             the same resolved configuration in different JSON shapes. Its REACH is \
+             bounded to match this scope: the document's own top level plus the two \
+             spec-defined nested containers whose properties were part of the measured \
+             set (`hostRequirements`, `portsAttributes`). It does NOT descend into \
+             arbitrary sub-documents — a `label` or `description` inside \
+             `customizations.vscode.settings` is user data and is compared, not elided. \
+             This compensates for a deacon serializer defect (it should apply \
+             `skip_serializing_if`) and is deleted when that lands — tracked at \
              specs/023-migrate-parity-to-conformance/tasks.md#T111. Replaces the retired \
              blanket `prune` (023 T062, research D3).",
         ),
@@ -586,6 +591,7 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
         scopes: &[
             "channel:chan-structured-output",
             "channel:chan-file-content",
+            "channel:chan-container-state",
             "channel:chan-image",
             "channel:chan-injected-process",
             "channel:chan-temporal",
@@ -619,6 +625,7 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
             "channel:chan-structured-output",
             "channel:chan-file-content",
             "channel:chan-filesystem",
+            "channel:chan-container-state",
             "channel:chan-image",
             "channel:chan-process-graph",
             "channel:chan-injected-process",
@@ -632,35 +639,23 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
         known_non_compliant: None,
     },
     NormalizationRule {
-        name: "strip_intentional_labels",
+        name: "workspace_basename_token",
         scopes: &["channel:chan-container-state"],
-        action: RuleAction::Drop,
-        // PREFIXES, not field names — this is precisely what makes the rule
-        // non-compliant, and it is recorded as it actually is rather than dressed up as
-        // an enumerated list.
-        removes: &[
-            "devcontainer.*",
-            "com.docker.*",
-            "desktop.*",
-            "dev.containers.*",
-        ],
+        action: RuleAction::Rewrite,
+        removes: &[],
         justification: Some(
-            "Subtracts labels both CLIs stamp by design and differently (identity, \
-             per-CLI metadata blob, compose bookkeeping, Docker Desktop).",
+            "Rewrites the workspace directory's BASENAME to `<WORKSPACE_NAME>` in \
+             container-state evidence. Each side of a differential runs in its own \
+             isolated temp workspace, and a config with no explicit `workspaceFolder` \
+             derives the container path from that basename — `/workspaces/deacon-conf-aaa` \
+             versus `/workspaces/deacon-conf-bbb`. The full-path substitution cannot reach \
+             it because the container-side path never contains the host path. Without this \
+             rule every container-state comparison would report a mount-destination \
+             divergence that is an artifact of the isolation the runner itself imposes. \
+             Rewrite, never delete; scoped to this one channel, so no other channel's \
+             evidence changes meaning (024 Phase 4).",
         ),
-        known_non_compliant: Some(
-            "The removal set is four PREFIX matches, not an enumerated list of field \
-             names, so it removes a whole CATEGORY of labels — including any label a \
-             future release adds under those namespaces — which is what FR-021 forbids \
-             (data-model §6 names this rule specifically). It is recorded here as \
-             non-compliant rather than narrowed, because narrowing it to the labels both \
-             CLIs actually stamp needs the live label sets from a real cross-CLI run, \
-             which belongs with its carrier's migration; it is scoped to the legacy \
-             `chan-container-state` channel and retires with `parity_state_diff` / \
-             `parity_observable_state` (residuals res-state-diff-* / \
-             res-observable-state-*). The newer `chan-image` path removes no label at \
-             all. Tracked at specs/023-migrate-parity-to-conformance/tasks.md#T112.",
-        ),
+        known_non_compliant: None,
     },
 ];
 
@@ -692,6 +687,18 @@ pub fn check_normalization_rules(rules: &[NormalizationRule]) -> Vec<crate::vali
         // `declared_non_compliant_rules` — not a V24 blocker (see the field docs). What
         // IS checked is that the declaration is honest: a non-empty reason naming a
         // tracked follow-up, so the field cannot silence the guard cheaply.
+        //
+        // The declaration excuses EXACTLY ONE property: an unbounded removal SET (an
+        // empty or open-ended `removes` on a `drop` rule). That is the FR-021 deficiency
+        // the field exists to admit. It does NOT excuse being unscoped, malformed, or
+        // unjustified — those are recorded honestly by every rule, deficient or not.
+        //
+        // Skipping every structural check instead (an early `continue`) turned the field
+        // into a general escape hatch: a rule with `scopes: &[]`, `removes: &[]` and no
+        // justification passed V24 outright, on the strength of a `.md#` substring. That
+        // admits a completely unscoped, unbounded, unexplained removal — the opposite of
+        // "recorded honestly rather than dressed up".
+        let declared_deficient = rule.known_non_compliant.is_some();
         if let Some(reason) = rule.known_non_compliant {
             if reason.trim().is_empty() || !mentions_tracked_reference(reason) {
                 push(
@@ -702,7 +709,6 @@ pub fn check_normalization_rules(rules: &[NormalizationRule]) -> Vec<crate::vali
                         .to_string(),
                 );
             }
-            continue;
         }
 
         if rule.scopes.is_empty() {
@@ -733,7 +739,8 @@ pub fn check_normalization_rules(rules: &[NormalizationRule]) -> Vec<crate::vali
 
         match rule.action {
             RuleAction::Drop => {
-                if rule.removes.is_empty() {
+                // The one property `known_non_compliant` is allowed to admit.
+                if rule.removes.is_empty() && !declared_deficient {
                     push(
                         rule.name,
                         "a `drop` rule must enumerate the field names it removes; an \
@@ -750,6 +757,9 @@ pub fn check_normalization_rules(rules: &[NormalizationRule]) -> Vec<crate::vali
                     );
                 }
                 for removed in rule.removes {
+                    if declared_deficient {
+                        break; // an open-ended entry IS the admitted deficiency
+                    }
                     if let Some(reason) = open_ended_removal(removed) {
                         push(
                             rule.name,
@@ -1371,10 +1381,35 @@ fn missing_counterparts(
         .iter()
         .flat_map(|c| c.behaviors.iter().map(String::as_str))
         .collect();
+    // The behaviors that existed BEFORE the migration.
+    //
+    // Deriving this from the surviving legacy cases alone makes the check erase itself:
+    // as each superseded carrier is deleted — the stated goal — its pointer case goes with
+    // it, the set shrinks, and once the last one is gone the loop below never runs and
+    // condition 2 passes vacuously for every behavior. The "before" side would be read
+    // from mutable present state, in a module whose whole discipline is measuring against
+    // a frozen record.
+    //
+    // `baseline.json` cannot supply it (a `BaselineUnit` records channels and fixtures,
+    // not behaviors), and fabricating a frozen list now — four carriers into the deletion
+    // — would be recording a subset and calling it the whole. What IS durable is
+    // `mapping.json`: a migrated unit's entry permanently names the case that took over,
+    // and that case claims the behaviors the unit's carrier used to claim. So the union of
+    // (still-live legacy cases) and (every mapping destination's behaviors) is stable
+    // under carrier deletion — deleting a carrier moves entries between the two halves
+    // rather than dropping them. A destination id that stops resolving is already V21.
+    let mapping_destinations: BTreeSet<&str> = registry
+        .mapping
+        .iter()
+        .flat_map(|m| m.case_ids.iter().map(String::as_str))
+        .collect();
     let before_behaviors: BTreeSet<&str> = registry
         .cases
         .iter()
-        .filter(|c| matches!(c.classify(), Ok(CaseKind::Legacy)))
+        .filter(|c| {
+            matches!(c.classify(), Ok(CaseKind::Legacy))
+                || mapping_destinations.contains(c.id.as_str())
+        })
         .flat_map(|c| c.behaviors.iter().map(String::as_str))
         .collect();
     for behavior in &before_behaviors {

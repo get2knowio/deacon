@@ -200,8 +200,7 @@ enum BaselineCommand {
         baseline: Option<PathBuf>,
         /// Assert the committed freeze `revision` is exactly this commit. Without it the
         /// regeneration adopts whatever revision the committed file records, so only the
-        /// unit records are compared; with it, a tampered freeze label is reported too
-        /// (the second half of V25).
+        /// unit records are compared; with it, a tampered freeze label is reported too.
         #[arg(long, value_name = "SHA")]
         freeze: Option<String>,
         /// Repository root to enumerate. Defaults to the workspace root.
@@ -1254,7 +1253,8 @@ fn resolve_baseline_file(registry_dir: &Path, explicit: Option<PathBuf>) -> Path
 
 /// The freeze sentinel recorded when `--freeze` is omitted and no committed baseline
 /// exists. A baseline carrying it is explicitly NOT frozen, so `--force` is not needed
-/// to regenerate over it (and `validate` reports it as V25).
+/// to regenerate over it. (`validate` no longer reports drift at all — V25 is retired;
+/// `baseline check` reports it informationally.)
 use deacon_conformance::baseline::UNFROZEN_REVISION as UNFROZEN;
 
 /// `baseline generate` (contracts/cli-commands.md): enumerate the pre-migration
@@ -1401,7 +1401,7 @@ fn compare_baselines(committed: &BaselineFile, regenerated: &BaselineFile) -> Ba
 /// to stderr per the output-stream contract.
 fn report_baseline_drift(path: &Path, drift: &BaselineDrift) {
     eprintln!(
-        "error: {} is out of date with respect to the repository tree (V25).",
+        "error: {} is out of date with respect to the repository tree.",
         path.display()
     );
     let lines = drift.lines();

@@ -218,13 +218,36 @@ fn raw_paths(deacon: &Invocation, oracle: &Invocation) -> RawPaths {
     }
 }
 
+/// The container LABEL namespaces the two CLIs each stamp by design and differently:
+/// identity/bookkeeping labels (`devcontainer.configHash`, `devcontainer.metadata`,
+/// `devcontainer.local_folder`, …), compose bookkeeping, and Docker Desktop's own.
+///
+/// These were removed inside the shared normalizer until 024 Phase 4, by a
+/// `strip_intentional_labels` rule whose removal set was four PREFIXES — a whole
+/// CATEGORY of labels, including any a future release adds under those namespaces, which
+/// is what FR-021 forbids (it was registered `known_non_compliant`). Capture is now
+/// verbatim, and the tolerance lives HERE, at the comparison that actually needs it:
+/// visible to anyone reading this carrier, applying to this binary only, and dying with
+/// it when the declarative `chan-container-state` cases replace it (024 Phase 5), where
+/// the same tolerance is re-expressed as a scoped, backed `allowedDifference` on the case.
+const INTENTIONAL_LABEL_FIELDS: &[&str] = &[
+    "label:devcontainer.*",
+    "label:com.docker.*",
+    "label:desktop.*",
+    "label:dev.containers.*",
+];
+
 /// Diff two snapshots, drop caller-allowed and waiver-characterized divergences,
 /// write a report fragment, and (on any surviving divergence or stale waiver)
 /// fail with a readable per-field report.
 ///
-/// Two allowance mechanisms combine here (both EXACT by default; a trailing `*`
+/// Three allowance mechanisms combine here (all EXACT by default; a trailing `*`
 /// makes a matcher a prefix — so `mount:/workspace` must NOT match
 /// `mount:/workspaces/sib`):
+///
+/// - [`INTENTIONAL_LABEL_FIELDS`]: the per-CLI identity/bookkeeping label namespaces,
+///   tolerated for every case of this binary (see the constant for why it lives here
+///   rather than in the normalizer).
 ///
 /// - `extra_allowed`: inline, genuinely test-structural allowances (e.g. two
 ///   distinct fixtures deliberately using different `containerEnv` KEYS) that are
@@ -261,7 +284,11 @@ async fn assert_parity(
     let unexpected: Vec<_> = divs
         .iter()
         .filter(|d| {
-            if extra_allowed.iter().any(|m| field_matches(&d.field, m)) {
+            if extra_allowed
+                .iter()
+                .chain(INTENTIONAL_LABEL_FIELDS)
+                .any(|m| field_matches(&d.field, m))
+            {
                 return false;
             }
             // A matching state-field waiver characterizes this divergence.

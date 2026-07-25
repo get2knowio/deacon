@@ -295,7 +295,8 @@ pub fn read_fragments(report_root: &Path) -> Result<Vec<ReportFragment>, Harness
         }
     };
 
-    let mut paths: Vec<PathBuf> = Vec::new();
+    let mut current: Vec<PathBuf> = Vec::new();
+    let mut legacy: Vec<PathBuf> = Vec::new();
     for entry in rd.filter_map(Result::ok) {
         let path = entry.path();
         if path.is_dir() {
@@ -303,7 +304,7 @@ pub fn read_fragments(report_root: &Path) -> Result<Vec<ReportFragment>, Harness
             let inner = std::fs::read_dir(&path).map_err(|e| HarnessError::Report {
                 cause: format!("could not read report fragment directory {path:?}: {e}"),
             })?;
-            paths.extend(
+            current.extend(
                 inner
                     .filter_map(Result::ok)
                     .map(|e| e.path())
@@ -311,10 +312,20 @@ pub fn read_fragments(report_root: &Path) -> Result<Vec<ReportFragment>, Harness
             );
         } else if is_json_file(&path) {
             // Legacy flat layout: report/<binary>.json
-            paths.push(path);
+            legacy.push(path);
         }
     }
-    paths.sort();
+    current.sort();
+    legacy.sort();
+
+    // Current layout FIRST, legacy second. `merge_fragment` keeps the first occurrence of
+    // a case id, so read order decides which wins — and a plain path sort put
+    // `report/parity_build.json` ahead of `report/parity_build/`, letting a leftover flat
+    // fragment from an older checkout outrank this run's own results. Ordering by layout
+    // rather than by path makes the tolerance for the retired layout a fallback, which is
+    // all it was ever meant to be.
+    let mut paths = current;
+    paths.extend(legacy);
 
     let mut merged: BTreeMap<String, ReportFragment> = BTreeMap::new();
     for path in paths {
@@ -399,8 +410,19 @@ fn merge_fragment(
 /// result looks green while seven claims go unwitnessed.
 ///
 /// The expected set is computed entirely from artifacts that already exist — the frozen
-/// `baseline.json` (what each carrier covered) minus the units `mapping.json` marks
-/// `migrated` (moved to a declarative case, so no longer this carrier's to report).
+/// `baseline.json` (what each carrier covered), keeping only the units whose mapping still
+/// makes them this carrier's to report.
+///
+/// **A unit is expected iff its disposition is `residual`, or it has no mapping entry
+/// at all.** That is the whole point of `residual`: the coverage has not moved, so the
+/// carrier still owes a result for it. The other three dispositions each say the opposite,
+/// and for different reasons — `migrated` and `deduplicated` moved the coverage to a
+/// declarative case, and `retired` deliberately dropped it with a recorded rationale.
+/// Excluding only `requires_cases()` (migrated | deduplicated) would both under-check —
+/// a `deduplicated` unit's carrier is no longer asked for anything — and produce a FALSE
+/// failure, by demanding a result for a unit whose `#[test]` was removed on purpose. A
+/// unit with no mapping entry is expected, because an unmapped unit is an unaccounted one:
+/// V21 reports it as an orphan, and until it is dispositioned its carrier still owes it.
 ///
 /// **Only the missing direction is a violation.** A carrier reporting a case the baseline
 /// does not list is the transitional dual-path state — a unit may be migrated *and* still
@@ -427,17 +449,19 @@ pub fn check_reported_granularity(
         return Ok(Vec::new());
     };
 
-    let migrated: HashSet<&str> = registry
+    // The units their carrier no longer owes a result for: everything whose disposition
+    // is not `residual`. See the doc comment — this is not `requires_cases()`.
+    let discharged: HashSet<&str> = registry
         .mapping
         .iter()
-        .filter(|m| m.disposition.requires_cases())
+        .filter(|m| m.disposition != deacon_conformance::mapping::Disposition::Residual)
         .map(|m| m.unit.as_str())
         .collect();
 
     // carrier -> the unit local-names it must still report.
     let mut expected: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for unit in &baseline.records {
-        if migrated.contains(unit.id.as_str()) {
+        if discharged.contains(unit.id.as_str()) {
             continue;
         }
         // `<program>::<case-id>`; a unit with no `::` is a whole-binary guard and is

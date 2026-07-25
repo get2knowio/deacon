@@ -118,9 +118,18 @@ async fn live_differential(
         deacon_norm.push(runner::capture_normalized(case, exp, &deacon_ctx)?);
     }
     if let Some(mut ws) = deacon_ws {
-        // Idempotent: the guard's `Drop` (running as `ws` falls out of scope here) will not
-        // re-reclaim, and the temp workspace directory is removed with it.
-        ws.cleanup_now();
+        // Reclamation shells out to `deacon down` plus several `docker` calls, all via
+        // blocking `std::process::Command::output`. Running that on the async executor
+        // would stall the runtime for seconds per case — under `--profile parity` with
+        // concurrent cases, for every teardown — so it is offloaded, exactly as the
+        // runner's far cheaper `docker ps` probe already is (constitution V).
+        //
+        // `ws` MOVES into the blocking task: `cleanup_now` is idempotent and the guard's
+        // `Drop` runs there too, so the temp workspace directory is removed on the
+        // blocking pool rather than here.
+        tokio::task::spawn_blocking(move || ws.cleanup_now())
+            .await
+            .map_err(runner::blocking_join_err)?;
     }
 
     // -- the reference side ----------------------------------------------------------
@@ -161,37 +170,90 @@ async fn live_differential(
     Ok((channels, tolerances.stale(&consumed)))
 }
 
-/// Fail loud when NOT ONE declared channel was observed (024 Phase 3, D-2).
+/// Channels whose evidence comes from the RUNTIME (a container or the filesystem) rather
+/// than from the CLI process itself.
+///
+/// The distinction is what makes the vacuity guard bite. A CLI-process channel
+/// (`chan-exit-code`, `chan-stdout`, …) is captured from the invocation and is therefore
+/// present on essentially every run, including a run where Docker fell over. A
+/// runtime-derived channel is present only if the container or file tree was actually
+/// inspected. Requiring "at least one channel overall" is satisfied by `chan-exit-code`
+/// alone, which is why it must be required PER GROUP instead.
+const RUNTIME_DERIVED_CHANNELS: &[&str] = &[
+    deacon_conformance::model::CHAN_CONTAINER_STATE,
+    deacon_conformance::model::CHAN_IMAGE,
+    deacon_conformance::model::CHAN_PROCESS_GRAPH,
+    deacon_conformance::model::CHAN_INJECTED_PROCESS,
+    deacon_conformance::model::CHAN_TEMPORAL,
+    deacon_conformance::model::CHAN_FILESYSTEM,
+    deacon_conformance::model::CHAN_FILE_CONTENT,
+];
+
+/// Fail loud when a case's declared channels were not actually observed (024 Phase 3,
+/// D-2).
 ///
 /// `channels` yields `(channel-id, observed)` for each declared channel — for a
-/// differential, `observed` is true when EITHER side captured it. A case whose every
-/// channel came back `present:false` observed nothing, and a comparison of two absences is
-/// not agreement: every Docker observer reports `not-captured` when there is no container
-/// inspect, so a daemon fault would otherwise report a green pass. Individual channels
-/// keep the FR-018 semantics (not-captured matches not-captured); only the all-empty case
-/// is rejected. A case declaring NO channel is left to the other validators (V16).
+/// differential, `observed` is true when EITHER side captured it. Two rules:
+///
+/// 1. **Nothing at all was observed.** A comparison of two absences is not agreement.
+/// 2. **Runtime-derived channels were declared and NONE of them was observed.** This is
+///    the rule that matters in practice. Rule 1 alone is nearly vacuous for a Docker case:
+///    such a case also declares `chan-exit-code`, which is captured from the CLI process
+///    and is present even when the daemon is dead — so a run where `docker inspect` came
+///    back empty for every observer would satisfy rule 1 on the exit code alone, compare
+///    not-captured to not-captured across all four Docker channels, and report `agree`.
+///    That is exactly the silent green pass this guard exists to eliminate, surviving the
+///    guard.
+///
+/// Individual channels keep the FR-018 semantics (not-captured matches not-captured) —
+/// a case may legitimately observe 3 of its 4 Docker channels. What is rejected is a
+/// whole GROUP coming back empty, because that indicates the observation itself failed
+/// rather than the evidence being genuinely absent. A case declaring NO channel is left to
+/// the other validators (V16).
 fn require_some_observation<'a>(
     case: &TestCase,
     channels: impl IntoIterator<Item = (&'a str, bool)>,
 ) -> Result<(), HarnessError> {
-    let mut unobserved: Vec<&str> = Vec::new();
+    let mut any_observed = false;
+    let mut all: Vec<&str> = Vec::new();
+    let mut runtime: Vec<&str> = Vec::new();
+    let mut any_runtime_observed = false;
+
     for (channel, observed) in channels {
-        if observed {
-            return Ok(());
+        all.push(channel);
+        any_observed |= observed;
+        if RUNTIME_DERIVED_CHANNELS.contains(&channel) {
+            runtime.push(channel);
+            any_runtime_observed |= observed;
         }
-        unobserved.push(channel);
     }
-    if unobserved.is_empty() {
+
+    if all.is_empty() {
         return Ok(());
     }
-    Err(HarnessError::ObservationFault {
-        case: case.id.clone(),
-        cause: format!(
-            "every declared channel came back not-captured ({}); a comparison of two \
-             absences is not agreement",
-            unobserved.join(", ")
-        ),
-    })
+    if !any_observed {
+        return Err(HarnessError::ObservationFault {
+            case: case.id.clone(),
+            cause: format!(
+                "every declared channel came back not-captured ({}); a comparison of two \
+                 absences is not agreement",
+                all.join(", ")
+            ),
+        });
+    }
+    if !runtime.is_empty() && !any_runtime_observed {
+        return Err(HarnessError::ObservationFault {
+            case: case.id.clone(),
+            cause: format!(
+                "no runtime-derived channel was captured ({}) — only CLI-process channels \
+                 were, which are present even when the container runtime is unavailable; \
+                 comparing these absences would report agreement about a container nobody \
+                 inspected",
+                runtime.join(", ")
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// snapshot: resolve the committed snapshot for the current `os-arch`, gate on

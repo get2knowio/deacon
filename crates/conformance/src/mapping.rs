@@ -411,9 +411,14 @@ pub fn check_mapping(
 ) -> Vec<MappingProblem> {
     let mut out = Vec::new();
 
-    // A registry with no committed baseline has nothing to map against; the absence is
-    // V25's concern, not V21's. An empty mapping against a present baseline IS reported
-    // (every unit is then an orphan) — that is the honest reading.
+    // A registry with no committed baseline has nothing to map against. The ABSENCE
+    // itself is reported by `validate::check_mapping`, which sees the whole registry and
+    // can tell "no baseline and nothing referencing one" (legitimate) from "no baseline
+    // but records that reference baseline units" (incoherent). This function sees only
+    // the units, so it cannot make that call and must not guess.
+    //
+    // An empty mapping against a PRESENT baseline IS reported here (every unit is then an
+    // orphan) — that is the honest reading.
     if baseline_units.is_empty() {
         return out;
     }

@@ -478,31 +478,96 @@ fn no_surface_globs_a_removed_path() {
 
     // And the surviving pre-pull must actually resolve to something: a warm-cache step
     // that matches nothing is indistinguishable from no step at all.
+    //
+    // This check MIRRORS THE SCRIPT'S DISCOVERY RULE (recursive, `.json` or `.jsonc`).
+    // An earlier revision asserted only `<fx>/.devcontainer/devcontainer.json` — the same
+    // fixed relative path the script used — so it went green while two fixtures whose
+    // config sits at `<fx>/<subdir>/devcontainer.jsonc` were warmed by nobody. A guard
+    // that shares the blind spot of the thing it guards is not a guard.
     let fixtures = root.join("conformance").join("fixtures");
-    let with_image = std::fs::read_dir(&fixtures)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|e| {
-                    let cfg = e.path().join(".devcontainer").join("devcontainer.json");
-                    std::fs::read_to_string(cfg)
-                        .map(|t| t.contains("\"image\""))
-                        .unwrap_or(false)
-                })
-                .count()
+    let configs = find_devcontainer_configs(&fixtures);
+    let with_image = configs
+        .iter()
+        .filter(|p| {
+            std::fs::read_to_string(p)
+                .map(|t| t.contains("\"image\""))
+                .unwrap_or(false)
         })
-        .unwrap_or(0);
+        .count();
     assert!(
         with_image > 0,
-        "the pre-pull step globs conformance/fixtures/*/.devcontainer/devcontainer.json; \
-         no fixture there declares an `image`, so the step would warm nothing"
+        "no fixture under {} declares an `image`, so the pre-pull would warm nothing",
+        fixtures.display()
     );
+
+    // The nested-config shape must stay covered specifically: it is the one the fixed-path
+    // glob missed, so losing it again would be invisible in the aggregate count above.
+    let nested = configs
+        .iter()
+        .filter(|p| {
+            p.parent()
+                .and_then(|d| d.file_name())
+                .is_some_and(|n| n != ".devcontainer")
+        })
+        .count();
+    assert!(
+        nested > 0,
+        "no fixture config outside a `.devcontainer/` directory was found — if that shape \
+         is genuinely gone, drop this assertion deliberately rather than letting the \
+         recursive discovery quietly stop being load-bearing"
+    );
+
+    // The workflow must DELEGATE to the script, not carry a second copy of the glob.
+    // Two copies of one discovery rule is precisely how T116 rotted: one was updated and
+    // the other kept exiting 0 while matching nothing.
+    let workflow = std::fs::read_to_string(root.join(".github/workflows/parity.yml"))
+        .expect("parity workflow is readable");
+    assert!(
+        workflow.contains("scripts/parity/prepull-fixture-images.sh"),
+        "the parity workflow must pre-pull via scripts/parity/prepull-fixture-images.sh"
+    );
+    for (line_no, line) in workflow.lines().enumerate() {
+        let code = line.trim_start();
+        if code.starts_with('#') {
+            continue; // prose may name the path it is explaining
+        }
+        assert!(
+            !code.contains("devcontainer.json"),
+            ".github/workflows/parity.yml:{}: carries its own fixture-config glob; \
+             discovery lives in scripts/parity/prepull-fixture-images.sh so the workflow \
+             and `make test-parity` cannot drift apart",
+            line_no + 1
+        );
+    }
 
     assert!(
         problems.is_empty(),
         "machine-consumed files reference removed paths:\n{}",
         problems.join("\n")
     );
+}
+
+/// Every `devcontainer.json` / `devcontainer.jsonc` under `dir`, at any depth.
+///
+/// Mirrors the `find` in `scripts/parity/prepull-fixture-images.sh`.
+fn find_devcontainer_configs(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(find_devcontainer_configs(&path));
+        } else if matches!(
+            path.file_name().and_then(|n| n.to_str()),
+            Some("devcontainer.json" | "devcontainer.jsonc")
+        ) {
+            found.push(path);
+        }
+    }
+    found.sort();
+    found
 }
 
 /// T089 (second direction): every binary the registry and nextest still name has a

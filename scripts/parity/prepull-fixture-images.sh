@@ -31,27 +31,51 @@ fi
 # local `docker inspect`. This mirrors the parity workflow's "Build declarative-fixture
 # local images" step, and must run BEFORE the pull loop skips `:local` tags — otherwise a
 # developer's `make test-parity` fails on a missing image where CI passes.
+# Locate every fixture config by SEARCH, never by a fixed relative path. A fixture's
+# config may sit at `<fx>/.devcontainer/devcontainer.json` or at a nested
+# `<fx>/<subdir>/devcontainer.jsonc` (both shapes exist — `fx-readconfig-basic` uses the
+# latter), and the `.jsonc` extension is as valid as `.json`. The earlier
+# `*/.devcontainer/devcontainer.json` glob silently matched neither, which is the same
+# "a glob that matches nothing is not an error" failure as 023 T116 — the bug this whole
+# script was written to prevent, reintroduced one directory level down.
+configs="$(find "${fixtures}" \
+             \( -name 'devcontainer.json' -o -name 'devcontainer.jsonc' \) \
+             -type f 2>/dev/null | sort)"
+
+if [ -z "${configs}" ]; then
+  echo "prepull: FATAL no devcontainer config found under ${fixtures} — the fixture" >&2
+  echo "prepull: discovery is broken, and warming nothing would read as a hang later" >&2
+  exit 1
+fi
+
+# Read an image reference out of a config (first `"image": "..."` wins).
+config_image() {
+  sed -nE 's/.*"image"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$1" | head -n1
+}
+
 for df in "${fixtures}"/*/image/Dockerfile; do
   [ -e "${df}" ] || continue
   dir="$(dirname "${df}")"
-  cfg="$(dirname "${dir}")/.devcontainer/devcontainer.json"
-  [ -e "${cfg}" ] || continue
-  tag="$(sed -nE 's/.*"image"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "${cfg}" | head -n1)"
+  fx="$(dirname "${dir}")"
+  # The sibling config, found the same way — not assumed at a fixed path.
+  cfg="$(printf '%s\n' "${configs}" | grep "^${fx}/" | head -n1)"
+  [ -n "${cfg}" ] || continue
+  tag="$(config_image "${cfg}")"
   [ -n "${tag}" ] || continue
   echo "prepull: docker build ${tag}"
   docker build -q -t "${tag}" "${dir}" >/dev/null \
     || echo "prepull: WARN could not build ${tag} (the parity run will report its own cause)" >&2
 done
 
-images="$(grep -rhoE '"image"[[:space:]]*:[[:space:]]*"[^"]+"' \
-            "${fixtures}"/*/.devcontainer/devcontainer.json 2>/dev/null \
-          | sed -E 's/.*"image"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
+images="$(printf '%s\n' "${configs}" \
+          | while read -r cfg; do config_image "${cfg}"; done \
           | sort -u \
           | grep -v ':local$' || true)"
 
 if [ -z "${images}" ]; then
-  echo "prepull: no pinned fixture images found under ${fixtures}" >&2
-  exit 0
+  echo "prepull: FATAL no image reference found in any of these configs:" >&2
+  printf '%s\n' "${configs}" >&2
+  exit 1
 fi
 
 while read -r img; do

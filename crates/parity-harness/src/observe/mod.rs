@@ -27,6 +27,7 @@ use crate::evidence::RawChannelEvidence;
 
 pub mod cli_process;
 pub mod container_graph;
+pub mod container_state;
 pub mod filesystem;
 pub mod image;
 pub mod injected_process;
@@ -160,7 +161,7 @@ pub trait ChannelObserver {
 /// Docker channels.
 pub fn observer_for(channel: &str) -> Option<Box<dyn ChannelObserver>> {
     use deacon_conformance::model::{
-        CHAN_IMAGE, CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_TEMPORAL,
+        CHAN_CONTAINER_STATE, CHAN_IMAGE, CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_TEMPORAL,
     };
     match channel {
         CHAN_EXIT_CODE | CHAN_STDOUT | CHAN_STDERR | CHAN_STRUCTURED_OUTPUT => {
@@ -173,6 +174,7 @@ pub fn observer_for(channel: &str) -> Option<Box<dyn ChannelObserver>> {
         CHAN_PROCESS_GRAPH => Some(Box::new(container_graph::ContainerGraphObserver)),
         CHAN_INJECTED_PROCESS => Some(Box::new(injected_process::InjectedProcessObserver)),
         CHAN_TEMPORAL => Some(Box::new(temporal::TemporalObserver)),
+        CHAN_CONTAINER_STATE => Some(Box::new(container_state::ContainerStateObserver)),
         _ => None,
     }
 }

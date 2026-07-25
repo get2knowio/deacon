@@ -161,6 +161,90 @@ async fn metadata_widens_and_omissions_survive() {
     );
 }
 
+/// An omission survives a LATER writer that has none (024 review finding).
+///
+/// This is the ordering the previous test happens not to exercise: it wrote the
+/// omission-bearing fragment last, so a shared metadata file would have passed it anyway.
+/// Omissions used to live on `_meta.json`, which every writer of a binary rewrites
+/// wholesale — so the last process to finish, typically one with nothing omitted, erased
+/// every other process's omission list. That is the same last-writer-wins evidence loss
+/// D-1 fixed for cases, one level down: gate 3 requires each omission to carry a reason
+/// and gate 7 reads them to tell a deliberate skip from an unreported unit, so a lost
+/// omission becomes a false granularity failure.
+#[tokio::test]
+async fn an_omission_survives_a_later_writer_that_has_none() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+
+    let mut first = fragment(
+        "parity_state_diff",
+        "compose-sidecar",
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:05Z",
+    );
+    first.omitted = vec![Omission {
+        case: "needs-registry".to_string(),
+        reason: "the fixture needs a local registry service".to_string(),
+    }];
+    first.write_under(root).await.expect("write");
+
+    // A later, omission-free writer for the SAME binary.
+    fragment(
+        "parity_state_diff",
+        "default-mount",
+        "2026-01-01T00:00:10Z",
+        "2026-01-01T00:00:20Z",
+    )
+    .write_under(root)
+    .await
+    .expect("write");
+
+    let merged = &read_fragments(root).expect("read")[0];
+    assert_eq!(
+        merged.omitted.len(),
+        1,
+        "the earlier writer's omission must survive a later writer that omitted nothing; \
+         found {:?}",
+        merged.omitted
+    );
+    assert_eq!(merged.omitted[0].case, "needs-registry");
+    assert_eq!(merged.cases.len(), 2, "both reported cases survive too");
+}
+
+/// Two case ids that differ only in unsafe characters land in DIFFERENT files.
+///
+/// The obvious sanitizer — map every unsafe character to `_` — is lossy, and lossy loses
+/// evidence: `exec/tty` and `exec:tty` both become `exec_tty.json`, so the second write
+/// renames over the first, the aggregator reports N-1 cases, and gate 7 flags the vanished
+/// baseline unit as unreported. Same evidence loss as D-1, re-entering through the name.
+#[tokio::test]
+async fn case_ids_differing_only_in_unsafe_characters_do_not_collide() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+
+    for case in ["exec/tty", "exec:tty", "exec_tty"] {
+        fragment(
+            "parity_exec",
+            case,
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:00:01Z",
+        )
+        .write_under(root)
+        .await
+        .expect("write");
+    }
+
+    let merged = &read_fragments(root).expect("read")[0];
+    let mut ids: Vec<&str> = merged.cases.iter().map(|c| c.case.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        vec!["exec/tty", "exec:tty", "exec_tty"],
+        "three distinct case ids must produce three distinct files, not overwrite \
+         each other"
+    );
+}
+
 /// Two fragments of one binary certifying against different oracles is not something to
 /// average over — the run is not comparable against a single pin.
 #[tokio::test]

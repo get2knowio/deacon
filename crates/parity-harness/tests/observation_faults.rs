@@ -40,16 +40,21 @@ fn every_observed_channel_has_an_observer() {
 
 #[test]
 fn a_channel_with_no_observer_is_not_declared_observable() {
-    // `chan-container-state` is a legacy channel with no declarative observer (its
-    // observer lands in 024 Phase 4). It must NOT be in the observable set, or a case
-    // naming it would validate and then fail at runtime — exactly the gap V16 closes.
+    // An id the harness has no observer for must not be listed as observable, or a case
+    // naming it would validate and then fail at runtime — the gap V16 closes. Every id in
+    // `channels.json` now HAS an observer (`chan-container-state` gained one in 024 Phase
+    // 4), so this uses the shape a newly-declared, not-yet-wired channel would take.
+    let unwired = "chan-not-yet-observable";
+    assert!(observer_for(unwired).is_none());
     assert!(
-        observer_for(CHAN_CONTAINER_STATE).is_none(),
-        "chan-container-state has no observer yet"
-    );
-    assert!(
-        !OBSERVED_CHANNELS.contains(&CHAN_CONTAINER_STATE),
+        !OBSERVED_CHANNELS.contains(&unwired),
         "a channel with no observer must not be listed as observable"
+    );
+    // …and the channel this rule was written for is now genuinely observable.
+    assert!(
+        observer_for(CHAN_CONTAINER_STATE).is_some()
+            && OBSERVED_CHANNELS.contains(&CHAN_CONTAINER_STATE),
+        "chan-container-state has an observer as of 024 Phase 4, so it is declarable"
     );
 }
 
@@ -302,10 +307,18 @@ mod runner_faults {
         );
     }
 
-    /// One observed channel is enough: not-captured-matches-not-captured stays a legal
-    /// PER-CHANNEL verdict (FR-018). Only the all-channels-empty case is rejected.
+    /// An observed RUNTIME-DERIVED channel makes the case verifiable, and its
+    /// not-captured siblings keep the per-channel FR-018 semantics
+    /// (not-captured-matches-not-captured).
+    ///
+    /// The grouping matters: `chan-exit-code` alone does NOT satisfy the guard, because a
+    /// CLI-process channel is present even on a run where the container runtime fell over
+    /// — requiring "at least one channel overall" would be satisfied by exactly the run
+    /// the guard exists to catch. Here `chan-filesystem` is the runtime-derived channel
+    /// that IS observed (it reads the workspace tree, so it needs no Docker), while
+    /// `chan-image`/`chan-temporal` stay not-captured on BOTH sides and agree as such.
     #[tokio::test]
-    async fn one_observed_channel_keeps_the_per_channel_not_captured_semantics() {
+    async fn an_observed_runtime_channel_keeps_the_per_channel_not_captured_semantics() {
         let dir = tempfile::tempdir().expect("tempdir");
         let stub = unix_stub::write(dir.path(), "stub-cli", "exit 0\n");
         let fixtures = dir.path().join("fixtures");
@@ -325,14 +338,20 @@ mod runner_faults {
             operation: Some("op-read".to_string()),
             assertion: None,
         });
+        case.expected.push(ExpectedObservable {
+            channel: deacon_conformance::model::CHAN_FILESYSTEM.to_string(),
+            operation: Some("op-read".to_string()),
+            assertion: None,
+        });
+        case.fs_allowlist = vec![".devcontainer/devcontainer.json".to_string()];
 
         let verdict = run_case(&case, &cfg)
             .await
-            .expect("one observed channel makes the case verifiable");
+            .expect("an observed runtime-derived channel makes the case verifiable");
         assert_eq!(
             verdict.overall,
             parity_harness::evidence::Outcome::Agree,
-            "the observed channel agrees and the unobservable ones stay not-captured on \
+            "the observed channels agree and the unobservable ones stay not-captured on \
              BOTH sides (FR-018): {verdict:?}"
         );
     }

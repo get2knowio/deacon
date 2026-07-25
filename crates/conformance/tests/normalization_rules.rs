@@ -212,6 +212,8 @@ fn the_retired_blanket_rules_are_not_registered() {
         "replace_hex12",
         "sanitize_dynamic_values",
         "drop_empty_values",
+        // 024 Phase 4: the four-prefix label drop.
+        "strip_intentional_labels",
     ] {
         assert!(
             !NORMALIZATION_RULES.iter().any(|r| r.name == retired),
@@ -220,20 +222,39 @@ fn the_retired_blanket_rules_are_not_registered() {
     }
 }
 
+/// T112, closed by 024 Phase 4: the registry now declares NO deficient rule.
+///
+/// `strip_intentional_labels` was the one — a `drop` whose removal set was four label
+/// NAMESPACE PREFIXES rather than field names, so it elided a whole category, including
+/// any label a future release adds under those namespaces. It is retired, not narrowed:
+/// container-state capture keeps every label, and the per-CLI identity labels are
+/// characterized where a reader can see them (a scoped, backed tolerance on the case that
+/// compares them, and — until those cases land — an explicit allowance in the one legacy
+/// carrier that still diffs labels).
+///
+/// This asserts the set is EMPTY. If a rule is ever declared non-compliant again, this
+/// test fails and the declaration has to be argued for on its own terms rather than
+/// inheriting an existing exemption.
 #[test]
-fn the_declared_deficiency_set_is_exactly_the_one_known_case() {
+fn no_rule_is_declared_non_compliant() {
     let declared = declared_non_compliant_rules(NORMALIZATION_RULES);
     let names: Vec<&str> = declared.iter().map(|(n, _)| *n).collect();
-    assert_eq!(
-        names,
-        vec!["strip_intentional_labels"],
-        "data-model §6 names exactly one non-compliant existing rule; a second one \
-         appearing here needs its own review"
+    assert!(
+        names.is_empty(),
+        "the rule registry must carry no declared deficiency (024 Phase 4 retired the \
+         last one); found {names:?}"
     );
-    for (name, reason) in &declared {
-        assert!(
-            reason.contains(".md#") || reason.contains('#'),
-            "{name}'s deficiency must name a tracked follow-up"
-        );
-    }
+    // Belt and braces: the retired rule is GONE, not renamed.
+    assert!(
+        !NORMALIZATION_RULES
+            .iter()
+            .any(|r| r.name == "strip_intentional_labels"),
+        "`strip_intentional_labels` is retired; a rule by that name reappearing means the \
+         prefix-drop came back"
+    );
+    // And no rule removes anything by prefix/glob/category anywhere in the registry.
+    assert!(
+        check_normalization_rules(NORMALIZATION_RULES).is_empty(),
+        "with no declared deficiency left, every registered rule must be fully compliant"
+    );
 }

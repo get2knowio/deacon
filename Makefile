@@ -301,6 +301,10 @@ test-parity: install-nextest ## Run live parity certification (needs the pinned 
 	# oracle — there is no opt-in env gate). Step 2 aggregates the per-binary \
 	# report fragments and enforces the six completeness gates, exiting nonzero on \
 	# any gap. `set -e` stops at the first failing step. \
+	# Report fragments are per-case files (024 D-1) that nobody truncates, so a \
+	# case deleted or renamed since the last run would linger and be aggregated as \
+	# if it had just run. Clear the tree so the report describes THIS run only. \
+	rm -rf target/parity/report; \
 	./scripts/parity/prepull-fixture-images.sh; \
 	cargo nextest run --profile parity; \
 	cargo run -p parity-harness --bin parity-report

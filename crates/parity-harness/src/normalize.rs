@@ -68,9 +68,6 @@ use crate::evidence::{NormalizedChannelEvidence, RawChannelEvidence};
 /// against it (T032).
 pub use deacon_conformance::snapshot::NORMALIZER_VERSION;
 
-/// The `<WORKSPACE>` / `<PROJECT>` path token substitution context for `path_token`
-/// (FR-024). Each `(path, token)` pair rewrites occurrences of an absolute temp path to
-/// a stable token so evidence is portable across machines/recordings. Substitutions are
 /// The FINITE, ENUMERATED key names [`drop_absent_optional`] may remove when their value
 /// carries no information (023 T062).
 ///
@@ -146,7 +143,12 @@ pub const DEVCONTAINER_ID_FIELDS: &[&str] = &[
     "workspaceMount",
 ];
 
-/// applied longest-path-first so a nested path tokenizes before its parent.
+/// The `<WORKSPACE>` / `<PROJECT>` path token substitution context for `path_token`
+/// (FR-024).
+///
+/// Each `(path, token)` pair rewrites occurrences of an absolute temp path to a stable
+/// token so evidence is portable across machines/recordings. Substitutions are applied
+/// longest-path-first so a nested path tokenizes before its parent.
 #[derive(Debug, Clone, Default)]
 pub struct TokenMap {
     subs: Vec<(String, String)>,
@@ -162,6 +164,32 @@ impl TokenMap {
     pub fn workspace(workspace: &Path) -> TokenMap {
         let mut m = TokenMap::new();
         m.insert(workspace.to_string_lossy(), "<WORKSPACE>");
+        m
+    }
+
+    /// **Rule `workspace_basename_token`** — [`TokenMap::workspace`] plus the workspace
+    /// directory's BASENAME → `<WORKSPACE_NAME>` (024 Phase 4).
+    ///
+    /// Each side of a differential runs in its OWN isolated temp workspace, so a config
+    /// with no explicit `workspaceFolder` yields a container path derived from the
+    /// basename — `/workspaces/deacon-conf-aaa` on deacon's side versus
+    /// `/workspaces/deacon-conf-bbb` on the reference's. The full-path substitution
+    /// cannot reach those: the container-side path contains only the basename, never the
+    /// host path. Without this rule EVERY container-state comparison would report a mount
+    /// destination divergence that is purely an artifact of the isolation the runner
+    /// itself imposes.
+    ///
+    /// Rewrite, never delete. Because [`path_token`] rewrites object KEYS as well as
+    /// values, mount destinations keyed by the container path normalize on both sides;
+    /// the same substitution also reaches a bind mount's `sourceTail` (the host workspace
+    /// directory's leaf component). Scoped to `chan-container-state` (the registry rule's
+    /// declared scope) — the plain [`TokenMap::workspace`] is used everywhere else, so no
+    /// other channel's evidence changes meaning.
+    pub fn workspace_with_basename(workspace: &Path) -> TokenMap {
+        let mut m = TokenMap::workspace(workspace);
+        if let Some(name) = workspace.file_name().and_then(|s| s.to_str()) {
+            m.insert(name, "<WORKSPACE_NAME>");
+        }
         m
     }
 
@@ -305,12 +333,29 @@ pub fn normalize_channel(
     }
 }
 
+/// The token map a channel's normalization runs under — the ONE place the per-channel
+/// token policy lives (Constitution VIII: channel-specific normalization belongs in the
+/// normalizer, not in the runner).
+///
+/// `chan-container-state` additionally tokenizes the workspace BASENAME
+/// (`workspace_basename_token`), because its evidence carries container-side paths
+/// derived from the per-side temp workspace name. Every other channel gets the plain
+/// full-path map, so this change cannot alter what any existing channel compares.
+pub fn tokens_for_channel(channel: &str, workspace: &Path) -> TokenMap {
+    if channel == deacon_conformance::model::CHAN_CONTAINER_STATE {
+        TokenMap::workspace_with_basename(workspace)
+    } else {
+        TokenMap::workspace(workspace)
+    }
+}
+
 /// Apply the named rules the contract lists for `channel` (observer-channel.md). An
 /// unknown channel is identity (never blanket-removed).
 fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap) -> Value {
     use deacon_conformance::model::{
-        CHAN_EXIT_CODE, CHAN_FILE_CONTENT, CHAN_FILESYSTEM, CHAN_IMAGE, CHAN_INJECTED_PROCESS,
-        CHAN_PROCESS_GRAPH, CHAN_STDERR, CHAN_STDOUT, CHAN_STRUCTURED_OUTPUT, CHAN_TEMPORAL,
+        CHAN_CONTAINER_STATE, CHAN_EXIT_CODE, CHAN_FILE_CONTENT, CHAN_FILESYSTEM, CHAN_IMAGE,
+        CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_STDERR, CHAN_STDOUT,
+        CHAN_STRUCTURED_OUTPUT, CHAN_TEMPORAL,
     };
     match channel {
         // No rule: an exit code carries no path/label/PATH content.
@@ -326,6 +371,13 @@ fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap) -> Value
         CHAN_PROCESS_GRAPH => normalize_process_graph(value, tokens),
         CHAN_INJECTED_PROCESS => normalize_injected_process(value, tokens),
         CHAN_TEMPORAL => null_preserving(value),
+        // `chan-container-state`: `workspace_basename_token` (carried by the token map
+        // from `tokens_for_channel`) + `path_token` over the whole snapshot — object KEYS
+        // included, so mount destinations keyed by the container-side workspace path
+        // normalize on both sides — then `null_preserving`. NOTHING is removed: labels,
+        // entrypoint, cmd and networks are emitted verbatim and any characterized
+        // difference is covered by a scoped, backed `allowedDifference` (024 Phase 4).
+        CHAN_CONTAINER_STATE => null_preserving(&path_token(value, tokens)),
         _ => value.clone(),
     }
 }
@@ -445,18 +497,96 @@ pub fn config_document_rules(value: &Value) -> Value {
 /// deacon should apply `skip_serializing_if` so absent optionals are omitted, matching
 /// the reference. Tracked in `specs/023-migrate-parity-to-conformance/tasks.md#T111`.
 pub fn drop_absent_optional(value: &Value) -> Value {
+    // ANCHOR the rule at its declared scope — `field:/configuration` and
+    // `field:/mergedConfiguration` — not at whatever object it happens to be handed.
+    //
+    // Two shapes reach this function. `config`/`merged_config` extract the inner document
+    // first, so the value IS the configuration. The `chan-structured-output` channel
+    // passes the whole CLI document, where the configuration sits one level down under
+    // `configuration` / `mergedConfiguration`. Treating the wrapper as the root would
+    // apply the rule at the wrong level in the second case (eliding nothing inside the
+    // configuration, and eliding wrapper keys that share a name).
+    if let Value::Object(map) = value {
+        let wrapped: Vec<&str> = SCOPE_FIELDS
+            .iter()
+            .copied()
+            .filter(|f| map.contains_key(*f))
+            .collect();
+        if !wrapped.is_empty() {
+            let mut out = map.clone();
+            for field in wrapped {
+                if let Some(inner) = map.get(field) {
+                    out.insert(
+                        field.to_string(),
+                        drop_absent_optional_scoped(inner, DropScope::Root),
+                    );
+                }
+            }
+            return Value::Object(out);
+        }
+    }
+    drop_absent_optional_scoped(value, DropScope::Root)
+}
+
+/// The document fields this rule is registered against (`field:/configuration`,
+/// `field:/mergedConfiguration`). Each names a configuration document root.
+const SCOPE_FIELDS: &[&str] = &["configuration", "mergedConfiguration"];
+
+/// The two spec-defined nested containers whose own properties were part of the measured
+/// set (see [`ABSENT_OPTIONAL_KEYS`]). The rule applies inside these, and nowhere else
+/// below the document root.
+const NESTED_CONTAINERS: &[&str] = &["hostRequirements", "portsAttributes"];
+
+/// Where [`drop_absent_optional`] is permitted to elide a key.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DropScope {
+    /// The configuration document's own top level.
+    Root,
+    /// Anywhere inside a [`NESTED_CONTAINERS`] entry (these are small, spec-defined
+    /// structures — `portsAttributes` nests its attribute objects one level down).
+    Container,
+    /// Everything else: arbitrary sub-documents the rule was never measured against.
+    Off,
+}
+
+/// The scoped implementation.
+///
+/// **Why this is scoped rather than recursive-everywhere**: the earlier version walked the
+/// whole document, so an enumerated key NAME was elided at any depth — including inside
+/// `customizations.vscode.settings`, which is arbitrary user data that merely happens to
+/// contain keys called `label` or `description`. The key list was measured, but the
+/// LOCATION was unbounded, which is the blanket behavior FR-029 forbids and understated
+/// what the rule's registered `field:/configuration` + `field:/mergedConfiguration` scope
+/// claimed. A rule a reviewer cannot bound by reading its registry entry is not auditable,
+/// which is the property V24 exists to provide.
+fn drop_absent_optional_scoped(value: &Value, scope: DropScope) -> Value {
     match value {
         Value::Object(map) => {
             let mut out = Map::new();
             for (k, v) in map {
-                if ABSENT_OPTIONAL_KEYS.contains(&k.as_str()) && carries_no_information(v) {
+                if scope != DropScope::Off
+                    && ABSENT_OPTIONAL_KEYS.contains(&k.as_str())
+                    && carries_no_information(v)
+                {
                     continue;
                 }
-                out.insert(k.clone(), drop_absent_optional(v));
+                let child = match scope {
+                    DropScope::Root if NESTED_CONTAINERS.contains(&k.as_str()) => {
+                        DropScope::Container
+                    }
+                    DropScope::Container => DropScope::Container,
+                    _ => DropScope::Off,
+                };
+                out.insert(k.clone(), drop_absent_optional_scoped(v, child));
             }
             Value::Object(out)
         }
-        Value::Array(items) => Value::Array(items.iter().map(drop_absent_optional).collect()),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|v| drop_absent_optional_scoped(v, scope))
+                .collect(),
+        ),
         other => other.clone(),
     }
 }
@@ -697,16 +827,6 @@ pub fn summarize(divs: &[ConfigDivergence]) -> String {
 /// cross-CLI outcome parity. Subtracted before diffing env.
 pub const NOISE_ENV_KEYS: &[&str] = &["PATH", "HOME", "HOSTNAME", "TERM", "container"];
 
-/// Label namespaces both CLIs stamp by design and differently (identity, per-CLI
-/// metadata blob, compose bookkeeping, Docker Desktop). Subtracted before diffing
-/// labels so only semantic image/config labels remain.
-pub const INTENTIONAL_LABEL_PREFIXES: &[&str] = &[
-    "devcontainer.",
-    "com.docker.",
-    "desktop.",
-    "dev.containers.",
-];
-
 /// **NAMED, SCOPED legacy rule `drop_noise_env` — chan-container-state ONLY** (research
 /// D6, FR-029). Whether `key` is a runtime-injected env var present in every container
 /// with no cross-CLI outcome meaning ([`NOISE_ENV_KEYS`]). This is the ONLY sanctioned
@@ -719,20 +839,9 @@ pub fn is_noise_env_key(key: &str) -> bool {
     NOISE_ENV_KEYS.contains(&key)
 }
 
-/// **NAMED, SCOPED legacy rule `strip_intentional_labels` — chan-container-state ONLY**
-/// (research D6, FR-029). Whether `key` is a label both CLIs stamp by design and
-/// differently ([`INTENTIONAL_LABEL_PREFIXES`]). The ONLY sanctioned label subtraction,
-/// scoped to the legacy observable-state channel. The NEW `chan-image` normalization
-/// ([`label_semantic`]) NEVER blanket-removes a label — it parses labels to key/value
-/// and preserves them, deferring intentional differences to scoped allowed-differences.
-pub fn is_intentional_label(key: &str) -> bool {
-    INTENTIONAL_LABEL_PREFIXES
-        .iter()
-        .any(|p| key.starts_with(p))
-}
-
 /// Normalized single-mount state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MountState {
     pub mount_type: String,
     pub ro: bool,
@@ -742,13 +851,26 @@ pub struct MountState {
 }
 
 /// Normalized snapshot of a container's observable state.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+///
+/// `Serialize` (camelCase, ordered maps/sets) is what the declarative
+/// `chan-container-state` observer emits: the observer DELEGATES to
+/// [`container_state`] rather than re-deriving any of this, so the legacy comparison and
+/// the declarative channel read one definition of container state (Constitution VIII).
+/// `BTreeMap`/`BTreeSet` give byte-stable field ordering for free.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StateSnapshot {
     /// destination -> mount state
     pub mounts: BTreeMap<String, MountState>,
     /// `KEY=VALUE` entries, noise keys removed
     pub env: BTreeSet<String>,
-    /// labels with CLI-namespaced keys stripped
+    /// Every label, VERBATIM (024 Phase 4). The retired `strip_intentional_labels` rule
+    /// removed four label NAMESPACES by prefix — a category, not an enumerated set, so
+    /// any label a future release added under `devcontainer.` / `com.docker.` /
+    /// `desktop.` / `dev.containers.` would have vanished from the comparison silently
+    /// (FR-021). Identity/bookkeeping labels the two CLIs stamp differently are now
+    /// characterized where a reader can see them — a scoped, backed `allowedDifference`
+    /// on the case — rather than elided inside the normalizer.
     pub labels: BTreeMap<String, String>,
     pub user: String,
     pub working_dir: String,
@@ -756,18 +878,25 @@ pub struct StateSnapshot {
     pub exposed_ports: BTreeSet<String>,
     /// `HostConfig.PortBindings` keys actually PUBLISHED to the host.
     pub published_ports: BTreeSet<String>,
-    /// Captured for debugging; NOT diffed. The container process shape is a
-    /// deacon-internal keep-alive/entrypoint-wrapper detail with no observable
-    /// behavioral difference — both CLIs keep the container running so `exec`,
-    /// lifecycle hooks, and feature entrypoints work identically. deacon uses a
-    /// PATH-robust `sh -c '… sleep infinity || tail -f /dev/null'`; the reference
-    /// an `exec "$@"` keep-alive loop. Intentional, characterized divergence (#290);
-    /// the behaviorally-significant cases (overrideCommand exit #291, feature
-    /// entrypoint composition #292) ARE observable and covered elsewhere.
+    /// The container process shape: a keep-alive/entrypoint-wrapper detail with no
+    /// observable behavioral difference — both CLIs keep the container running so
+    /// `exec`, lifecycle hooks and feature entrypoints work identically. deacon uses a
+    /// PATH-robust `sh -c '… sleep infinity || tail -f /dev/null'`; the reference an
+    /// `exec "$@"` keep-alive loop. Intentional, characterized divergence (#290); the
+    /// behaviorally-significant cases (overrideCommand exit #291, feature entrypoint
+    /// composition #292) ARE observable and covered elsewhere.
+    ///
+    /// EMITTED on `chan-container-state` and therefore COMPARED (024 Phase 4). The legacy
+    /// `diff_states` documented it as "captured but NOT diffed" — an undeclared
+    /// non-comparison, invisible to anyone reading the case. A declarative case declares
+    /// the tolerance instead, so the elision is visible, backed and stale-checked.
     pub entrypoint: Vec<String>,
-    /// Captured for debugging; NOT diffed — see `entrypoint` (#290).
+    /// The container command — see [`StateSnapshot::entrypoint`] (#290): emitted and
+    /// compared, with any characterized difference declared on the case.
     pub cmd: Vec<String>,
-    /// Captured (compose-project-prefix-normalized) for debugging; NOT diffed.
+    /// Network names (compose-project prefix normalized) — emitted and compared, with the
+    /// project-naming difference characterized on the case
+    /// (`bhv-compose-project-name-robust`) rather than silently not diffed.
     pub networks: BTreeSet<String>,
 }
 
@@ -836,14 +965,13 @@ pub fn container_state(case: &str, raw: &Value) -> Result<StateSnapshot, Harness
         })
         .collect();
 
-    // Legacy chan-container-state label subtraction via the NAMED, SCOPED rule
-    // `strip_intentional_labels` ([`is_intentional_label`]) — the only sanctioned label
-    // removal (D6).
+    // Labels VERBATIM (024 Phase 4): the `strip_intentional_labels` prefix-drop is
+    // retired. Capture removes nothing; a characterized identity-label difference is
+    // declared on the case that compares it, never elided here.
     let labels = raw["Config"]["Labels"]
         .as_object()
         .map(|o| {
             o.iter()
-                .filter(|(k, _)| !is_intentional_label(k))
                 .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
                 .collect()
         })
@@ -1213,17 +1341,95 @@ mod tests {
     #[test]
     fn normalizer_version_is_bumped_for_named_rules() {
         assert_eq!(
-            NORMALIZER_VERSION, "3",
-            "023 T062/T063 retired the blanket prune/replace_hex12 rules"
+            NORMALIZER_VERSION, "5",
+            "the 024 review bounded `drop_absent_optional` to the document root plus \
+             `hostRequirements`/`portsAttributes`; it previously elided an enumerated key \
+             name at ANY depth, including inside `customizations` — a change to what \
+             \"equal\" means, so every recorded snapshot must go stale and be re-reviewed"
         );
     }
 
     #[test]
     fn legacy_noise_rules_are_named_and_scoped() {
         assert!(is_noise_env_key("PATH") && !is_noise_env_key("MY_VAR"));
-        assert!(
-            is_intentional_label("com.docker.compose.project")
-                && !is_intentional_label("org.opencontainers.image.title")
+    }
+
+    #[test]
+    fn container_state_captures_every_label_verbatim() {
+        // The retired `strip_intentional_labels` removed four label NAMESPACES by prefix.
+        // Capture now removes NOTHING: an identity label both CLIs stamp differently is
+        // characterized on the case that compares it, where a reader can see it.
+        let snap = container_state(
+            "labels",
+            &json!({
+                "Config": {
+                    "User": "",
+                    "Labels": {
+                        "devcontainer.local_folder": "/tmp/ws",
+                        "com.docker.compose.project": "p",
+                        "desktop.docker.io/x": "1",
+                        "dev.containers.id": "abc",
+                        "org.opencontainers.image.title": "demo"
+                    }
+                }
+            }),
+        )
+        .expect("snapshot");
+        assert_eq!(
+            snap.labels.len(),
+            5,
+            "every label survives capture: {:?}",
+            snap.labels
+        );
+        for key in [
+            "devcontainer.local_folder",
+            "com.docker.compose.project",
+            "desktop.docker.io/x",
+            "dev.containers.id",
+        ] {
+            assert!(
+                snap.labels.contains_key(key),
+                "{key} must NOT be dropped by the normalizer"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_basename_token_normalizes_two_different_temp_workspaces() {
+        // The whole point: each side runs in its OWN temp workspace, so the container
+        // path derived from the basename differs. `TokenMap::workspace` alone cannot
+        // reach it (the container path never contains the host path), so the two sides
+        // would diverge on a mount KEY that is an artifact of the runner's isolation.
+        use deacon_conformance::model::CHAN_CONTAINER_STATE;
+        let state = |name: &str| {
+            json!({
+                "mounts": { format!("/workspaces/{name}"): { "mountType": "bind", "ro": false, "sourceTail": name } },
+                "workspaceBindTargets": [format!("/workspaces/{name}")]
+            })
+        };
+        let a = apply_channel_rules(
+            CHAN_CONTAINER_STATE,
+            &state("deacon-conf-aaa"),
+            &tokens_for_channel(CHAN_CONTAINER_STATE, Path::new("/tmp/deacon-conf-aaa")),
+        );
+        let b = apply_channel_rules(
+            CHAN_CONTAINER_STATE,
+            &state("deacon-conf-bbb"),
+            &tokens_for_channel(CHAN_CONTAINER_STATE, Path::new("/tmp/deacon-conf-bbb")),
+        );
+        assert_eq!(a, b, "two temp workspaces must normalize equal");
+        assert_eq!(
+            a["workspaceBindTargets"],
+            json!(["/workspaces/<WORKSPACE_NAME>"]),
+            "the basename is TOKENIZED, not removed: {a}"
+        );
+
+        // Only this channel gets the basename token — no other channel's meaning changes.
+        let plain = tokens_for_channel(CHAN_STDOUT, Path::new("/tmp/deacon-conf-aaa"));
+        assert_eq!(
+            path_token(&json!("/workspaces/deacon-conf-aaa"), &plain),
+            json!("/workspaces/deacon-conf-aaa"),
+            "chan-stdout keeps the plain full-path token map"
         );
     }
 
@@ -1263,6 +1469,41 @@ mod tests {
         assert_eq!(obj.get("name"), Some(&json!("demo")));
         // List elements are preserved verbatim.
         assert_eq!(obj.get("list_keeps_nulls"), Some(&json!([1, null, ""])));
+    }
+
+    /// The rule's REACH is bounded, not just its key list (024 review finding).
+    ///
+    /// An enumerated key name outside the document root and the two nested containers is
+    /// compared, not elided. Before this was scoped, the walk was unbounded: a `label: ""`
+    /// inside `customizations.vscode.settings` — arbitrary user data — was dropped merely
+    /// for sharing a name with a modeled property, so the registered
+    /// `field:/configuration` scope understated what the rule removed.
+    #[test]
+    fn drop_absent_optional_is_bounded_to_the_root_and_named_containers() {
+        let raw = r#"{
+            "image": "",
+            "customizations": { "vscode": { "settings": { "label": "", "init": null } } },
+            "hostRequirements": { "gpu": null, "cpus": 4 },
+            "portsAttributes": { "3000": { "label": "", "protocol": "https" } }
+        }"#;
+        let obj = config("bounded", raw).expect("normalize");
+
+        // Root: enumerated + absent → elided.
+        assert!(!obj.as_object().expect("object").contains_key("image"));
+
+        // Inside an arbitrary sub-document → PRESERVED, despite the names being on the
+        // list. This is the property the unbounded walk destroyed.
+        assert_eq!(
+            obj.pointer("/customizations/vscode/settings"),
+            Some(&json!({ "label": "", "init": null })),
+        );
+
+        // Inside the two named containers → still elided, at whatever depth they nest.
+        assert_eq!(obj.pointer("/hostRequirements"), Some(&json!({"cpus": 4})));
+        assert_eq!(
+            obj.pointer("/portsAttributes/3000"),
+            Some(&json!({ "protocol": "https" })),
+        );
     }
 
     #[test]
@@ -1422,7 +1663,7 @@ mod tests {
     }
 
     #[test]
-    fn container_state_subtracts_noise_and_label_prefixes() {
+    fn container_state_subtracts_only_the_enumerated_noise_env() {
         let inspect = json!({
             "Config": {
                 "Env": ["PATH=/bin", "FOO=bar", "HOME=/root"],
@@ -1443,13 +1684,14 @@ mod tests {
         assert!(snap.env.contains("FOO=bar"));
         assert!(!snap.env.iter().any(|e| e.starts_with("PATH=")));
         assert!(!snap.env.iter().any(|e| e.starts_with("HOME=")));
-        // CLI-namespaced labels stripped; app label kept.
+        // EVERY label is kept — the app label AND the CLI-namespaced ones (024 Phase 4;
+        // see `container_state_captures_every_label_verbatim`).
         assert_eq!(
             snap.labels.get("my.app.tier").map(String::as_str),
             Some("web")
         );
-        assert!(!snap.labels.contains_key("devcontainer.local_folder"));
-        assert!(!snap.labels.contains_key("com.docker.compose.project"));
+        assert!(snap.labels.contains_key("devcontainer.local_folder"));
+        assert!(snap.labels.contains_key("com.docker.compose.project"));
         // Bind mount source reported as leaf only.
         assert_eq!(snap.mounts["/workspace"].source_tail, "ws");
     }

@@ -62,11 +62,11 @@ use crate::load::{
 };
 use crate::mapping::{CaseFacts, MechanismForm};
 use crate::model::{
-    BehaviorUnit, CONSUMER_SUBCOMMANDS, CaseKind, CertificationProfile, Classification,
-    ClauseClassification, ClauseInventory, ClauseUnit, Condition, ConstraintInventory,
-    ConstraintUnit, Decision, Disposition, DocumentScope, FILESYSTEM_CHANNELS, OBSERVED_CHANNELS,
-    OracleType, RecordType, ReferenceStatus, RevisionKind, SpecManifest, SpecStatus, Strength,
-    Testability, parse_id,
+    BehaviorUnit, CONSUMER_SUBCOMMANDS, CONTAINER_SUBCOMMANDS, CaseKind, CertificationProfile,
+    Classification, ClauseClassification, ClauseInventory, ClauseUnit, Condition,
+    ConstraintInventory, ConstraintUnit, Decision, Disposition, DocumentScope, FILESYSTEM_CHANNELS,
+    OBSERVED_CHANNELS, OracleType, RecordType, ReferenceStatus, RevisionKind, SpecManifest,
+    SpecStatus, Strength, Testability, parse_id,
 };
 use crate::prose::Document;
 use crate::prose::strength::{has_family, hides_mandatory_keyword};
@@ -305,10 +305,35 @@ pub fn check_snapshots(registry: &Registry, snapshots_dir: &Path) -> Vec<Violati
 /// vocabulary-free inputs `crate::mapping` checks, so the RULES are stated once, next
 /// to their class, and this function only adapts. A registry with no committed baseline
 /// (a fixture registry, or the tree before the baseline is generated) yields no
-/// violations — the absence is V25's concern.
+/// violations — but a registry carrying mapping/residual records with NO baseline to
+/// reference is reported as V21 (V25, which used to own baseline provenance, is retired).
 pub fn check_mapping(registry: &Registry) -> Vec<Violation> {
     let Some(baseline) = registry.baseline.as_ref() else {
-        return Vec::new();
+        // V25 (baseline provenance) is retired, and with it went the only check that the
+        // committed baseline EXISTS. That left a hole: `Registry::load` treats a missing
+        // `baseline.json` as `None` rather than an error, so deleting it made this check,
+        // `check_residuals` and the harness's granularity gate all scope themselves out —
+        // and `validate` went green while every conservation claim became vacuously true.
+        //
+        // A registry with NO mapping and NO residual records genuinely has nothing to
+        // conserve (fixture registries are shaped that way, and so was the tree before
+        // the baseline was first frozen). But a registry that carries records whose whole
+        // purpose is to reference baseline units, with no baseline to reference, is
+        // incoherent — report it rather than falling silent.
+        if registry.mapping.is_empty() && registry.residuals.is_empty() {
+            return Vec::new();
+        }
+        return vec![Violation::new(
+            "V21",
+            "migration/baseline.json".to_string(),
+            format!(
+                "no committed baseline, but the registry carries {} mapping record(s) and \
+                 {} residual record(s) that reference baseline units — every conservation \
+                 check reads the baseline and would silently pass with nothing to check",
+                registry.mapping.len(),
+                registry.residuals.len()
+            ),
+        )];
     };
 
     let unit_ids: Vec<String> = baseline.records.iter().map(|u| u.id.clone()).collect();
@@ -2280,6 +2305,7 @@ impl<'a> Checker<'a> {
             self.check_case_subcommands(case);
             self.check_case_fs_allowlist(case);
             self.check_case_observable_channels(case);
+            self.check_case_resource_group(case);
             return;
         };
 
@@ -2305,6 +2331,7 @@ impl<'a> Checker<'a> {
 
         self.check_case_fs_allowlist(case);
         self.check_case_observable_channels(case);
+        self.check_case_resource_group(case);
     }
 
     /// Every declared `expected[].channel` must be a channel the runner can actually
@@ -2541,6 +2568,46 @@ impl<'a> Checker<'a> {
             ),
             _ => {}
         }
+    }
+
+    /// A case invoking a container-creating subcommand must declare a Docker
+    /// `resourceGroup` (024 review finding).
+    ///
+    /// `resourceGroup` reads like scheduling metadata, but it is the ONLY discriminator
+    /// the runner and this validator use to decide a case is Docker-backed. Omit it on a
+    /// case that runs `up`, and: `execute_ops` builds no isolated `DockerWorkspace`, so
+    /// both sides run against the committed fixture tree in the repo and stamp an
+    /// IDENTICAL `devcontainer.local_folder` label — deacon's container and the oracle's
+    /// become indistinguishable, as do two cases running in parallel; no cleanup guard is
+    /// created, so the container, network and volume leak; and V18's pinned-image rule
+    /// skips the case, because it is `is_docker_case`-gated too.
+    ///
+    /// Nothing else catches this. The case runs, and may well pass.
+    fn check_case_resource_group(&mut self, case: &crate::model::TestCase) {
+        if is_docker_case(case) {
+            return;
+        }
+        let mut offenders: Vec<&str> = case
+            .operations
+            .iter()
+            .filter(|op| CONTAINER_SUBCOMMANDS.contains(&op.subcommand.as_str()))
+            .map(|op| op.subcommand.as_str())
+            .collect();
+        offenders.sort_unstable();
+        offenders.dedup();
+        if offenders.is_empty() {
+            return;
+        }
+        self.push(
+            "V16",
+            &case.id,
+            format!(
+                "case invokes container-creating subcommand(s) {} but declares no Docker \
+                 `resourceGroup`; without it the case gets no isolated workspace, no \
+                 cleanup guard, and V18 does not check its image inputs",
+                offenders.join(", ")
+            ),
+        );
     }
 }
 
@@ -3222,12 +3289,15 @@ mod tests {
 
     #[test]
     fn v16_rejects_a_channel_with_no_observer() {
-        // `chan-container-state` is a legacy channel with no declarative observer: a case
-        // declaring it used to VALIDATE and then fail at run time (024 Phase 3, D-2).
+        // A case declaring a channel the harness cannot observe used to VALIDATE and then
+        // fail at run time (024 Phase 3, D-2). Every channel `channels.json` declares now
+        // HAS an observer (`chan-container-state` gained one in 024 Phase 4), so the
+        // violator here is a channel id outside the observable set — which is exactly the
+        // shape a newly-declared, not-yet-observable channel would have.
         let mut reg = Registry::default();
         let mut case = declarative_case("case-unobservable-channel");
         case.expected.push(crate::model::ExpectedObservable {
-            channel: crate::model::CHAN_CONTAINER_STATE.to_string(),
+            channel: "chan-not-yet-observable".to_string(),
             operation: Some("op-1".to_string()),
             assertion: Some(serde_json::json!({ "jsonEquals": {} })),
         });
