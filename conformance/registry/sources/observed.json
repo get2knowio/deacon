@@ -32,6 +32,16 @@
       ]
     },
     {
+      "id": "src-obs-container-keepalive-command",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "up/keepalive-command",
+      "summary": "`docker inspect .Config.Cmd` on fx-up-container-labels shows two different shell keep-alive strings. Behavioral equivalence measured by `docker stop` wall time and exit code: deacon 245 ms / exit 0, reference 215 ms / exit 0.",
+      "behaviors": [
+        "bhv-container-keepalive-command"
+      ]
+    },
+    {
       "id": "src-obs-duplicate-keys",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",

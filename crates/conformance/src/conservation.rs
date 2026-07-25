@@ -63,9 +63,10 @@ pub const PRE_MIGRATION_BEHAVIORS: usize = 25;
 /// that must say why it is not a variant. Entries are self-invalidating — an id that no
 /// longer resolves in the registry is reported, so a deleted behavior cannot leave its
 /// allowance behind (the `waiver.rs` staleness pattern).
-pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[(
-    "bhv-container-identity-labels",
-    "deacon stamps five identity/bookkeeping labels the reference CLI does not set at \
+pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
+    (
+        "bhv-container-identity-labels",
+        "deacon stamps five identity/bookkeeping labels the reference CLI does not set at \
      all (`devcontainer.configHash`, `.config_name`, `.name`, `.source`, \
      `.workspaceHash`), measured directly against the pinned oracle 0.87.0 on \
      fx-up-basic. This is a deacon EXTENSION, not a variant of any pre-migration claim: \
@@ -74,7 +75,18 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[(
      before comparison. The three shared keys are NOT part of this behavior — \
      `devcontainer.metadata` compares byte-equal, and `.local_folder` / `.config_file` \
      differ only by each side's own temp workspace path and are normalized, not tolerated.",
-)];
+    ),
+    (
+        "bhv-container-keepalive-command",
+        "The two CLIs install different shell keep-alive commands. Newly RECORDABLE for the \
+     same reason as the labels behavior: the legacy `diff_states` captured `cmd` and \
+     deliberately did not compare it, so no behavior described it. Not a variant of any \
+     pre-migration claim — nothing else states what either CLI sets as the container \
+     command. Classified intentional only after measuring `docker stop` equal (245 ms / \
+     exit 0 vs 215 ms / exit 0); the same field's earlier 'cannot matter behaviorally' \
+     assumption hid a 10s stall.",
+    ),
+];
 
 /// The observable-channel count at the branch point (research §1g).
 pub const PRE_MIGRATION_CHANNELS: usize = 11;

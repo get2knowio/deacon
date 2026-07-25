@@ -2678,7 +2678,8 @@
     {
       "id": "case-up-container-identity-labels",
       "behaviors": [
-        "bhv-container-identity-labels"
+        "bhv-container-identity-labels",
+        "bhv-container-keepalive-command"
       ],
       "context": [],
       "oracleType": "live-differential",
@@ -2737,6 +2738,13 @@
           "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
           "rationale": "deacon sets `devcontainer.workspaceHash`; the reference CLI sets no such label. Measured against the pinned oracle 0.87.0 on fx-up-basic. Tolerated as ONE named key: the retired `strip_intentional_labels` rule hid the whole `devcontainer.*` namespace, so a namespace-wide tolerance here would reinstate exactly the blanket behavior 024 removed and would silently absorb any future label either CLI adds.",
           "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-keepalive-command",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The two keep-alive command strings differ; the observable behavior does not. Measured, not assumed: `docker stop` completes in 245 ms with exit 0 for deacon and 215 ms with exit 0 for the reference. Scoped to `cmd` alone \u2014 `entrypoint` and every other container-state field stay compared.",
+          "divergenceId": "bhv-container-keepalive-command"
         }
       ],
       "cleanup": {
@@ -2746,7 +2754,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Records the container-label surface both CLIs produce (024 Phase 5). Only the five deacon-only keys are excused; `local_folder`/`config_file` differ only by each side's own isolated temp workspace and are normalized by the workspace path token, so they must compare equal. This case CURRENTLY REPORTS `diverge` on two further paths the first live run surfaced \u2014 `labels.devcontainer.metadata` (reference stamps \"[]\", deacon omits the label) and `cmd` (different keep-alive mechanism). They are deliberately NOT tolerated: neither is characterized yet, and a tolerance without a real backing record is the suppression this model exists to prevent. See the behavior notes and tasks.md#T114. Image pinned to debian:bookworm-slim (V18)."
+      "notes": "Records the container-label surface both CLIs produce (024 Phase 5). Only the five deacon-only keys are excused; `local_folder`/`config_file` differ only by each side's own isolated temp workspace and are normalized by the workspace path token, so they must compare equal. This case's first live run reported `diverge` on two further paths \u2014 `labels.devcontainer.metadata` and `cmd` \u2014 and BOTH were fixed in deacon rather than tolerated (the cmd one was a 10s `docker stop` stall). They are now compared and must agree; no tolerance was added for either."
     },
     {
       "id": "case-up-container-labels-stamped",
