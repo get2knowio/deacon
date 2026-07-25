@@ -1800,6 +1800,88 @@
       ]
     },
     {
+      "id": "case-state-appport",
+      "behaviors": [
+        "bhv-container-identity-labels",
+        "bhv-container-keepalive-command",
+        "bhv-state-diff-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-state-appport"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.configHash",
+          "rationale": "deacon sets `devcontainer.configHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.config_name",
+          "rationale": "deacon sets `devcontainer.config_name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.name",
+          "rationale": "deacon sets `devcontainer.name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.source",
+          "rationale": "deacon sets `devcontainer.source`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
+          "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-keepalive-command",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (`docker stop` 245 ms / exit 0 vs 215 ms / exit 0). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
+          "divergenceId": "bhv-container-keepalive-command"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Migrated from parity_state_diff::appport-published-ports (024 Phase 5). `appPort: [3000]` publishes the same container port in both CLIs. This case was unmigratable before 024 Phase 3: with a FIXED host port both sides collided, because deacon's container was still running while the oracle's `up` ran. The side sequencing fix (capture deacon's evidence, reclaim, then run the oracle) is what makes a fixed-host-port differential expressible at all. Image pinned to debian:bookworm-slim (V18)."
+    },
+    {
       "id": "case-state-diff",
       "behaviors": [
         "bhv-state-diff-parity"
@@ -1814,6 +1896,252 @@
           "expectation": "the normalized observable-state diff between deacon and the reference is empty"
         }
       ]
+    },
+    {
+      "id": "case-state-dockerfile-nonroot",
+      "behaviors": [
+        "bhv-container-identity-labels",
+        "bhv-container-keepalive-command",
+        "bhv-state-diff-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-state-dockerfile-nonroot"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.configHash",
+          "rationale": "deacon sets `devcontainer.configHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.config_name",
+          "rationale": "deacon sets `devcontainer.config_name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.name",
+          "rationale": "deacon sets `devcontainer.name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.source",
+          "rationale": "deacon sets `devcontainer.source`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
+          "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-keepalive-command",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (`docker stop` 245 ms / exit 0 vs 215 ms / exit 0). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
+          "divergenceId": "bhv-container-keepalive-command"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Migrated from parity_state_diff::dockerfile-build-and-nonroot-user (024 Phase 5). A Dockerfile-built workspace with a non-root `containerUser`/`remoteUser` yields equivalent container state in both CLIs \u2014 the built image's ENV, the resolved user, and the workspace bind all compare. Image pinned to debian:bookworm-slim (V18)."
+    },
+    {
+      "id": "case-state-mount-variety",
+      "behaviors": [
+        "bhv-container-identity-labels",
+        "bhv-container-keepalive-command",
+        "bhv-state-diff-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-state-mount-variety"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.configHash",
+          "rationale": "deacon sets `devcontainer.configHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.config_name",
+          "rationale": "deacon sets `devcontainer.config_name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.name",
+          "rationale": "deacon sets `devcontainer.name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.source",
+          "rationale": "deacon sets `devcontainer.source`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
+          "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-keepalive-command",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (`docker stop` 245 ms / exit 0 vs 215 ms / exit 0). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
+          "divergenceId": "bhv-container-keepalive-command"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Migrated from parity_state_diff::mount-variety-readonly-and-tmpfs (024 Phase 5). A read-only bind mount and a tmpfs mount are applied identically by both CLIs \u2014 the read-only flag and the tmpfs target both appear in the compared mount set. Image pinned to debian:bookworm-slim (V18)."
+    },
+    {
+      "id": "case-state-single-container",
+      "behaviors": [
+        "bhv-container-identity-labels",
+        "bhv-container-keepalive-command",
+        "bhv-state-diff-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-state-single-container"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.configHash",
+          "rationale": "deacon sets `devcontainer.configHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.config_name",
+          "rationale": "deacon sets `devcontainer.config_name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.name",
+          "rationale": "deacon sets `devcontainer.name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.source",
+          "rationale": "deacon sets `devcontainer.source`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
+          "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-keepalive-command",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (`docker stop` 245 ms / exit 0 vs 215 ms / exit 0). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
+          "divergenceId": "bhv-container-keepalive-command"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Migrated from parity_state_diff::single-container-parity (024 Phase 5). deacon and the reference produce equivalent inspected container state for a single-container workspace: the `workspaceMount` bind, a second `mounts` bind at /workspaces/sib, and `containerEnv` SC_ENV. Image pinned to debian:bookworm-slim (V18)."
     },
     {
       "id": "case-tier1-decl-bare-base-node-feature",

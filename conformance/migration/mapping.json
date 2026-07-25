@@ -1102,8 +1102,16 @@
     },
     {
       "unit": "parity_state_diff::appport-published-ports",
-      "disposition": "residual",
-      "residualId": "res-state-diff-cross-cli-snapshot"
+      "disposition": "migrated",
+      "caseIds": [
+        "case-state-appport"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:state_diff_appport_published_ports",
+          "to": "conformance/fixtures/fx-state-appport"
+        }
+      ]
     },
     {
       "unit": "parity_state_diff::compose-parity-with-feature-mount-gap",
@@ -1122,8 +1130,16 @@
     },
     {
       "unit": "parity_state_diff::dockerfile-build-and-nonroot-user",
-      "disposition": "residual",
-      "residualId": "res-state-diff-cross-cli-snapshot"
+      "disposition": "migrated",
+      "caseIds": [
+        "case-state-dockerfile-nonroot"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:state_diff_dockerfile_build_and_nonroot_user",
+          "to": "conformance/fixtures/fx-state-dockerfile-nonroot"
+        }
+      ]
     },
     {
       "unit": "parity_state_diff::intra-deacon-single-vs-compose",
@@ -1132,13 +1148,29 @@
     },
     {
       "unit": "parity_state_diff::mount-variety-readonly-and-tmpfs",
-      "disposition": "residual",
-      "residualId": "res-state-diff-cross-cli-snapshot"
+      "disposition": "migrated",
+      "caseIds": [
+        "case-state-mount-variety"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:state_diff_mount_variety_readonly_and_tmpfs",
+          "to": "conformance/fixtures/fx-state-mount-variety"
+        }
+      ]
     },
     {
       "unit": "parity_state_diff::single-container-parity",
-      "disposition": "residual",
-      "residualId": "res-state-diff-cross-cli-snapshot"
+      "disposition": "migrated",
+      "caseIds": [
+        "case-state-single-container"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:state_diff_single_container_parity",
+          "to": "conformance/fixtures/fx-state-single-container"
+        }
+      ]
     },
     {
       "unit": "parity_up_exec::traditional",

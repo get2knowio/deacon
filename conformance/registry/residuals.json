@@ -204,13 +204,9 @@
     {
       "id": "res-state-diff-cross-cli-snapshot",
       "units": [
-        "parity_state_diff::appport-published-ports",
         "parity_state_diff::compose-parity-with-feature-mount-gap",
         "parity_state_diff::compose-sidecar-and-named-volume",
-        "parity_state_diff::default-workspace-mount-target-parity",
-        "parity_state_diff::dockerfile-build-and-nonroot-user",
-        "parity_state_diff::mount-variety-readonly-and-tmpfs",
-        "parity_state_diff::single-container-parity"
+        "parity_state_diff::default-workspace-mount-target-parity"
       ],
       "blockedCarrier": "parity_state_diff",
       "missingCapability": "cross-CLI container-state snapshot comparison: a normalized whole-container state snapshot taken on both sides and diffed field-by-field, which the per-channel `chan-container-state` observer does not provide",

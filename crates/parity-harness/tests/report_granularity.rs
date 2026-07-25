@@ -330,21 +330,43 @@ fn gate_7_catches_a_carrier_that_reports_fewer_cases_than_it_carries() {
         oracle(),
         "2026-01-01T00:00:00Z".to_string(),
         "2026-01-01T00:01:00Z".to_string(),
-        vec![CaseResult::pass("single-container-parity", raw())],
+        vec![CaseResult::pass("a-unit-this-carrier-does-not-have", raw())],
         vec![],
     );
     let violations =
         check_reported_granularity(&registry_root(), &[under_reporting]).expect("gate runs");
 
+    // The expected set is whatever `parity_state_diff` STILL carries — i.e. its baseline
+    // units that the mapping has not dispositioned away. Deriving it keeps this test
+    // honest as units migrate: hardcoding "seven of eight" made it fail the moment four
+    // of them legitimately became declarative cases, which is drift in the test, not a
+    // regression in the gate.
+    let registry =
+        deacon_conformance::load::Registry::load(&registry_root()).expect("registry loads");
+    let baseline = registry.baseline.as_ref().expect("committed baseline");
+    let discharged: std::collections::HashSet<&str> = registry
+        .mapping
+        .iter()
+        .filter(|m| m.disposition != deacon_conformance::mapping::Disposition::Residual)
+        .map(|m| m.unit.as_str())
+        .collect();
+    let still_carried: Vec<&str> = baseline
+        .records
+        .iter()
+        .filter(|u| u.program == "parity_state_diff" && !discharged.contains(u.id.as_str()))
+        .map(|u| u.id.split_once("::").map(|(_, t)| t).unwrap_or(&u.id))
+        .collect();
     assert!(
-        violations.len() >= 7,
-        "seven of eight units went unreported; gate 7 must name each: {violations:#?}"
+        !still_carried.is_empty(),
+        "this test is vacuous once parity_state_diff carries nothing — delete it with the \
+         carrier rather than letting it pass by checking nothing"
     );
-    for unit in [
-        "appport-published-ports",
-        "compose-sidecar-and-named-volume",
-        "mount-variety-readonly-and-tmpfs",
-    ] {
+    assert_eq!(
+        violations.len(),
+        still_carried.len(),
+        "gate 7 must name every unit the carrier still carries: {violations:#?}"
+    );
+    for unit in &still_carried {
         assert!(
             violations.iter().any(|v| v.contains(unit)),
             "gate 7 must name the specific missing unit `{unit}`: {violations:#?}"

@@ -1,0 +1,10 @@
+{
+  "name": "StateDiffSingle",
+  "image": "debian:bookworm-slim",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "containerEnv": { "SC_ENV": "yes" },
+  "mounts": [
+    "source=${localWorkspaceFolder}/sib,target=/workspaces/sib,type=bind"
+  ]
+}

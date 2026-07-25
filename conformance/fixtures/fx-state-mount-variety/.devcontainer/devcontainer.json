@@ -1,0 +1,11 @@
+{
+  "name": "StateDiffMounts",
+  "image": "debian:bookworm-slim",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "containerEnv": { "MV_ENV": "yes" },
+  "mounts": [
+    "source=${localWorkspaceFolder}/ro,target=/ro,type=bind,readonly",
+    "type=tmpfs,target=/tmpmnt"
+  ]
+}

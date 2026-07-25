@@ -23,7 +23,7 @@ const GOOD: &str = r##"{
   "records": [
     {
       "id": "res-probe",
-      "units": ["parity_state_diff::single-container-parity"],
+      "units": ["parity_state_diff::intra-deacon-single-vs-compose"],
       "blockedCarrier": "parity_state_diff",
       "missingCapability": "cross-CLI container-state snapshot comparison across both CLIs",
       "followUp": "#4242",
@@ -181,7 +181,7 @@ fn an_external_corpus_residual_may_omit_the_carrier_but_not_declare_one() {
 fn a_residual_covering_a_migrated_unit_fails() {
     // `parity_corpus_errors::malformed-json` is migrated in the real mapping.
     let violations = violations_for(&GOOD.replace(
-        "parity_state_diff::single-container-parity",
+        "parity_state_diff::intra-deacon-single-vs-compose",
         "parity_corpus_errors::malformed-json",
     ));
     assert!(
@@ -195,7 +195,7 @@ fn a_residual_covering_a_migrated_unit_fails() {
 #[test]
 fn an_unresolvable_unit_or_behavior_fails() {
     let ghost_unit = violations_for(&GOOD.replace(
-        "parity_state_diff::single-container-parity",
+        "parity_state_diff::intra-deacon-single-vs-compose",
         "parity_ghost::nope",
     ));
     assert!(
