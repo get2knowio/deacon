@@ -202,29 +202,93 @@ impl ReportFragment {
         Ok(())
     }
 
-    /// Serialize and write this fragment atomically to
-    /// `<report_root>/report/<binary>.json`, returning the absolute path written.
+    /// Serialize and write this fragment atomically under
+    /// `<report_root>/report/<binary>/`, returning the directory written.
     /// A write failure is [`HarnessError::Report`] — the caller fails the test.
     pub async fn write(&self) -> Result<PathBuf, HarnessError> {
         self.write_under(&crate::report_root()).await
     }
 
     /// As [`write`], but under an explicit report root (for tests / custom dirs).
+    ///
+    /// **One file per [`CaseResult`]** (`<binary>/<case-id>.json`), plus a `_meta.json`
+    /// carrying the run metadata and any omissions.
+    ///
+    /// This shape exists because the previous one silently destroyed evidence. A fragment
+    /// used to be written to a single `report/<binary>.json`, but a binary like
+    /// `parity_state_diff` has EIGHT `#[tokio::test]` functions, each building a fragment
+    /// holding ONE case — and under nextest each is a separate process. Last writer won, so
+    /// the on-disk fragment held 1 case of 8, and the aggregator's per-binary index
+    /// collapsed same-binary fragments the same way. That is the exact
+    /// reported-granularity-below-asserted-granularity defect spec 023 existed to fix,
+    /// living on unguarded in the carriers 023 did not retire (024 D-1).
+    ///
+    /// Per-case files make concurrent writers additive instead of destructive: two
+    /// processes writing different cases of one binary touch different paths, and
+    /// [`crate::aggregate::read_fragments`] merges them back.
     pub async fn write_under(
         &self,
         report_root: &std::path::Path,
     ) -> Result<PathBuf, HarnessError> {
         self.validate()
             .map_err(|cause| HarnessError::Report { cause })?;
-        let bytes = serde_json::to_vec_pretty(self).map_err(|e| HarnessError::Report {
-            cause: format!("could not serialize fragment for `{}`: {e}", self.binary),
-        })?;
-        let path = report_root
-            .join("report")
-            .join(format!("{}.json", self.binary));
-        crate::atomic_write(&path, &bytes).await?;
-        Ok(path)
+        let dir = report_root.join("report").join(&self.binary);
+
+        // Metadata + omissions live in their own file so they are recorded exactly once,
+        // rather than duplicated onto (or arbitrarily attached to) a case.
+        let meta = ReportFragment {
+            cases: Vec::new(),
+            ..self.clone()
+        };
+        write_json(&dir.join("_meta.json"), &meta, &self.binary).await?;
+
+        for case in &self.cases {
+            let single = ReportFragment {
+                cases: vec![case.clone()],
+                omitted: Vec::new(),
+                ..self.clone()
+            };
+            write_json(&dir.join(case_file_name(&case.case)), &single, &self.binary).await?;
+        }
+        Ok(dir)
     }
+}
+
+/// Serialize `fragment` and write it atomically to `path`.
+async fn write_json(
+    path: &std::path::Path,
+    fragment: &ReportFragment,
+    binary: &str,
+) -> Result<(), HarnessError> {
+    let bytes = serde_json::to_vec_pretty(fragment).map_err(|e| HarnessError::Report {
+        cause: format!("could not serialize fragment for `{binary}`: {e}"),
+    })?;
+    crate::atomic_write(path, &bytes).await
+}
+
+/// A filesystem-safe file name for a case id.
+///
+/// Case ids are authored slugs, but a path separator or `..` in one would escape the
+/// report directory, so every character outside `[A-Za-z0-9._-]` is replaced. The mapping
+/// need not be reversible — the case id is carried inside the file, and the aggregator
+/// reads it from there rather than from the name.
+fn case_file_name(case: &str) -> String {
+    let mut out: String = case
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    // `_meta` is reserved, and a leading dot would hide the file.
+    if out == "_meta" || out.starts_with('.') {
+        out.insert(0, 'c');
+    }
+    out.push_str(".json");
+    out
 }
 
 /// Current UTC time as an RFC3339 second-precision `Z` timestamp.

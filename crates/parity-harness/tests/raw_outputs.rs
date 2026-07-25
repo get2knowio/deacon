@@ -131,8 +131,19 @@ async fn preserves_all_four_raw_files_and_fragment_paths_resolve() {
         vec![CaseResult::pass(case, raw.clone())],
         vec![],
     );
-    let frag_path = frag.write_under(&root).await.expect("fragment write");
-    assert!(frag_path.is_file(), "fragment must be written");
+    // `write_under` returns the per-binary DIRECTORY: one file per case plus `_meta.json`
+    // (024 D-1 — a single per-binary file let concurrent test processes overwrite each
+    // other's evidence).
+    let frag_dir = frag.write_under(&root).await.expect("fragment write");
+    assert!(frag_dir.is_dir(), "fragment directory must be written");
+    assert!(
+        frag_dir.join("_meta.json").is_file(),
+        "run metadata must be recorded"
+    );
+    assert!(
+        frag_dir.join(format!("{case}.json")).is_file(),
+        "the case must have its OWN file, so a sibling test process cannot clobber it"
+    );
 
     for rel in [
         &raw.deacon_stdout,
