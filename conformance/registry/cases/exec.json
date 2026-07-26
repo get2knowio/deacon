@@ -343,7 +343,7 @@
             "--",
             "sh",
             "-lc",
-            "printf '%s|%s|%s\\n' \"$CONF_FROM_IMAGE\" \"$CONF_FROM_CONFIG\" \"$CONF_FROM_OVERLAY\"; command -v conf-tool"
+            "printf '%s|%s|%s\\n' \"$CONF_FROM_IMAGE\" \"$CONF_FROM_CONFIG\" \"$CONF_FROM_OVERLAY\""
           ]
         }
       ],
@@ -364,7 +364,65 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-exec-dockerfile-running-cli-overlay`. Three sources of environment meet in one invocation — the image's own `ENV`, the configuration's `containerEnv`, and a `--remote-env` overlay — and the command also resolves a tool the image put on `PATH`. The `PATH` probe is the load-bearing half: an overlay implemented as a replacement rather than an extension satisfies every variable assertion and still loses the image's `PATH`."
+      "notes": "Covers the high-risk triple `hrt-exec-dockerfile-running-cli-overlay`. Three sources of environment meet in one invocation — the image's own `ENV`, the configuration's `containerEnv`, and a `--remote-env` overlay — and all three must survive together. The `command -v conf-tool` PATH probe that used to share this argv now lives in case-exec-image-path-overlay. Splitting them was forced by the tolerance model, not by preference: the probe DOES diverge (deacon loses the image's `ENV PATH`), the divergence lands in arbitrary stdout TEXT, and a tolerance over the whole of `chan-stdout` is a wildcard by any reading — which is exactly why `chan-stdout` is excluded from SCALAR_OBSERVABLE. Keeping both subjects in one case would have meant either weakening that rule or letting a real divergence sit uncharacterized. Each case now has one subject, and the exit-code tolerance in the sibling is scoped to a case whose only exit code IS the PATH probe."
+    },
+    {
+      "id": "case-exec-image-path-overlay",
+      "behaviors": [
+        "bhv-exec-image-path-preserved"
+      ],
+      "context": [],
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-dockerfile-overlay"
+          ]
+        },
+        {
+          "id": "op-exec-path",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "conf-tool"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec-path"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-exec-image-path-preserved",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "The image puts `conf-tool` on PATH via `ENV PATH=/opt/conformance/bin:$PATH`. Inside the exec session the reference's shell resolves it and exits 0; deacon's shell has lost that PATH entry, so the lookup fails and `sh` exits 127. Measured at oracle 0.87.0. The exit code is the whole observable of this case, and it IS the PATH probe — nothing else in the case can be absorbed by this tolerance.",
+          "waiverId": "wvr-exec-image-path-dropped"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The PATH half of the exec/dockerfile/cli-overlay pair, split out of case-exec-dockerfile-overlay so the divergence it carries is addressable by a scoped tolerance. The argv resolves the tool THROUGH A SHELL (`sh -c conf-tool`) rather than naming it as the exec argv, because those are two different lookups and only one of them is broken: `docker exec` resolves a bare argv against the container's own configuration and finds the tool on both sides, so `-- conf-tool` would pass vacuously. A shell inside the session reads `$PATH` as deacon handed it over, which is where the image's entry has gone missing — deacon exits 127, the reference runs the tool and exits 0. `sh -c` rather than `sh -lc` for the same reason: a login shell re-sources `/etc/profile`, which would put a third PATH in play and blur what the case is measuring. The earlier `command -v conf-tool` form was worse still — `command` is a shell BUILTIN, so as an exec argv it is not an executable at all and both CLIs failed identically with 127, agreeing about nothing. Characterized by bhv-exec-image-path-preserved / wvr-exec-image-path-dropped, tracked for fix at https://github.com/get2knowio/deacon/issues/370. No `scenarioContext`: the triple this exercises is already carried by its sibling, and declaring it twice would inflate the pairwise denominator with a combination nothing new is being learned about. When the fix lands, the tolerance stops being consumed and is reported stale, which is what forces it to be deleted alongside."
     },
     {
       "id": "case-exec-malformed-config-rejected",

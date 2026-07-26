@@ -18,9 +18,10 @@
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
       "locator": "devcontainer-reference.md § Development container lifecycle",
-      "summary": "Creating a development container versus reconnecting to one that already exists.",
+      "summary": "Creating a development container versus reconnecting to one that already exists, and what re-entry does when the configuration has changed since the container was created.",
       "behaviors": [
-        "bhv-up-restart-reuses-container"
+        "bhv-up-restart-reuses-container",
+        "bhv-up-changed-config-recreates-container"
       ]
     },
     {
@@ -38,9 +39,10 @@
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
       "locator": "Command execution",
-      "summary": "A command is executed inside the container with its output streamed and its exit code propagated.",
+      "summary": "A command is executed inside the container with its output streamed and its exit code propagated, in the container's environment — including the PATH the image itself established.",
       "behaviors": [
-        "bhv-exec-command-parity"
+        "bhv-exec-command-parity",
+        "bhv-exec-image-path-preserved"
       ]
     },
     {

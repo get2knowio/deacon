@@ -33,6 +33,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-18ed3890",
+      "kind": "behavior",
+      "behavior": "bhv-down-missing-config-idempotent",
+      "context": []
+    },
+    {
       "id": "obl-bhv-1a7defc1",
       "kind": "behavior",
       "behavior": "bhv-auto-forward-ports",
@@ -156,6 +162,12 @@
       "id": "obl-bhv-6f3ac540",
       "kind": "behavior",
       "behavior": "bhv-up-container-env-merge-precedence",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-70aab6e9",
+      "kind": "behavior",
+      "behavior": "bhv-exec-image-path-preserved",
       "context": []
     },
     {
@@ -318,6 +330,12 @@
       "id": "obl-bhv-de6e65f1",
       "kind": "behavior",
       "behavior": "bhv-doctor-diagnostics-report",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-e2a9480e",
+      "kind": "behavior",
+      "behavior": "bhv-up-changed-config-recreates-container",
       "context": []
     },
     {

@@ -107,6 +107,14 @@
       ]
     },
     {
+      "id": "odp-bhv-e2a9480e",
+      "obligation": "obl-bhv-e2a9480e",
+      "disposition": "case",
+      "cases": [
+        "case-up-stale-config-reentry"
+      ]
+    },
+    {
       "id": "odp-cmb-0194092a",
       "obligation": "obl-cmb-0194092a",
       "disposition": "gap",

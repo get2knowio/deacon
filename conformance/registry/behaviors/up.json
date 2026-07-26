@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "bhv-up-changed-config-recreates-container",
+      "area": "up",
+      "statement": "Re-entering a workspace whose configuration has CHANGED since its container was created provisions a new container for the new configuration rather than reattaching to the stale one; the reference reattaches.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Measured directly at oracle 0.87.0 against fx-up-stale-config: two `up` runs whose documents differ only in `name` and `containerEnv` return the IDENTICAL containerId from the reference and two different containerIds from deacon. deacon's direction is deliberate and is the safer branch — reattaching keeps a container whose Feature layer was built from the OLD configuration while every reported value comes from the NEW one, which is the failure the recreate avoids. It follows from deacon's `devcontainer.configHash` identity label (ext-container-identity-labels), which the reference does not set. The spec defines no re-entry policy for a changed configuration, hence `spec: unspecified`. Characterized by wvr-up-changed-config-recreates. What is NOT intended, and is a separate defect tracked at https://github.com/get2knowio/deacon/issues/371, is that the superseded container is left RUNNING — the recreate policy is the decision, the leak is a bug."
+    },
+    {
       "id": "bhv-up-container-env-merge-precedence",
       "area": "up",
       "statement": "A `containerEnv` variable declared by BOTH the configuration and a Feature takes the configuration's value in the created container; variables contributed by only one layer are present from that layer.",
@@ -104,12 +114,12 @@
     {
       "id": "bhv-up-restart-reuses-container",
       "area": "up",
-      "statement": "Re-entering a workspace whose container already exists reattaches to it rather than creating a second one, including when the configuration has changed since it was created.",
+      "statement": "Re-entering a workspace whose container already exists, with the SAME configuration, reattaches to it rather than creating a second one.",
       "applicability": [],
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Asserted as a metamorphic relationship (`first-create-vs-restart`) rather than against a fixed output, because what is being pinned is the relation between the two runs and not either run's document. The container-graph observation captures EVERY container matching the workspace label so a duplicate is visible; an exit code cannot show one."
+      "notes": "Asserted as a metamorphic relationship (`first-create-vs-restart`) rather than against a fixed output, because what is being pinned is the relation between the two runs and not either run's document. The container-graph observation captures EVERY container matching the workspace label so a duplicate is visible; an exit code cannot show one. SCOPED TO AN UNCHANGED CONFIGURATION (024 follow-up): the statement previously read \"including when the configuration has changed since it was created\", which is not what deacon does — deacon's container identity includes a configHash, so a changed document is a different identity and produces a NEW container. That is recorded separately as bhv-up-changed-config-recreates-container; leaving the clause here made the record claim a behavior no case had ever verified."
     }
   ]
 }

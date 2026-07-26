@@ -26,10 +26,11 @@
       "inventory": "cli",
       "revision": "rev-cli-surface-0-87-0",
       "locator": "deacon down [--remove] [--all]",
-      "summary": "The teardown command: stop, and optionally remove, the workspace's container or Compose project. The pinned reference exposes no equivalent.",
+      "summary": "The teardown command: stop, and optionally remove, the workspace's container or Compose project, including when the workspace no longer carries a configuration to scope it with. The pinned reference exposes no equivalent.",
       "behaviors": [
         "bhv-down-removes-container",
-        "bhv-down-compose-project-teardown"
+        "bhv-down-compose-project-teardown",
+        "bhv-down-missing-config-idempotent"
       ]
     },
     {

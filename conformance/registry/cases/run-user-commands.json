@@ -443,7 +443,8 @@
     {
       "id": "case-run-user-commands-dockerfile-workspace",
       "behaviors": [
-        "bhv-run-user-commands-hook-order"
+        "bhv-run-user-commands-hook-order",
+        "bhv-readconfig-extends-merged"
       ],
       "context": [],
       "scenarioContext": {
@@ -491,7 +492,16 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. Running hooks in a container built from a Dockerfile. The image supplies the shell the hooks run in, which is the part a Dockerfile-based workspace can get wrong and an image-based one cannot."
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. Running hooks in a container built from a Dockerfile. The image supplies the shell the hooks run in, which is the part a Dockerfile-based workspace can get wrong and an image-based one cannot. The 024 live run showed the divergence is not about hooks at all: this case's fixture is fx-up-dockerfile-extends, and oracle 0.87.0 cannot resolve `extends`, so the reference's `op-up` failed and its `run-user-commands` then reported 'Dev container not found.' Same root cause as case-up-dockerfile-extends-chain, and tolerated the same way. deacon's half — that a Dockerfile-supplied shell runs the hooks — is unchanged.",
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-extends-merged",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "Downstream of the same one-sided `extends` difference: the reference's `up` never produced a container for this workspace, so its `run-user-commands` reports 'Dev container not found.' and exits non-zero while deacon runs the hooks and exits 0. The pinned reference does not resolve `extends` at all: for this workspace `devcontainer up` fails with 'Dev container config ... is missing one of \"image\", \"dockerFile\" or \"dockerComposeFile\" properties', because the `build.dockerfile` is declared by the PARENT document. deacon resolves the chain and builds, so it exits 0 where the reference exits non-zero. An ahead-of-spec deacon capability recorded by ext-extends-resolution, not a defect on either side.",
+          "divergenceId": "ext-extends-resolution"
+        }
+      ]
     },
     {
       "id": "case-run-user-commands-feature-contributed-hook",
@@ -516,7 +526,8 @@
           "subcommand": "up",
           "argv": [
             "--workspace-folder",
-            "${WORKSPACE}"
+            "${WORKSPACE}",
+            "--skip-post-create"
           ],
           "fixtures": [
             "fx-ruc-image-feature"
@@ -556,7 +567,7 @@
           "channel": "chan-stdout",
           "operation": "op-read-feature-hook",
           "assertion": {
-            "contains": "1"
+            "matches": "^1\\s*$"
           }
         }
       ],
@@ -567,7 +578,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-037, the Feature-contributed half: the installed Feature declares its own `postCreateCommand`, and it must run exactly ONCE. `grep -c` rather than a presence check is deliberate — a Feature hook that runs on every invocation instead of once is present either way, and presence is what a weaker assertion would confirm."
+      "notes": "FR-037, the Feature-contributed half: the installed Feature declares its own `postCreateCommand`, and it must run exactly ONCE in the `run-user-commands` pass. `grep -c` rather than a presence check is deliberate — a Feature hook that runs on every invocation instead of once is present either way, and presence is what a weaker assertion would confirm. CORRECTED after the 024 live run, which counted 2. The count was measuring the wrong thing: `up` runs `postCreate` and `run-user-commands` runs it again, so the file held two of EVERY hook — the configuration's own just as much as the Feature's, since both go through one merged list in aggregate_lifecycle_commands and neither is marker-gated on this path. Re-running on every invocation is deliberate and separately characterized (wvr-ruc-completed-hooks-not-rerun: the reference skips a completed hook, deacon re-runs, and deacon's direction is the one that keeps `run-user-commands` usable as an explicit re-run). Counting across BOTH invocations therefore asserted the negation of a behavior the registry had already accepted. `up --skip-post-create` isolates the pass under test so the count is what the behavior actually claims. The assertion is `matches ^1\\s*$` rather than `contains \"1\"` because `contains` would also pass on 11 or 21."
     },
     {
       "id": "case-run-user-commands-feature-hook-sequence",

@@ -137,6 +137,35 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      before it there was no way to state this claim, only to state each run's output.",
     ),
     (
+        "bhv-up-changed-config-recreates-container",
+        "Re-entry whose CONFIGURATION has changed since the container was created. Not a variant \
+     of the reuse claim, and provably so: the two diverge in opposite directions on the same \
+     run. deacon reattaches when the document is unchanged and provisions a NEW container \
+     when it changed, because its identity includes a configHash; the pinned oracle reattaches \
+     in BOTH cases. An implementation satisfying the reuse claim can therefore fail this one, \
+     which is what makes it a second claim. Newly recordable in 024 US3: nothing pre-migration \
+     re-ran an operation against a mutated configuration at all.",
+    ),
+    (
+        "bhv-exec-image-path-preserved",
+        "Whether PATH entries the IMAGE contributed via `ENV PATH` survive into an `exec` \
+     session. Not a variant of the exec command-parity claim: every variable in the case \
+     resolves identically on both sides and only PATH differs, so an implementation \
+     satisfying command parity, argument passing and exit-code propagation still fails this. \
+     Newly recordable because the pre-migration exec coverage never ran a command that had to \
+     RESOLVE through PATH — it compared output of commands named by absolute path or already \
+     on the default PATH.",
+    ),
+    (
+        "bhv-down-missing-config-idempotent",
+        "Teardown over a workspace with NO configuration succeeding rather than failing, and \
+     still resolving a container recorded for the workspace path. Distinct from the removal \
+     claim: that one is about a teardown that has a configuration to scope itself with, this \
+     one is about the absence of one, and the two are served by different code paths \
+     (identity-from-config versus auto-discovery). Newly recordable for the same reason as \
+     the removal claim — `down` had zero cases and the pinned reference has no such command.",
+    ),
+    (
         "bhv-build-features-extended-image",
         "Which image `build` reports and tags when Features are layered. The one pre-migration \
      `build` behavior is about the build OUTCOME; this is about the identity of the artifact \

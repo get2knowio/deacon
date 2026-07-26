@@ -250,7 +250,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-040 malformed class: `down` derives the resources to remove FROM the configuration, so an unparseable document leaves it with nothing to identify. Failing is the honest outcome; succeeding would claim a teardown that could not have been scoped."
+      "notes": "FR-040 malformed class: `down` derives the resources to remove FROM the configuration, so an unparseable document leaves it with nothing it can trust. Failing is the honest outcome; succeeding would claim a teardown that could not have been scoped. This diverged on the 024 live run and was FIXED in deacon rather than characterized: `down` was falling through to auto-discovery on a parse error, which re-derives the identity from a DEFAULT configuration — so a `down` over an unreadable document silently scoped the teardown differently from the `up` that created the container, then exited 0 having removed nothing. `up` and `exec` already rejected the same document; `down` was the one subcommand that did not."
     },
     {
       "id": "case-down-removes-container",
@@ -325,12 +325,12 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-039 teardown: after `down --remove` the workspace's container is GONE, which a `down` exit code cannot show — a teardown that removed nothing exits 0 too. The third operation execs into the container that should no longer exist and must fail; that failure is the evidence. (The container-graph channel cannot serve here: it reads an inspect the runner captures at an `up`/`exec` boundary, and after a successful removal there is nothing left to inspect.) The pinned reference has no `down` command, so this is evaluated against the declared expectation."
+      "notes": "FR-039 teardown: after `down --remove` the workspace's container is GONE, which a `down` exit code cannot show — a teardown that removed nothing exits 0 too. The third operation execs into the container that should no longer exist and must fail; that failure is the evidence. (The container-graph channel cannot serve here: it reads an inspect the runner captures at an `up`/`exec` boundary, and after a successful removal there is nothing left to inspect.) The pinned reference has no `down` command, so this is evaluated against the declared expectation. This diverged on the 024 live run — `op-verify` still succeeded, i.e. the container was NOT removed — and was FIXED in deacon rather than characterized. Root cause was not `down` at all: the host-global state index is a read-modify-write over a shared file, and with four cases running concurrently in `docker-shared` each process republished the whole in-memory map, silently erasing the entries the others had written. `down` then found no state for its workspace and removed nothing while exiting 0. The read-modify-write is now serialized under an advisory lock (crates/core/src/cache/disk.rs); `--remove --all` was never affected because it is label-driven rather than index-driven."
     },
     {
       "id": "case-down-unsupported-no-workspace-config",
       "behaviors": [
-        "bhv-down-removes-container"
+        "bhv-down-missing-config-idempotent"
       ],
       "context": [],
       "scenarioContext": {
@@ -355,8 +355,7 @@
           ],
           "fixtures": [
             "fx-errors-missing-config"
-          ],
-          "expectFailurePhase": "config-resolution"
+          ]
         }
       ],
       "expected": [
@@ -364,7 +363,7 @@
           "channel": "chan-exit-code",
           "operation": "op-down",
           "assertion": {
-            "nonZero": true
+            "equals": 0
           }
         }
       ],
@@ -375,7 +374,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-040 unsupported class: a workspace folder with no devcontainer configuration at all. The request is well-formed and the folder exists; there is simply no configuration from which the resources to remove could be identified."
+      "notes": "FR-040 unsupported class: a workspace folder with no devcontainer configuration at all. The request is well-formed and the folder exists; the configuration simply cannot be provided. CORRECTED after the 024 live run. The case previously declared `expectFailurePhase: config-resolution` and a non-zero exit, and diverged — that expectation described a contract deacon has never held. The class is right; the OUTCOME column of the class table ('rejects, later') is a typical consequence, not a definition, and for an idempotent teardown the unsupported input is ACCEPTED. That is the fact worth recording here: `down` treats \"nothing to tear down\" as a successful outcome, exactly as in case-down-boundary-no-container and case-errorpath-down-repeat-teardown, and its auto-discovery path still resolves a container recorded for the workspace PATH — so teardown genuinely survives the configuration being deleted rather than failing to scope. Nine integration tests in crates/deacon/tests/integration_down.rs already pin exit 0 here. The input `down` does reject is an UNREADABLE document, which case-down-malformed-config-rejected covers and deacon now rejects: absent means nothing to scope, unparseable means the scope cannot be trusted."
     },
     {
       "id": "case-errorpath-down-repeat-teardown",

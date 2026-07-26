@@ -577,7 +577,9 @@
                   "ro": false
                 }
               ],
-              "networks": ["bridge"]
+              "networks": [
+                "bridge"
+              ]
             }
           }
         },
@@ -603,7 +605,8 @@
     {
       "id": "case-up-dockerfile-extends-chain",
       "behaviors": [
-        "bhv-up-feature-install-order"
+        "bhv-up-feature-install-order",
+        "bhv-readconfig-extends-merged"
       ],
       "context": [],
       "scenarioContext": {
@@ -643,7 +646,16 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-up-dockerfile-extends-chain-absent`. The `build.dockerfile` is declared by the PARENT document, so the build context has to be resolved relative to the directory of the file that declared it rather than the child's. Getting that wrong fails the build outright, which is why the exit code is a sufficient observable here and a differential is worth the reference run."
+      "notes": "Covers the high-risk triple `hrt-up-dockerfile-extends-chain-absent`. The `build.dockerfile` is declared by the PARENT document, so the build context has to be resolved relative to the directory of the file that declared it rather than the child's. Getting that wrong fails the build outright, which is why the exit code is a sufficient observable here and a differential is worth the reference run. The 024 live run showed the differential is one-sided: deacon builds and the REFERENCE fails, because oracle 0.87.0 has no `extends` support at all. That is the already-recorded deacon extension (ext-extends-resolution) surfacing in `up` rather than in `read-configuration`, so the case links bhv-readconfig-extends-merged and scopes a tolerance to the exit code. deacon's own half of the assertion — that the parent-declared build context resolves relative to the file that declared it — is unchanged and still the reason the case exists.",
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-extends-merged",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "The pinned reference does not resolve `extends` at all: for this workspace `devcontainer up` fails with 'Dev container config ... is missing one of \"image\", \"dockerFile\" or \"dockerComposeFile\" properties', because the `build.dockerfile` is declared by the PARENT document. deacon resolves the chain and builds, so it exits 0 where the reference exits non-zero. An ahead-of-spec deacon capability recorded by ext-extends-resolution, not a defect on either side.",
+          "divergenceId": "ext-extends-resolution"
+        }
+      ]
     },
     {
       "id": "case-up-entrypoint-chain-differential",
@@ -1839,7 +1851,7 @@
     {
       "id": "case-up-stale-config-reentry",
       "behaviors": [
-        "bhv-up-restart-reuses-container"
+        "bhv-up-changed-config-recreates-container"
       ],
       "context": [],
       "scenarioContext": {
@@ -1851,7 +1863,7 @@
         "sdim-output-mode": "structured"
       },
       "inputClass": "valid",
-      "oracleType": "invariant-metamorphic",
+      "oracleType": "spec-expectation",
       "resourceGroup": "docker-shared",
       "operations": [
         {
@@ -1873,25 +1885,26 @@
             "${WORKSPACE}",
             "--override-config",
             "${WORKSPACE}/.devcontainer/changed.json"
-          ],
-          "relationship": {
-            "kind": "first-create-vs-restart",
-            "againstOp": "op-up-first"
-          }
+          ]
         }
       ],
       "expected": [
         {
           "channel": "chan-exit-code",
-          "operation": "op-up-changed"
-        },
-        {
-          "channel": "chan-process-graph",
-          "operation": "op-up-changed"
+          "operation": "op-up-changed",
+          "assertion": {
+            "equals": 0
+          }
         },
         {
           "channel": "chan-temporal",
-          "operation": "op-up-changed"
+          "operation": "op-up-changed",
+          "assertion": {
+            "jsonSubset": {
+              "running": true,
+              "status": "running"
+            }
+          }
         }
       ],
       "cleanup": {
@@ -1901,7 +1914,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-up-image-single-feature-stale-config`. The second `up` runs against a configuration that has since changed (a different `containerEnv` generation), supplied as a command-line override because the runner materializes a fixture once and does not edit it mid-case — the observable situation is identical either way. With a Feature installed, reuse is the dangerous branch: the container keeps the layer built from the OLD configuration while every reported value comes from the new one."
+      "notes": "Covers the high-risk triple `hrt-up-image-single-feature-stale-config`. The second `up` runs against a configuration that has since changed (a different `containerEnv` generation), supplied as a command-line override because the runner materializes a fixture once and does not edit it mid-case — the observable situation is identical either way. RE-POINTED after the 024 live run. The case was an `invariant-metamorphic` asserting `first-create-vs-restart`, and that relationship simply is not deacon's contract: deacon's container identity includes a configHash, so a CHANGED document is a different identity and produces a NEW container. Reuse is the dangerous branch — the container would keep the Feature layer built from the OLD configuration while every reported value came from the NEW one — so recreating is the direction worth keeping, and the metamorphic oracle had no relationship kind that could express it (the closed set is idempotence / first-create-vs-restart / resume). Asserting the relationship anyway would have pinned a behavior deacon deliberately does not have. The reference does reattach, verified directly at oracle 0.87.0; that difference is recorded as bhv-up-changed-config-recreates-container and waived by wvr-up-changed-config-recreates. What the recreate does NOT license is leaving the superseded container running, which deacon currently does and which is tracked as a defect at https://github.com/get2knowio/deacon/issues/371 — when that lands, this case gains a container-count assertion."
     },
     {
       "id": "case-up-unsupported-image-reference",

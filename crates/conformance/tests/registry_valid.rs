@@ -55,7 +55,17 @@ const TODAY: &str = "2026-07-19";
 /// exactly one clause that was neither out of scope nor already covered — the cwd rule for
 /// lifecycle hooks — so it became `behavior-mapped` on a new behavior, which arrives with
 /// this one spec-expectation case as its evidence. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 199;
+///
+/// **199 → 200** (024 divergence characterization): the live Docker tier's exec/dockerfile/
+/// cli-overlay case was carrying two subjects at once — the environment LAYERING, which the
+/// two CLIs agree on, and the image's `ENV PATH`, which they do not. The PATH divergence
+/// lands in arbitrary stdout TEXT, and a tolerance over the whole of `chan-stdout` is a
+/// wildcard by any reading (which is precisely why that channel is excluded from
+/// `SCALAR_OBSERVABLE`), so the difference could be neither expressed nor characterized while
+/// the two shared one case. Splitting the PATH probe into `case-exec-image-path-overlay`
+/// gives each case one subject and scopes the exit-code tolerance to a case whose only exit
+/// code IS the probe. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 200;
 
 #[test]
 fn real_registry_is_structurally_valid() {

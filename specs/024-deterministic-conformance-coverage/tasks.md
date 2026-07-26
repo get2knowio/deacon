@@ -336,10 +336,52 @@ Per the constitution's Deferral Tracking rule, every deferral recorded in `resea
 `spec.md` gets an entry here with acceptance criteria. A specification is **not** complete
 while deferred tasks remain unresolved.
 
-- [ ] T149 [Deferral] Activate a second environment profile (alternative runtime and/or non-Linux platform) per spec Assumption 10
+**Tracked follow-up (no task id): characterize the divergences the live Docker tier reported.**
+The eight `diverge` verdicts US3's cases left on the `docker-shared` group are resolved — three
+by fixing deacon, three by correcting a case that asserted a contract deacon has never held, and
+two by characterizing a real difference with a behavior, a waiver and a scoped tolerance. The
+Docker tier is green with every difference either fixed or evidence-backed:
+
+| Case | Outcome |
+|---|---|
+| `case-down-removes-container` | **fixed** — the host-global state index lost entries to an unlocked read-modify-write, so a concurrent `down` removed nothing (`crates/core/src/cache/disk.rs`) |
+| `case-down-malformed-config-rejected` | **fixed** — `down` swallowed an unreadable configuration and exited 0; `up`/`exec` already rejected it |
+| `case-down-unsupported-no-workspace-config` | **case corrected** — teardown is idempotent by design and pinned by nine existing tests; the case asserted a rejection deacon never performed |
+| `case-run-user-commands-feature-contributed-hook` | **case corrected** — it counted hooks across BOTH `up` and `run-user-commands`, contradicting the already-accepted `wvr-ruc-completed-hooks-not-rerun`; `up --skip-post-create` isolates the pass under test |
+| `case-up-dockerfile-extends-chain` | **characterized** — oracle 0.87.0 has no `extends` support at all; the existing `ext-extends-resolution` extension, surfacing in `up` |
+| `case-run-user-commands-dockerfile-workspace` | **characterized** — same root cause, downstream (the reference's `up` never made a container) |
+| `case-exec-dockerfile-overlay` | **characterized + split** — deacon's `exec` drops the image's `ENV PATH`; `bhv-exec-image-path-preserved` / `wvr-exec-image-path-dropped`, fix tracked at #370 |
+| `case-up-stale-config-reentry` | **characterized + re-pointed** — deacon recreates on a changed configuration where the reference reattaches; `bhv-up-changed-config-recreates-container` / `wvr-up-changed-config-recreates`, container leak tracked at #371 |
+
+Issues filed: #370 (exec PATH, `parity-drift`), #371 (superseded container left running, `bug`),
+#372 (`run-user-commands` writes markers with `config_hash: None`, `bug`), #373 (the
+`devcontainer.metadata` label defects `bhv-container-metadata-label-content` already demanded an
+issue for, `parity-drift`).
+
+- [X] T149 [Deferral] Activate a second environment profile (alternative runtime and/or non-Linux platform) per spec Assumption 10
   - **Decision**: spec FR-004a/FR-004b, clarification session Q1 — model now, activate later
   - **Rationale**: activating a runtime lane multiplies live cost; the model keeps the backlog visible in the meantime via the `inactive-environment` bucket
   - **Acceptance**: marking the profile `active` in `conformance/registry/profiles.json` re-buckets its obligations with **zero** changes to `scenario.json`, `applicability.json`, or any case (SC-015 already tests this against a fixture; this task does it for real)
+  - **Outcome — MODELLED AND ATTEMPTED FOR REAL; DELIBERATELY LEFT INACTIVE.** The second
+    profile record now exists (`prof-linux-amd64-podman-0870`, identical to the docker profile
+    but for `dim-runtime: podman`), so activation is the one-field data change FR-004b promises.
+    The acceptance criterion's *structural* half is confirmed against the real registry, not a
+    fixture: activation was performed on a copy and needed zero changes to `scenario.json`,
+    `applicability.json` or any case. What that experiment also showed is why the flag stays
+    `false`. `validate` and `certify` under the podman profile returned results **identical** to
+    the docker profile's — 787 obligations, 370 covered, 417 gap, `inactive-environment 0`, the
+    same ten blocking gaps — because all 55 behaviors carry an empty `applicability` and so apply
+    in every environment. The re-bucketing is real but currently vacuous: nothing is
+    runtime-conditioned for the swap to move. Marking it active would therefore verify nothing
+    while asserting that the registry's whole `reference` axis holds under a runtime no case has
+    ever executed against, which is exactly what "statuses are evidence-backed claims, not
+    aspirations" forbids. Genuine activation needs a podman execution lane (out of scope per the
+    clarification session) plus runtime-conditioned applicability on the behaviors that actually
+    differ. Two durable improvements land regardless: the record exists and is ready, and
+    `registry_valid::exactly_one_environment_profile_is_active` now guards the FR-004a arity —
+    coverage and validation both resolve the active profile with `.find(|p| p.active)`, so a
+    second `active: true` would never have been consulted and the "activation" would have been a
+    silent no-op. Recorded in spec Assumption 10 and research's deferral table.
 - [X] T150 [Deferral] Re-review the remaining `non-testable` clause classifications not covered by T095
   - **Decision**: research Decision 9 — the 156 `non-testable` clauses are the real reservoir of new behaviors; only those blocked by the absent container tier are in scope for T095
   - **Acceptance**: every remaining `non-testable` classification either keeps its ground with a restated rationale, or becomes `behavior-mapped` with a behavior and dispositioned obligations

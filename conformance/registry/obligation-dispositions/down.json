@@ -10,6 +10,14 @@
       ]
     },
     {
+      "id": "odp-bhv-18ed3890",
+      "obligation": "obl-bhv-18ed3890",
+      "disposition": "case",
+      "cases": [
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
       "id": "odp-bhv-be0a39ad",
       "obligation": "obl-bhv-be0a39ad",
       "disposition": "case",

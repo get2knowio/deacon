@@ -1,0 +1,9 @@
+{
+  "id": "wvr-up-changed-config-recreates",
+  "behaviors": ["bhv-up-changed-config-recreates-container"],
+  "scope": { "kind": "corpus_case", "corpus": "conformance", "case": "up-stale-config-reentry" },
+  "expect": { "kind": "deacon-stricter", "signal": ["configHash", "stale-config"] },
+  "rationale": "Surfaced by the 024 US3 stale-config re-entry case (hrt-up-image-single-feature-stale-config). Re-entering a workspace whose configuration has CHANGED since its container was created: the reference reattaches to the existing container, deacon provisions a new one. Measured directly at oracle 0.87.0 against fx-up-stale-config — two `up` runs whose documents differ only in `name` and `containerEnv.CONF_GENERATION` return the IDENTICAL containerId from `devcontainer up` and two different containerIds from `deacon up`. deacon is the stricter side and deliberately so: its container identity includes a configHash (ext-container-identity-labels, a label the reference does not set), so a changed document is a different identity. Reattaching is the dangerous branch — the container keeps the Feature layer built from the OLD configuration while every reported value comes from the NEW one — which is the failure the recreate avoids. The containers.dev spec defines no re-entry policy for a changed configuration, so there is no spec position to follow. Separately tracked and NOT waived: deacon leaves the superseded container RUNNING, so one workspace ends up with two live containers (https://github.com/get2knowio/deacon/issues/371). The recreate is the decision; the leak is a bug. This waiver self-invalidates as stale when the difference stops reproducing.",
+  "added": "2026-07-26",
+  "expires": "2027-01-26"
+}
