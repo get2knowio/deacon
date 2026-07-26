@@ -1,0 +1,449 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "odp-cmb-0225b456",
+      "obligation": "obl-cmb-0225b456",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-03439e09",
+      "obligation": "obl-cmb-03439e09",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-0412e436",
+      "obligation": "obl-cmb-0412e436",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-042be3b8",
+      "obligation": "obl-cmb-042be3b8",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-095afaec",
+      "obligation": "obl-cmb-095afaec",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-0b194953",
+      "obligation": "obl-cmb-0b194953",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-0cb4effa",
+      "obligation": "obl-cmb-0cb4effa",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-0cfe1f76",
+      "obligation": "obl-cmb-0cfe1f76",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-15cfc44a",
+      "obligation": "obl-cmb-15cfc44a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-1d2991e9",
+      "obligation": "obl-cmb-1d2991e9",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-1f614cee",
+      "obligation": "obl-cmb-1f614cee",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-236a8642",
+      "obligation": "obl-cmb-236a8642",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-25e62aab",
+      "obligation": "obl-cmb-25e62aab",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-2949da63",
+      "obligation": "obl-cmb-2949da63",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-2a2e5b40",
+      "obligation": "obl-cmb-2a2e5b40",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-2bb41234",
+      "obligation": "obl-cmb-2bb41234",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-30357cd3",
+      "obligation": "obl-cmb-30357cd3",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-3b09bb0d",
+      "obligation": "obl-cmb-3b09bb0d",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-3e60d85c",
+      "obligation": "obl-cmb-3e60d85c",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-3f125c4d",
+      "obligation": "obl-cmb-3f125c4d",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-44d5dd3c",
+      "obligation": "obl-cmb-44d5dd3c",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-48a3d9eb",
+      "obligation": "obl-cmb-48a3d9eb",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-53668210",
+      "obligation": "obl-cmb-53668210",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-584d6440",
+      "obligation": "obl-cmb-584d6440",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-5b537d51",
+      "obligation": "obl-cmb-5b537d51",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-5e00fbe8",
+      "obligation": "obl-cmb-5e00fbe8",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-68fa56a9",
+      "obligation": "obl-cmb-68fa56a9",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-6ca77f90",
+      "obligation": "obl-cmb-6ca77f90",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-6d28294c",
+      "obligation": "obl-cmb-6d28294c",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-7288bd0a",
+      "obligation": "obl-cmb-7288bd0a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-76286197",
+      "obligation": "obl-cmb-76286197",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-7693352b",
+      "obligation": "obl-cmb-7693352b",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-786c86cf",
+      "obligation": "obl-cmb-786c86cf",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-7ac5d5d6",
+      "obligation": "obl-cmb-7ac5d5d6",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-7dd34b50",
+      "obligation": "obl-cmb-7dd34b50",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-8004dcb5",
+      "obligation": "obl-cmb-8004dcb5",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-835fa8aa",
+      "obligation": "obl-cmb-835fa8aa",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-84b01b94",
+      "obligation": "obl-cmb-84b01b94",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-85effe27",
+      "obligation": "obl-cmb-85effe27",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-883530a6",
+      "obligation": "obl-cmb-883530a6",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-89498bda",
+      "obligation": "obl-cmb-89498bda",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-8973eeec",
+      "obligation": "obl-cmb-8973eeec",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-8cb066ca",
+      "obligation": "obl-cmb-8cb066ca",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-96df3ac7",
+      "obligation": "obl-cmb-96df3ac7",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-97ac81fb",
+      "obligation": "obl-cmb-97ac81fb",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-9bac407d",
+      "obligation": "obl-cmb-9bac407d",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-9d105152",
+      "obligation": "obl-cmb-9d105152",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-9f83485f",
+      "obligation": "obl-cmb-9f83485f",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-a784aa57",
+      "obligation": "obl-cmb-a784aa57",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-b3f4795c",
+      "obligation": "obl-cmb-b3f4795c",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-b5573eb6",
+      "obligation": "obl-cmb-b5573eb6",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-b825ae47",
+      "obligation": "obl-cmb-b825ae47",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-ba2615ba",
+      "obligation": "obl-cmb-ba2615ba",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-bc986d3a",
+      "obligation": "obl-cmb-bc986d3a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-c21c09c0",
+      "obligation": "obl-cmb-c21c09c0",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-c5083a84",
+      "obligation": "obl-cmb-c5083a84",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-c71b7d4f",
+      "obligation": "obl-cmb-c71b7d4f",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-c7c70c79",
+      "obligation": "obl-cmb-c7c70c79",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-cc08481e",
+      "obligation": "obl-cmb-cc08481e",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-cc12fdd0",
+      "obligation": "obl-cmb-cc12fdd0",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-cebf08fb",
+      "obligation": "obl-cmb-cebf08fb",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-cf98d7c3",
+      "obligation": "obl-cmb-cf98d7c3",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-d123620b",
+      "obligation": "obl-cmb-d123620b",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-d85553f9",
+      "obligation": "obl-cmb-d85553f9",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-de50e6b0",
+      "obligation": "obl-cmb-de50e6b0",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-e0fd6c20",
+      "obligation": "obl-cmb-e0fd6c20",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-e3a3d1f8",
+      "obligation": "obl-cmb-e3a3d1f8",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-e5530e73",
+      "obligation": "obl-cmb-e5530e73",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-e873981b",
+      "obligation": "obl-cmb-e873981b",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-ea867bea",
+      "obligation": "obl-cmb-ea867bea",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-ecc162ad",
+      "obligation": "obl-cmb-ecc162ad",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-ed83e368",
+      "obligation": "obl-cmb-ed83e368",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-f2698c7f",
+      "obligation": "obl-cmb-f2698c7f",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    },
+    {
+      "id": "odp-cmb-fcbbce91",
+      "obligation": "obl-cmb-fcbbce91",
+      "disposition": "gap",
+      "gap": "gap-pairwise-upgrade"
+    }
+  ]
+}

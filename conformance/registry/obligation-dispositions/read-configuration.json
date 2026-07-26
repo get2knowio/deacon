@@ -1,0 +1,593 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "odp-bhv-2730f76b",
+      "obligation": "obl-bhv-2730f76b",
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-wrong-type-features"
+      ]
+    },
+    {
+      "id": "odp-bhv-2c706c4f",
+      "obligation": "obl-bhv-2c706c4f",
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-malformed-json"
+      ]
+    },
+    {
+      "id": "odp-bhv-495a30ef",
+      "obligation": "obl-bhv-495a30ef",
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-build-args-subst",
+        "case-merged-decl-compose-array",
+        "case-merged-decl-compose-postgres",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-dependson-autoinstall",
+        "case-merged-decl-dockerfile-build",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-feature-order",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-python-features",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom"
+      ]
+    },
+    {
+      "id": "odp-bhv-562b69e2",
+      "obligation": "obl-bhv-562b69e2",
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-extends-child"
+      ]
+    },
+    {
+      "id": "odp-bhv-73cb50e4",
+      "obligation": "obl-bhv-73cb50e4",
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-extends-cycle"
+      ]
+    },
+    {
+      "id": "odp-bhv-7711b3ce",
+      "obligation": "obl-bhv-7711b3ce",
+      "disposition": "case",
+      "cases": [
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-build-args-subst",
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-compose-postgres",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-dependson-autoinstall",
+        "case-tier1-decl-dockerfile-build",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-extends-child",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-python-features",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
+    },
+    {
+      "id": "odp-bhv-9ffff359",
+      "obligation": "obl-bhv-9ffff359",
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-missing-config",
+        "case-errors-decl-missing-config-decision"
+      ]
+    },
+    {
+      "id": "odp-bhv-c0ca20fa",
+      "obligation": "obl-bhv-c0ca20fa",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-decl-basic",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-parity-exit",
+        "case-readconfig-snapshot",
+        "case-readconfig-workspace-file-present"
+      ]
+    },
+    {
+      "id": "odp-bhv-c333dfce",
+      "obligation": "obl-bhv-c333dfce",
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-extends-missing"
+      ]
+    },
+    {
+      "id": "odp-bhv-c42382e5",
+      "obligation": "obl-bhv-c42382e5",
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-unknown-field-preserved",
+        "case-readconfig-unknown-field-echo"
+      ]
+    },
+    {
+      "id": "odp-bhv-c87a30ad",
+      "obligation": "obl-bhv-c87a30ad",
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys"
+      ]
+    },
+    {
+      "id": "odp-bhv-d8b2b5e7",
+      "obligation": "obl-bhv-d8b2b5e7",
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-bad-config-path",
+        "case-errors-decl-bad-config-path-decision"
+      ]
+    },
+    {
+      "id": "odp-bhv-ecfffaa7",
+      "obligation": "obl-bhv-ecfffaa7",
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-wrong-type-forwardports"
+      ]
+    },
+    {
+      "id": "odp-cmb-030accfe",
+      "obligation": "obl-cmb-030accfe",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-037a318e",
+      "obligation": "obl-cmb-037a318e",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-05df8fcb",
+      "obligation": "obl-cmb-05df8fcb",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-0aa1c962",
+      "obligation": "obl-cmb-0aa1c962",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-0d9f1229",
+      "obligation": "obl-cmb-0d9f1229",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-0e9a80ce",
+      "obligation": "obl-cmb-0e9a80ce",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-128e7432",
+      "obligation": "obl-cmb-128e7432",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-1802ef57",
+      "obligation": "obl-cmb-1802ef57",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-1b993bde",
+      "obligation": "obl-cmb-1b993bde",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-21e1ffec",
+      "obligation": "obl-cmb-21e1ffec",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-28c7fc43",
+      "obligation": "obl-cmb-28c7fc43",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-3173e041",
+      "obligation": "obl-cmb-3173e041",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-36813e4a",
+      "obligation": "obl-cmb-36813e4a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-39d51c27",
+      "obligation": "obl-cmb-39d51c27",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-3ab0f51e",
+      "obligation": "obl-cmb-3ab0f51e",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-3c6ff02c",
+      "obligation": "obl-cmb-3c6ff02c",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-3e3801ad",
+      "obligation": "obl-cmb-3e3801ad",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-415030df",
+      "obligation": "obl-cmb-415030df",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-4a7b3111",
+      "obligation": "obl-cmb-4a7b3111",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-4bcf721d",
+      "obligation": "obl-cmb-4bcf721d",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-4c187d1d",
+      "obligation": "obl-cmb-4c187d1d",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-4c948c5b",
+      "obligation": "obl-cmb-4c948c5b",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-4e577ef0",
+      "obligation": "obl-cmb-4e577ef0",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-4efd4b0b",
+      "obligation": "obl-cmb-4efd4b0b",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-51d90cdc",
+      "obligation": "obl-cmb-51d90cdc",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-5ae9f1fc",
+      "obligation": "obl-cmb-5ae9f1fc",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-5d8a2e14",
+      "obligation": "obl-cmb-5d8a2e14",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-5ec25efe",
+      "obligation": "obl-cmb-5ec25efe",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-6b94da7e",
+      "obligation": "obl-cmb-6b94da7e",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-71ce71c7",
+      "obligation": "obl-cmb-71ce71c7",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-764d9bc6",
+      "obligation": "obl-cmb-764d9bc6",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-7dfae70a",
+      "obligation": "obl-cmb-7dfae70a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-7fb02571",
+      "obligation": "obl-cmb-7fb02571",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-81377d6a",
+      "obligation": "obl-cmb-81377d6a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-8252b855",
+      "obligation": "obl-cmb-8252b855",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-8469f4a7",
+      "obligation": "obl-cmb-8469f4a7",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-8e313701",
+      "obligation": "obl-cmb-8e313701",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-8e5dcbf4",
+      "obligation": "obl-cmb-8e5dcbf4",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-8f315d24",
+      "obligation": "obl-cmb-8f315d24",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-96f1b289",
+      "obligation": "obl-cmb-96f1b289",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-9c95a825",
+      "obligation": "obl-cmb-9c95a825",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-a69623f8",
+      "obligation": "obl-cmb-a69623f8",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-ae27a584",
+      "obligation": "obl-cmb-ae27a584",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-b0043b33",
+      "obligation": "obl-cmb-b0043b33",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-b149cc05",
+      "obligation": "obl-cmb-b149cc05",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-b384b33b",
+      "obligation": "obl-cmb-b384b33b",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-b6832ce4",
+      "obligation": "obl-cmb-b6832ce4",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-b6db79df",
+      "obligation": "obl-cmb-b6db79df",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-ba72333d",
+      "obligation": "obl-cmb-ba72333d",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-be729589",
+      "obligation": "obl-cmb-be729589",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-bf0637bc",
+      "obligation": "obl-cmb-bf0637bc",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-bf5d8932",
+      "obligation": "obl-cmb-bf5d8932",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-c024a7fb",
+      "obligation": "obl-cmb-c024a7fb",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-c2c59302",
+      "obligation": "obl-cmb-c2c59302",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-c2ef55c2",
+      "obligation": "obl-cmb-c2ef55c2",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-c3956c9c",
+      "obligation": "obl-cmb-c3956c9c",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-c7a699d7",
+      "obligation": "obl-cmb-c7a699d7",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-cdd51fcd",
+      "obligation": "obl-cmb-cdd51fcd",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-d1d2efe3",
+      "obligation": "obl-cmb-d1d2efe3",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-d37fafd1",
+      "obligation": "obl-cmb-d37fafd1",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-d7e12b78",
+      "obligation": "obl-cmb-d7e12b78",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-da2cf481",
+      "obligation": "obl-cmb-da2cf481",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-db65fbb3",
+      "obligation": "obl-cmb-db65fbb3",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-dca5a1e6",
+      "obligation": "obl-cmb-dca5a1e6",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-e5f367b4",
+      "obligation": "obl-cmb-e5f367b4",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-e944fc75",
+      "obligation": "obl-cmb-e944fc75",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-eaaf0756",
+      "obligation": "obl-cmb-eaaf0756",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-ed639dec",
+      "obligation": "obl-cmb-ed639dec",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-eefbfbd0",
+      "obligation": "obl-cmb-eefbfbd0",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-fdb75cfa",
+      "obligation": "obl-cmb-fdb75cfa",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-ff37e1fb",
+      "obligation": "obl-cmb-ff37e1fb",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    },
+    {
+      "id": "odp-cmb-ffb51199",
+      "obligation": "obl-cmb-ffb51199",
+      "disposition": "gap",
+      "gap": "gap-pairwise-read-configuration"
+    }
+  ]
+}
