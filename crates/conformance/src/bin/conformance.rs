@@ -124,6 +124,42 @@ enum Command {
         #[command(subcommand)]
         command: BaselineCommand,
     },
+    /// Deterministic coverage obligation tooling (024-deterministic-conformance-coverage,
+    /// contracts/coverage-cli.md). Hermetic: no network, no Docker, no reference oracle.
+    /// Dev-only — NEVER part of the shipped `deacon` consumer CLI.
+    Coverage {
+        #[command(subcommand)]
+        command: CoverageCommand,
+    },
+}
+
+/// `coverage <generate|check|report|scaffold>` (contracts/coverage-cli.md). `generate`
+/// is the sole writer of `conformance/obligations/obligations.json`; `check` byte-compares
+/// without writing; `report` writes the four read-only report families to
+/// `target/conformance/`; `scaffold` emits skeleton dispositions to stdout only.
+#[derive(Debug, Subcommand)]
+enum CoverageCommand {
+    /// Regenerate `conformance/obligations/obligations.json` from the scenario model,
+    /// applicability rules, high-risk triples, and behavior records.
+    Generate {
+        /// Redirect the written file for inspection without touching the committed one.
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
+    /// Regenerate in memory and byte-compare against the committed obligations file.
+    Check {},
+    /// Write the four coverage report families to `target/conformance/` (git-ignored).
+    /// Read-only with respect to the registry; exit code never reflects coverage.
+    Report {
+        /// Directory to write the report artifacts into. Defaults to
+        /// `<workspace>/target/conformance/`.
+        #[arg(long, value_name = "DIR")]
+        out_dir: Option<PathBuf>,
+    },
+    /// Emit skeleton `odp-` disposition records to stdout for every undispositioned
+    /// applicable obligation, each carrying an `"UNREVIEWED"` sentinel the loader rejects.
+    /// Never writes the registry.
+    Scaffold {},
 }
 
 /// `migration <scaffold>` — hand-authored mapping/residual tooling
@@ -435,7 +471,39 @@ fn run(cli: Cli) -> i32 {
             }
             SnapshotCommand::Diff { old, new, format } => snapshot_diff(&old, &new, format),
         },
+        Command::Coverage { command } => match command {
+            CoverageCommand::Generate { out } => coverage_generate(&registry_dir, out),
+            CoverageCommand::Check {} => coverage_check(&registry_dir),
+            CoverageCommand::Report { out_dir } => {
+                coverage_report_cmd(&registry_dir, &today, out_dir)
+            }
+            CoverageCommand::Scaffold {} => coverage_scaffold(&registry_dir, &today),
+        },
     }
+}
+
+// ---------------------------------------------------------------------------
+// coverage (024-deterministic-conformance-coverage) — stubs, filled in User Story 1/2
+// ---------------------------------------------------------------------------
+
+/// `coverage generate` (contracts/coverage-cli.md). T039.
+fn coverage_generate(_registry_dir: &Path, _out: Option<PathBuf>) -> i32 {
+    todo!("024-deterministic-conformance-coverage T039: coverage generate")
+}
+
+/// `coverage check` (contracts/coverage-cli.md). T040.
+fn coverage_check(_registry_dir: &Path) -> i32 {
+    todo!("024-deterministic-conformance-coverage T040: coverage check")
+}
+
+/// `coverage report` (contracts/coverage-cli.md). T048.
+fn coverage_report_cmd(_registry_dir: &Path, _today: &str, _out_dir: Option<PathBuf>) -> i32 {
+    todo!("024-deterministic-conformance-coverage T048: coverage report")
+}
+
+/// `coverage scaffold` (contracts/coverage-cli.md). T069.
+fn coverage_scaffold(_registry_dir: &Path, _today: &str) -> i32 {
+    todo!("024-deterministic-conformance-coverage T069: coverage scaffold")
 }
 
 /// `snapshot check` (contract runner-cli.md §1): recompute the case/fixture hashes +

@@ -69,6 +69,11 @@ checkable at a glance rather than by reading every section.
 | **V23** | malformed residual | [Migration mapping](#migration-mapping-v21--v23--transitional) |
 | **V24** | unscoped or unjustified normalization rule | [Normalization rules](#normalization-rules-v24--transitional) |
 | ~~**V25**~~ | baseline provenance — **RETIRED** (FR-053); the artifact is retained, the gate is gone | [Baseline provenance](#migration-baseline-provenance-v25--retired) |
+| **V26** | scenario-model integrity: dead dimension value; rule naming an unknown dimension/value; rule with no ground; case `scenarioContext` that is partial, undeclared, or invalid | [Scenario model and obligation provenance](#scenario-model-and-obligation-provenance-v26--v27) |
+| **V27** | obligation provenance: committed obligations ≠ regenerated; `revision` mismatch; obligation referencing a removed dimension value | [Scenario model and obligation provenance](#scenario-model-and-obligation-provenance-v26--v27) |
+| **V28** | an applicable obligation with zero dispositions, or with more than one | [Obligation dispositions](#obligation-dispositions-v28--v29) |
+| **V29** | malformed disposition: filler rationale; a high-risk triple dispositioned by rationale/waiver rather than a case; a disposition whose obligation no longer resolves (stale) | [Obligation dispositions](#obligation-dispositions-v28--v29) |
+| **V30** | injected-regression integrity: a declared channel with no regression record; a regression targeting a channel with no observer | [Injected-regression harness](#injected-regression-harness-v30) |
 
 **Three distinctions this file keeps apart**, because conflating any pair makes a status
 unfalsifiable:
