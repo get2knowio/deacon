@@ -263,14 +263,14 @@
           "channel": "chan-stderr",
           "operation": "op-read",
           "assertion": {
-            "contains": "JSONC parsing error"
+            "matches": "JSONC parsing error[^\\n]*\\n?$"
           }
         }
       ],
       "cleanup": {
         "tempdir": true
       },
-      "notes": "deacon rejects a hard JSONC syntax error where the reference leniently recovers — waiver wvr-malformed-json (deacon-stricter). See case-errors-decl-extends-cycle for why this is a spec-expectation.",
+      "notes": "deacon rejects a hard JSONC syntax error where the reference leniently recovers — waiver wvr-malformed-json (deacon-stricter). See case-errors-decl-extends-cycle for why this is a spec-expectation. The stderr assertion is ANCHORED at end-of-text rather than a bare `contains`: the parse diagnostic must be the LAST thing deacon writes, so trailing bytes after it — a stray print, a partially written second error, an un-flushed buffer landing late — are a difference this case notices. A `contains` cannot see appended output at all, which made chan-stderr inert by construction (024 US6, reg-stderr-diagnostic-truncated).",
       "inputClass": "malformed"
     },
     {

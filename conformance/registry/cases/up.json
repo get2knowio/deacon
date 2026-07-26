@@ -569,7 +569,16 @@
           "channel": "chan-process-graph",
           "operation": "op-up",
           "assertion": {
-            "jsonSubset": {}
+            "jsonSubset": {
+              "mounts": [
+                {
+                  "source": "<WORKSPACE>",
+                  "type": "bind",
+                  "ro": false
+                }
+              ],
+              "networks": ["bridge"]
+            }
           }
         },
         {
@@ -589,7 +598,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Declarative Docker-backed spec-expectation case (022-conformance-runner US5): `deacon up` in an ISOLATED external temp workspace (collision-resistant, guaranteed cleanup) exercises all four Docker channels — chan-image (deacon stamps devcontainer.source), chan-injected-process (containerEnv CONF_TOKEN injected), chan-process-graph (mount/network/volume graph captured), chan-temporal (container running). Image pinned to alpine:3.19 (V18)."
+      "notes": "Declarative Docker-backed spec-expectation case (022-conformance-runner US5): `deacon up` in an ISOLATED external temp workspace (collision-resistant, guaranteed cleanup) exercises all four Docker channels — chan-image (deacon stamps devcontainer.source), chan-injected-process (containerEnv CONF_TOKEN injected), chan-process-graph (mount/network/volume graph captured), chan-temporal (container running). Image pinned to alpine:3.19 (V18). The chan-process-graph assertion was an empty `jsonSubset: {}` until 024 US6 — which matches ANY graph, so the channel was inert by construction: the case declared it, observed it, and could not fail on it. It now pins the workspace bind (source, type, read-write) and the network the container joined, which is the graph's headline claim and what reg-process-graph-workspace-mount-vanished perturbs."
     },
     {
       "id": "case-up-dockerfile-extends-chain",
