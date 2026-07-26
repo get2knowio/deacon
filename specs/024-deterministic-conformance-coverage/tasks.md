@@ -340,9 +340,42 @@ while deferred tasks remain unresolved.
   - **Decision**: spec FR-004a/FR-004b, clarification session Q1 — model now, activate later
   - **Rationale**: activating a runtime lane multiplies live cost; the model keeps the backlog visible in the meantime via the `inactive-environment` bucket
   - **Acceptance**: marking the profile `active` in `conformance/registry/profiles.json` re-buckets its obligations with **zero** changes to `scenario.json`, `applicability.json`, or any case (SC-015 already tests this against a fixture; this task does it for real)
-- [ ] T150 [Deferral] Re-review the remaining `non-testable` clause classifications not covered by T095
+- [X] T150 [Deferral] Re-review the remaining `non-testable` clause classifications not covered by T095
   - **Decision**: research Decision 9 — the 156 `non-testable` clauses are the real reservoir of new behaviors; only those blocked by the absent container tier are in scope for T095
   - **Acceptance**: every remaining `non-testable` classification either keeps its ground with a restated rationale, or becomes `behavior-mapped` with a behavior and dispositioned obligations
+  - **Outcome**: all 148 reviewed individually against the clause's own excerpt in
+    `conformance/inventory/clauses.json`, one document at a time. Result: **148 → 45**
+    `non-testable`, **+91** `behavior-mapped` (59 → 150), **+12** `not-applicable` (12 → 24).
+    - The starting state was the real finding: all 148 carried one of exactly **two**
+      boilerplate rationales, which is the filler-rationale failure V23/V29 reject
+      everywhere else in this registry. Every one of the 148 now names a specific ground.
+    - **90 of the 91 flips reuse an EXISTING behavior**, so the coverage denominator did
+      not move and no flip rests on evidence that does not run. The mapping rule is the
+      one 020 already established for the schema surface: a prose clause stating a
+      property's shape maps where its `cst-` twin maps (`bhv-readconfig-basic-parse`), a
+      clause stating a runtime consequence maps to the behavior that observes it. 024's
+      own US5 behaviors did most of the unblocking — "container mounts, environment
+      variables, and user configuration should be applied at [creation]" and "per
+      variable, last value wins" had no observer before this feature and have three now.
+    - **1 flip minted a behavior**, `bhv-up-lifecycle-command-cwd`, for the clause
+      inventory's only carrier of the lifecycle-hook cwd rule. It arrives with
+      `case-up-lifecycle-cwd` + `fx-lifecycle-cwd` (obligation dispositioned `case`, not
+      `gap`) and both axes measured against the pinned oracle first, per Decision 11.
+      Verified live under `--profile parity`.
+    - **12 re-dispositioned `not-applicable`** where the ground is scope, not
+      testability: the whole `features-legacy-ids` document (its `legacyIds`/`deprecated`
+      schema twins are already `not-applicable`), `supporting-tools`' editor- and
+      Codespaces-owned entries, and the publish-side OCI annotation clause.
+    - **Zero left open.**
+  - **Two findings worth their own follow-ups** (neither is a T150 deliverable):
+    - `optionalPaths` (templates) is not implemented at all — no occurrence anywhere in
+      `crates/`. Its three clauses are dispositioned on the prompt-is-not-observable
+      ground, which is honest for a non-interactive CLI but is not the same as saying the
+      property is out of scope.
+    - The hypothesis that `authoring.json` held per-clause records that the document-scope
+      `not-applicable` default already covers is **false**: all 36 of its `non-testable`
+      records are CONSUMER obligations living inside authoring documents, which is exactly
+      why they were given per-clause records. No cleanup was needed there.
 
 ---
 
