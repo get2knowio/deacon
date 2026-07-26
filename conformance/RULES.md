@@ -557,3 +557,138 @@ corpus entries (research D8), the 17 harness fault-injection and 6 registry-stru
 (they observe the comparison machinery and the repository, not consumer behavior, so they have
 no oracle and no observable channel), the 4 intra-deacon consistency units (no reference side,
 hence `behaviors: []`), and the lockfile interop unit (Constitution II).
+
+## Scenario model and obligation provenance (V26 – V27)
+
+024-deterministic-conformance-coverage adds a **constrained scenario model** and a
+generated **obligation** denominator on top of the behavior denominator. Two classes keep
+that denominator honest: **V26** guards the hand-authored model, **V27** guards the
+machine-generated inventory built from it.
+
+### Two namespaces, deliberately never merged
+
+| Namespace | File | Means | Evaluated against |
+|---|---|---|---|
+| `dim-*` (environment) | `dimensions.json` + `profiles.json` | **where** evidence can be gathered | the single active profile's assignment |
+| `sdim-*` (scenario) | `scenario.json` | **what** a case exercises | a case's `scenarioContext` |
+
+Scenario dimensions MUST NOT be added to `dimensions.json`. `applies_in_profile` treats a
+condition on a dimension the profile does not assign as **unsatisfied**, so a scenario
+dimension living in the environment model would silently drop every behavior constraining
+it *out of profile* — removing it from the coverage denominator entirely. A feature built
+to stop the denominator hiding things must not begin by hiding things, and the failure
+would be invisible: `certify` counts only in-profile behaviors, so the number would go
+*down* and still be green. `Condition` is reused verbatim for scenario applicability; only
+the evaluator is new.
+
+### Applicability is pure exclusion, and exclusion is attributable
+
+```text
+invalid(combination) ⇔ ∃ rule : ∀ condition ∈ rule.excludes :
+                         combination[condition.dimension] ∈ condition.values
+```
+
+There is no "include" form, no precedence, and no ordering dependence — the predicate is a
+disjunction, so evaluation order cannot change the answer. A rule constrains **only** the
+dimensions it names. A **partial** combination that does not assign a dimension the rule
+names is *inconclusive*, never excluded: excluding speculatively would drop pairs no rule
+actually forbids.
+
+An invalid combination leaves the denominator entirely, and **the excluding rule id travels
+with it** into `coverage-pairwise.json`'s `excluded` list. This is the one place where
+"silently absent" and "explicitly excluded" must not be confused: collapse the two and any
+missing combination can be explained away as impossible, which makes the denominator
+unfalsifiable.
+
+A dimension **every** value of which is excluded under an operation is *inapplicable* there
+and contributes no pairs. Pruning happens before enumeration, which is what keeps the space
+tractable without a covering-array minimizer.
+
+> **Note on the illustrative rule in data-model.md §2.** It excludes only the three
+> container-ful states for the operations that create no container, leaving `none`. That is
+> deliberate and the committed rule follows it, even though contracts/scenario-model.md
+> describes the dimension as *inapplicable* to those operations. Excluding `none` as well
+> would leave `read-configuration`, `build`, and `doctor` with **no valid total assignment
+> at all**, and a case must assign every scenario dimension (data-model.md §3) — the
+> operation would become unrepresentable. The dimension therefore survives with one value
+> rather than being pruned outright.
+
+### Obligations are generated, never authored
+
+| File | Owner | Written by | Hand edits |
+|---|---|---|---|
+| `registry/scenario.json` | hand | never generated | expected |
+| `registry/applicability.json` | hand | never generated | expected |
+| `obligations/obligations.json` | **machine** | `coverage generate` ONLY | **V27** |
+
+`coverage generate` writes **exactly one file** and never a disposition, case, behavior,
+waiver, gap, or report. This is the 020/021 boundary restated, because it is the invariant
+most easily lost: a generator that could edit a disposition would convert human review into
+a build artifact.
+
+Two obligation kinds, **never multiplied together** (FR-019):
+
+- `obl-bhv-<hash8>` — a behavior paired with the context its own applicability requires.
+  **Exactly one per behavior.** An empty applicability is one universal context (zero
+  obligations would erase the behavior from the denominator); a non-empty one *is* the
+  context, because a condition pins a value **subset** meaning "any of these". Expanding a
+  subset into one obligation per value would multiply the two kinds against the environment
+  model and produce the unreviewable thousands research Decision 2 rejected.
+- `obl-cmb-<hash8>` — a valid pair (`arity: 2`) or a hand-selected high-risk triple
+  (`arity: 3`), partitioned by operation.
+
+The **operation is a partition key, never a pair member**: a pair covered under `up` does
+not cover that pair under `down`, because the same pair means different things per
+operation and pooling would let one operation's coverage mask another's.
+
+Ids are **substance-anchored**, following the `clu-` precedent: reordering records,
+renaming a file, or writing the same pair's keys in a different order leaves the id alone,
+so a cosmetic edit never orphans a hand-authored disposition. Changing what a combination
+*is* does change the id — and that is a new obligation needing its own decision.
+
+### The classes
+
+| Class | Fires on | Remedy |
+|---|---|---|
+| **V26** | a **dead value** (declared but permitted in no valid combination — FR-010); an empty or duplicated value set; a missing required dimension (FR-003); a rule naming an unknown dimension or value; a rule with fewer than two conditions; a rule whose `ground` is filler rather than an argument; a high-risk triple that pins no operation, pins other than three dimensions, carries a filler `reason`, or selects an excluded combination; a case `scenarioContext` that is partial, names something undeclared, or is itself an excluded combination | Remove the value or narrow the rule that strands it; declare the dimension; name the mechanism in the ground; assign **every** scenario dimension on a case, or none |
+| **V27** | the committed inventory does not byte-match a fresh regeneration; its `revision` names no `spec`-kind revision record; a unit references an operation, dimension, value, or behavior the registry no longer declares; **or** the registry declares a scenario model but ships no inventory at all | `cargo run -p deacon-conformance -- coverage generate` |
+
+**A hand edit and a stale regeneration are indistinguishable to V27, and both fail.** That
+is the point: there is no way to edit the generated file that the check would treat as
+legitimate. A missing inventory is likewise a violation and not a skip — an absent file
+would otherwise read as "nothing to check".
+
+A registry that declares **no** scenario dimensions opts out of both classes: there is no
+model to be broken, so the fixture registries predating this feature stay silent rather
+than reporting six missing dimensions each.
+
+### A rule's `ground` must argue, not assert
+
+V26 rejects filler with the same vocabulary V23 applies to `missingCapability`, plus a
+prose floor. It deliberately does **not** reuse `names_an_exclusion_ground`, whose markers
+("constitution", "principle", "authoring") are tuned for permanent *out-of-scope* claims: an
+applicability ground argues from a **mechanism** ("this operation never creates a container,
+so a container state is not a property it can exercise"), so requiring those markers would
+reject every correct ground.
+
+### Drift workflow (pin bump, dimension edit, or rule edit)
+
+1. `coverage generate` — regenerate the inventory.
+2. `coverage check` — confirms the commit matches; a mismatch is V27 and names the first
+   differing unit id and whether it was added, removed, or changed.
+3. `validate` — V26 lists dead values; V28 (User Story 2) enumerates the new
+   undispositioned queue.
+4. `coverage scaffold` (User Story 2) — skeletons to stdout with `UNREVIEWED` sentinels the
+   loader rejects.
+5. Disposition until `certify` unblocks.
+
+**Disposition is never inherited by name.** A regenerated obligation that happens to
+resemble a removed one is a **new** obligation and needs its own decision — the same rule
+020 states for classifications, for the same reason: a name is not evidence.
+
+### Reporting never gates, and gating never reports
+
+`coverage report` is read-only with respect to the record and its **exit code never
+reflects what the report says**. A command that both measured coverage and decided the
+build's fate would make widening the report the cheapest way to go green. The gates are
+`validate` (V26, V27) and `certify` (V28, V29 — User Story 2).
