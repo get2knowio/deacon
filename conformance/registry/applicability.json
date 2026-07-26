@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "rule-exec-emits-no-result-document",
+      "excludes": [
+        { "dimension": "sdim-operation", "values": ["exec"] },
+        { "dimension": "sdim-output-mode", "values": ["structured"] }
+      ],
+      "ground": "`exec` streams the invoked command's own stdout and stderr and emits no result document of its own — it carries no output-format flag — so there is no structured rendering for a case to choose between."
+    },
+    {
+      "id": "rule-no-container-state-without-a-container",
+      "excludes": [
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "read-configuration",
+            "build",
+            "outdated",
+            "upgrade",
+            "templates-apply",
+            "doctor"
+          ]
+        },
+        {
+          "dimension": "sdim-container-state",
+          "values": ["stopped", "running", "running-stale-config"]
+        }
+      ],
+      "ground": "These operations neither create nor attach to a container: they resolve configuration, build an image, resolve Feature versions, scaffold files, or probe the host. A pre-existing container is therefore not a condition they can observe or act on, and only the degenerate `none` state remains meaningful."
+    },
+    {
+      "id": "rule-no-feature-composition-for-attach-only-operations",
+      "excludes": [
+        { "dimension": "sdim-operation", "values": ["exec"] },
+        {
+          "dimension": "sdim-features",
+          "values": ["multiple-declared-order", "multiple-dependency-order", "lockfile"]
+        }
+      ],
+      "ground": "`exec` attaches to a container another operation created; it never resolves, orders, or installs Features. Whether the target container has Features at all is visible to it, but the ordering and lockfile-resolution decisions belong to `up`/`build`, and a case pinning those decisions is a case for that operation."
+    },
+    {
+      "id": "rule-no-features-for-teardown-scaffolding-and-diagnostics",
+      "excludes": [
+        { "dimension": "sdim-operation", "values": ["down", "doctor", "templates-apply"] },
+        {
+          "dimension": "sdim-features",
+          "values": [
+            "single",
+            "multiple-declared-order",
+            "multiple-dependency-order",
+            "lockfile"
+          ]
+        }
+      ],
+      "ground": "`down` removes resources identified by labels and the Compose project name, `doctor` reports host and runtime diagnostics, and `templates apply` scaffolds files into a workspace. None of the three resolves or installs a Feature, so Feature composition cannot change what they do or what they emit."
+    },
+    {
+      "id": "rule-no-image-metadata-layer-without-an-image",
+      "excludes": [
+        {
+          "dimension": "sdim-operation",
+          "values": ["down", "outdated", "upgrade", "templates-apply", "doctor"]
+        },
+        { "dimension": "sdim-layering", "values": ["image-metadata"] }
+      ],
+      "ground": "An image-metadata layer is read from the `devcontainer.metadata` label of a resolved image. These operations never resolve or inspect an image — they remove labelled resources, query a Feature registry, rewrite a lockfile, scaffold files, or probe the host — so no image-derived layer can exist to contribute to their effective configuration."
+    },
+    {
+      "id": "rule-no-layered-configuration-for-diagnostics",
+      "excludes": [
+        { "dimension": "sdim-operation", "values": ["doctor"] },
+        { "dimension": "sdim-layering", "values": ["extends-chain", "cli-overlay"] }
+      ],
+      "ground": "`doctor` reports host, runtime, and environment diagnostics rather than a merged configuration; it never resolves an extends chain or applies a command-line overlay, so how a configuration would have been layered cannot affect the diagnosis it prints."
+    },
+    {
+      "id": "rule-no-result-document-for-teardown-and-hook-execution",
+      "excludes": [
+        { "dimension": "sdim-operation", "values": ["down", "run-user-commands"] },
+        { "dimension": "sdim-output-mode", "values": ["structured"] }
+      ],
+      "ground": "`down` and `run-user-commands` complete with progress and diagnostics only; neither carries an output-format flag and neither writes a result document to stdout, so a structured rendering does not exist for a case to observe."
+    },
+    {
+      "id": "rule-structured-only-result-documents",
+      "excludes": [
+        { "dimension": "sdim-operation", "values": ["read-configuration", "up"] },
+        { "dimension": "sdim-output-mode", "values": ["human"] }
+      ],
+      "ground": "`read-configuration` and `up` emit their result exclusively as a single JSON document on stdout; neither carries an output-format flag, so a human-readable rendering of the result does not exist and cannot be exercised."
+    }
+  ],
+  "triples": []
+}

@@ -31,6 +31,7 @@ use crate::model::{
     SchemasManifest, SourceRevision, SourceUnit, SpecManifest, TestCase, Waiver,
 };
 use crate::residual::{ResidualFile, ResidualRecord};
+use crate::scenario::{ApplicabilityFile, ApplicabilityRule, HighRiskTriple, ScenarioDimension};
 
 /// A schema-class load failure for a single file: an unreadable file, malformed
 /// JSON, or a record that violates the schema (unknown field, bad enum, missing
@@ -229,6 +230,17 @@ pub struct Registry {
     /// Hand-authored characterized-exception correspondences, from the same
     /// `mapping.json` file (FR-024, FR-051). A missing file is empty.
     pub mapping_exceptions: Vec<ExceptionMapping>,
+    /// Hand-authored **scenario** dimensions — `scenario.json`
+    /// (024-deterministic-conformance-coverage). A SEPARATE namespace from
+    /// [`dimensions`](Self::dimensions), which stays environment-only (research
+    /// Decision 1). A missing file is empty.
+    pub scenario: Vec<ScenarioDimension>,
+    /// Hand-authored applicability exclusion rules — `applicability.json` `records`.
+    /// A missing file is empty.
+    pub applicability: Vec<ApplicabilityRule>,
+    /// Hand-authored high-risk triples — `applicability.json` `triples` (US3). A
+    /// missing file is empty.
+    pub triples: Vec<HighRiskTriple>,
 }
 
 impl Registry {
@@ -248,6 +260,10 @@ impl Registry {
         let mut errors: Vec<SchemaError> = Vec::new();
         let (baseline_path, mapping_path) = crate::migration_paths_for(root);
         let mapping_file = load_mapping_file(&mapping_path, &mut errors);
+        // applicability.json carries TWO record kinds (rules + triples) in one document,
+        // so it needs its own file struct rather than the `Collection` envelope.
+        let applicability_file =
+            load_applicability_file(&root.join("applicability.json"), &mut errors);
 
         // The four source-inventory files (each a collection of source units),
         // concatenated in a stable order.
@@ -293,6 +309,11 @@ impl Registry {
             baseline: load_baseline_file(&baseline_path, &mut errors),
             mapping: mapping_file.records,
             mapping_exceptions: mapping_file.exceptions,
+            // scenario.json / applicability.json — the 024 scenario model. Both are
+            // single-file collections at the registry root, like `dimensions.json`.
+            scenario: load_collection(root, "scenario.json", &mut errors),
+            applicability: applicability_file.records,
+            triples: applicability_file.triples,
         };
 
         // 022-conformance-runner (T007, FR-003): every case record MUST be exactly one
@@ -493,6 +514,22 @@ fn load_mapping_file(path: &Path, errors: &mut Vec<SchemaError>) -> MappingFile 
         }
     }
     file
+}
+
+/// Load `applicability.json` (024). A missing file yields an empty document; a malformed
+/// one pushes a located [`SchemaError`] and yields empty — never a silently partial rule
+/// set, which would quietly widen the valid combination space instead of failing.
+fn load_applicability_file(path: &Path, errors: &mut Vec<SchemaError>) -> ApplicabilityFile {
+    if !path.exists() {
+        return ApplicabilityFile::default();
+    }
+    match read_file(path).and_then(|raw| deserialize_located::<ApplicabilityFile>(path, &raw)) {
+        Ok(file) => file,
+        Err(err) => {
+            errors.push(err);
+            ApplicabilityFile::default()
+        }
+    }
 }
 
 /// Load a single collection file `dir/name`. A missing file yields an empty vector
