@@ -74,6 +74,7 @@ use crate::obligation::{
 };
 use crate::prose::Document;
 use crate::prose::strength::{has_family, hides_mandatory_keyword};
+use crate::regression::RegressionRecord;
 use crate::scenario::{OPERATION_DIMENSION, ScenarioModel, excluding_rule, is_invalid};
 
 /// A single structural violation. `code` is the stable class (`"V1"`..`"V10"` or
@@ -1648,6 +1649,9 @@ pub fn run(registry: &Registry, today: &str, repo_root: &Path) -> Vec<Violation>
     // same records (and V27 is what guarantees the commit matches). Living in `run` means
     // `report` and `certify` see it too, not only the `validate` command.
     out.extend(check_obligation_dispositions(registry));
+    // V30: injected-regression coverage (024, US6). Same scoping as V27–V29 — a registry
+    // that has not opted into the scenario model has not opted into this regime either.
+    out.extend(check_regressions(registry));
     sort_violations(&mut out);
     out
 }
@@ -1867,6 +1871,12 @@ impl<'a> Checker<'a> {
             r.obligation_dispositions
                 .iter()
                 .map(|x| (x.id.as_str(), RecordType::ObligationDisposition)),
+        );
+        // Injected-regression records are hand-authored registry records too (024 US6).
+        out.extend(
+            r.regressions
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::Regression)),
         );
         out
     }
@@ -3669,6 +3679,182 @@ fn blanket_waiver_scope(scope: &Scope) -> Option<String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// V30 — injected-regression coverage (024-deterministic-conformance-coverage, US6)
+// ---------------------------------------------------------------------------
+
+/// **V30 — injected-regression coverage** (024 US6; data-model.md §7,
+/// contracts/regression-harness.md).
+///
+/// | What it refuses | Why |
+/// |---|---|
+/// | a declared channel with **no** regression record | nothing would ever prove that channel can fail, and a green suite whose channels are inert is worse than no suite |
+/// | a record naming a channel that is **not declared** in `channels.json` | it proves nothing about the registry's channel set |
+/// | a record naming a channel with **no registered observer** | it could never be detected, so declaring it would manufacture a false `inert` (data-model.md §7, "Invariant") |
+/// | a record whose `expectedDetectingCases` names an **unknown case** | the candidate could never run |
+/// | a candidate case that does **not declare the record's channel** | it could not observe the perturbation, so listing it overstates the candidate set |
+/// | a **kind ↔ target** mismatch (a JSON-pointer kind on a byte stream, `remove-path` on a process result, …) | the perturbation would be inapplicable at run time — a fault reported far from its cause |
+///
+/// The "no registered observer" test is against [`OBSERVED_CHANNELS`], the same mirrored
+/// list V16 uses. `deacon-conformance` deliberately does not depend on `parity-harness`
+/// (the dependency runs the other way), so the list is mirrored rather than imported, and
+/// a `parity-harness` test (`observation_faults.rs`) keeps the mirror in lockstep with
+/// `observe::observer_for` in BOTH directions.
+///
+/// **Scoped to registries that declare a scenario model**, exactly as V27–V29 are. A
+/// pre-024 fixture registry has not opted into this regime at all, and reporting eleven
+/// uncovered channels for every such fixture would say nothing true about them.
+pub fn check_regressions(registry: &Registry) -> Vec<Violation> {
+    let mut out = Vec::new();
+    if registry.scenario.is_empty() {
+        return out;
+    }
+
+    let declared: BTreeSet<&str> = registry.channels.iter().map(|c| c.id.as_str()).collect();
+    let case_channels: HashMap<&str, BTreeSet<&str>> = registry
+        .cases
+        .iter()
+        .map(|c| {
+            (
+                c.id.as_str(),
+                c.expected.iter().map(|e| e.channel.as_str()).collect(),
+            )
+        })
+        .collect();
+
+    // -- every declared channel needs at least one record -------------------
+    let covered: BTreeSet<&str> = registry
+        .regressions
+        .iter()
+        .map(|r| r.channel.as_str())
+        .collect();
+    for channel in &declared {
+        if !covered.contains(channel) {
+            out.push(Violation::new(
+                "V30",
+                *channel,
+                "declared observable channel has no injected-regression record — nothing \
+                 proves a difference on this channel turns the suite red, so every green \
+                 result that rests on it is unearned (FR-065). Add a `reg-` record to \
+                 `regressions.json` naming a real case and a real perturbation.",
+            ));
+        }
+    }
+
+    // -- each record must be applicable ------------------------------------
+    for record in &registry.regressions {
+        if !declared.contains(record.channel.as_str()) {
+            out.push(Violation::new(
+                "V30",
+                &record.id,
+                format!(
+                    "names channel {:?}, which is not declared in `channels.json` — a \
+                     regression against an undeclared channel proves nothing about the \
+                     registry's channel set",
+                    record.channel
+                ),
+            ));
+        } else if !OBSERVED_CHANNELS.contains(&record.channel.as_str()) {
+            out.push(Violation::new(
+                "V30",
+                &record.id,
+                format!(
+                    "names channel {:?}, for which the harness registers NO observer — the \
+                     perturbation could never be detected, so the record would manufacture a \
+                     false `inert` verdict rather than reveal a dead channel. Wire the \
+                     observer, or drop the record.",
+                    record.channel
+                ),
+            ));
+        }
+
+        if let Some(mismatch) = kind_target_mismatch(record) {
+            out.push(Violation::new("V30", &record.id, mismatch));
+        }
+
+        for case_id in &record.expected_detecting_cases {
+            match case_channels.get(case_id.as_str()) {
+                None => out.push(Violation::new(
+                    "V30",
+                    &record.id,
+                    format!(
+                        "names candidate case {case_id:?}, which is not a case in the \
+                         registry — the candidate could never run"
+                    ),
+                )),
+                Some(channels) if !channels.contains(record.channel.as_str()) => {
+                    out.push(Violation::new(
+                        "V30",
+                        &record.id,
+                        format!(
+                            "names candidate case {case_id:?}, which does not declare channel \
+                             {:?} — that case observes nothing on this channel, so listing it \
+                             overstates what could detect the regression",
+                            record.channel
+                        ),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+
+    out
+}
+
+/// Why a record's perturbation KIND cannot be applied to its declared evidence TARGET, or
+/// `None` when the pair is coherent.
+///
+/// The pairing table is the one in contracts/regression-harness.md ("Perturbation kinds"),
+/// stated once here so an incoherent record is refused at validation rather than surfacing
+/// at run time as an "inapplicable perturbation" error — a fault reported far from the
+/// authoring mistake that caused it.
+fn kind_target_mismatch(record: &RegressionRecord) -> Option<String> {
+    use crate::regression::{EvidenceTarget as T, PerturbationKind as K};
+    let kind = record.perturbation.kind;
+    let target = record.target;
+    let ok = match kind {
+        K::SetJsonPointer | K::RemoveJsonPointer => target.is_json_document(),
+        K::SetExitCode => target == T::ProcessResult,
+        K::AppendBytes => matches!(
+            target,
+            T::ProcessStdout | T::ProcessStderr | T::WorkspaceFile
+        ),
+        K::RemovePath => target == T::WorkspaceFile,
+    };
+    if ok {
+        // `append-bytes` against a workspace file needs the path naming WHICH file.
+        if kind == K::AppendBytes
+            && target == T::WorkspaceFile
+            && record.perturbation.path.is_none()
+        {
+            return Some(
+                "`append-bytes` against `workspace-file` must carry `path` naming the file \
+                 to append to"
+                    .to_string(),
+            );
+        }
+        if kind == K::AppendBytes
+            && target != T::WorkspaceFile
+            && record.perturbation.path.is_some()
+        {
+            return Some(format!(
+                "`append-bytes` against `{}` must not carry `path` — a stream has no path, so \
+                 the field would be silently ignored",
+                target.as_str()
+            ));
+        }
+        return None;
+    }
+    Some(format!(
+        "perturbation kind `{}` cannot be applied to evidence target `{}` (see the \
+         kind→source table in contracts/regression-harness.md); the perturbation would be \
+         inapplicable at run time",
+        kind.as_str(),
+        target.as_str()
+    ))
+}
+
 /// Whether a behavior applies in a profile's context: every applicability condition
 /// must be satisfied by the profile's assignment (empty applicability = everywhere).
 /// A condition on a dimension the profile does not assign is treated as unsatisfied.
@@ -3779,6 +3965,7 @@ fn record_type_name(ty: RecordType) -> &'static str {
         RecordType::HighRiskTriple => "high-risk-triple",
         RecordType::Obligation => "obligation",
         RecordType::ObligationDisposition => "obligation disposition",
+        RecordType::Regression => "injected-regression",
     }
 }
 

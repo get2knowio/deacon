@@ -880,3 +880,77 @@ behavior-level coverage numbers and never folded into them. The two denominators
 different questions — which behaviors are evidenced, versus which modelled combinations are
 exercised — and collapsing them would let progress on one hide the absence of progress on
 the other.
+
+---
+
+## Injected-regression harness (V30)
+
+Every other rule in this document polices whether a claim of coverage is *honestly
+recorded*. V30 polices whether the machinery that produces those claims is *capable of
+saying no*.
+
+A conformance channel is a claim: "if deacon and the reference differed here, we would see
+it." Nothing in the registry tests that claim. A channel whose observer stopped looking, or
+whose cases assert something no plausible defect could violate, reports `agree` forever —
+and reports it in exactly the same words as a channel that is genuinely watching. A green
+suite whose channels are inert is worse than no suite, because it is trusted.
+
+### The record, and what it may perturb
+
+A `reg-` record under `registry/regressions.json` declares one **reversible perturbation of
+one raw evidence source**, and the case(s) that ought to notice it:
+
+| Field | Rule |
+|---|---|
+| `channel` | a declared `chan-` that the harness has an **observer** for |
+| `target` | the RAW artifact — a process result, a stdout/stderr stream, a structured or `docker inspect` document, or file bytes. **Never** an observer's return value |
+| `perturbation` | one of five closed kinds, coherent with `target` |
+| `expectedDetectingCases` | ≥1 real case that declares the channel |
+
+**Why the target may never be an observer's output.** Perturbing what an observer *returns*
+would make a **dead** observer — one that ignores its input and always returns the same
+thing — report `detected`: the return value differs, so the difference is "seen", while
+nothing was observed at all. Injecting into the source instead means a dead observer
+returns its usual value, no difference appears, and the channel is correctly reported
+`inert`. This is enforced three ways and stated once: the `EvidenceTarget` vocabulary
+contains no such variant, the harness's injection functions are generic over a *sealed*
+trait no observer output can implement, and V30 refuses a record naming a channel with no
+observer at all (which could never be detected, and so would manufacture a false `inert`).
+
+### Detected vs. inert vs. inapplicable — three different claims
+
+| Verdict | The claim | Consequence |
+|---|---|---|
+| `detected` | a case that was **clean** on this channel is **red** on this channel after the perturbation | the channel is live |
+| `inert` | every record for the channel went undetected | the run **fails** (FR-067) |
+| *inapplicable* | the perturbation never landed (a `HarnessError`, not a verdict) | the run fails, naming the **record** |
+
+The third row exists because collapsing it into `inert` would be the worst possible
+confusion: `inert` is a claim about the **channel**, and a mis-authored record says nothing
+about the channel. It would let a broken record masquerade as a dead channel — and, far
+worse, let a dead channel hide behind a broken record.
+
+Attribution is equally load-bearing. A case that was **already failing** on the channel
+cannot detect anything: its post-injection failure is not evidence the injection caused
+anything. The harness reports such a candidate as a note and does not count it.
+
+### An inert channel is a failure, not a warning
+
+A warning is a thing a green pipeline scrolls past. The state it would describe here —
+a channel nobody can make fail — retroactively empties every result that rested on that
+channel. So `coverage-regressions` exits non-zero, and the `parity / live-certification`
+lane runs it without `continue-on-error`.
+
+The remedy is never to delete the record. Either the perturbation is wrong (fix it), or the
+cases that observe the channel assert something no defect could violate (strengthen them).
+The second is the common one, and it is a real finding: an empty `jsonSubset: {}` matches
+any graph, and a `contains` assertion cannot see appended output at all — both were found
+this way, and both were channels the registry believed it was covering.
+
+### Isolation and reversibility
+
+| Requirement | Mechanism |
+|---|---|
+| An ordinary run can never inject (FR-070) | injection needs a process-level capability only the `coverage-regressions` bin takes out; the one hook the runner calls is inert without it |
+| A perturbation is never left applied (FR-066) | an RAII guard reverts on success **and** on unwind, mirroring the Docker workspace guard; the tree is verified unmodified afterwards |
+| The classification is reproducible (FR-069) | perturbations are data, applied in a deterministic order, and the report is byte-stable |

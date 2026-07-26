@@ -1,0 +1,125 @@
+{
+  "records": [
+    {
+      "id": "reg-container-state-config-name-rewritten",
+      "channel": "chan-container-state",
+      "target": "container-inspect-document",
+      "perturbation": {
+        "kind": "set-json-pointer",
+        "pointer": "/Config/Labels/devcontainer.config_name",
+        "value": "injected-regression"
+      },
+      "expectedDetectingCases": ["case-up-container-labels-stamped"],
+      "notes": "The container-state channel exists to catch a container that was created with the wrong identity. Rewriting `devcontainer.config_name` in the inspect document is exactly that difference, and it is the narrowest one available: the case pins five labels, and this perturbs one of them, so a detection cannot be an accident of some coarser change."
+    },
+    {
+      "id": "reg-exit-code-failure-masked",
+      "channel": "chan-exit-code",
+      "target": "process-result",
+      "perturbation": { "kind": "set-exit-code", "exitCode": 0 },
+      "expectedDetectingCases": ["case-errors-decl-malformed-json"],
+      "notes": "The failure this channel exists to catch is deacon reporting SUCCESS for input it should reject — a malformed configuration silently accepted. Setting the captured status to 0 is that failure precisely, and the case's `nonZero` assertion is the thing that must notice."
+    },
+    {
+      "id": "reg-file-content-scaffold-corrupted",
+      "channel": "chan-file-content",
+      "target": "workspace-file",
+      "perturbation": {
+        "kind": "append-bytes",
+        "bytes": "\n// INJECTED-REGRESSION\n",
+        "path": "applied/.devcontainer/devcontainer.json"
+      },
+      "expectedDetectingCases": ["case-templates-apply-default-option"],
+      "notes": "`templates apply` emits no result document, so the scaffolded BYTES are the whole observable. Appending to the file it wrote is the difference the channel exists to catch: a template that produced almost-right content. The case asserts the exact scaffolded text, so it must notice."
+    },
+    {
+      "id": "reg-filesystem-scaffold-missing",
+      "channel": "chan-filesystem",
+      "target": "workspace-file",
+      "perturbation": {
+        "kind": "remove-path",
+        "path": "applied/.devcontainer/devcontainer.json"
+      },
+      "expectedDetectingCases": ["case-templates-apply-option-substituted"],
+      "notes": "Presence is what this channel observes, so absence is its regression: the file `templates apply` was supposed to scaffold is gone. Distinct from the file-content record above — that one asks whether the bytes are right, this one whether anything was written at all."
+    },
+    {
+      "id": "reg-image-source-label-dropped",
+      "channel": "chan-image",
+      "target": "image-inspect-document",
+      "perturbation": {
+        "kind": "remove-json-pointer",
+        "pointer": "/Config/Labels/devcontainer.source"
+      },
+      "expectedDetectingCases": ["case-up-docker-channels"],
+      "notes": "`devcontainer.source` is the label that says deacon built this container's configuration at all. Dropping it from the image configuration is the difference the image channel exists to catch, and the case asserts exactly that label."
+    },
+    {
+      "id": "reg-injected-process-env-dropped",
+      "channel": "chan-injected-process",
+      "target": "container-inspect-document",
+      "perturbation": {
+        "kind": "remove-json-pointer",
+        "pointer": "/Config/Env"
+      },
+      "expectedDetectingCases": ["case-up-docker-channels"],
+      "notes": "The process context a command runs under is what this channel observes, and `containerEnv` not arriving is its most consequential failure. Removing the container's whole `Env` array models it at the source; the case pins `CONF_TOKEN`, which then has nowhere to come from."
+    },
+    {
+      "id": "reg-process-graph-workspace-mount-vanished",
+      "channel": "chan-process-graph",
+      "target": "container-inspect-document",
+      "perturbation": {
+        "kind": "remove-json-pointer",
+        "pointer": "/Mounts/0"
+      },
+      "expectedDetectingCases": ["case-up-docker-channels"],
+      "notes": "The mount/network/volume graph's headline claim is that the workspace is bound into the container. Removing the first (workspace bind) mount from the inspect document is that claim failing. NOTE: this record is why the case's `chan-process-graph` assertion was strengthened from the vacuous `jsonSubset: {}` it carried — an empty subset matches anything, so the channel was inert by construction."
+    },
+    {
+      "id": "reg-stderr-diagnostic-truncated",
+      "channel": "chan-stderr",
+      "target": "process-stderr",
+      "perturbation": {
+        "kind": "append-bytes",
+        "bytes": "INJECTED-REGRESSION"
+      },
+      "expectedDetectingCases": ["case-errors-decl-malformed-json"],
+      "notes": "Trailing bytes after the diagnostic — a stray print, a partially written second error, an un-flushed buffer landing after the message. A `contains` assertion cannot see this by construction, which is why the case's stderr assertion is anchored at end-of-text: the parse diagnostic must be the LAST thing deacon writes."
+    },
+    {
+      "id": "reg-stdout-appended-marker",
+      "channel": "chan-stdout",
+      "target": "process-stdout",
+      "perturbation": {
+        "kind": "append-bytes",
+        "bytes": "INJECTED-REGRESSION"
+      },
+      "expectedDetectingCases": ["case-up-user-created-by-feature", "case-up-user-uid-gid-nonroot"],
+      "notes": "Stray bytes on stdout — the class of defect where a diagnostic, a progress line, or a second result document leaks into the result stream. Detecting it needs a case whose stdout assertion is EXACT: a `contains` or a `matches` without an end anchor cannot see appended output at all, and most stdout assertions in the corpus are one of those. These two `exec` cases assert the complete expected text (`id -u`/`id -g`/`id -un`), which is what makes them sensitive."
+    },
+    {
+      "id": "reg-structured-output-unknown-field-dropped",
+      "channel": "chan-structured-output",
+      "target": "structured-output-document",
+      "perturbation": {
+        "kind": "remove-json-pointer",
+        "pointer": "/configuration/customUnknownKey"
+      },
+      "expectedDetectingCases": ["case-readconfig-unknown-field-echo"],
+      "notes": "Silently dropping an unmodelled configuration key is a real, previously-shipped class of defect (the `extra` passthrough exists because of it). Perturbing the document at its SOURCE — the stdout bytes are re-parsed, the key removed, and the document written back — means the structured observer parses the perturbed output exactly as it parses real output."
+    },
+    {
+      "id": "reg-temporal-container-not-running",
+      "channel": "chan-temporal",
+      "target": "container-inspect-document",
+      "perturbation": {
+        "kind": "set-json-pointer",
+        "pointer": "/State/Status",
+        "value": "exited"
+      },
+      "expectedDetectingCases": ["case-up-docker-channels"],
+      "notes": "The lifecycle transition this channel observes is `up` leaving a RUNNING container. Reporting `exited` is that transition failing — the container was created and then died — and the case asserts `status: running`."
+    }
+  ]
+}

@@ -73,6 +73,9 @@ pub enum RecordType {
     /// `obl-` unit. A registry record like any other, so it obeys the same V2 grammar,
     /// prefix↔type agreement, and cross-namespace uniqueness.
     ObligationDisposition,
+    /// A hand-authored injected-regression record (`reg-`) — the declarative perturbation
+    /// that proves one observable channel can actually fail (024 US6).
+    Regression,
 }
 
 impl RecordType {
@@ -98,6 +101,7 @@ impl RecordType {
             RecordType::HighRiskTriple => "hrt",
             RecordType::Obligation => "obl",
             RecordType::ObligationDisposition => "odp",
+            RecordType::Regression => "reg",
         }
     }
 
@@ -123,6 +127,7 @@ impl RecordType {
             "hrt" => RecordType::HighRiskTriple,
             "obl" => RecordType::Obligation,
             "odp" => RecordType::ObligationDisposition,
+            "reg" => RecordType::Regression,
             _ => return None,
         })
     }
@@ -136,8 +141,8 @@ pub enum IdError {
     /// uppercase, or disallowed characters.
     #[error(
         "id {id:?} is malformed: expected \
-         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls|clu|clc|sdim|rule|hrt|obl|odp)\
-          -[a-z0-9]+(-[a-z0-9]+)*$`"
+         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls|clu|clc|sdim|rule|hrt|obl|odp\
+          |reg)-[a-z0-9]+(-[a-z0-9]+)*$`"
     )]
     Format { id: String },
     /// The id is well-formed but its leading segment is not a known record prefix.

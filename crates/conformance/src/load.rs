@@ -31,6 +31,7 @@ use crate::model::{
     SchemasManifest, SourceRevision, SourceUnit, SpecManifest, TestCase, Waiver,
 };
 use crate::obligation::ObligationDisposition;
+use crate::regression::{RegressionFile, RegressionRecord};
 use crate::residual::{ResidualFile, ResidualRecord};
 use crate::scenario::{ApplicabilityFile, ApplicabilityRule, HighRiskTriple, ScenarioDimension};
 
@@ -249,6 +250,12 @@ pub struct Registry {
     /// 020/021 boundary). A missing directory is empty — which is not "nothing to
     /// decide" but "nothing decided yet", and V28 says so.
     pub obligation_dispositions: Vec<ObligationDisposition>,
+    /// Hand-authored injected-regression records — `regressions.json` (024 US6). One per
+    /// (channel, perturbation) the harness applies to prove that channel can fail. A
+    /// missing file is empty — which V30 refuses for a registry that has opted into the
+    /// scenario model, because "no regression declared" and "the channel is live" are
+    /// not the same claim.
+    pub regressions: Vec<RegressionRecord>,
 }
 
 impl Registry {
@@ -329,6 +336,9 @@ impl Registry {
                 &root.join("obligation-dispositions"),
                 &mut errors,
             ),
+            // regressions.json — the injected-regression records that prove each channel
+            // is live (024 US6). Single-file collection at the registry root.
+            regressions: load_regressions_collection(&root.join("regressions.json"), &mut errors),
         };
 
         // 022-conformance-runner (T007, FR-003): every case record MUST be exactly one
@@ -477,6 +487,28 @@ fn load_residuals_collection(path: &Path, errors: &mut Vec<SchemaError>) -> Vec<
             }
         };
     errors.extend(crate::residual::duplicate_id_errors(path, &records));
+    records
+}
+
+/// Load `regressions.json` (024 US6). A missing file yields an empty vector; a malformed
+/// one pushes a located [`SchemaError`]. Duplicate ids are reported per record so two
+/// records can never silently claim the same identity.
+fn load_regressions_collection(
+    path: &Path,
+    errors: &mut Vec<SchemaError>,
+) -> Vec<RegressionRecord> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    let records =
+        match read_file(path).and_then(|raw| deserialize_located::<RegressionFile>(path, &raw)) {
+            Ok(file) => file.records,
+            Err(err) => {
+                errors.push(err);
+                return Vec::new();
+            }
+        };
+    errors.extend(crate::regression::duplicate_id_errors(path, &records));
     records
 }
 
