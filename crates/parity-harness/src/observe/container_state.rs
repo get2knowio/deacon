@@ -9,7 +9,9 @@
 //!
 //! Emitted: `{mounts, env, labels, user, workingDir, exposedPorts, publishedPorts,
 //! entrypoint, cmd, networks}` (the serialized [`StateSnapshot`]) plus the DERIVED
-//! `workspaceBindTargets`. The shared normalizer then applies `workspace_basename_token`,
+//! `workspaceBindTargets`, `envMap`, `pathSegments`, `mountSources`, `labelNamespaces`,
+//! `userSpec` and `composeProjectResources` (024 US5, see [`crate::observe::derived`]).
+//! The shared normalizer then applies `workspace_basename_token`,
 //! `path_token` and `null_preserving`; nothing is removed (FR-029). Labels, entrypoint,
 //! cmd and networks are emitted verbatim, and any characterized difference is declared on
 //! the case as a scoped, backed `allowedDifference`.
@@ -32,7 +34,7 @@ use serde_json::Value;
 
 use crate::HarnessError;
 use crate::evidence::RawChannelEvidence;
-use crate::observe::{ChannelObserver, RunContext, not_captured};
+use crate::observe::{ChannelObserver, RunContext, derived, not_captured};
 
 /// Captures `chan-container-state` from the case's container.
 #[derive(Debug, Clone, Copy)]
@@ -69,6 +71,29 @@ impl ChannelObserver for ContainerStateObserver {
         match value.as_object_mut() {
             Some(obj) => {
                 obj.insert("workspaceBindTargets".to_string(), targets);
+                // The US5 derived fields (T122): each turns a comparison that would
+                // otherwise need a search, a grouping or a type test into ordinary
+                // equality. All are ADDITIVE — the raw `env` / `mounts` / `labels` /
+                // `user` / `networks` fields they summarize stay compared alongside them.
+                let env_map = derived::env_map(obj.get("env").unwrap_or(&Value::Null));
+                obj.insert("pathSegments".to_string(), derived::path_segments(&env_map));
+                obj.insert("envMap".to_string(), env_map);
+                obj.insert("mountSources".to_string(), derived::mount_sources(inspect));
+                obj.insert(
+                    "labelNamespaces".to_string(),
+                    derived::label_namespaces(obj.get("labels").unwrap_or(&Value::Null)),
+                );
+                obj.insert(
+                    "userSpec".to_string(),
+                    derived::user_spec(obj.get("user").and_then(Value::as_str).unwrap_or("")),
+                );
+                let project = inspect["Config"]["Labels"]["com.docker.compose.project"]
+                    .as_str()
+                    .unwrap_or("");
+                obj.insert(
+                    "composeProjectResources".to_string(),
+                    derived::compose_project_resources(inspect, project),
+                );
             }
             None => {
                 return Err(HarnessError::NormalizationFailed {

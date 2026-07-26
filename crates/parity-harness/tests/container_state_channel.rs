@@ -169,6 +169,29 @@ fn emits_every_declared_field_from_the_delegated_snapshot() {
     // 024 US5 (T123): `drop_noise_env` no longer runs at CAPTURE, so every variable
     // reaches the channel — `PATH` included, which FR-050 requires be compared.
     assert_eq!(v["env"], json!(["FOO=bar", "HOME=/root", "PATH=/usr/bin"]));
+
+    // The US5 derived fields (T122) accompany the raw ones; each turns a comparison that
+    // would otherwise need a search into ordinary equality.
+    assert_eq!(v["envMap"]["PATH"], json!("/usr/bin"));
+    assert_eq!(
+        v["pathSegments"],
+        json!(["/usr/bin"]),
+        "PATH compares segment-wise, so a Feature-contributed segment is an array subset"
+    );
+    assert_eq!(
+        v["mountSources"]["/feat-mnt"],
+        json!("feat-probe-vol"),
+        "the WHOLE source, not the leaf `sourceTail` collapses to"
+    );
+    assert_eq!(
+        v["userSpec"],
+        json!({ "name": "vscode", "uid": null, "group": null, "gid": null })
+    );
+    assert_eq!(v["composeProjectResources"]["networks"], json!(["bridge"]));
+    assert!(
+        v["labelNamespaces"].is_object(),
+        "labels are also grouped by namespace (FR-052)"
+    );
 }
 
 #[test]
@@ -362,6 +385,11 @@ fn a_per_cli_identity_label_difference_is_visible_and_must_be_characterized() {
 
     // And a scoped tolerance — the mechanism that REPLACES the blanket drop — turns it
     // into an `allowed-difference` while every other field stays compared.
+    // Two paths, because 024 US5's derived `labelNamespaces` reports the same one-sided
+    // label a SECOND way (as a difference in the namespace's membership) and the compose
+    // project name reaches the derived `composeProjectResources`. Each is named
+    // explicitly: a tolerance that covered them implicitly would be the blanket ignore
+    // this mechanism replaces.
     let path = |p: &str| deacon_conformance::model::AllowedDifference {
         behavior: "bhv-x".to_string(),
         context: vec![],
@@ -370,7 +398,11 @@ fn a_per_cli_identity_label_difference_is_visible_and_must_be_characterized() {
         waiver_id: None,
         divergence_id: Some("ext-container-identity-labels".to_string()),
     };
-    let allowed = vec![path("chan-container-state.labels")];
+    let allowed = vec![
+        path("chan-container-state.labels"),
+        path("chan-container-state.labelNamespaces"),
+        path("chan-container-state.composeProjectResources.project"),
+    ];
     let behaviors = vec!["bhv-x".to_string()];
     let tolerances = Tolerances::new(&allowed, &behaviors);
     let mut consumed = HashSet::new();
