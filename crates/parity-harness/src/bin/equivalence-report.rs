@@ -8,19 +8,23 @@
 //! ledger, because "the new thing passes" is not evidence — the new thing must not pass
 //! where the old thing *failed* (FR-033–FR-038).
 //!
-//! # Which carriers this bin can judge, and why the rest are silent
+//! # Which carriers this bin can judge
 //!
-//! The legacy comparison for a **config corpus** carrier is expressible through the shared
-//! harness API: run both CLIs, normalize through the single `normalize::config` /
-//! `merged_config`, diff. This bin therefore judges those carriers for real. The
-//! **Docker scenario** carriers (`parity_exec`, `parity_build`, `parity_up_exec`,
-//! `parity_observable_state`, `parity_state_diff`) assert through bespoke orchestration
-//! that lives inside their own test binaries; re-implementing it here would be a SECOND
-//! comparison implementation, which is the thing FR-030 forbids — so this bin records NO
-//! verdict for them.
+//! **Every live carrier**, config-corpus and Docker-scenario alike, because it never
+//! re-implements a comparison: it runs the carrier's OWN test binary and reads the
+//! `ReportFragment` that binary already writes (see [`run_legacy_carrier`]). That is the
+//! legacy path's verdict in the legacy path's own words, which is what FR-030 requires —
+//! a second comparison implementation here would be the defect, not the coverage.
 //!
-//! No verdict is not a pass. A carrier with no verdict fails deletion condition 1, which
-//! is the correct and safe reading: unproven is not the same as safe.
+//! An earlier revision of this doc claimed the Docker scenario carriers could NOT be
+//! judged, on the reasoning that their orchestration is bespoke. That was true of an
+//! earlier design and false of this one: 024 Phase 6 judged `parity_exec` (4 units) and
+//! `parity_up_exec` (1 unit) for real, all `equivalent`, and deleted both on that evidence.
+//! The claim is corrected here rather than left standing, because "this tool cannot judge
+//! X" is exactly the kind of statement that stops anyone from trying.
+//!
+//! No verdict is still not a pass. A carrier with no verdict fails deletion condition 1,
+//! which is the correct and safe reading: unproven is not the same as safe.
 //!
 //! # Preconditions (constitution IV)
 //!
