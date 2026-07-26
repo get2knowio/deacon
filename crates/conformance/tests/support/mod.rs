@@ -36,7 +36,7 @@ impl Fixture {
             }
         }
         assert!(
-            dst.join("registry").join("cases.json").is_file(),
+            dst.join("registry").join("cases").is_dir(),
             "the fixture must contain the real registry"
         );
         Fixture { dir }
@@ -101,27 +101,44 @@ impl Fixture {
         self
     }
 
-    /// Drop one case from `cases.json`.
+    /// Every per-area case file, sorted (024 T007: cases live in `cases/<area>.json`).
+    fn case_files(&self) -> Vec<PathBuf> {
+        let dir = self.registry_dir().join("cases");
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("json"))
+            .collect();
+        files.sort();
+        files
+    }
+
+    /// Drop one case from whichever `cases/<area>.json` holds it.
     pub fn without_case(self, case_id: &str) -> Fixture {
-        self.edit_json(&self.registry_dir().join("cases.json"), |doc| {
-            if let Some(records) = doc.get_mut("records").and_then(|v| v.as_array_mut()) {
-                records.retain(|r| r.get("id").and_then(|v| v.as_str()) != Some(case_id));
-            }
-        });
+        for file in self.case_files() {
+            self.edit_json(&file, |doc| {
+                if let Some(records) = doc.get_mut("records").and_then(|v| v.as_array_mut()) {
+                    records.retain(|r| r.get("id").and_then(|v| v.as_str()) != Some(case_id));
+                }
+            });
+        }
         self
     }
 
-    /// Mutate one case in place.
+    /// Mutate one case in place, in whichever `cases/<area>.json` holds it.
     pub fn edit_case(self, case_id: &str, edit: impl Fn(&mut serde_json::Value)) -> Fixture {
-        self.edit_json(&self.registry_dir().join("cases.json"), |doc| {
-            if let Some(records) = doc.get_mut("records").and_then(|v| v.as_array_mut()) {
-                for record in records.iter_mut() {
-                    if record.get("id").and_then(|v| v.as_str()) == Some(case_id) {
-                        edit(record);
+        for file in self.case_files() {
+            self.edit_json(&file, |doc| {
+                if let Some(records) = doc.get_mut("records").and_then(|v| v.as_array_mut()) {
+                    for record in records.iter_mut() {
+                        if record.get("id").and_then(|v| v.as_str()) == Some(case_id) {
+                            edit(record);
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
         self
     }
 

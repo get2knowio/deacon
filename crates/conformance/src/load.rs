@@ -4,9 +4,10 @@
 //! aggregate:
 //!
 //! - collection files (`{ schemaVersion, records }`): `revisions.json`,
-//!   `dimensions.json`, `channels.json`, `profiles.json`, `cases.json`,
-//!   `gaps.json`, `extensions.json`, and `sources/{schema,spec,cli,observed}.json`;
+//!   `dimensions.json`, `channels.json`, `profiles.json`, `gaps.json`,
+//!   `extensions.json`, and `sources/{schema,spec,cli,observed}.json`;
 //! - per-area behavior files: `behaviors/*.json` (each a collection);
+//! - per-area case files: `cases/*.json` (each a collection);
 //! - per-waiver files: `waivers/*.json` (each a single record object).
 //!
 //! Missing collection files / directories are treated as EMPTY (the seed skeleton
@@ -260,13 +261,18 @@ impl Registry {
             ));
         }
 
+        // cases/*.json — one collection per area (024 T007/T008). Each record keeps
+        // the file it came from and its index WITHIN that file, so a shape diagnostic
+        // still points at a reviewable location after the split.
+        let case_origins = load_case_files(&root.join("cases"), &mut errors);
+
         let registry = Registry {
             // Single-file collections at the registry root.
             revisions: load_collection(root, "revisions.json", &mut errors),
             dimensions: load_collection(root, "dimensions.json", &mut errors),
             channels: load_collection(root, "channels.json", &mut errors),
             profiles: load_collection(root, "profiles.json", &mut errors),
-            cases: load_collection(root, "cases.json", &mut errors),
+            cases: case_origins.iter().map(|o| o.case.clone()).collect(),
             gaps: load_collection(root, "gaps.json", &mut errors),
             extensions: load_collection(root, "extensions.json", &mut errors),
             sources,
@@ -295,12 +301,12 @@ impl Registry {
         // schema error naming the offending case id, so it never reaches validation as a
         // half-interpreted record. (Semantic well-formedness of a correctly-shaped
         // declarative case is a V-series validation concern; see `validate.rs`.)
-        check_case_shapes(&root.join("cases.json"), &registry.cases, &mut errors);
+        check_case_shapes(&case_origins, &mut errors);
         // 022-conformance-runner (T062, FR-032/035): each allowed-difference must be
         // exactly-one-of waiverId/divergenceId, target a dotted path within a channel
         // (never a bare-channel/global-ignore), and be unique per (behavior, path) within
         // its case — all fail-loud at load.
-        check_allowed_differences(&root.join("cases.json"), &registry.cases, &mut errors);
+        check_allowed_differences(&case_origins, &mut errors);
 
         if errors.is_empty() {
             Ok(registry)
@@ -310,20 +316,66 @@ impl Registry {
     }
 }
 
+/// One loaded case together with the per-area file it came from and its index WITHIN
+/// that file (024 T008). Keeping the origin means a load diagnostic still names a
+/// reviewable `cases/<area>.json:records[i]` location after `cases.json` was split.
+#[derive(Debug, Clone)]
+struct CaseOrigin {
+    file: PathBuf,
+    /// Index of the record within its own file, NOT within the concatenated set.
+    index: usize,
+    case: TestCase,
+}
+
+/// Load every `cases/<area>.json` collection (024 T007/T008), returning the records
+/// with their origins in a deterministic, id-sorted order.
+///
+/// Files are read in sorted-filename order and each record keeps its in-file index;
+/// the concatenated result is then sorted by case id so the aggregate ordering is a
+/// property of the DATA, not of how the areas happen to be named or split. That
+/// preserves the ordering the single `cases.json` had (it was already id-sorted) and
+/// keeps it stable if a future area file is added, renamed, or resplit. The sort is
+/// stable, so two records sharing an id (a V2 duplicate) keep their relative file
+/// order and are still both reported.
+fn load_case_files(dir: &Path, errors: &mut Vec<SchemaError>) -> Vec<CaseOrigin> {
+    let mut out: Vec<CaseOrigin> = Vec::new();
+    for path in json_files_sorted(dir, errors) {
+        match parse_collection::<TestCase>(&path) {
+            Ok(records) => {
+                out.extend(
+                    records
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, case)| CaseOrigin {
+                            file: path.clone(),
+                            index,
+                            case,
+                        }),
+                )
+            }
+            Err(err) => errors.push(err),
+        }
+    }
+    out.sort_by(|a, b| a.case.id.cmp(&b.case.id));
+    out
+}
+
 /// Push a located [`SchemaError`] for every case record that is neither cleanly legacy
 /// nor cleanly declarative (both shapes present, or neither). The `location` names the
-/// offending case id (or its index when the id is empty) so the diagnosis is precise
-/// (022-conformance-runner, FR-003).
-fn check_case_shapes(cases_file: &Path, cases: &[TestCase], errors: &mut Vec<SchemaError>) {
-    for (idx, case) in cases.iter().enumerate() {
+/// offending case id (or its in-file index when the id is empty) so the diagnosis is
+/// precise (022-conformance-runner, FR-003).
+fn check_case_shapes(cases: &[CaseOrigin], errors: &mut Vec<SchemaError>) {
+    for origin in cases {
+        let case = &origin.case;
         if let Err(shape) = case.classify() {
+            let idx = origin.index;
             let location = if case.id.is_empty() {
                 format!("records[{idx}]")
             } else {
                 format!("records[{idx}] ({})", case.id)
             };
             errors.push(SchemaError {
-                file: cases_file.to_path_buf(),
+                file: origin.file.clone(),
                 location: Some(location),
                 message: shape.message().to_string(),
             });
@@ -335,15 +387,17 @@ fn check_case_shapes(cases_file: &Path, cases: &[TestCase], errors: &mut Vec<Sch
 /// of `waiverId`/`divergenceId`, a bare-channel/global-ignore `observablePath`, or a
 /// duplicate `(behavior, observablePath)` within the same case (a conflicting duplicate).
 /// These are structural, per-case defects rejected fail-loud at load (FR-032/035).
-fn check_allowed_differences(cases_file: &Path, cases: &[TestCase], errors: &mut Vec<SchemaError>) {
-    for (idx, case) in cases.iter().enumerate() {
+fn check_allowed_differences(cases: &[CaseOrigin], errors: &mut Vec<SchemaError>) {
+    for origin in cases {
+        let case = &origin.case;
+        let idx = origin.index;
         let mut seen: std::collections::HashSet<(String, String)> =
             std::collections::HashSet::new();
         for (adx, ad) in case.allowed_differences.iter().enumerate() {
             let where_at = format!("records[{idx}] ({}).allowedDifferences[{adx}]", case.id);
             let mut push = |message: String| {
                 errors.push(SchemaError {
-                    file: cases_file.to_path_buf(),
+                    file: origin.file.clone(),
                     location: Some(where_at.clone()),
                     message,
                 });

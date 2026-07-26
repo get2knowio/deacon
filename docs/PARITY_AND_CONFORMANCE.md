@@ -464,7 +464,8 @@ conformance/
   RULES.md                    R1–R8, gap-vs-waiver, out-of-scope, V11–V14
   registry/
     behaviors/*.json          three-axis behavior records
-    cases.json  waivers/  gaps.json  extensions.json
+    cases/*.json              per-area conformance case records
+    waivers/  gaps.json  extensions.json
     revisions.json  dimensions.json  channels.json  profiles.json
     classifications/          hand-authored constraint dispositions
   inventory/constraints.json  MACHINE-OWNED — never hand-edit
