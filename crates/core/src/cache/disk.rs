@@ -2,6 +2,7 @@
 
 use super::{Cache, CacheStats, Result, TtlEntry, hash_key};
 use crate::errors::CacheError;
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -10,6 +11,18 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{debug, trace, warn};
+
+/// Sibling lock file guarding the whole `index.json` read-modify-write.
+///
+/// Mirrors `port_forward::registry`: an advisory `fs2` `flock` held across the
+/// *sequence*, not just the publish. `flock` is attached to the open file
+/// description, so independent `File::create` calls contend correctly both
+/// across processes and across threads of one process, and the kernel releases
+/// it if the holder dies.
+const INDEX_LOCK_FILE: &str = "index.lock";
+
+/// Name of the published index.
+const INDEX_FILE: &str = "index.json";
 
 fn cache_io<S: Into<String>>(message: S) -> impl FnOnce(std::io::Error) -> CacheError {
     let message = message.into();
@@ -83,25 +96,55 @@ where
         Ok(cache)
     }
 
-    /// Load the index of existing cache entries
-    fn load_index(&mut self) -> Result<()> {
-        let metadata_file = self.cache_dir.join("index.json");
+    /// Acquire the advisory lock guarding the index read-modify-write.
+    ///
+    /// The lock auto-releases when the returned handle is dropped (or the holder
+    /// dies), which is the crash-safety a host-shared index needs.
+    fn lock_index(&self) -> Result<fs::File> {
+        let lock_path = self.cache_dir.join(INDEX_LOCK_FILE);
+        let file = fs::File::create(&lock_path).map_err(cache_io(format!(
+            "Failed to create cache index lock: {:?}",
+            lock_path
+        )))?;
+        FileExt::lock_exclusive(&file).map_err(cache_io(format!(
+            "Failed to acquire cache index lock: {:?}",
+            lock_path
+        )))?;
+        Ok(file)
+    }
 
-        if metadata_file.exists() {
-            let content = fs::read_to_string(&metadata_file).map_err(cache_io(format!(
+    /// Read the published index from disk. Absent (or empty) means "no entries".
+    fn read_index(&self) -> Result<HashMap<String, CacheMetadata>> {
+        let metadata_file = self.cache_dir.join(INDEX_FILE);
+        match fs::read_to_string(&metadata_file) {
+            Ok(content) if content.trim().is_empty() => Ok(HashMap::new()),
+            Ok(content) => serde_json::from_str(&content)
+                .map_err(cache_serde_json("Failed to parse cache index")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(e) => Err(cache_io(format!(
                 "Failed to read cache index: {:?}",
                 metadata_file
-            )))?;
-
-            self.index = serde_json::from_str(&content)
-                .map_err(cache_serde_json("Failed to parse cache index"))?;
-
-            // Remove expired entries and clean up orphaned files
-            self.cleanup_expired_entries()?;
-
-            debug!(entries = self.index.len(), "Loaded cache index");
+            ))(e)),
         }
+    }
 
+    /// Adopt the on-disk index, discarding this instance's in-memory copy.
+    ///
+    /// MUST be called while holding [`Self::lock_index`]. Every mutation re-reads
+    /// first, because the in-memory map is a snapshot taken at construction and
+    /// republishing it wholesale would delete every key another process has
+    /// written since.
+    fn refresh_index_locked(&mut self) -> Result<()> {
+        self.index = self.read_index()?;
+        self.cleanup_expired_entries()?;
+        Ok(())
+    }
+
+    /// Load the index of existing cache entries
+    fn load_index(&mut self) -> Result<()> {
+        let _guard = self.lock_index()?;
+        self.refresh_index_locked()?;
+        debug!(entries = self.index.len(), "Loaded cache index");
         Ok(())
     }
 
@@ -113,8 +156,12 @@ where
     /// dir) race, a shorter payload landing over a longer file leaves trailing
     /// bytes — surfacing later as "trailing characters" JSON parse errors. The
     /// rename makes each publish all-or-nothing (last writer wins, always valid).
+    ///
+    /// Atomicity of the *publish* is necessary but not sufficient: the caller MUST
+    /// hold [`Self::lock_index`] and have re-read the index under it, or a
+    /// concurrent writer's entries are lost to the read-modify-write.
     fn save_index(&self) -> Result<()> {
-        let metadata_file = self.cache_dir.join("index.json");
+        let metadata_file = self.cache_dir.join(INDEX_FILE);
         let content = serde_json::to_string_pretty(&self.index)
             .map_err(cache_serde_json("Failed to serialize cache index"))?;
 
@@ -206,6 +253,13 @@ where
             ttl_seconds: ttl_entry.ttl_seconds,
         };
 
+        // The index is shared by every process using this cache directory, so the
+        // whole read-modify-write is serialized: take the lock, adopt what other
+        // writers have published, apply only OUR key, republish. Mutating the
+        // in-memory snapshot instead would silently drop every entry written since
+        // this instance was constructed.
+        let _guard = self.lock_index()?;
+        self.refresh_index_locked()?;
         self.index.insert(key_hash.clone(), metadata);
         self.save_index()?;
 
@@ -279,6 +333,26 @@ where
     fn remove(&mut self, key: &K) -> Option<V> {
         let key_hash = hash_key(key);
 
+        // Serialize the whole read-modify-write (see `set_with_ttl`). A lock or
+        // re-read failure degrades to the in-memory snapshot with a warning rather
+        // than dropping the removal — the `Cache` trait has no fallible removal —
+        // but it is never silent.
+        let guard = match self.lock_index() {
+            Ok(g) => Some(g),
+            Err(e) => {
+                warn!(
+                    ?e,
+                    "Failed to lock cache index for removal; proceeding unlocked"
+                );
+                None
+            }
+        };
+        if guard.is_some()
+            && let Err(e) = self.refresh_index_locked()
+        {
+            warn!(?e, "Failed to re-read cache index before removal");
+        }
+
         // Get the value before removal
         let value = match self.load_entry(&key_hash) {
             Ok(Some(entry)) => Some(entry.value),
@@ -304,6 +378,24 @@ where
     }
 
     fn clear(&mut self) {
+        // Clearing must see every writer's entries, or the data files another
+        // process published outlive the index that named them.
+        let guard = match self.lock_index() {
+            Ok(g) => Some(g),
+            Err(e) => {
+                warn!(
+                    ?e,
+                    "Failed to lock cache index for clear; proceeding unlocked"
+                );
+                None
+            }
+        };
+        if guard.is_some()
+            && let Err(e) = self.refresh_index_locked()
+        {
+            warn!(?e, "Failed to re-read cache index before clear");
+        }
+
         let count = self.index.len();
 
         // Remove all data files
@@ -445,6 +537,52 @@ mod tests {
             .expect("index.json must remain valid JSON under concurrent writers");
         let _cache: DiskCache<String, String> =
             DiskCache::new(&dir).expect("reload must not fail to parse the index");
+    }
+
+    #[test]
+    fn test_concurrent_writers_do_not_lose_each_others_entries() {
+        // Regression: the index is a read-modify-write over a SHARED file. Each
+        // `DiskCache` loads `index.json` into memory at construction and republishes
+        // the WHOLE map on every mutation. Without a lock held across the whole
+        // sequence, a losing writer's entry is silently clobbered (classic lost
+        // update) even though each individual publish is atomic — which is how a
+        // `deacon down` for one workspace could report "no containers found" after a
+        // concurrent `up` for a different workspace overwrote its entry.
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().to_path_buf();
+        const THREADS: usize = 8;
+        const PER_THREAD: usize = 25;
+
+        let handles: Vec<_> = (0..THREADS)
+            .map(|t| {
+                let dir = dir.clone();
+                std::thread::spawn(move || {
+                    for i in 0..PER_THREAD {
+                        // A fresh cache per write mirrors separate `deacon`
+                        // PROCESSES, each of which loads the index, mutates one
+                        // key and exits.
+                        let mut cache: DiskCache<String, String> = DiskCache::new(&dir).unwrap();
+                        cache.set(format!("t{t}-k{i}"), format!("v{i}")).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let mut cache: DiskCache<String, String> = DiskCache::new(&dir).unwrap();
+        let missing: Vec<String> = (0..THREADS)
+            .flat_map(|t| (0..PER_THREAD).map(move |i| format!("t{t}-k{i}")))
+            .filter(|k| cache.get(k).is_none())
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "{} of {} entries were lost to the index read-modify-write race: {:?}",
+            missing.len(),
+            THREADS * PER_THREAD,
+            &missing[..missing.len().min(10)]
+        );
     }
 
     #[test]
