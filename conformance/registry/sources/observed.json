@@ -26,7 +26,7 @@
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",
       "locator": "up/container-labels",
-      "summary": "On the same fixture (fx-up-basic, image alpine:3.19), `docker inspect .Config.Labels` shows the reference CLI setting exactly three labels \u2014 devcontainer.metadata, devcontainer.local_folder, devcontainer.config_file \u2014 while deacon sets those three plus five it alone defines: devcontainer.configHash, devcontainer.config_name, devcontainer.name, devcontainer.source (value \"deacon\"), devcontainer.workspaceHash. devcontainer.metadata is byte-identical between the two; local_folder and config_file differ only by each side's own workspace path.",
+      "summary": "On the same fixture (fx-up-basic, image alpine:3.19), `docker inspect .Config.Labels` shows the reference CLI setting exactly three labels — devcontainer.metadata, devcontainer.local_folder, devcontainer.config_file — while deacon sets those three plus five it alone defines: devcontainer.configHash, devcontainer.config_name, devcontainer.name, devcontainer.source (value \"deacon\"), devcontainer.workspaceHash. local_folder and config_file differ only by each side's own workspace path. devcontainer.metadata is byte-identical ON THIS FIXTURE only because its bare config contributes no picked property, so both sides stamp \"[]\"; its CONTENT is a separate claim, recorded by bhv-container-metadata-label-authored, and it was NOT in agreement until T115.",
       "behaviors": [
         "bhv-container-identity-labels"
       ]
@@ -39,6 +39,16 @@
       "summary": "`docker inspect .Config.Cmd` on fx-up-container-labels shows two different shell keep-alive strings. Behavioral equivalence measured by `docker stop` wall time and exit code: deacon 245 ms / exit 0, reference 215 ms / exit 0.",
       "behaviors": [
         "bhv-container-keepalive-command"
+      ]
+    },
+    {
+      "id": "src-obs-container-metadata-label-authored",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "up/container-metadata-label",
+      "summary": "On fx-state-single-container the reference stamps `devcontainer.metadata` as [{\"mounts\":[\"source=${localWorkspaceFolder}/sib,target=/workspaces/sib,type=bind\"],\"containerEnv\":{\"SC_ENV\":\"yes\"}}] — templates intact — where deacon stamped the substituted absolute path. A dedicated probe fixture extended the measurement to `remoteEnv` and `postCreateCommand` (also templates) and to `Config.Env` (the SUBSTITUTED containerEnv value), and to the read-back: `devcontainer exec --container-id` prints `LWF=[${localWorkspaceFolder}]`, `CWF=[${containerWorkspaceFolder}]`, `LENV=[/home/vscode]`.",
+      "behaviors": [
+        "bhv-container-metadata-label-authored"
       ]
     },
     {

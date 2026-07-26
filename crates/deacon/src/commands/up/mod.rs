@@ -193,6 +193,7 @@ pub(crate) async fn execute_up_with_runtime(
     // Load configuration with shared resolution (workspace/config/override/secrets)
     let ConfigLoadResult {
         mut config,
+        raw_config,
         workspace_folder,
         config_path,
         ..
@@ -219,6 +220,22 @@ pub(crate) async fn execute_up_with_runtime(
     // config stamps a `devcontainer.configHash` label that `exec` can never
     // reproduce, breaking `up` ↔ `exec` reconnection for Dockerfile configs.
     let identity_config = config.clone();
+
+    // #322 / T115: pick the `devcontainer.metadata` config entry from the RAW
+    // (pre-substitution) config, here, where the raw config exists.
+    //
+    // Two independent reasons this must happen at the top of `up`:
+    //   1. Substitution. The label describes the AUTHORED configuration to whoever
+    //      reads the container later, so it carries `${localWorkspaceFolder}`, not
+    //      this machine's absolute path. Measured against pinned oracle 0.87.0.
+    //   2. Layering. The picked entry must be devcontainer.json's own properties,
+    //      not a duplicate of the base image's metadata (which the label already
+    //      carries as separate, lower-precedence entries) — so it is taken before
+    //      the image-metadata merge, the feature merge and the Dockerfile build.
+    // None of the mutations between here and the create call touch a picked
+    // property (they touch `forwardPorts`/`appPort`, `features`, `image`), so this
+    // snapshot loses nothing they would have contributed.
+    let metadata_config_entry = merged_config::config_metadata_entry(&raw_config);
 
     // T029: Check for disallowed features before any runtime operations
     check_for_disallowed_features(&config.features)?;
@@ -555,6 +572,7 @@ pub(crate) async fn execute_up_with_runtime(
             config_path.as_path(),
             &runtime,
             host_ca_set.as_ref(),
+            &metadata_config_entry,
         )
         .await?
     } else {
@@ -571,6 +589,7 @@ pub(crate) async fn execute_up_with_runtime(
             &cache_folder,
             &build_options,
             host_ca_set.as_ref(),
+            &metadata_config_entry,
         )
         .await?
     };

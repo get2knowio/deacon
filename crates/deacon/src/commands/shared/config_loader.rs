@@ -39,6 +39,15 @@ pub struct ConfigLoadArgs<'a> {
 #[derive(Debug)]
 pub struct ConfigLoadResult {
     pub config: DevContainerConfig,
+    /// The merged configuration **before** variable substitution — the reference
+    /// CLI's `SubstitutedConfig.raw`.
+    ///
+    /// Needed by the one output that describes the *authored* configuration rather
+    /// than the resolved one: the `devcontainer.metadata` container label, which a
+    /// later reader recovers config from and so must carry `${localWorkspaceFolder}`
+    /// rather than this machine's absolute path.
+    #[allow(dead_code)]
+    pub raw_config: DevContainerConfig,
     #[allow(dead_code)]
     pub substitution_report: SubstitutionReport,
     pub workspace_folder: PathBuf,
@@ -113,17 +122,19 @@ pub async fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
     };
 
     let merge_refs: Vec<&Path> = merge_paths.iter().map(|p| p.as_path()).collect();
-    let (config, substitution_report) = ConfigLoader::load_with_overrides_and_substitution(
-        &config_path,
-        &merge_refs,
-        secrets.as_ref(),
-        &workspace_folder,
-        args.resolve_devcontainer_id,
-    )
-    .await?;
+    let (raw_config, config, substitution_report) =
+        ConfigLoader::load_with_overrides_and_substitution_raw(
+            &config_path,
+            &merge_refs,
+            secrets.as_ref(),
+            &workspace_folder,
+            args.resolve_devcontainer_id,
+        )
+        .await?;
 
     Ok(ConfigLoadResult {
         config,
+        raw_config,
         substitution_report,
         workspace_folder,
         config_path,

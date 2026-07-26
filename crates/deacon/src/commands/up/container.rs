@@ -85,17 +85,12 @@ pub(crate) async fn execute_container_up(
     cache_folder: &Option<PathBuf>,
     build_options: &BuildOptions,
     host_ca_set: Option<&CorporateCaSet>,
+    metadata_config_entry: &serde_json::Value,
 ) -> Result<UpContainerInfo> {
     debug!("Starting traditional development container");
 
     // Merge CLI forward_ports into config
     let mut config = config.clone();
-
-    // #322: capture the pure USER config BEFORE any image-metadata merge, so the
-    // `devcontainer.metadata` config entry we stamp carries only devcontainer.json's
-    // own picked properties (remoteEnv/remoteUser/…) and does NOT duplicate the base
-    // image's metadata (which is already present as separate label entries).
-    let user_config_for_metadata = config.clone();
 
     // Host-CA injection (016, T028): synthesize the six CA env vars into the
     // container environment at create time, insert-if-absent so user
@@ -579,13 +574,18 @@ pub(crate) async fn execute_container_up(
     // container and is recoverable by exec/read-configuration/set-up without the
     // workspace — matching the reference CLI. Informational label; never feeds
     // `devcontainerId` (see `ContainerIdentity::id_hash_labels`).
+    //
+    // `metadata_config_entry` was picked from the RAW (pre-substitution) config by
+    // the caller (T115). It is not derived from the local `config`: that one has
+    // been substituted, and stamping substituted values bakes this machine's
+    // absolute paths into container metadata.
     let create_identity_owned;
     let create_identity: &ContainerIdentity = match config.image.as_deref() {
         Some(image_ref) => {
             match super::merged_config::build_container_metadata_label(
                 docker,
                 image_ref,
-                &user_config_for_metadata,
+                metadata_config_entry,
             )
             .await
             {

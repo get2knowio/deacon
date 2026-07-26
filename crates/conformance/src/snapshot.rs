@@ -33,7 +33,11 @@ use serde_json::Value;
 /// `portsAttributes`, where its key list was measured — it previously walked the whole
 /// document, eliding an enumerated key NAME at any depth (including inside
 /// `customizations`, arbitrary user data), which is the unbounded reach FR-029 forbids.
-pub const NORMALIZER_VERSION: &str = "5";
+/// T115 set it to `"6"`: `label_json_document` was added to the `chan-container-state`
+/// chain, so the one label whose value is a JSON document (`devcontainer.metadata`)
+/// compares as that document rather than as a byte string — key order and insignificant
+/// whitespace stop mattering, nothing is removed.
+pub const NORMALIZER_VERSION: &str = "6";
 
 /// The `provenance.json` record — the FR-017 identity/environment elements (data-model
 /// §7, contract snapshot-provenance.md). Thirteen fields: twelve identity/environment
