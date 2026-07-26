@@ -295,6 +295,14 @@ pub(crate) async fn execute_ops(
     for (op_id, snapshot) in op_snapshots {
         ctx.record_op_snapshot(op_id, snapshot);
     }
+
+    // THE EVIDENCE-SOURCE BOUNDARY (024 US6, research Decision 5). Capture is complete and
+    // no observer has run yet, so this is the one point at which the injected-regression
+    // harness may perturb the RAW artifacts. It is a no-op — a single atomic load — in
+    // every ordinary run: only the `coverage-regressions` bin takes out the capability
+    // that arms it (FR-070), and only deacon's side is ever perturbed.
+    crate::inject::intercept(&mut ctx)?;
+
     Ok((ctx, docker_ws))
 }
 

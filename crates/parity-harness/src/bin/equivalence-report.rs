@@ -29,7 +29,6 @@
 //! produced is not an empty ledger.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use deacon_conformance::baseline::{BaselineFile, UnitCategory, load_baseline};
@@ -41,13 +40,11 @@ use parity_harness::equivalence::{
     ComparisonOutcome, EquivalenceEntry, EquivalenceLedger, Relation, classify_relation,
 };
 use parity_harness::oracle::Oracle;
+use parity_harness::prereq::deacon_binary;
 use parity_harness::registry::ParityRegistry;
 use parity_harness::report::{CaseResult, Outcome as LegacyOutcome};
 use parity_harness::runner::{RunConfig, run_case};
 use parity_harness::{HarnessError, report_root};
-
-/// The environment override for the deacon binary under test.
-const DEACON_BIN_ENV: &str = "DEACON_PARITY_DEACON_BIN";
 
 /// The program every migrated case runs on: the migration's DESTINATION, never a
 /// deletion candidate however its own units are judged. Mirrors
@@ -183,82 +180,6 @@ fn legacy_outcome_name(result: &CaseResult) -> &'static str {
         LegacyOutcome::PassWaived => "pass-waived",
         LegacyOutcome::Fail => "fail",
     }
-}
-
-/// The deacon binary under test — **built, then taken from cargo's own artifact report**.
-///
-/// This must be the SAME binary the parity tests exercise. Every parity test binary uses
-/// `env!("CARGO_BIN_EXE_deacon")`, which is the artifact cargo just compiled; a bin has no
-/// such macro, so it has to establish the equivalent itself.
-///
-/// It previously guessed — preferring `target/release/deacon` if the file merely existed,
-/// else `target/debug/deacon` — and that was a real defect with teeth. A release artifact
-/// left over from an earlier day satisfied the check, so the ledger compared a **stale
-/// deacon** against the current oracle. Observed live: a three-day-old `target/release/deacon`
-/// still injected `${containerEnv:VAR}` into a lifecycle command string (the #332 hazard
-/// since fixed), which the ledger faithfully reported as the replacement being `stricter`
-/// than the legacy path. The finding was entirely an artifact of the binary chosen.
-///
-/// The failure mode that matters is the mirror image: a stale build that happens to AGREE
-/// with the reference would have produced a false `equivalent` and authorized deleting real
-/// coverage. A gate for an irreversible act cannot guess which binary it is judging, so this
-/// builds and reads the path back rather than looking for one.
-///
-/// `DEACON_PARITY_DEACON_BIN` still overrides, for pointing at a specific build deliberately.
-fn deacon_binary() -> Result<PathBuf, HarnessError> {
-    if let Some(path) = std::env::var_os(DEACON_BIN_ENV) {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            eprintln!(
-                "using the deacon binary from {DEACON_BIN_ENV}: {}",
-                path.display()
-            );
-            return Ok(path);
-        }
-        return Err(HarnessError::FixtureMissing { path });
-    }
-
-    let output = std::process::Command::new("cargo")
-        .args(["build", "-p", "deacon", "--message-format", "json"])
-        .current_dir(workspace_root())
-        .output()
-        .map_err(|e| HarnessError::Report {
-            cause: format!("could not build the deacon binary under test: {e}"),
-        })?;
-    if !output.status.success() {
-        return Err(HarnessError::Report {
-            cause: format!(
-                "building the deacon binary under test failed ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            ),
-        });
-    }
-
-    // cargo emits one JSON object per line; the `deacon` bin artifact carries the path.
-    let mut executable: Option<PathBuf> = None;
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        if value.get("reason").and_then(|v| v.as_str()) != Some("compiler-artifact") {
-            continue;
-        }
-        if value.pointer("/target/name").and_then(|v| v.as_str()) != Some("deacon") {
-            continue;
-        }
-        if let Some(path) = value.get("executable").and_then(|v| v.as_str()) {
-            executable = Some(PathBuf::from(path));
-        }
-    }
-
-    let path = executable.ok_or_else(|| HarnessError::Report {
-        cause: "cargo reported no `deacon` executable artifact — refusing to guess which \
-                binary to judge"
-            .to_string(),
-    })?;
-    eprintln!("deacon binary under test: {}", path.display());
-    Ok(path)
 }
 
 /// Produce the ledger, writing `target/parity/equivalence.json`.

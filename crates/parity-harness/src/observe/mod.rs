@@ -144,6 +144,26 @@ impl RunContext {
         self.outcomes.get(op_id)
     }
 
+    /// Every captured process outcome, mutably, in a DETERMINISTIC (op-id-sorted) order.
+    ///
+    /// Exists for one caller: the injected-regression harness
+    /// ([`crate::inject`]), which perturbs the RAW captured artifact in the gap between
+    /// capture and observation (024 US6). Nothing on the ordinary path mutates a captured
+    /// outcome — evidence is recorded once and read, never rewritten — and the injector
+    /// itself is gated on a process-level capability the ordinary drivers never take out.
+    ///
+    /// The sort is not cosmetic: a `HashMap` iteration order would make a perturbation's
+    /// application order vary run to run, and FR-069 requires the same inputs to produce
+    /// the same classification.
+    pub fn outcomes_mut(&mut self) -> impl Iterator<Item = &mut ProcessOutcome> {
+        // Collect the `(key, &mut value)` pairs and sort them, rather than sorting the keys
+        // and indexing back into the map — the borrow checker will not let a key list index
+        // a map it is also lending out mutably, and this form needs no second lookup.
+        let mut pairs: Vec<(&String, &mut ProcessOutcome)> = self.outcomes.iter_mut().collect();
+        pairs.sort_by(|a, b| a.0.cmp(b.0));
+        pairs.into_iter().map(|(_, outcome)| outcome)
+    }
+
     /// Record the container snapshot at an operation's boundary (runner-side, US6).
     pub fn record_op_snapshot(&mut self, op_id: impl Into<String>, snapshot: OpSnapshot) {
         self.op_snapshots.insert(op_id.into(), snapshot);
