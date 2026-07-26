@@ -170,3 +170,44 @@ fn committed_obligations_match_a_fresh_regeneration() {
         drift.changed.len()
     );
 }
+
+/// 024 T149 / FR-004a: **exactly one** environment profile is active.
+///
+/// Both `Coverage::evaluate` and the validator select the active profile with
+/// `.find(|p| p.active)` — the FIRST match, silently. With one record in the file that was
+/// harmless. It stopped being harmless the moment a second profile was modelled: a
+/// contributor "activating" it by setting a second `active: true` gets a result that looks
+/// like an activation, reports cleanly, and means nothing, because the first record still
+/// wins and the second is never consulted.
+///
+/// A silent no-op is the one outcome the whole conformance model exists to prevent, so the
+/// arity is asserted rather than assumed. Activating a further environment (FR-004b) stays a
+/// pure data change — it is a *swap* of which record carries the flag, not an addition.
+#[test]
+fn exactly_one_environment_profile_is_active() {
+    let registry_dir = default_registry_dir();
+    let registry = Registry::load(&registry_dir).unwrap_or_else(|e| {
+        panic!(
+            "the real registry at {} is unreadable: {e}",
+            registry_dir.display()
+        )
+    });
+
+    let active: Vec<&str> = registry
+        .profiles
+        .iter()
+        .filter(|p| p.active)
+        .map(|p| p.id.as_str())
+        .collect();
+
+    assert_eq!(
+        active.len(),
+        1,
+        "exactly one profile in conformance/registry/profiles.json must be `active` \
+         (FR-004a); found {}: {active:?}. Coverage and validation resolve the active \
+         profile with `.find(|p| p.active)`, so a second active record is never consulted \
+         — the activation would silently do nothing. To activate a different environment, \
+         MOVE the flag rather than adding one.",
+        active.len()
+    );
+}

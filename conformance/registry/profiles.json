@@ -10,6 +10,16 @@
         "dim-oracle": "0.87.0"
       },
       "active": true
+    },
+    {
+      "id": "prof-linux-amd64-podman-0870",
+      "context": {
+        "dim-os": "linux",
+        "dim-arch": "amd64",
+        "dim-runtime": "podman",
+        "dim-oracle": "0.87.0"
+      },
+      "active": false
     }
   ]
 }

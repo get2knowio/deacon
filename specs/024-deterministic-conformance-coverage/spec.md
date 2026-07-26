@@ -624,6 +624,27 @@ reported inert.
     only active one. Alternative runtimes and non-Linux platforms are modelled, their obligations
     enumerated and reported inactive-environment, and their activation is deliberately deferred to
     later work — which FR-004b keeps to a data change rather than a re-modelling.
+
+    **Outcome of T149 (attempted, deliberately not activated).** A second profile record now
+    exists — `prof-linux-amd64-podman-0870`, identical but for `dim-runtime: podman` — so
+    activation is the one-field data change FR-004b promises. It is `active: false`, and the
+    reason is empirical rather than budgetary. Activation was tried for real against a copy of
+    the registry, and `validate` plus `certify` returned results **identical to the docker
+    profile's**: 787 obligations, 370 covered, 417 gap, `inactive-environment 0`, the same ten
+    blocking gaps. The re-bucketing SC-015 predicts is real, but it is currently VACUOUS: all 55
+    behaviors carry an empty `applicability`, so every one of them applies in every environment
+    and nothing is runtime-conditioned for a profile swap to move. That identical output is
+    precisely why the flag stays off — activation would move nothing, and so would verify
+    nothing, while asserting that the whole registry's `reference` axis holds under a runtime no
+    case has ever been executed against. Under this registry's own core principle ("statuses are
+    evidence-backed claims, not aspirations") that is the one thing a profile flag must not do.
+    Note also that activation can only ever be a **swap**, never an addition: coverage and
+    validation both resolve the active profile with `.find(|p| p.active)`, so a second
+    `active: true` is never consulted — a silent no-op now guarded by
+    `registry_valid::exactly_one_environment_profile_is_active`. Genuine activation needs a
+    podman execution lane (research Decision: an order-of-magnitude live-cost multiplier) and
+    runtime-conditioned `applicability` on the behaviors that actually differ; neither is in
+    scope here.
 11. **`inactive-environment` never blocks and never counts as covered.** It is a fifth reporting
     bucket. Folding it into coverage would let a green run in one environment read as evidence
     about another; folding it into gaps would block every release on environments nobody has
