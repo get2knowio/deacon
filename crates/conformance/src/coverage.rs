@@ -27,7 +27,9 @@ use crate::load::Registry;
 use crate::model::{
     BehaviorUnit, CaseKind, CertificationProfile, Decision, ReferenceStatus, SpecStatus, TestCase,
 };
-use crate::obligation::{Obligation, ObligationInventory, ObligationKind};
+use crate::obligation::{
+    DispositionIndex, DispositionKind, Obligation, ObligationInventory, ObligationKind,
+};
 use crate::scenario::OPERATION_DIMENSION;
 use crate::validate::applies_in_profile;
 
@@ -330,13 +332,26 @@ pub struct ObligationOutcome<'a> {
 /// bucket vocabulary. Reusing it means the behavior denominator `certify` already
 /// measures and the obligation denominator this feature adds can never disagree.
 ///
-/// Explicit `odp-` disposition records (User Story 2) take precedence over everything
-/// here; until they exist, this is evidence-derived and an obligation with no evidence is
-/// [`ObligationBucket::Undispositioned`].
+/// **Explicit `odp-` disposition records take precedence over everything here** (User
+/// Story 2, contracts/obligation.md "Disposition resolution"). The precedence order is:
+///
+/// 1. `inactive-environment` — DERIVED from the active profile, so it outranks even an
+///    explicit record. It is a reporting bucket, not a disposition (rule 4): if an author
+///    could out-vote it, "the environment is inactive" would become a way to retire an
+///    obligation rather than a statement about the profile.
+/// 2. The single resolved [`crate::obligation::Resolution::One`] disposition.
+/// 3. Otherwise the evidence — what cases actually exist.
+///
+/// Step 3 is **not** a disposition default. It is what a *report* can honestly say about
+/// an obligation nobody has judged yet, and it never makes that obligation acceptable:
+/// V28 fires on exactly this state, in `validate` and in `certify`, whatever bucket the
+/// report prints. Removing it would not tighten any gate; it would only blind the report
+/// to evidence during the interval between generating an obligation and dispositioning it.
 pub fn evaluate_obligations<'a>(
     registry: &'a Registry,
     inventory: &'a ObligationInventory,
 ) -> Vec<ObligationOutcome<'a>> {
+    let dispositions = DispositionIndex::build(registry);
     let coverage = Coverage::evaluate(registry);
     let by_behavior: BTreeMap<&str, &BehaviorCoverage<'a>> = coverage
         .behaviors
@@ -359,20 +374,10 @@ pub fn evaluate_obligations<'a>(
     inventory
         .units
         .iter()
-        .map(|unit| match unit.kind {
-            ObligationKind::Combination => {
-                let by = matching_case_ids(unit, &scenario_cases);
-                ObligationOutcome {
-                    obligation: unit,
-                    bucket: if by.is_empty() {
-                        ObligationBucket::Undispositioned
-                    } else {
-                        ObligationBucket::Covered
-                    },
-                    by,
-                }
-            }
-            ObligationKind::Behavior => {
+        .map(|unit| {
+            // Precedence step 1: the derived inactive-environment bucket, before any
+            // hand-authored record is consulted.
+            if unit.kind == ObligationKind::Behavior {
                 let behavior = unit.behavior.as_deref().unwrap_or_default();
                 if out_of_profile.contains(behavior) {
                     return ObligationOutcome {
@@ -381,38 +386,70 @@ pub fn evaluate_obligations<'a>(
                         by: Vec::new(),
                     };
                 }
-                match by_behavior.get(behavior) {
-                    None => ObligationOutcome {
-                        obligation: unit,
-                        bucket: ObligationBucket::Undispositioned,
-                        by: Vec::new(),
+            }
+            // Precedence step 2: the single explicit disposition, if there is exactly
+            // one. Zero or several is V28's business, and falls through to the evidence.
+            if let Some(record) = dispositions.resolve(&unit.id).single() {
+                return ObligationOutcome {
+                    obligation: unit,
+                    bucket: match record.disposition {
+                        DispositionKind::Case => ObligationBucket::Covered,
+                        DispositionKind::NonTestable => ObligationBucket::NonTestable,
+                        DispositionKind::Waived => ObligationBucket::Waived,
+                        DispositionKind::Gap => ObligationBucket::Gap,
                     },
-                    Some(entry) => {
-                        let (bucket, by): (ObligationBucket, Vec<String>) = match entry.state {
-                            CoverageState::Conformant | CoverageState::Divergent => (
-                                ObligationBucket::Covered,
-                                entry.cases.iter().map(|c| c.id.clone()).collect(),
-                            ),
-                            CoverageState::Waived => (
-                                ObligationBucket::Waived,
-                                entry.waivers.iter().map(|w| (*w).to_string()).collect(),
-                            ),
-                            CoverageState::Gap => (
-                                ObligationBucket::Gap,
-                                entry.gaps.iter().map(|g| (*g).to_string()).collect(),
-                            ),
-                        };
-                        if by.is_empty() {
-                            ObligationOutcome {
-                                obligation: unit,
-                                bucket: ObligationBucket::Undispositioned,
-                                by,
-                            }
+                    by: disposition_backing(record),
+                };
+            }
+            // Precedence step 3: the evidence.
+            match unit.kind {
+                ObligationKind::Combination => {
+                    let by = matching_case_ids(unit, &scenario_cases);
+                    ObligationOutcome {
+                        obligation: unit,
+                        bucket: if by.is_empty() {
+                            ObligationBucket::Undispositioned
                         } else {
-                            ObligationOutcome {
-                                obligation: unit,
-                                bucket,
-                                by,
+                            ObligationBucket::Covered
+                        },
+                        by,
+                    }
+                }
+                ObligationKind::Behavior => {
+                    let behavior = unit.behavior.as_deref().unwrap_or_default();
+                    match by_behavior.get(behavior) {
+                        None => ObligationOutcome {
+                            obligation: unit,
+                            bucket: ObligationBucket::Undispositioned,
+                            by: Vec::new(),
+                        },
+                        Some(entry) => {
+                            let (bucket, by): (ObligationBucket, Vec<String>) = match entry.state {
+                                CoverageState::Conformant | CoverageState::Divergent => (
+                                    ObligationBucket::Covered,
+                                    entry.cases.iter().map(|c| c.id.clone()).collect(),
+                                ),
+                                CoverageState::Waived => (
+                                    ObligationBucket::Waived,
+                                    entry.waivers.iter().map(|w| (*w).to_string()).collect(),
+                                ),
+                                CoverageState::Gap => (
+                                    ObligationBucket::Gap,
+                                    entry.gaps.iter().map(|g| (*g).to_string()).collect(),
+                                ),
+                            };
+                            if by.is_empty() {
+                                ObligationOutcome {
+                                    obligation: unit,
+                                    bucket: ObligationBucket::Undispositioned,
+                                    by,
+                                }
+                            } else {
+                                ObligationOutcome {
+                                    obligation: unit,
+                                    bucket,
+                                    by,
+                                }
                             }
                         }
                     }
@@ -420,6 +457,22 @@ pub fn evaluate_obligations<'a>(
             }
         })
         .collect()
+}
+
+/// The record ids a disposition puts forward as its backing, id-sorted — the covering
+/// cases, or the single waiver/gap. A `non-testable` disposition names no record: its
+/// backing is an argument, which is why V29 insists the argument name a ground.
+fn disposition_backing(record: &crate::obligation::ObligationDisposition) -> Vec<String> {
+    match record.disposition {
+        DispositionKind::Case => {
+            let mut cases = record.cases.clone();
+            cases.sort();
+            cases
+        }
+        DispositionKind::NonTestable => Vec::new(),
+        DispositionKind::Waived => record.waiver.iter().cloned().collect(),
+        DispositionKind::Gap => record.gap.iter().cloned().collect(),
+    }
 }
 
 /// The ids of cases whose evidence may satisfy a combination obligation.

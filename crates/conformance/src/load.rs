@@ -30,6 +30,7 @@ use crate::model::{
     Collection, ConstraintInventory, ContextDimension, DeaconExtension, Gap, ObservableChannel,
     SchemasManifest, SourceRevision, SourceUnit, SpecManifest, TestCase, Waiver,
 };
+use crate::obligation::ObligationDisposition;
 use crate::residual::{ResidualFile, ResidualRecord};
 use crate::scenario::{ApplicabilityFile, ApplicabilityRule, HighRiskTriple, ScenarioDimension};
 
@@ -241,6 +242,13 @@ pub struct Registry {
     /// Hand-authored high-risk triples — `applicability.json` `triples` (US3). A
     /// missing file is empty.
     pub triples: Vec<HighRiskTriple>,
+    /// Hand-authored obligation dispositions — `obligation-dispositions/<area>.json`,
+    /// one collection per area (024, US2). The judgement half of the obligation model:
+    /// `conformance/obligations/obligations.json` is machine-owned and says what must be
+    /// decided, these records say what was decided. Generation NEVER writes them (the
+    /// 020/021 boundary). A missing directory is empty — which is not "nothing to
+    /// decide" but "nothing decided yet", and V28 says so.
+    pub obligation_dispositions: Vec<ObligationDisposition>,
 }
 
 impl Registry {
@@ -314,6 +322,13 @@ impl Registry {
             scenario: load_collection(root, "scenario.json", &mut errors),
             applicability: applicability_file.records,
             triples: applicability_file.triples,
+            // obligation-dispositions/*.json — one collection per area (024 US2), read
+            // exactly like `behaviors/`/`classifications/`: same envelope, same
+            // per-file split, so adding an area is a file, not a code change.
+            obligation_dispositions: load_dir_collections(
+                &root.join("obligation-dispositions"),
+                &mut errors,
+            ),
         };
 
         // 022-conformance-runner (T007, FR-003): every case record MUST be exactly one

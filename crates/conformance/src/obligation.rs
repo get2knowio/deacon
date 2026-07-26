@@ -398,6 +398,388 @@ fn generate_behavior_obligations(registry: &Registry) -> Vec<Obligation> {
 }
 
 // ---------------------------------------------------------------------------
+// Disposition (`odp-`) — `registry/obligation-dispositions/<area>.json` (T061–T063)
+// ---------------------------------------------------------------------------
+
+/// The four dispositions an obligation may carry (data-model.md §6). Closed: there is no
+/// "different but acceptable" state, and no fifth word may be invented to soften a gap.
+///
+/// `inactive-environment` is deliberately **absent**: it is a *reporting bucket* derived
+/// from the active profile, never a hand-authored judgement (contracts/obligation.md,
+/// "Rules that make the vocabulary honest", rule 4). Putting it here would let an author
+/// retire an obligation by declaring its environment inactive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DispositionKind {
+    /// Satisfied by ≥1 resolvable, executable case. Never blocks.
+    Case,
+    /// Declared untestable, with a `rationale` naming a ground. Never blocks.
+    NonTestable,
+    /// Covered by a resolvable `wvr-` waiver. Blocks only once that waiver expires (V6).
+    Waived,
+    /// Admitted missing coverage, pointing at a resolvable `gap-`. **Always** blocks,
+    /// because the gap record it names always blocks.
+    Gap,
+}
+
+/// One hand-authored obligation disposition (`odp-`) — data-model.md §6.
+///
+/// Exactly one of `cases` / `rationale` / `waiver` / `gap` is present, and which one is
+/// fixed by `disposition`. **That arity is enforced at deserialize time** via
+/// [`RawObligationDisposition`], not deferred to V28/V29, for the reason `residual.rs`
+/// gives for the same choice: a record whose disposition and payload disagree is not a
+/// nuance a validation pass should interpret — it is a half-stated judgement, and the
+/// only honest reading is to refuse it at the door. V28 then owns *arity across records*
+/// (how many dispositions one obligation has) and V29 owns *semantics* (filler rationale,
+/// a triple argued rather than tested, a stale or dangling reference) — questions that
+/// genuinely need the rest of the registry to answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "RawObligationDisposition")]
+pub struct ObligationDisposition {
+    /// `odp-<slug>`.
+    pub id: String,
+    /// The `obl-` id this record dispositions. A disposition whose obligation no longer
+    /// resolves is **stale** (V29) — reported, never quietly dropped.
+    pub obligation: String,
+    pub disposition: DispositionKind,
+    /// `case` only: the covering case ids, ≥1.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cases: Vec<String>,
+    /// `non-testable` only: the ground. A filler phrase is V29.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    /// `waived` only: the backing `wvr-` id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiver: Option<String>,
+    /// `gap` only: the backing `gap-` id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap: Option<String>,
+}
+
+/// The on-disk shape, validated into [`ObligationDisposition`] by [`TryFrom`]. Carries
+/// `deny_unknown_fields` because it is the struct that actually reads the file.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RawObligationDisposition {
+    id: String,
+    obligation: String,
+    disposition: DispositionKind,
+    #[serde(default)]
+    cases: Vec<String>,
+    #[serde(default)]
+    rationale: Option<String>,
+    #[serde(default)]
+    waiver: Option<String>,
+    #[serde(default)]
+    gap: Option<String>,
+}
+
+impl TryFrom<RawObligationDisposition> for ObligationDisposition {
+    type Error = String;
+
+    fn try_from(raw: RawObligationDisposition) -> Result<Self, Self::Error> {
+        let id = raw.id;
+        let rationale = disposition_value(raw.rationale.as_deref(), "rationale", &id)?;
+        let waiver = disposition_value(raw.waiver.as_deref(), "waiver", &id)?;
+        let gap = disposition_value(raw.gap.as_deref(), "gap", &id)?;
+        for (index, case) in raw.cases.iter().enumerate() {
+            disposition_value(Some(case), &format!("cases[{index}]"), &id)?;
+        }
+
+        // Which payload each disposition REQUIRES, and — by exclusion — which three it
+        // forbids. Stated once, as data, so the two halves cannot drift apart.
+        let present: Vec<&str> = [
+            (!raw.cases.is_empty()).then_some("cases"),
+            rationale.is_some().then_some("rationale"),
+            waiver.is_some().then_some("waiver"),
+            gap.is_some().then_some("gap"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let required = match raw.disposition {
+            DispositionKind::Case => "cases",
+            DispositionKind::NonTestable => "rationale",
+            DispositionKind::Waived => "waiver",
+            DispositionKind::Gap => "gap",
+        };
+        if present != [required] {
+            return Err(format!(
+                "obligation disposition `{id}` is `{}` so it must carry exactly \
+                 `{required}` and nothing else, but it carries [{}]. A disposition whose \
+                 payload disagrees with its word is a half-stated judgement: say which of \
+                 the four it is, and back only that one.",
+                disposition_name(raw.disposition),
+                if present.is_empty() {
+                    "nothing".to_string()
+                } else {
+                    present.join(", ")
+                }
+            ));
+        }
+
+        Ok(ObligationDisposition {
+            id,
+            obligation: raw.obligation,
+            disposition: raw.disposition,
+            cases: raw.cases,
+            rationale,
+            waiver,
+            gap,
+        })
+    }
+}
+
+/// The wire spelling of a disposition, for diagnostics.
+pub fn disposition_name(kind: DispositionKind) -> &'static str {
+    match kind {
+        DispositionKind::Case => "case",
+        DispositionKind::NonTestable => "non-testable",
+        DispositionKind::Waived => "waived",
+        DispositionKind::Gap => "gap",
+    }
+}
+
+/// Normalize an optional payload field: absent stays absent, but a blank value or the
+/// scaffold sentinel is refused (T070).
+///
+/// A blank field is an authoring mistake, not an intentional absence — treating the two
+/// alike would let `"rationale": ""` satisfy `non-testable`. The sentinel check is the
+/// half that makes `coverage scaffold` safe to run: its output is deliberately
+/// unloadable, so a skeleton committed unedited fails at the door rather than certifying
+/// as a considered judgement.
+fn disposition_value(value: Option<&str>, field: &str, id: &str) -> Result<Option<String>, String> {
+    match value {
+        None => Ok(None),
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Err(format!(
+                    "obligation disposition `{id}`: `{field}` is present but blank — omit \
+                     the field entirely to mean \"absent\", so a blank value can never \
+                     stand in for a real one"
+                ));
+            }
+            if trimmed == crate::residual::UNREVIEWED_SENTINEL {
+                return Err(format!(
+                    "obligation disposition `{id}`: `{field}` carries the `{}` scaffold \
+                     sentinel — a scaffolded record must be reviewed and filled in before \
+                     it is committed",
+                    crate::residual::UNREVIEWED_SENTINEL
+                ));
+            }
+            Ok(Some(raw.to_string()))
+        }
+    }
+}
+
+/// How many dispositions an obligation carries, and which (T063).
+///
+/// **Explicit only. No inheritance, no default.** There is no document-scope fallback of
+/// the kind `clc-` classifications use for authoring documents, and no implicit
+/// "evidence exists, so call it covered". An obligation with no record is
+/// [`Resolution::Undispositioned`] — a state nobody chose, which V28 refuses — and one
+/// with several is [`Resolution::Conflicting`], which V28 also refuses. Resolution never
+/// picks a winner from a conflict: silently preferring one record would convert a
+/// disagreement between two reviewers into a decision neither made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolution<'a> {
+    /// No `odp-` record names this obligation.
+    Undispositioned,
+    /// Exactly one record — the only resolvable state.
+    One(&'a ObligationDisposition),
+    /// More than one record, id-sorted.
+    Conflicting(Vec<&'a ObligationDisposition>),
+}
+
+impl<'a> Resolution<'a> {
+    /// The single disposition, or `None` for both the zero and the many case.
+    pub fn single(&self) -> Option<&'a ObligationDisposition> {
+        match self {
+            Resolution::One(record) => Some(record),
+            _ => None,
+        }
+    }
+}
+
+/// An obligation-id → disposition-record index over a registry's hand-authored records.
+///
+/// Built once and shared by the reporter and both validators, so "what dispositions this
+/// obligation" has exactly one answer in the codebase.
+#[derive(Debug, Clone, Default)]
+pub struct DispositionIndex<'a> {
+    by_obligation: std::collections::BTreeMap<&'a str, Vec<&'a ObligationDisposition>>,
+}
+
+impl<'a> DispositionIndex<'a> {
+    /// Index every `odp-` record in `registry`, id-sorting the records under each
+    /// obligation so a conflict is reported in a stable order.
+    pub fn build(registry: &'a Registry) -> DispositionIndex<'a> {
+        let mut by_obligation: std::collections::BTreeMap<&str, Vec<&ObligationDisposition>> =
+            std::collections::BTreeMap::new();
+        for record in &registry.obligation_dispositions {
+            by_obligation
+                .entry(record.obligation.as_str())
+                .or_default()
+                .push(record);
+        }
+        for records in by_obligation.values_mut() {
+            records.sort_by(|a, b| a.id.cmp(&b.id));
+        }
+        DispositionIndex { by_obligation }
+    }
+
+    /// Resolve `obligation` — explicit only (see [`Resolution`]).
+    pub fn resolve(&self, obligation: &str) -> Resolution<'a> {
+        match self.by_obligation.get(obligation) {
+            None => Resolution::Undispositioned,
+            Some(records) if records.len() == 1 => Resolution::One(records[0]),
+            Some(records) => Resolution::Conflicting(records.clone()),
+        }
+    }
+
+    /// Every `(obligation id, records)` entry, obligation-id sorted.
+    pub fn entries(&self) -> impl Iterator<Item = (&'a str, &[&'a ObligationDisposition])> {
+        self.by_obligation
+            .iter()
+            .map(|(id, records)| (*id, records.as_slice()))
+    }
+}
+
+/// The default `odp-` id for a machine-emitted skeleton: the obligation's own tail under
+/// the `odp-` prefix (`obl-cmb-3f9a2c17` → `odp-cmb-3f9a2c17`).
+///
+/// A convention, **not** a rule: unlike `cls-`/`clc-`, whose id must mirror its unit's
+/// tail (V13), an `odp-` id may be any well-formed slug — data-model.md §6's own example
+/// is the semantic `odp-up-compose-lockfile`. Mirroring is simply what a generator can
+/// pick without inventing meaning, and it makes a bulk-authored record traceable to its
+/// obligation by eye. `obligation` is the load-bearing link either way.
+pub fn scaffold_disposition_id(obligation: &str) -> String {
+    match obligation.strip_prefix("obl-") {
+        Some(tail) => format!("odp-{tail}"),
+        None => format!("odp-{obligation}"),
+    }
+}
+
+/// The join of a generated obligation inventory against a registry's hand-authored
+/// `odp-` records — the raw material behind V28 and V29's staleness arm, and the
+/// population `coverage scaffold` emits.
+///
+/// Extracted for the reason [`crate::validate::join_inventory`] was: `validate`'s
+/// enforcement, `certify`'s blocking set, and the scaffold's worklist must be computed by
+/// ONE implementation. If the scaffold's idea of "undispositioned" could drift from
+/// V28's, the workflow would loop forever — scaffold, fill in everything it emitted,
+/// still fail.
+#[derive(Debug, Clone, Default)]
+pub struct DispositionAudit<'a> {
+    /// Applicable obligations carrying **zero** records (V28), id-sorted.
+    pub undispositioned: Vec<&'a Obligation>,
+    /// Obligations carrying **more than one** record (V28), id-sorted; the records under
+    /// each are id-sorted too.
+    pub conflicting: Vec<(&'a Obligation, Vec<&'a ObligationDisposition>)>,
+    /// Records whose `obligation` resolves to nothing (V29 stale), id-sorted.
+    pub stale: Vec<&'a ObligationDisposition>,
+    /// Cleanly resolved `(obligation, record)` pairs, obligation-id sorted.
+    pub resolved: Vec<(&'a Obligation, &'a ObligationDisposition)>,
+    /// Obligations excluded from the applicable population because their environment is
+    /// not the active one, id-sorted. Reported, never blocking, never "covered".
+    pub inactive: Vec<&'a Obligation>,
+}
+
+/// Join `inventory` against `registry`'s `odp-` records (see [`DispositionAudit`]).
+///
+/// `inactive` is derived from the active profile — a behavior obligation whose behavior
+/// falls outside it. It is computed here, and not left to each caller, so that "which
+/// obligations must be dispositioned" cannot mean one thing to `validate` and another to
+/// `certify`. Combination obligations are never inactive: scenario dimensions describe
+/// what an operation exercises, not where it can run (research Decision 1).
+pub fn audit_dispositions<'a>(
+    registry: &'a Registry,
+    inventory: &'a ObligationInventory,
+) -> DispositionAudit<'a> {
+    use std::collections::BTreeSet;
+
+    let index = DispositionIndex::build(registry);
+    let coverage = crate::coverage::Coverage::evaluate(registry);
+    let out_of_profile: BTreeSet<&str> = coverage
+        .out_of_profile
+        .iter()
+        .map(|b| b.id.as_str())
+        .collect();
+
+    let mut audit = DispositionAudit::default();
+    let known: BTreeSet<&str> = inventory.units.iter().map(|u| u.id.as_str()).collect();
+
+    for unit in &inventory.units {
+        let inactive = unit.kind == ObligationKind::Behavior
+            && unit
+                .behavior
+                .as_deref()
+                .is_some_and(|b| out_of_profile.contains(b));
+        if inactive {
+            audit.inactive.push(unit);
+        }
+        match index.resolve(&unit.id) {
+            Resolution::One(record) => audit.resolved.push((unit, record)),
+            Resolution::Conflicting(records) => audit.conflicting.push((unit, records)),
+            // An inactive obligation is NOT applicable, so nobody owes it a decision. It
+            // stays enumerated (in `inactive`) so it reads as backlog rather than
+            // disappearing from the denominator — the arithmetic FR-004a forbids.
+            Resolution::Undispositioned if inactive => {}
+            Resolution::Undispositioned => audit.undispositioned.push(unit),
+        }
+    }
+
+    for record in &registry.obligation_dispositions {
+        if !known.contains(record.obligation.as_str()) {
+            audit.stale.push(record);
+        }
+    }
+
+    audit.undispositioned.sort_by(|a, b| a.id.cmp(&b.id));
+    audit.conflicting.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+    audit.stale.sort_by(|a, b| a.id.cmp(&b.id));
+    audit.resolved.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+    audit.inactive.sort_by(|a, b| a.id.cmp(&b.id));
+    audit
+}
+
+/// A one-line human description of what an obligation is about, for a diagnostic that has
+/// to be actionable without opening the machine-owned inventory (FR-024, scenario 1: the
+/// message names the obligation, its behavior or operation+assignment, and its context).
+pub fn describe(unit: &Obligation) -> String {
+    match unit.kind {
+        ObligationKind::Behavior => {
+            let behavior = unit.behavior.as_deref().unwrap_or("<no behavior>");
+            let context = unit.context.as_deref().unwrap_or(&[]);
+            if context.is_empty() {
+                format!("behavior {behavior} (context: any)")
+            } else {
+                let rendered: Vec<String> = context
+                    .iter()
+                    .map(|c| format!("{}={}", c.dimension, c.values.join("|")))
+                    .collect();
+                format!("behavior {behavior} (context: {})", rendered.join(", "))
+            }
+        }
+        ObligationKind::Combination => {
+            let operation = unit.operation.as_deref().unwrap_or("<no operation>");
+            let assignment = unit
+                .assignment
+                .as_ref()
+                .map(|a| {
+                    a.iter()
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            format!("operation {operation} (assignment: {assignment})")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Serialization + atomic write
 // ---------------------------------------------------------------------------
 
@@ -941,5 +1323,240 @@ mod tests {
         assert!(drift.removed.is_empty() && drift.changed.is_empty());
         assert_eq!(drift.first_difference(), Some((removed.id, "added")));
         assert!(compare(&regenerated, &regenerated).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Dispositions (T061–T063)
+    // -----------------------------------------------------------------------
+
+    fn parse_disposition(json: &str) -> Result<ObligationDisposition, String> {
+        serde_json::from_str::<ObligationDisposition>(json).map_err(|e| e.to_string())
+    }
+
+    /// Each of the four dispositions loads with exactly its own payload, and with the
+    /// other three absent — the positive control the rejection tests need.
+    #[test]
+    fn each_disposition_loads_with_exactly_its_own_payload() {
+        let case = parse_disposition(
+            r#"{ "id": "odp-a", "obligation": "obl-cmb-0000aaaa",
+                 "disposition": "case", "cases": ["case-x"] }"#,
+        )
+        .expect("case disposition loads");
+        assert_eq!(case.disposition, DispositionKind::Case);
+        assert_eq!(case.cases, vec!["case-x".to_string()]);
+
+        let non_testable = parse_disposition(
+            r#"{ "id": "odp-b", "obligation": "obl-cmb-0000bbbb",
+                 "disposition": "non-testable", "rationale": "no observable channel" }"#,
+        )
+        .expect("non-testable disposition loads");
+        assert_eq!(non_testable.disposition, DispositionKind::NonTestable);
+
+        let waived = parse_disposition(
+            r#"{ "id": "odp-c", "obligation": "obl-cmb-0000cccc",
+                 "disposition": "waived", "waiver": "wvr-x" }"#,
+        )
+        .expect("waived disposition loads");
+        assert_eq!(waived.waiver.as_deref(), Some("wvr-x"));
+
+        let gap = parse_disposition(
+            r#"{ "id": "odp-d", "obligation": "obl-cmb-0000dddd",
+                 "disposition": "gap", "gap": "gap-x" }"#,
+        )
+        .expect("gap disposition loads");
+        assert_eq!(gap.gap.as_deref(), Some("gap-x"));
+    }
+
+    /// A payload that disagrees with the word — too many, too few, or the wrong one — is
+    /// refused at DESERIALIZE time, so a half-stated judgement never reaches validation.
+    #[test]
+    fn a_payload_disagreeing_with_the_disposition_is_refused_at_load() {
+        // Two payloads.
+        let both = parse_disposition(
+            r#"{ "id": "odp-a", "obligation": "obl-cmb-0000aaaa", "disposition": "case",
+                 "cases": ["case-x"], "gap": "gap-y" }"#,
+        )
+        .expect_err("two payloads must be refused");
+        assert!(
+            both.contains("cases, gap"),
+            "message must list both: {both}"
+        );
+
+        // No payload at all.
+        let none = parse_disposition(
+            r#"{ "id": "odp-a", "obligation": "obl-cmb-0000aaaa", "disposition": "waived" }"#,
+        )
+        .expect_err("a waived disposition with no waiver must be refused");
+        assert!(none.contains("nothing"), "message must say so: {none}");
+
+        // The wrong payload for the word.
+        let wrong = parse_disposition(
+            r#"{ "id": "odp-a", "obligation": "obl-cmb-0000aaaa",
+                 "disposition": "non-testable", "waiver": "wvr-x" }"#,
+        )
+        .expect_err("a non-testable disposition backed by a waiver must be refused");
+        assert!(
+            wrong.contains("rationale"),
+            "message names what it needs: {wrong}"
+        );
+
+        // An unknown disposition word.
+        assert!(
+            parse_disposition(
+                r#"{ "id": "odp-a", "obligation": "obl-cmb-0000aaaa",
+                     "disposition": "probably-fine", "rationale": "r" }"#,
+            )
+            .is_err(),
+            "the disposition vocabulary is closed"
+        );
+    }
+
+    /// A blank payload, and the `UNREVIEWED` scaffold sentinel, are both refused (T070).
+    #[test]
+    fn a_blank_or_sentinel_payload_is_refused_at_load() {
+        let blank = parse_disposition(
+            r#"{ "id": "odp-a", "obligation": "obl-cmb-0000aaaa",
+                 "disposition": "non-testable", "rationale": "   " }"#,
+        )
+        .expect_err("a blank rationale must be refused");
+        assert!(blank.contains("blank"), "{blank}");
+
+        let sentinel = parse_disposition(
+            r#"{ "id": "odp-a", "obligation": "obl-cmb-0000aaaa",
+                 "disposition": "non-testable", "rationale": "UNREVIEWED" }"#,
+        )
+        .expect_err("a scaffolded rationale must be refused");
+        assert!(sentinel.contains("UNREVIEWED"), "{sentinel}");
+
+        // And the scaffold's own `disposition` sentinel is refused by the closed enum,
+        // so a skeleton is unloadable on both axes.
+        assert!(
+            parse_disposition(
+                r#"{ "id": "odp-a", "obligation": "obl-cmb-0000aaaa",
+                     "disposition": "UNREVIEWED", "rationale": "UNREVIEWED" }"#,
+            )
+            .is_err()
+        );
+    }
+
+    fn disposition(id: &str, obligation: &str) -> ObligationDisposition {
+        ObligationDisposition {
+            id: id.to_string(),
+            obligation: obligation.to_string(),
+            disposition: DispositionKind::Gap,
+            cases: Vec::new(),
+            rationale: None,
+            waiver: None,
+            gap: Some("gap-x".to_string()),
+        }
+    }
+
+    /// Resolution is explicit only: zero records is `Undispositioned` (never a default),
+    /// and several is `Conflicting` (never a silently-picked winner).
+    #[test]
+    fn resolution_is_explicit_with_no_default_and_no_winner_picked_from_a_conflict() {
+        let registry = Registry {
+            obligation_dispositions: vec![
+                disposition("odp-second", "obl-cmb-0000aaaa"),
+                disposition("odp-first", "obl-cmb-0000aaaa"),
+                disposition("odp-solo", "obl-cmb-0000bbbb"),
+            ],
+            ..Default::default()
+        };
+        let index = DispositionIndex::build(&registry);
+
+        assert_eq!(
+            index.resolve("obl-cmb-0000cccc"),
+            Resolution::Undispositioned,
+            "an obligation nobody judged has no disposition — not an implicit one"
+        );
+        assert_eq!(
+            index
+                .resolve("obl-cmb-0000bbbb")
+                .single()
+                .map(|r| r.id.as_str()),
+            Some("odp-solo")
+        );
+        match index.resolve("obl-cmb-0000aaaa") {
+            Resolution::Conflicting(records) => {
+                assert_eq!(
+                    records.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+                    vec!["odp-first", "odp-second"],
+                    "conflicting records are id-sorted so the report is stable"
+                );
+            }
+            other => panic!("two records must conflict, got {other:?}"),
+        }
+        assert!(
+            index.resolve("obl-cmb-0000aaaa").single().is_none(),
+            "a conflict never resolves to one of its members"
+        );
+    }
+
+    /// The audit separates the four populations, and an inactive-environment obligation is
+    /// enumerated rather than counted as owing a decision.
+    #[test]
+    fn the_audit_separates_undispositioned_conflicting_stale_and_inactive() {
+        let mut registry = registry_fixture();
+        let inventory = generate_obligations(&registry).expect("generate");
+        let first = inventory.units[0].id.clone();
+        let second = inventory.units[1].id.clone();
+
+        registry.obligation_dispositions = vec![
+            disposition("odp-one", &first),
+            disposition("odp-two", &second),
+            disposition("odp-three", &second),
+            disposition("odp-ghost", "obl-cmb-deadbeef"),
+        ];
+
+        let audit = audit_dispositions(&registry, &inventory);
+        assert_eq!(
+            audit
+                .resolved
+                .iter()
+                .map(|(u, _)| u.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![first.as_str()]
+        );
+        assert_eq!(
+            audit
+                .conflicting
+                .iter()
+                .map(|(u, _)| u.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![second.as_str()]
+        );
+        assert_eq!(
+            audit
+                .stale
+                .iter()
+                .map(|r| r.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["odp-ghost"],
+            "a record naming no live obligation is stale, not silently dropped"
+        );
+        assert_eq!(
+            audit.undispositioned.len(),
+            inventory.units.len() - 2,
+            "every other obligation still owes a decision"
+        );
+        assert!(
+            audit.undispositioned.windows(2).all(|w| w[0].id <= w[1].id),
+            "the queue is id-sorted"
+        );
+    }
+
+    /// A scaffold id mirrors its obligation's tail, and the two prefixes stay disjoint.
+    #[test]
+    fn a_scaffold_id_mirrors_its_obligations_tail() {
+        assert_eq!(
+            scaffold_disposition_id("obl-cmb-3f9a2c17"),
+            "odp-cmb-3f9a2c17"
+        );
+        assert_eq!(
+            scaffold_disposition_id("obl-bhv-079ac919"),
+            "odp-bhv-079ac919"
+        );
+        assert!(scaffold_disposition_id("obl-cmb-3f9a2c17").starts_with("odp-"));
     }
 }

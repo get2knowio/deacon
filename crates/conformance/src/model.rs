@@ -69,6 +69,10 @@ pub enum RecordType {
     /// A generated coverage obligation (`obl-`); machine-owned inventory, like `cst-`
     /// and `clu-`.
     Obligation,
+    /// A hand-authored obligation disposition (`odp-`) — the judgement attached to an
+    /// `obl-` unit. A registry record like any other, so it obeys the same V2 grammar,
+    /// prefix↔type agreement, and cross-namespace uniqueness.
+    ObligationDisposition,
 }
 
 impl RecordType {
@@ -93,6 +97,7 @@ impl RecordType {
             RecordType::ApplicabilityRule => "rule",
             RecordType::HighRiskTriple => "hrt",
             RecordType::Obligation => "obl",
+            RecordType::ObligationDisposition => "odp",
         }
     }
 
@@ -117,6 +122,7 @@ impl RecordType {
             "rule" => RecordType::ApplicabilityRule,
             "hrt" => RecordType::HighRiskTriple,
             "obl" => RecordType::Obligation,
+            "odp" => RecordType::ObligationDisposition,
             _ => return None,
         })
     }
@@ -130,7 +136,7 @@ pub enum IdError {
     /// uppercase, or disallowed characters.
     #[error(
         "id {id:?} is malformed: expected \
-         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls|clu|clc|sdim|rule|hrt|obl)\
+         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls|clu|clc|sdim|rule|hrt|obl|odp)\
           -[a-z0-9]+(-[a-z0-9]+)*$`"
     )]
     Format { id: String },

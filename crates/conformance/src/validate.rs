@@ -1855,6 +1855,14 @@ impl<'a> Checker<'a> {
                 .iter()
                 .map(|x| (x.id.as_str(), RecordType::HighRiskTriple)),
         );
+        // Obligation dispositions are hand-authored registry records (unlike the `obl-`
+        // units they judge), so they obey the same grammar, prefix↔type agreement, and
+        // cross-namespace uniqueness as everything else here.
+        out.extend(
+            r.obligation_dispositions
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::ObligationDisposition)),
+        );
         out
     }
 
@@ -3329,6 +3337,7 @@ fn record_type_name(ty: RecordType) -> &'static str {
         RecordType::ApplicabilityRule => "applicability-rule",
         RecordType::HighRiskTriple => "high-risk-triple",
         RecordType::Obligation => "obligation",
+        RecordType::ObligationDisposition => "obligation disposition",
     }
 }
 
