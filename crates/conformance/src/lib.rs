@@ -169,6 +169,28 @@ pub fn migration_paths_for(
     )
 }
 
+/// The default machine-owned obligation inventory:
+/// `<workspace_root>/conformance/obligations/obligations.json` — the sole output of
+/// `coverage generate` (024-deterministic-conformance-coverage). The CLI's `--out
+/// <file>` flag overrides it; `--registry <dir>` resolves it as a sibling via
+/// [`obligations_file_for`] so fixture registries get their own.
+pub fn default_obligations_file() -> std::path::PathBuf {
+    workspace_root()
+        .join("conformance")
+        .join("obligations")
+        .join("obligations.json")
+}
+
+/// Resolve the obligation inventory belonging to a registry, as a sibling under the same
+/// `conformance/` tree: `<registry>/../obligations/obligations.json`. Mirrors
+/// [`clause_paths_for`] / [`migration_paths_for`] / the schema-inventory sibling
+/// resolution, so `--registry <fixture>` picks up the fixture's own obligations rather
+/// than the workspace's.
+pub fn obligations_file_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
+    let base = registry_dir.parent().unwrap_or(registry_dir);
+    base.join("obligations").join("obligations.json")
+}
+
 /// Atomically write `contents` to `path` (unique temp file + `fs::rename`), creating
 /// the parent directory if needed. Never leaves a partial file, and a shorter payload
 /// over a longer one can never leave trailing bytes (the failure mode a plain
