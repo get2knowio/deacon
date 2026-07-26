@@ -1,0 +1,6 @@
+{
+  "name": "StateDiffDefaultMount",
+  "image": "debian:bookworm-slim",
+  "workspaceFolder": "/workspace",
+  "containerEnv": { "DM_ENV": "yes" }
+}

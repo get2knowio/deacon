@@ -52,6 +52,16 @@
       "notes": "Backed by case-observable-state (parity_observable_state)."
     },
     {
+      "id": "bhv-state-default-workspace-mount-target",
+      "area": "observable-state",
+      "statement": "With `workspaceFolder` set and no explicit `workspaceMount`, the workspace is bound at the spec default `/workspaces/<basename>` — never at `workspaceFolder`, which is the working directory rather than a mount target.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "deacon mounted the workspace at `workspaceFolder` until #273 aligned it. This is an ABSOLUTE claim about each side, not an agreement claim: a live differential would pass if deacon and the reference regressed together, which is why it is evidenced by the spec-expectation case case-state-default-mount-target while its differential twin case-state-default-mount carries the agreement half. Both sides were measured at the pinned oracle 0.87.0. Asserted through the observer's DERIVED `workspaceBindTargets` field, so no quantified assertion predicate was needed."
+    },
+    {
       "id": "bhv-state-diff-parity",
       "area": "observable-state",
       "statement": "The normalized observable-state diff between deacon and the reference is empty for the observed fixtures.",
