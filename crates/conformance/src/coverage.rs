@@ -28,7 +28,7 @@ use crate::model::{
     BehaviorUnit, CaseKind, CertificationProfile, Decision, ReferenceStatus, SpecStatus, TestCase,
 };
 use crate::obligation::{
-    DispositionIndex, DispositionKind, Obligation, ObligationInventory, ObligationKind,
+    DispositionIndex, DispositionKind, Obligation, ObligationInventory, ObligationKind, Resolution,
 };
 use crate::scenario::OPERATION_DIMENSION;
 use crate::validate::applies_in_profile;
@@ -387,19 +387,33 @@ pub fn evaluate_obligations<'a>(
                     };
                 }
             }
-            // Precedence step 2: the single explicit disposition, if there is exactly
-            // one. Zero or several is V28's business, and falls through to the evidence.
-            if let Some(record) = dispositions.resolve(&unit.id).single() {
-                return ObligationOutcome {
-                    obligation: unit,
-                    bucket: match record.disposition {
-                        DispositionKind::Case => ObligationBucket::Covered,
-                        DispositionKind::NonTestable => ObligationBucket::NonTestable,
-                        DispositionKind::Waived => ObligationBucket::Waived,
-                        DispositionKind::Gap => ObligationBucket::Gap,
-                    },
-                    by: disposition_backing(record),
-                };
+            // Precedence step 2: the explicit records, when there are any.
+            match dispositions.resolve(&unit.id) {
+                Resolution::One(record) => {
+                    return ObligationOutcome {
+                        obligation: unit,
+                        bucket: match record.disposition {
+                            DispositionKind::Case => ObligationBucket::Covered,
+                            DispositionKind::NonTestable => ObligationBucket::NonTestable,
+                            DispositionKind::Waived => ObligationBucket::Waived,
+                            DispositionKind::Gap => ObligationBucket::Gap,
+                        },
+                        by: disposition_backing(record),
+                    };
+                }
+                // Several records are several judgements and no decision. It does NOT
+                // fall through to the evidence: the fallback below answers "nobody has
+                // looked at this yet", and someone plainly has — twice, incompatibly.
+                // Reporting whatever the evidence happens to say would let a conflict
+                // read as settled.
+                Resolution::Conflicting(_) => {
+                    return ObligationOutcome {
+                        obligation: unit,
+                        bucket: ObligationBucket::Undispositioned,
+                        by: Vec::new(),
+                    };
+                }
+                Resolution::Undispositioned => {}
             }
             // Precedence step 3: the evidence.
             match unit.kind {

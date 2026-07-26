@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-ports-forward-declared",
+      "area": "ports",
+      "statement": "A port declared in forwardPorts is forwarded to the host when the container starts.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Added WITHOUT dispositioning the obligation it generates \u2014 the SC-014 scenario."
+    }
+  ]
+}

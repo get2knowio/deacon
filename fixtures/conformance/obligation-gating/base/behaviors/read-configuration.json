@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-readconfig-basic-parse",
+      "area": "read-configuration",
+      "statement": "Reading a well-formed devcontainer.json exits 0 and emits the resolved configuration as a single JSON document.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec"
+    },
+    {
+      "id": "bhv-readconfig-malformed-jsonc-rejected",
+      "area": "read-configuration",
+      "statement": "A devcontainer.json with a hard JSONC syntax error is rejected rather than silently recovered.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Waiver-backed, so its obligation is the fixture's `waived` disposition."
+    }
+  ]
+}

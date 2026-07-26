@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "records": [],
+  "triples": [
+    {
+      "id": "hrt-fixture-features-layering-state",
+      "assignment": {
+        "sdim-operation": "read-configuration",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-container-state": "none"
+      },
+      "reason": "Feature resolution, configuration layering, and container state have historically interacted: the resolved layer set decides which Features are installed, and an already-running container changes whether that resolution is re-run at all."
+    }
+  ]
+}

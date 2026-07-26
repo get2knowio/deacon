@@ -327,6 +327,7 @@ fn certify_fixture(
     let reg = Registry::load(registry_dir).expect("fixture registry loads");
     certify(
         &reg,
+        TODAY,
         &fx.inputs(),
         &no_clause_inputs(),
         Path::new("/nonexistent-conformance/snapshots"),
@@ -507,7 +508,8 @@ fn the_real_registry_blocks_only_on_declared_coverage_gaps() {
     let code = output.status.code().expect("process exited with a code");
     let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
     assert_eq!(
-        code, 1,
+        code,
+        1,
         "the real registry carries declared coverage gaps, so it must not certify; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -581,6 +583,7 @@ fn certify_clauses(registry: &Registry) -> deacon_conformance::certify::Certific
     // No constraint inventory here — scope that join out; exercise ONLY the clause gate.
     certify(
         registry,
+        TODAY,
         &InventoryInputs {
             schemas_dir: Path::new("/nonexistent-conformance/schemas"),
             inventory_file: Path::new("/nonexistent-conformance/inventory/constraints.json"),
