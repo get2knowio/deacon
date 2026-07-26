@@ -42,7 +42,15 @@ const TODAY: &str = "2026-07-19";
 /// creation ×2, Feature installation ×2, lifecycle execution ×2, teardown ×1) and three
 /// `-direction` spec-expectation twins pinning which side is right where the two
 /// implementations disagree. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 181;
+///
+/// **181 → 198** (024 US5): the de-suppression pass added 17 cases for the twelve fields
+/// broad normalization used to hide — lifecycle hooks in both forms, chained Feature
+/// entrypoints, environment merge precedence, PATH construction, the effective user and its
+/// UID/GID, label namespaces, mount source versus mount shape, networks, Compose project
+/// resources, and the null/empty/omitted distinction — each a spec-expectation pinning
+/// deacon's side and, where the two implementations have room to disagree, a live
+/// differential alongside it. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 198;
 
 #[test]
 fn real_registry_is_structurally_valid() {

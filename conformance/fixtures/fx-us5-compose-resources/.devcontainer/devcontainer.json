@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceUs5ComposeResources",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace"
+}

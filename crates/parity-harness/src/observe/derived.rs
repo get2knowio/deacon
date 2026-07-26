@@ -252,9 +252,9 @@ fn classify(value: Option<&Value>) -> &'static str {
 /// reference's `omitted` on EVERY configuration case — one real defect (characterized
 /// once) restated as thousands of per-case differences, which is noise, not evidence.
 /// Restricted to what the fixture actually wrote, the field answers the question the
-/// author posed and nothing else. The omitted-property direction is evidenced by the
-/// document comparison itself, where a property the author left out is absent on both
-/// sides.
+/// author posed and nothing else. A fixture that wants the OMITTED state observed as
+/// well names the property in the sidecar (see [`authored_properties`]) — the scope is
+/// declared by the fixture, in data, rather than inferred.
 pub fn null_empty_omitted(document: &Value, authored: &BTreeSet<String>) -> Value {
     let config = document
         .get("configuration")
@@ -286,13 +286,37 @@ pub fn is_configuration_document(document: &Value) -> bool {
             .is_some_and(Value::is_object)
 }
 
-/// The top-level property names authored by the workspace's `devcontainer.json`.
+/// The sidecar by which a fixture declares EXTRA properties to classify — one property
+/// name per line, blank lines and `#` comments ignored.
+///
+/// It is deliberately NOT part of `devcontainer.json`: neither CLI must see it, and a key
+/// added to the configuration to steer an observation would change the very document
+/// under observation.
+pub const OBSERVED_PROPERTIES_SIDECAR: &str = ".devcontainer/.conformance-observed-properties";
+
+/// The property names [`null_empty_omitted`] classifies: those the workspace's
+/// `devcontainer.json` **authors**, plus any the fixture names in
+/// [`OBSERVED_PROPERTIES_SIDECAR`].
 ///
 /// Looks in the two spec discovery locations (`.devcontainer/devcontainer.json` and the
 /// root `.devcontainer.json`); a plain `devcontainer.json` at the workspace root is NOT a
 /// discovery location. A file that cannot be read or parsed yields an EMPTY set, which
 /// makes [`null_empty_omitted`] an empty object on BOTH sides — never a one-sided field.
+///
+/// The sidecar is what lets a case observe the **omitted** state: a property the author
+/// left out is not in the document, so nothing else can name it, and without a declared
+/// name the only alternative would be classifying every modeled optional — which restates
+/// one characterized defect as a difference on every configuration case.
 pub fn authored_properties(workspace: &Path) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    if let Ok(text) = std::fs::read_to_string(workspace.join(OBSERVED_PROPERTIES_SIDECAR)) {
+        for line in text.lines() {
+            let line = line.trim();
+            if !line.is_empty() && !line.starts_with('#') {
+                names.insert(line.to_string());
+            }
+        }
+    }
     for rel in [".devcontainer/devcontainer.json", ".devcontainer.json"] {
         let path = workspace.join(rel);
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -302,11 +326,12 @@ pub fn authored_properties(workspace: &Path) -> BTreeSet<String> {
             // JSONC (comments / trailing commas) is deliberately NOT parsed here: a
             // best-effort comment stripper is its own source of wrong answers, and a
             // fixture that needs this field can be written as strict JSON.
-            return BTreeSet::new();
+            return names;
         };
-        return map.keys().cloned().collect();
+        names.extend(map.keys().cloned());
+        break;
     }
-    BTreeSet::new()
+    names
 }
 
 #[cfg(test)]

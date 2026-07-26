@@ -33,6 +33,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-20718aca",
+      "kind": "behavior",
+      "behavior": "bhv-up-lifecycle-command-forms",
+      "context": []
+    },
+    {
       "id": "obl-bhv-2141938d",
       "kind": "behavior",
       "behavior": "bhv-run-user-commands-hook-failure",
@@ -75,6 +81,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-497a7817",
+      "kind": "behavior",
+      "behavior": "bhv-up-feature-entrypoint-chain",
+      "context": []
+    },
+    {
       "id": "obl-bhv-52023030",
       "kind": "behavior",
       "behavior": "bhv-up-exec-parity",
@@ -99,6 +111,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-5b81aa11",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
+      "context": []
+    },
+    {
       "id": "obl-bhv-66556fa0",
       "kind": "behavior",
       "behavior": "bhv-readconfig-unsupported-enum-rejected",
@@ -117,6 +135,24 @@
       "context": []
     },
     {
+      "id": "obl-bhv-6a9a3165",
+      "kind": "behavior",
+      "behavior": "bhv-up-mount-source-and-shape",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-6be021c1",
+      "kind": "behavior",
+      "behavior": "bhv-up-path-construction",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-6f3ac540",
+      "kind": "behavior",
+      "behavior": "bhv-up-container-env-merge-precedence",
+      "context": []
+    },
+    {
       "id": "obl-bhv-70ba7cb7",
       "kind": "behavior",
       "behavior": "bhv-exec-command-parity",
@@ -132,6 +168,12 @@
       "id": "obl-bhv-7711b3ce",
       "kind": "behavior",
       "behavior": "bhv-readconfig-tier1-corpus",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-7896e51a",
+      "kind": "behavior",
+      "behavior": "bhv-container-metadata-label-content",
       "context": []
     },
     {
@@ -168,6 +210,12 @@
       "id": "obl-bhv-a36e5ed6",
       "kind": "behavior",
       "behavior": "bhv-templates-apply-scaffolds-options",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-a3f1f12f",
+      "kind": "behavior",
+      "behavior": "bhv-compose-project-file-set",
       "context": []
     },
     {
@@ -222,6 +270,12 @@
       "id": "obl-bhv-c42382e5",
       "kind": "behavior",
       "behavior": "bhv-readconfig-unknown-field-preserved",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-c5668b84",
+      "kind": "behavior",
+      "behavior": "bhv-up-effective-user-uid-gid",
       "context": []
     },
     {

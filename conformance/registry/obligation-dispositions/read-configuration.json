@@ -66,6 +66,15 @@
       ]
     },
     {
+      "id": "odp-bhv-5b81aa11",
+      "obligation": "obl-bhv-5b81aa11",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-null-empty-omitted",
+        "case-readconfig-null-empty-omitted-differential"
+      ]
+    },
+    {
       "id": "odp-bhv-66556fa0",
       "obligation": "obl-bhv-66556fa0",
       "disposition": "case",

@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "bhv-readconfig-authored-empty-omitted-collapsed",
+      "area": "read-configuration",
+      "statement": "deacon's resolved-configuration output reports the same value for a property the author left OUT as for one the author wrote as empty, while the reference reports the author's document faithfully and omits what was not written.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Surfaced by the 024 US5 de-suppression. deacon models the configuration as a typed struct and serializes every modeled optional unconditionally, so an unauthored `mounts` and an authored `\"mounts\": []` are the same bytes on the way out; the reference echoes the authored document, so the two are distinguishable there. `spec: unspecified` because the spec does not define this CLI's result document at all. The decision enum has no 'known defect, fix queued' value and R5/R6 forbid `follow-spec`/`align-with-reference` for a divergent behavior, so this is recorded as `intentional-divergence` — but it is NOT a design preference: it is the tracked fidelity defect at specs/023-migrate-parity-to-conformance/tasks.md#T111 (deacon should apply `skip_serializing_if`), and it NEEDS A `parity-drift` GITHUB ISSUE FILED. Characterized by `wvr-readconfig-authored-empty-omitted`. Note the fix is only partial even then: an authored `\"name\": null` and an omitted `name` are both `None` inside deacon, so omitting unauthored properties closes the empty-vs-omitted half and leaves the null-vs-omitted half."
+    },
+    {
       "id": "bhv-readconfig-bad-config-path",
       "area": "read-configuration",
       "statement": "An explicit --config pointing at a file that does not exist is rejected (no silent discovery fallback).",

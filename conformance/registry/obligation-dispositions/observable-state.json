@@ -22,6 +22,26 @@
       ]
     },
     {
+      "id": "odp-bhv-7896e51a",
+      "obligation": "obl-bhv-7896e51a",
+      "disposition": "case",
+      "cases": [
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-env-merge-differential",
+        "case-up-mount-source-shape-differential"
+      ]
+    },
+    {
+      "id": "odp-bhv-a3f1f12f",
+      "obligation": "obl-bhv-a3f1f12f",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-project-resources-differential"
+      ]
+    },
+    {
       "id": "odp-bhv-b8a717d5",
       "obligation": "obl-bhv-b8a717d5",
       "disposition": "case",

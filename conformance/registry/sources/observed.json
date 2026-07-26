@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "src-obs-authored-empty-omitted",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration over a configuration authoring `name: null` / `forwardPorts: []` / `containerEnv: {}` and omitting `mounts`",
+      "summary": "Whether a resolved-configuration result distinguishes an authored null, an authored empty collection, and an omitted property.",
+      "behaviors": [
+        "bhv-readconfig-authored-empty-omitted-collapsed"
+      ]
+    },
+    {
       "id": "src-obs-bad-config-path",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",
@@ -9,6 +19,16 @@
       "summary": "With an explicit --config pointing at a nonexistent file, the reference CLI rejects (no silent discovery fallback).",
       "behaviors": [
         "bhv-readconfig-bad-config-path"
+      ]
+    },
+    {
+      "id": "src-obs-compose-override-delivery",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "com.docker.compose.project.config_files / config-hash on a Compose-backed workspace",
+      "summary": "How each CLI delivers its generated Compose override, and the Compose labels derived from the resulting file set.",
+      "behaviors": [
+        "bhv-compose-project-file-set"
       ]
     },
     {
@@ -39,6 +59,16 @@
       "summary": "`docker inspect .Config.Cmd` on fx-up-container-labels shows two different shell keep-alive strings. Behavioral equivalence measured by `docker stop` wall time and exit code: deacon 245 ms / exit 0, reference 215 ms / exit 0.",
       "behaviors": [
         "bhv-container-keepalive-command"
+      ]
+    },
+    {
+      "id": "src-obs-container-metadata-label",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "devcontainer.metadata label on a container created from a configuration with a local Feature and templated mount sources",
+      "summary": "What the image-metadata label records: the per-Feature entries, and whether configuration values appear as authored or as substituted.",
+      "behaviors": [
+        "bhv-container-metadata-label-content"
       ]
     },
     {

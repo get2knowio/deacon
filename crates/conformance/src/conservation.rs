@@ -213,6 +213,85 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      regeneration claim because it is the boundary the pinned oracle FAILS on, so the two \
      have different reference axes and cannot be one record.",
     ),
+    (
+        "bhv-up-lifecycle-command-forms",
+        "A lifecycle hook in the ARRAY (argv) form and in the OBJECT (named commands) form. \
+     Nothing pre-migration described either form: the corpora compared resolved \
+     CONFIGURATION documents, where a hook is a value to echo, and never ran one. Not a \
+     variant of `bhv-run-user-commands-hook-order`, which claims the ORDER hooks run in \
+     for a single form — an implementation can order hooks correctly and still drop the \
+     second command of an object-form hook.",
+    ),
+    (
+        "bhv-up-feature-entrypoint-chain",
+        "Entrypoints contributed by MULTIPLE Features, chained. Newly recordable in the same \
+     way the labels and keep-alive behaviors were: `Config.Entrypoint` was captured and \
+     deliberately not compared, so no behavior described it, and the two CLIs build the \
+     chain by different mechanisms that only an effect-level observation can relate. Not a \
+     variant of `bhv-up-feature-install-order`: installing the right Features in the right \
+     order says nothing about whether their entrypoints then run.",
+    ),
+    (
+        "bhv-up-container-env-merge-precedence",
+        "Which layer wins when the configuration AND a Feature declare the same `containerEnv` \
+     variable. No pre-migration claim covers it — `bhv-readconfig-merged-configuration` \
+     compares the merged DOCUMENT, and deacon's document was correct here while the \
+     container it created was not, which is exactly the gap a document-only comparison \
+     leaves. Recorded after measuring both sides: the defect it found (deacon merged the \
+     Feature layer OVER the configuration's) is fixed in the same change.",
+    ),
+    (
+        "bhv-up-path-construction",
+        "PATH as CONSTRUCTED in the created container, including a segment a Feature \
+     contributes. Newly recordable because `drop_noise_env` removed `PATH` at capture until \
+     024 US5, so no case could see it. Not a variant of the containerEnv precedence claim: \
+     PATH is the one variable both layers legitimately WRITE TO rather than set, so \
+     last-writer-wins is the wrong rule for it and getting precedence right does not imply \
+     getting the prepend right.",
+    ),
+    (
+        "bhv-up-effective-user-uid-gid",
+        "The effective user of the container process and the UID/GID it resolves to, for a user \
+     the image creates and for one a FEATURE creates. `bhv-state-container-parity` compares \
+     whatever the observed fixtures happened to contain and none declared a non-root user; \
+     more importantly it compares the DECLARATION, while the ids are only observable by \
+     running something inside the container, which no pre-migration unit did.",
+    ),
+    (
+        "bhv-up-mount-source-and-shape",
+        "A mount's SOURCE as distinct from its SHAPE. Not recordable before 024 US5: the \
+     observable-state snapshot carried only `sourceTail`, the bind's leaf component, so two \
+     mounts rooted at different host directories compared equal and no claim about sources \
+     could be evidenced. `bhv-state-container-parity` covers the shape half only, for the \
+     same reason.",
+    ),
+    (
+        "bhv-container-metadata-label-content",
+        "What the `devcontainer.metadata` label actually CONTAINS. Newly recordable in 024 US5 \
+     for two independent reasons: the label was compared only where a case happened to reach \
+     it, and the second of its two differences (substituted absolute paths where the reference \
+     keeps the author\'s `${localWorkspaceFolder}` template) was unobservable while a mount \
+     source was collapsed to its leaf component. Not a variant of \
+     `bhv-container-identity-labels`, which is about labels the reference does not set at all — \
+     this one is a label BOTH set, with different contents.",
+    ),
+    (
+        "bhv-compose-project-file-set",
+        "How each CLI delivers its generated Compose override, and the two Compose labels \
+     derived from the resulting file set. No pre-migration unit compared Compose bookkeeping \
+     labels. Not a variant of `bhv-compose-project-name-robust`: an implementation could adopt \
+     either CLI\'s project naming and still deliver its override the other way, so the two are \
+     independent claims.",
+    ),
+    (
+        "bhv-readconfig-authored-empty-omitted-collapsed",
+        "Whether a resolved-configuration result distinguishes an authored `null`, an authored \
+     empty collection, and an OMITTED property. Structurally unrecordable before 024 US5: \
+     `drop_absent_optional` ran on both sides, so all three states normalized to the same \
+     observation and no pre-migration unit could have reported a difference. Not a variant \
+     of the readconfig strictness family — those are REJECTIONS of malformed input; this is \
+     a fidelity loss on input both sides accept.",
+    ),
 ];
 
 /// The observable-channel count at the branch point (research §1g).
@@ -928,7 +1007,11 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
     },
     NormalizationRule {
         name: "user_default_root",
-        scopes: &["field:/user"],
+        scopes: &[
+            "field:/user",
+            "channel:chan-container-state",
+            "field:/userSpec/name",
+        ],
         action: RuleAction::Canonicalize,
         removes: &[],
         justification: Some(
@@ -938,7 +1021,11 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
              `diff_states` comparison while a real non-root `remoteUser`/`containerUser` \
              still diverges. Removes nothing, and applies to the legacy comparison only — \
              the declarative `chan-container-state` channel emits `user` verbatim plus the \
-             derived `userSpec`. Registered in 024 US5 (T123): it was an unregistered \
+             derived `userSpec` — which is why the DECLARATIVE half of the rule is scoped \
+             to those two fields on `chan-container-state`: measured at oracle 0.87.0 over \
+             a Feature-extended image, deacon leaves `Config.User` empty while the \
+             reference\'s generated Dockerfile writes `USER root`, and the two containers \
+             run as the same user. Registered in 024 US5 (T123): it was an unregistered \
              comparison-time equivalence, invisible to anyone reading the rule list.",
         ),
         known_non_compliant: None,

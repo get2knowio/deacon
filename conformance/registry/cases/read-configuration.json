@@ -2191,6 +2191,138 @@
       "notes": "The differential half of the migrated `malformed-json` unit. Its spec-expectation twin (`case-errors-decl-malformed-json`) pins that deacon rejects a hard JSONC syntax error; this half records that the reference does not, so the pair states BOTH the direction and the difference rather than either alone."
     },
     {
+      "id": "case-readconfig-null-empty-omitted",
+      "behaviors": [
+        "bhv-readconfig-authored-empty-omitted-collapsed"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "boundary",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-null-empty-omitted"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "nullEmptyOmitted": {
+                "name": "null",
+                "forwardPorts": "empty",
+                "containerEnv": "empty",
+                "image": "present",
+                "mounts": "empty"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-055, deacon's side pinned outright. Four states in one document: an authored `null`, two authored empty collections, a populated property, and `mounts`, which the configuration does NOT author — named in the fixture's `.conformance-observed-properties` sidecar, because nothing inside a document can name a property that is not in it. `mounts: \"empty\"` IS the defect: the reference reports `omitted` there, and deacon cannot tell an omission from an authored empty. Pinning deacon's side means the differential below cannot lose the direction if the difference ever stops reproducing."
+    },
+    {
+      "id": "case-readconfig-null-empty-omitted-differential",
+      "behaviors": [
+        "bhv-readconfig-authored-empty-omitted-collapsed"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "boundary",
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-null-empty-omitted"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
+          "context": [],
+          "observablePath": "chan-structured-output.configuration.name",
+          "rationale": "The author wrote `\"name\": null`. The reference echoes it; deacon serializes the same `null` it would emit for an omitted `name`, so the normalization that compensates for its unconditional serializer elides the author's value with it.",
+          "waiverId": "wvr-readconfig-authored-empty-omitted"
+        },
+        {
+          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
+          "context": [],
+          "observablePath": "chan-structured-output.configuration.forwardPorts",
+          "rationale": "The author wrote `\"forwardPorts\": []`. The reference echoes it; deacon emits the same `[]` it would emit unauthored, so the compensating normalization elides it.",
+          "waiverId": "wvr-readconfig-authored-empty-omitted"
+        },
+        {
+          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
+          "context": [],
+          "observablePath": "chan-structured-output.configuration.containerEnv",
+          "rationale": "The author wrote `\"containerEnv\": {}`. The reference echoes it; deacon emits the same `{}` it would emit unauthored, so the compensating normalization elides it.",
+          "waiverId": "wvr-readconfig-authored-empty-omitted"
+        },
+        {
+          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
+          "context": [],
+          "observablePath": "chan-structured-output.nullEmptyOmitted.mounts",
+          "rationale": "The author did NOT write `mounts`. The reference omits it and reports `omitted`; deacon serializes `[]` and reports `empty`. This is the direction of the defect stated positively, on a property chosen precisely because it is absent from the document.",
+          "waiverId": "wvr-readconfig-authored-empty-omitted"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The cross-CLI half of FR-055, and the case the 024 US5 normalizer narrowing exists to make possible: while `drop_absent_optional` ran on both sides, all three states normalized to 'absent on both sides' and this comparison was green while proving nothing. Four tolerances, each naming one path and all backed by the same waiver — three where deacon elides what the author wrote, one where deacon reports `empty` for a property the author never wrote."
+    },
+    {
       "id": "case-readconfig-overlay-dockerfile-depends",
       "behaviors": [
         "bhv-readconfig-feature-resolution-order"

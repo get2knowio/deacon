@@ -2,6 +2,25 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "odp-bhv-20718aca",
+      "obligation": "obl-bhv-20718aca",
+      "disposition": "case",
+      "cases": [
+        "case-up-lifecycle-array-form",
+        "case-up-lifecycle-object-differential",
+        "case-up-lifecycle-object-form"
+      ]
+    },
+    {
+      "id": "odp-bhv-497a7817",
+      "obligation": "obl-bhv-497a7817",
+      "disposition": "case",
+      "cases": [
+        "case-up-entrypoint-chain-differential",
+        "case-up-entrypoint-chained-features"
+      ]
+    },
+    {
       "id": "odp-bhv-52023030",
       "obligation": "obl-bhv-52023030",
       "disposition": "case",
@@ -24,6 +43,33 @@
       ]
     },
     {
+      "id": "odp-bhv-6a9a3165",
+      "obligation": "obl-bhv-6a9a3165",
+      "disposition": "case",
+      "cases": [
+        "case-up-mount-source-shape-differential",
+        "case-up-mount-source-vs-shape"
+      ]
+    },
+    {
+      "id": "odp-bhv-6be021c1",
+      "obligation": "obl-bhv-6be021c1",
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-path-construction"
+      ]
+    },
+    {
+      "id": "odp-bhv-6f3ac540",
+      "obligation": "obl-bhv-6f3ac540",
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-env-merge-precedence"
+      ]
+    },
+    {
       "id": "odp-bhv-a08d7b2a",
       "obligation": "obl-bhv-a08d7b2a",
       "disposition": "case",
@@ -41,6 +87,15 @@
       "cases": [
         "case-up-compose-feature-restart",
         "case-up-stale-config-reentry"
+      ]
+    },
+    {
+      "id": "odp-bhv-c5668b84",
+      "obligation": "obl-bhv-c5668b84",
+      "disposition": "case",
+      "cases": [
+        "case-up-user-created-by-feature",
+        "case-up-user-uid-gid-nonroot"
       ]
     },
     {

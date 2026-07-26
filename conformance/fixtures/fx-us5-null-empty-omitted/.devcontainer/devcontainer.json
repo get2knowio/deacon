@@ -1,0 +1,6 @@
+{
+	"image": "alpine:3.19",
+	"name": null,
+	"forwardPorts": [],
+	"containerEnv": {}
+}

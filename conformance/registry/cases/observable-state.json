@@ -112,6 +112,13 @@
           "observablePath": "chan-container-state.cmd",
           "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (`docker stop` 245 ms / exit 0 vs 215 ms / exit 0). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
           "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labelNamespaces.devcontainer",
+          "rationale": "The five identity labels deacon stamps and the reference does not make the `devcontainer` namespace's key SET differ, which is the same one-sided difference the per-key tolerances name, reported a second way by the derived grouping (024 US5 added it so a one-sided label is visible without enumerating every key either CLI might emit). Scoped to that one namespace.",
+          "divergenceId": "ext-container-identity-labels"
         }
       ],
       "cleanup": {
@@ -144,6 +151,7 @@
       "behaviors": [
         "bhv-container-identity-labels",
         "bhv-container-keepalive-command",
+        "bhv-container-metadata-label-content",
         "bhv-state-diff-parity"
       ],
       "context": [],
@@ -218,6 +226,20 @@
           "observablePath": "chan-container-state.cmd",
           "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (`docker stop` 245 ms / exit 0 vs 215 ms / exit 0). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
           "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labelNamespaces.devcontainer",
+          "rationale": "The five identity labels deacon stamps and the reference does not make the `devcontainer` namespace's key SET differ, which is the same one-sided difference the per-key tolerances name, reported a second way by the derived grouping (024 US5 added it so a one-sided label is visible without enumerating every key either CLI might emit). Scoped to that one namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-metadata-label-content",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.metadata",
+          "rationale": "deacon's `devcontainer.metadata` omits the per-Feature `{\"id\": …}` entries the reference records, and records substituted absolute paths where the reference records the unsubstituted `${localWorkspaceFolder}` template. Measured at oracle 0.87.0; both are deacon defects awaiting a `parity-drift` issue.",
+          "waiverId": "wvr-container-metadata-label-content"
         }
       ],
       "cleanup": {
@@ -234,6 +256,7 @@
       "behaviors": [
         "bhv-container-identity-labels",
         "bhv-container-keepalive-command",
+        "bhv-container-metadata-label-content",
         "bhv-state-diff-parity"
       ],
       "context": [],
@@ -308,6 +331,20 @@
           "observablePath": "chan-container-state.cmd",
           "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (`docker stop` 245 ms / exit 0 vs 215 ms / exit 0). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
           "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labelNamespaces.devcontainer",
+          "rationale": "The five identity labels deacon stamps and the reference does not make the `devcontainer` namespace's key SET differ, which is the same one-sided difference the per-key tolerances name, reported a second way by the derived grouping (024 US5 added it so a one-sided label is visible without enumerating every key either CLI might emit). Scoped to that one namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-metadata-label-content",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.metadata",
+          "rationale": "deacon's `devcontainer.metadata` omits the per-Feature `{\"id\": …}` entries the reference records, and records substituted absolute paths where the reference records the unsubstituted `${localWorkspaceFolder}` template. Measured at oracle 0.87.0; both are deacon defects awaiting a `parity-drift` issue.",
+          "waiverId": "wvr-container-metadata-label-content"
         }
       ],
       "cleanup": {
@@ -324,6 +361,7 @@
       "behaviors": [
         "bhv-container-identity-labels",
         "bhv-container-keepalive-command",
+        "bhv-container-metadata-label-content",
         "bhv-state-diff-parity"
       ],
       "context": [],
@@ -398,6 +436,20 @@
           "observablePath": "chan-container-state.cmd",
           "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (`docker stop` 245 ms / exit 0 vs 215 ms / exit 0). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
           "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labelNamespaces.devcontainer",
+          "rationale": "The five identity labels deacon stamps and the reference does not make the `devcontainer` namespace's key SET differ, which is the same one-sided difference the per-key tolerances name, reported a second way by the derived grouping (024 US5 added it so a one-sided label is visible without enumerating every key either CLI might emit). Scoped to that one namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-metadata-label-content",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.metadata",
+          "rationale": "deacon's `devcontainer.metadata` omits the per-Feature `{\"id\": …}` entries the reference records, and records substituted absolute paths where the reference records the unsubstituted `${localWorkspaceFolder}` template. Measured at oracle 0.87.0; both are deacon defects awaiting a `parity-drift` issue.",
+          "waiverId": "wvr-container-metadata-label-content"
         }
       ],
       "cleanup": {
@@ -413,7 +465,8 @@
       "id": "case-up-container-identity-labels",
       "behaviors": [
         "bhv-container-identity-labels",
-        "bhv-container-keepalive-command"
+        "bhv-container-keepalive-command",
+        "bhv-container-metadata-label-content"
       ],
       "context": [],
       "scenarioContext": {
@@ -487,6 +540,20 @@
           "observablePath": "chan-container-state.cmd",
           "rationale": "The two keep-alive command strings differ; the observable behavior does not. Measured, not assumed: `docker stop` completes in 245 ms with exit 0 for deacon and 215 ms with exit 0 for the reference. Scoped to `cmd` alone — `entrypoint` and every other container-state field stay compared.",
           "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labelNamespaces.devcontainer",
+          "rationale": "The five identity labels deacon stamps and the reference does not make the `devcontainer` namespace's key SET differ, which is the same one-sided difference the per-key tolerances name, reported a second way by the derived grouping (024 US5 added it so a one-sided label is visible without enumerating every key either CLI might emit). Scoped to that one namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-metadata-label-content",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.metadata",
+          "rationale": "deacon's `devcontainer.metadata` omits the per-Feature `{\"id\": …}` entries the reference records, and records substituted absolute paths where the reference records the unsubstituted `${localWorkspaceFolder}` template. Measured at oracle 0.87.0; both are deacon defects awaiting a `parity-drift` issue.",
+          "waiverId": "wvr-container-metadata-label-content"
         }
       ],
       "cleanup": {

@@ -311,6 +311,44 @@ pub fn path_env_segmented(path_value: &Value, tokens: &TokenMap) -> Value {
     Value::Array(segments)
 }
 
+/// **Rule `user_default_root`, declarative half** (024 US5, action `canonicalize`, scope
+/// `channel:chan-container-state` `field:/user` + `field:/userSpec/name`): an EMPTY
+/// container user is spelled `root`.
+///
+/// Docker records "the image's default user" as the empty string, and both CLIs mean the
+/// same thing by it — but they do not always write the same one. Measured at oracle 0.87.0
+/// over a Feature-extended image: deacon leaves `Config.User` empty, the reference's
+/// generated Dockerfile sets `USER root`, and the two containers run as the same user.
+/// Comparing the raw spelling reports a difference with no observable consequence, which
+/// RULES.md places out of scope entirely.
+///
+/// The same equivalence the legacy [`diff_states`] has always applied ([`norm_user`]);
+/// this is the declarative channel's half of it, so one rule covers both comparison paths
+/// instead of one path quietly comparing something the other does not. It CANONICALIZES —
+/// nothing is removed, a genuinely non-root user still compares, and the rewrite is
+/// confined to the exact value `""` on two named fields.
+fn default_user_root(value: &Value) -> Value {
+    let Value::Object(map) = value else {
+        return value.clone();
+    };
+    let mut out = map.clone();
+    if let Some(Value::String(user)) = map.get("user") {
+        if user.is_empty() {
+            out.insert("user".to_string(), Value::String("root".to_string()));
+        }
+    }
+    if let Some(Value::Object(spec)) = map.get("userSpec") {
+        let mut spec = spec.clone();
+        if matches!(spec.get("name"), None | Some(Value::Null))
+            && spec.get("uid") == Some(&Value::Null)
+        {
+            spec.insert("name".to_string(), Value::String("root".to_string()));
+        }
+        out.insert("userSpec".to_string(), Value::Object(spec));
+    }
+    Value::Object(out)
+}
+
 /// THE single channel-normalization entry point for the declarative runner
 /// (Constitution VIII — one normalizer). Applies the per-channel named rules
 /// (contract observer-channel.md) to a channel's [`RawChannelEvidence`], yielding
@@ -383,9 +421,9 @@ fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap, side: Si
         // `PATH` and `HOME` alongside it) and `null_preserving`. NOTHING is removed:
         // env, labels, entrypoint, cmd and networks are emitted verbatim and any
         // characterized difference is covered by a scoped, backed `allowedDifference`.
-        CHAN_CONTAINER_STATE => {
-            null_preserving(&container_hostname_token(&path_token(value, tokens)))
-        }
+        CHAN_CONTAINER_STATE => null_preserving(&default_user_root(&container_hostname_token(
+            &path_token(value, tokens),
+        ))),
         _ => value.clone(),
     }
 }
@@ -1203,11 +1241,11 @@ fn strip_project_prefix(name: &str, project: &str) -> String {
 /// bases used here); treat "" and "root" as equivalent so a cosmetic difference is not
 /// flagged, while a real non-root `remoteUser`/`containerUser` still diverges.
 ///
-/// Applies to the LEGACY [`diff_states`] comparison only. The declarative
-/// `chan-container-state` channel emits `user` verbatim and additionally the derived
-/// `userSpec`, so a case there sees the raw spelling. Registered in 024 US5 because it
-/// was an unregistered equivalence — a comparison-time collapse no reviewer could find
-/// from the rule list.
+/// This is the LEGACY [`diff_states`] half of the rule; [`default_user_root`] is the
+/// declarative channel's half, so one registered rule covers both comparison paths rather
+/// than one path quietly comparing something the other does not. Registered in 024 US5
+/// because it was an unregistered equivalence — a comparison-time collapse no reviewer
+/// could find from the rule list.
 fn norm_user(u: &str) -> &str {
     if u.is_empty() { "root" } else { u }
 }
