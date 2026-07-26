@@ -239,7 +239,7 @@ mod compose_consistency_tests {
         };
 
         let override_yaml = project
-            .generate_injection_override()
+            .generate_injection_override(None)
             .expect("Should generate override with mounts");
 
         // Verify the YAML contains the mount
@@ -283,8 +283,8 @@ mod compose_consistency_tests {
         };
 
         // Generate override multiple times and verify determinism
-        let override1 = project.generate_injection_override().unwrap();
-        let override2 = project.generate_injection_override().unwrap();
+        let override1 = project.generate_injection_override(None).unwrap();
+        let override2 = project.generate_injection_override(None).unwrap();
 
         assert_eq!(
             override1, override2,
@@ -317,7 +317,7 @@ mod compose_consistency_tests {
             deacon_labels: deacon_core::IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // Without consistency specified, the mount should not have :cached, :consistent, or :delegated
         assert!(
@@ -359,7 +359,7 @@ mod compose_consistency_tests {
             deacon_labels: deacon_core::IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         assert!(
             override_yaml.contains("/host/external:/external:ro"),
@@ -899,7 +899,7 @@ mod default_workspace_discovery_tests {
         };
 
         let override_yaml = project
-            .generate_injection_override()
+            .generate_injection_override(None)
             .expect("Should generate override with mounts");
 
         // Verify the YAML contains the mount in default format
@@ -1044,7 +1044,7 @@ mod compose_git_root_tests {
         };
 
         let override_yaml = project
-            .generate_injection_override()
+            .generate_injection_override(None)
             .expect("Should generate override with workspace mount");
 
         // Verify the mount uses the git-root path
@@ -1092,7 +1092,7 @@ mod compose_git_root_tests {
         };
 
         let override_yaml = project
-            .generate_injection_override()
+            .generate_injection_override(None)
             .expect("Should generate override with workspace mount");
 
         // Verify the mount does NOT use the subdir path
@@ -1151,7 +1151,7 @@ mod compose_git_root_tests {
         );
 
         // Generate override and verify the mount path
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // The injection override targets the primary service
         assert!(
@@ -1196,7 +1196,7 @@ mod compose_git_root_tests {
             deacon_labels: deacon_core::IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // Mount should use the same path
         assert!(
@@ -1242,7 +1242,7 @@ mod compose_git_root_consistency_tests {
             deacon_labels: deacon_core::IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // Should have both git-root path and consistency
         assert!(
@@ -1280,7 +1280,7 @@ mod compose_git_root_consistency_tests {
             deacon_labels: deacon_core::IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // Should have both git-root path and consistency
         assert!(
@@ -1318,7 +1318,7 @@ mod compose_git_root_consistency_tests {
             deacon_labels: deacon_core::IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // Should have both git-root path and consistency
         assert!(
@@ -1357,7 +1357,7 @@ mod compose_git_root_consistency_tests {
                 deacon_labels: deacon_core::IndexMap::new(),
             };
 
-            let override_yaml = project.generate_injection_override().unwrap();
+            let override_yaml = project.generate_injection_override(None).unwrap();
 
             assert!(
                 override_yaml.contains(&format!("{}:{}:{}", git_root, target_path, consistency)),
@@ -1396,7 +1396,7 @@ mod compose_git_root_consistency_tests {
             deacon_labels: deacon_core::IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // Should have both :ro and :cached options
         assert!(
@@ -1434,7 +1434,7 @@ mod compose_git_root_consistency_tests {
             deacon_labels: deacon_core::IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // Should have mount without any options suffix (no trailing colon after target)
         let expected_mount = format!("{}:{}\n", git_root, target_path);
@@ -1610,13 +1610,13 @@ mod performance_tests {
         };
 
         // Warm-up call
-        let _ = project.generate_injection_override();
+        let _ = project.generate_injection_override(None);
 
         // Measure Compose override generation time
         let iterations = 100;
         let start = Instant::now();
         for _ in 0..iterations {
-            let result = project.generate_injection_override();
+            let result = project.generate_injection_override(None);
             assert!(result.is_some(), "Should generate override");
         }
         let elapsed = start.elapsed();
@@ -1691,7 +1691,7 @@ mod performance_tests {
             };
 
             // Step 5: Generate Compose override
-            let _override_yaml = compose_project.generate_injection_override();
+            let _override_yaml = compose_project.generate_injection_override(None);
         }
         let elapsed = start.elapsed();
         let avg_duration = elapsed / iterations;
