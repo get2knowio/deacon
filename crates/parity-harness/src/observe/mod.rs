@@ -28,6 +28,7 @@ use crate::evidence::RawChannelEvidence;
 pub mod cli_process;
 pub mod container_graph;
 pub mod container_state;
+pub mod derived;
 pub mod filesystem;
 pub mod image;
 pub mod injected_process;
@@ -66,6 +67,14 @@ pub struct RunContext {
     /// The workspace the case's operations ran against (US5 makes this an isolated
     /// external temp dir; US1 config-only cases run against the committed fixture dir).
     pub workspace: PathBuf,
+    /// Which implementation produced this evidence.
+    ///
+    /// Carried so the normalizer can apply a rule to the SIDE whose behavior it
+    /// compensates rather than to both (024 US5, T123): `drop_absent_optional` exists for
+    /// deacon's unconditional serialization of modeled optionals, and applying it to the
+    /// reference as well erased the reference's faithful null/empty/omitted distinction —
+    /// the one FR-055 requires be preserved.
+    pub side: crate::exec::Side,
     /// The container id, once the case has brought one up. `None` for pure CLI-process
     /// cases that never create a container.
     pub container_id: Option<String>,
@@ -105,10 +114,18 @@ pub struct OpSnapshot {
 }
 
 impl RunContext {
-    /// A context for a container-less run rooted at `workspace`.
+    /// A context for a container-less run rooted at `workspace`, attributed to
+    /// [`crate::exec::Side::Deacon`] (the side every unit test and every
+    /// spec-expectation run observes). Use [`RunContext::for_side`] for the reference.
     pub fn new(workspace: PathBuf) -> RunContext {
+        RunContext::for_side(workspace, crate::exec::Side::Deacon)
+    }
+
+    /// A context for a run rooted at `workspace` and produced by `side`.
+    pub fn for_side(workspace: PathBuf, side: crate::exec::Side) -> RunContext {
         RunContext {
             workspace,
+            side,
             container_id: None,
             container_inspect: None,
             fs_allowlist: Vec::new(),

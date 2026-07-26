@@ -10,6 +10,8 @@
 //! No live oracle, Docker, or network is involved.
 
 use parity_harness::HarnessError;
+use parity_harness::exec::Side;
+use parity_harness::normalize::DocumentBlock;
 use parity_harness::normalize::{self, DiffKind};
 use serde_json::{Value, json};
 
@@ -29,7 +31,7 @@ enum Verdict {
 /// caller-context label — the only thing that varies between runners.
 fn config_verdict(case: &str, deacon_raw: &str, reference_raw: &str) -> Verdict {
     let normalize_one = |raw: &str| -> Result<Value, ()> {
-        match normalize::config(case, raw) {
+        match normalize::config(case, raw, Side::Deacon) {
             Ok(v) => Ok(v),
             Err(HarnessError::Normalization { .. }) => Err(()),
             Err(other) => panic!("unexpected non-normalization error for `{case}`: {other:?}"),
@@ -189,6 +191,7 @@ fn merged_config_agrees_with_config_on_the_shared_block() {
                     .collect(),
             )
             .to_string(),
+            Side::Deacon,
         )
         .expect("config normalizes");
         let via_merged = normalize::merged_config(
@@ -199,6 +202,7 @@ fn merged_config_agrees_with_config_on_the_shared_block() {
                     .collect(),
             )
             .to_string(),
+            Side::Deacon,
         )
         .expect("merged_config normalizes");
 
@@ -313,6 +317,7 @@ fn every_config_entry_point_routes_through_one_rule_chain() {
                 .collect(),
         )
         .to_string(),
+        Side::Deacon,
     )
     .expect("config normalizes");
 
@@ -325,11 +330,24 @@ fn every_config_entry_point_routes_through_one_rule_chain() {
                 .collect(),
         )
         .to_string(),
+        Side::Deacon,
     )
     .expect("merged_config normalizes");
 
-    // 3. the rule chain the declarative `chan-structured-output` channel applies
-    let via_rules = normalize::config_document_rules(&body);
+    // 3. the rule chain the declarative `chan-structured-output` channel applies. It is
+    //    handed the WHOLE CLI document, so the same body is reached through the wrapper
+    //    key rather than as the root — which is exactly the shape the channel sees.
+    let wrapped = Value::Object(
+        [("configuration".to_string(), body.clone())]
+            .into_iter()
+            .collect(),
+    );
+    let via_rules = normalize::config_document_rules(
+        &wrapped,
+        Side::Deacon,
+        DocumentBlock::Wrapper,
+    )["configuration"]
+        .clone();
 
     assert_eq!(
         via_config, via_merged,
@@ -339,6 +357,42 @@ fn every_config_entry_point_routes_through_one_rule_chain() {
         via_config, via_rules,
         "the legacy entry points and the declarative channel must share ONE rule chain — \
          a second implementation is what Constitution VIII forbids (FR-030)"
+    );
+}
+
+/// 024 US5 (T123): `drop_absent_optional` is narrowed to the SIDE whose serializer defect
+/// it compensates. On the reference's `configuration` block — an echo of the authored
+/// document — nothing is elided, because an empty value there is the AUTHOR's.
+#[test]
+fn the_absent_optional_drop_applies_to_deacons_configuration_only() {
+    let raw = json!({ "configuration": { "name": "demo", "forwardPorts": [], "image": null } })
+        .to_string();
+
+    let deacon = normalize::config("side", &raw, Side::Deacon).expect("normalize");
+    let reference = normalize::config("side", &raw, Side::Oracle).expect("normalize");
+
+    assert_eq!(
+        deacon,
+        json!({ "name": "demo" }),
+        "deacon's side still elides the enumerated absent optionals it serializes \
+         unconditionally"
+    );
+    assert_eq!(
+        reference,
+        json!({ "name": "demo", "forwardPorts": [], "image": null }),
+        "the reference's side keeps them — eliding them there is what made an authored \
+         empty, an authored null and an omission the same observation (FR-055)"
+    );
+
+    // `mergedConfiguration` is synthesized by BOTH CLIs, so the rule still applies to
+    // both there: the pinned reference emits its own computed `containerEnv: {}` /
+    // `remoteEnv: {}` / `portsAttributes: {}`, which carry no authorship signal.
+    let merged =
+        json!({ "mergedConfiguration": { "name": "demo", "containerEnv": {} } }).to_string();
+    assert_eq!(
+        normalize::merged_config("side", &merged, Side::Oracle).expect("normalize"),
+        json!({ "name": "demo" }),
+        "the merged block is a computed default on both sides"
     );
 }
 

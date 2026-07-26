@@ -320,10 +320,12 @@ async fn f_hang_stub_times_out_with_partial_output() {
 #[test]
 fn g_injected_difference_is_unwaived_divergence() {
     // deacon drops a key the reference keeps — the highest-signal (ref-only) class.
-    let deacon = normalize::config("g", r#"{ "name": "demo" }"#).expect("normalize deacon");
+    let deacon =
+        normalize::config("g", r#"{ "name": "demo" }"#, Side::Deacon).expect("normalize deacon");
     let reference = normalize::config(
         "g",
         r#"{ "name": "demo", "customizations": { "vscode": { "extensions": ["x"] } } }"#,
+        Side::Deacon,
     )
     .expect("normalize reference");
 
@@ -447,7 +449,7 @@ fn i_kept_waiver_without_difference_is_stale() {
 // ---------------------------------------------------------------------------
 #[test]
 fn j_normalization_failure_has_no_raw_fallback() {
-    let err = normalize::config("j", "this is not json")
+    let err = normalize::config("j", "this is not json", Side::Deacon)
         .expect_err("non-JSON input must fail normalization, not fall back to raw compare");
     match err {
         HarnessError::Normalization { case, cause } => {
@@ -461,14 +463,14 @@ fn j_normalization_failure_has_no_raw_fallback() {
     // than silently comparing an empty/raw value.
     assert!(
         matches!(
-            normalize::merged_config("j", "[1, 2, 3]"),
+            normalize::merged_config("j", "[1, 2, 3]", Side::Deacon),
             Err(HarnessError::Normalization { .. })
         ),
         "merged_config must reject a non-object top-level, never fall back"
     );
     // The only outcomes of normalization are Ok(normalized) or Err(Normalization);
     // there is no raw-byte comparison path a caller could take instead.
-    assert!(normalize::config("j", "{ broken").is_err());
+    assert!(normalize::config("j", "{ broken", Side::Deacon).is_err());
 }
 
 // ===========================================================================
@@ -487,9 +489,13 @@ fn j_normalization_failure_has_no_raw_fallback() {
 /// class rather than folded into a generic "differs".
 #[test]
 fn k_reference_only_difference_is_classified_as_ref_only() {
-    let deacon = normalize::config("k", r#"{ "name": "demo" }"#).expect("normalize");
-    let reference =
-        normalize::config("k", r#"{ "name": "demo", "remoteUser": "vscode" }"#).expect("normalize");
+    let deacon = normalize::config("k", r#"{ "name": "demo" }"#, Side::Deacon).expect("normalize");
+    let reference = normalize::config(
+        "k",
+        r#"{ "name": "demo", "remoteUser": "vscode" }"#,
+        Side::Deacon,
+    )
+    .expect("normalize");
 
     let divergences = normalize::diff(&deacon, &reference);
     assert_eq!(divergences.len(), 1, "{divergences:?}");
@@ -511,9 +517,14 @@ fn k_reference_only_difference_is_classified_as_ref_only() {
 fn l_deacon_only_difference_is_classified_and_not_deprioritized() {
     // `someNewProperty` is deliberately NOT on the enumerated `ABSENT_OPTIONAL_KEYS`
     // list, so it is compared — the property retiring `prune` restored (023 T062).
-    let deacon =
-        normalize::config("l", r#"{ "name": "demo", "someNewProperty": {} }"#).expect("normalize");
-    let reference = normalize::config("l", r#"{ "name": "demo" }"#).expect("normalize");
+    let deacon = normalize::config(
+        "l",
+        r#"{ "name": "demo", "someNewProperty": {} }"#,
+        Side::Deacon,
+    )
+    .expect("normalize");
+    let reference =
+        normalize::config("l", r#"{ "name": "demo" }"#, Side::Deacon).expect("normalize");
 
     let divergences = normalize::diff(&deacon, &reference);
     assert_eq!(
@@ -532,10 +543,18 @@ fn l_deacon_only_difference_is_classified_and_not_deprioritized() {
     );
 
     // FR-020 / 023 T065: ordering must not place deacon-only last as "default noise".
-    let mixed_deacon =
-        normalize::config("l", r#"{ "name": "a", "someNewProperty": 1 }"#).expect("normalize");
-    let mixed_reference =
-        normalize::config("l", r#"{ "name": "b", "remoteUser": "vscode" }"#).expect("normalize");
+    let mixed_deacon = normalize::config(
+        "l",
+        r#"{ "name": "a", "someNewProperty": 1 }"#,
+        Side::Deacon,
+    )
+    .expect("normalize");
+    let mixed_reference = normalize::config(
+        "l",
+        r#"{ "name": "b", "remoteUser": "vscode" }"#,
+        Side::Deacon,
+    )
+    .expect("normalize");
     let kinds: Vec<_> = normalize::diff(&mixed_deacon, &mixed_reference)
         .iter()
         .map(|d| d.kind)
@@ -555,8 +574,10 @@ fn l_deacon_only_difference_is_classified_and_not_deprioritized() {
 /// one-sided class, and must report BOTH sides so the difference is diagnosable.
 #[test]
 fn m_value_difference_is_classified_with_both_sides() {
-    let deacon = normalize::config("m", r#"{ "name": "demo-a" }"#).expect("normalize");
-    let reference = normalize::config("m", r#"{ "name": "demo-b" }"#).expect("normalize");
+    let deacon =
+        normalize::config("m", r#"{ "name": "demo-a" }"#, Side::Deacon).expect("normalize");
+    let reference =
+        normalize::config("m", r#"{ "name": "demo-b" }"#, Side::Deacon).expect("normalize");
 
     let divergences = normalize::diff(&deacon, &reference);
     assert_eq!(divergences.len(), 1);

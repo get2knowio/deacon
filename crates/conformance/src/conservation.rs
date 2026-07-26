@@ -706,6 +706,39 @@ pub struct NormalizationRule {
 /// is invisible to review, and a rule that is registered but blanket fails **V24**.
 pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
     NormalizationRule {
+        name: "compose_project_prefix",
+        scopes: &["channel:chan-container-state"],
+        action: RuleAction::Rewrite,
+        removes: &[],
+        justification: Some(
+            "Strips a Compose project's `<project>_` prefix from a network or volume name \
+             so two CLIs that derive different project names still compare on the resource \
+             itself (bhv-compose-project-name-robust). Rewrite, never delete. Registered \
+             in 024 US5 (T123): it had been applied inside the container-state capture \
+             since the observable-state port without ever appearing in this registry, and \
+             it discarded the project identity leaving no trace in the evidence. The \
+             derived `composeProjectResources.project` field now records the name that was \
+             stripped, so the rewrite is auditable from a snapshot alone.",
+        ),
+        known_non_compliant: None,
+    },
+    NormalizationRule {
+        name: "container_hostname_token",
+        scopes: &["channel:chan-container-state"],
+        action: RuleAction::Rewrite,
+        removes: &[],
+        justification: Some(
+            "Rewrites a container-id-shaped `HOSTNAME` env value (12 lowercase-hex \
+             characters, Docker's default) to `<CONTAINER_HOSTNAME>`, on the `env` entry \
+             and the derived `envMap` value. Two containers created by two CLIs always \
+             disagree here for a reason that says nothing about either CLI. A hostname the \
+             configuration actually set is not 12 hex characters and is left alone. Added \
+             in 024 US5 (T123) so `drop_noise_env` no longer has to delete `PATH` and \
+             `HOME` to get rid of `HOSTNAME`.",
+        ),
+        known_non_compliant: None,
+    },
+    NormalizationRule {
         name: "devcontainer_id_token",
         scopes: &["field:/configuration", "field:/mergedConfiguration"],
         action: RuleAction::Rewrite,
@@ -785,8 +818,15 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
              set (`hostRequirements`, `portsAttributes`). It does NOT descend into \
              arbitrary sub-documents — a `label` or `description` inside \
              `customizations.vscode.settings` is user data and is compared, not elided. \
-             This compensates for a deacon serializer defect (it should apply \
-             `skip_serializing_if`) and is deleted when that lands — tracked at \
+             NARROWED in 024 US5 (T123) to the SIDE whose defect it compensates: it \
+             applies to `/configuration` on deacon's side only, because the reference's \
+             `configuration` is an echo of the authored document and an empty value there \
+             is authorship information — eliding it on both sides is what made an \
+             authored null, an authored empty and an omission indistinguishable (FR-055). \
+             It still applies to `/mergedConfiguration` on BOTH sides, where each CLI \
+             synthesizes computed empties of its own. This compensates for a deacon \
+             serializer defect (it should apply `skip_serializing_if`) and is deleted when \
+             that lands — tracked at \
              specs/023-migrate-parity-to-conformance/tasks.md#T111. Replaces the retired \
              blanket `prune` (023 T062, research D3).",
         ),
@@ -794,14 +834,21 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
     },
     NormalizationRule {
         name: "drop_noise_env",
-        scopes: &["channel:chan-container-state"],
+        scopes: &["field:/env"],
         action: RuleAction::Drop,
         removes: &["PATH", "HOME", "HOSTNAME", "TERM", "container"],
         justification: Some(
             "These five environment variables are injected by the container runtime into \
              every container regardless of the CLI that created it, so they carry no \
              cross-CLI outcome meaning. The set is finite and enumerated; the newer \
-             `chan-injected-process` channel removes no env var at all.",
+             `chan-injected-process` channel removes no env var at all. NARROWED in 024 \
+             US5 (T123) from CAPTURE to the legacy `diff_states` COMPARISON: the \
+             declarative `chan-container-state` observer delegates to the same \
+             `container_state` capture, so removing these at capture also removed them \
+             from the declarative channel — including `PATH`, which FR-050 requires be \
+             compared. Its scope is now the `/env` field of that one legacy comparison; \
+             the declarative channel keeps every variable and rewrites the only \
+             irreconcilable one via `container_hostname_token`.",
         ),
         known_non_compliant: None,
     },
@@ -876,6 +923,23 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
         justification: Some(
             "Rewrites per-run temp workspace and project paths to stable tokens so two \
              runs in different temp directories compare equal. Rewrite, never delete.",
+        ),
+        known_non_compliant: None,
+    },
+    NormalizationRule {
+        name: "user_default_root",
+        scopes: &["field:/user"],
+        action: RuleAction::Canonicalize,
+        removes: &[],
+        justification: Some(
+            "An empty Docker `Config.User` means \"the image default\", which for every \
+             Linux base this suite pins is root; treating \"\" and \"root\" as the same \
+             effective identity keeps a cosmetic spelling difference out of the legacy \
+             `diff_states` comparison while a real non-root `remoteUser`/`containerUser` \
+             still diverges. Removes nothing, and applies to the legacy comparison only — \
+             the declarative `chan-container-state` channel emits `user` verbatim plus the \
+             derived `userSpec`. Registered in 024 US5 (T123): it was an unregistered \
+             comparison-time equivalence, invisible to anyone reading the rule list.",
         ),
         known_non_compliant: None,
     },

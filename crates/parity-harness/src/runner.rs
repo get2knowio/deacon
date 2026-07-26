@@ -284,7 +284,7 @@ pub(crate) async fn execute_ops(
     }
 
     let workspace = context_workspace.unwrap_or_else(|| cfg.fixtures_root.to_path_buf());
-    let mut ctx = RunContext::new(workspace);
+    let mut ctx = RunContext::for_side(workspace, side);
     // Scope the filesystem observer to the case's declared allowlist (clarify Q1).
     ctx.fs_allowlist = case.fs_allowlist.clone();
     ctx.container_id = container_id;
@@ -549,7 +549,7 @@ pub(crate) fn capture_channel(
     // VIII): `chan-container-state` also tokenizes the workspace BASENAME, since each side
     // runs in its own temp workspace and the container-side paths carry only that name.
     let tokens = crate::normalize::tokens_for_channel(&exp.channel, &ctx.workspace);
-    let normalized = crate::normalize::normalize_channel(&exp.channel, &raw, &tokens);
+    let normalized = crate::normalize::normalize_channel(&exp.channel, &raw, &tokens, ctx.side);
     Ok((raw, normalized))
 }
 
