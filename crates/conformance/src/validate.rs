@@ -68,8 +68,13 @@ use crate::model::{
     OBSERVED_CHANNELS, OracleType, RecordType, ReferenceStatus, RevisionKind, SpecManifest,
     SpecStatus, Strength, Testability, parse_id,
 };
+use crate::obligation::{
+    ObligationInventory, compare as compare_obligations, generate_obligations,
+    render as render_obligations,
+};
 use crate::prose::Document;
 use crate::prose::strength::{has_family, hides_mandatory_keyword};
+use crate::scenario::{OPERATION_DIMENSION, ScenarioModel, excluding_rule, is_invalid};
 
 /// A single structural violation. `code` is the stable class (`"V1"`..`"V10"` or
 /// `"SCHEMA"`); `record` names the offending registry record (or, for SCHEMA, the
@@ -196,6 +201,13 @@ pub fn validate_path_with_inventory(
                 .map(|p| p.join("snapshots"))
                 .unwrap_or_else(|| root.join("snapshots"));
             violations.extend(check_snapshots(&registry, &snapshots_dir));
+            // V27: obligation provenance — the committed machine-owned inventory is a
+            // sibling of the registry dir (the same resolution V14/V17 use), so a fixture
+            // registry naturally validates without one (024, US1).
+            violations.extend(check_obligations(
+                &registry,
+                &crate::obligations_file_for(root),
+            ));
             // V25: baseline provenance — the committed frozen inventory must still match
             // a fresh enumeration of the repository tree (023, US1).
             // **V25 (baseline provenance) is RETIRED** — 023 T099, FR-053. The frozen
@@ -1627,6 +1639,10 @@ pub fn run(registry: &Registry, today: &str, repo_root: &Path) -> Vec<Violation>
     checker.check_metamorphic_arity(); // V20 (022-conformance-runner US6)
 
     let mut out = checker.violations;
+    // V26: scenario-model integrity (024, US1). A free function rather than another
+    // `Checker` method — the scenario model is a self-contained sub-record and
+    // `validate.rs` is already 3,300 lines (Principle V, modular boundaries).
+    out.extend(check_scenario_model(registry));
     sort_violations(&mut out);
     out
 }
@@ -1818,6 +1834,26 @@ impl<'a> Checker<'a> {
             r.classifications
                 .iter()
                 .map(|x| (x.id.as_str(), RecordType::Classification)),
+        );
+        // The 024 scenario model is registry data too, so its ids obey the same grammar,
+        // the same prefix↔type agreement, and the same cross-registry uniqueness — which
+        // is what data-model.md §1 means by "unique across ALL id namespaces". Generated
+        // obligations are deliberately absent: like `cst-`/`clu-` they live in a
+        // machine-owned inventory outside the registry, and V27 owns their integrity.
+        out.extend(
+            r.scenario
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::ScenarioDimension)),
+        );
+        out.extend(
+            r.applicability
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::ApplicabilityRule)),
+        );
+        out.extend(
+            r.triples
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::HighRiskTriple)),
         );
         out
     }
@@ -2671,6 +2707,519 @@ fn image_is_pinned(image: &str) -> bool {
     }
 }
 
+// ---------------------------------------------------------------------------
+// V26 — scenario-model integrity (024-deterministic-conformance-coverage, US1)
+// ---------------------------------------------------------------------------
+
+/// The scenario dimensions FR-003 requires the model to declare. Named here rather than
+/// derived so that *removing* one is a visible failure instead of a quietly smaller
+/// denominator — the failure mode this whole feature exists to prevent.
+pub const REQUIRED_SCENARIO_DIMENSIONS: &[&str] = &[
+    "sdim-operation",
+    "sdim-config-source",
+    "sdim-container-state",
+    "sdim-features",
+    "sdim-layering",
+    "sdim-output-mode",
+];
+
+/// **V26 — scenario-model integrity** (024, US1; data-model.md §9).
+///
+/// Flags: a dead dimension value (one appearing in no valid combination, FR-010); a
+/// dimension with an empty or duplicated value set; a missing required dimension
+/// (FR-003); an applicability rule naming an unknown dimension or value, carrying fewer
+/// than two conditions, or carrying no real ground; a high-risk triple whose assignment
+/// is malformed; and a case `scenarioContext` that is partial, undeclared, or itself an
+/// invalid combination.
+///
+/// A registry that declares **no** scenario dimensions opts out entirely (fixture
+/// registries predating this feature): there is no model to be broken, so the check is
+/// silent rather than reporting six missing dimensions for every legacy fixture.
+///
+/// Deliberately a free function over the loaded registry rather than another method on
+/// the 3,300-line `Checker`: the scenario model is a self-contained sub-record with its
+/// own vocabulary, and Principle V's modular-boundaries rule says new logic goes in a new
+/// boundary rather than growing the monolith.
+pub fn check_scenario_model(registry: &Registry) -> Vec<Violation> {
+    let mut out = Vec::new();
+    if registry.scenario.is_empty() {
+        return out;
+    }
+
+    let model = ScenarioModel::new(&registry.scenario, &registry.applicability);
+
+    // --- Dimensions -------------------------------------------------------
+    for dimension in &registry.scenario {
+        if dimension.values.is_empty() {
+            out.push(Violation::new(
+                "V26",
+                &dimension.id,
+                "declares an empty value set; a dimension with no values can never be assigned \
+                 and silently removes itself from every combination",
+            ));
+        }
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
+        for value in &dimension.values {
+            if !seen.insert(value.as_str()) {
+                out.push(Violation::new(
+                    "V26",
+                    &dimension.id,
+                    format!(
+                        "declares value {value:?} more than once; a duplicated value would be \
+                         enumerated twice and double-count its own coverage"
+                    ),
+                ));
+            }
+        }
+    }
+    for required in REQUIRED_SCENARIO_DIMENSIONS {
+        if model.dimension(required).is_none() {
+            out.push(Violation::new(
+                "V26",
+                *required,
+                "required scenario dimension is not declared (FR-003); the combination space \
+                 would silently shrink to the dimensions that remain",
+            ));
+        }
+    }
+
+    let declared: BTreeMap<&str, BTreeSet<&str>> = registry
+        .scenario
+        .iter()
+        .map(|d| {
+            (
+                d.id.as_str(),
+                d.values.iter().map(|v| v.as_str()).collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect();
+
+    // --- Applicability rules ---------------------------------------------
+    for rule in &registry.applicability {
+        if rule.excludes.len() < 2 {
+            out.push(Violation::new(
+                "V26",
+                &rule.id,
+                format!(
+                    "declares {} exclusion condition(s); a rule needs at least two, because a \
+                     single-condition rule bans a value outright rather than banning a \
+                     combination (remove the value from the dimension instead)",
+                    rule.excludes.len()
+                ),
+            ));
+        }
+        if is_filler_ground(&rule.ground) {
+            out.push(Violation::new(
+                "V26",
+                &rule.id,
+                format!(
+                    "`ground` {:?} does not state WHY the combination cannot exist — name the \
+                     mechanism (e.g. \"this operation never creates a container, so a container \
+                     state is not a property it can exercise\"). A rule that only asserts its own \
+                     exclusion removes combinations from the denominator without argument",
+                    rule.ground
+                ),
+            ));
+        }
+        for condition in &rule.excludes {
+            out.extend(check_scenario_condition(
+                &declared,
+                &rule.id,
+                &condition.dimension,
+                &condition.values,
+            ));
+        }
+    }
+
+    // --- High-risk triples ------------------------------------------------
+    for triple in &registry.triples {
+        if !triple.assignment.contains_key(OPERATION_DIMENSION) {
+            out.push(Violation::new(
+                "V26",
+                &triple.id,
+                format!(
+                    "assignment does not pin `{OPERATION_DIMENSION}`; a triple without an \
+                     operation has no partition to belong to and could not be generated"
+                ),
+            ));
+        }
+        let other = triple
+            .assignment
+            .keys()
+            .filter(|k| k.as_str() != OPERATION_DIMENSION)
+            .count();
+        if other != 3 {
+            out.push(Violation::new(
+                "V26",
+                &triple.id,
+                format!(
+                    "assignment pins {other} dimension(s) beyond the operation; a high-risk \
+                     triple names exactly three (data-model.md §5)"
+                ),
+            ));
+        }
+        if is_filler_ground(&triple.reason) {
+            out.push(Violation::new(
+                "V26",
+                &triple.id,
+                format!(
+                    "`reason` {:?} does not state why this interaction was selected; the triple \
+                     set is reviewable only if the selection can be judged, not just the coverage",
+                    triple.reason
+                ),
+            ));
+        }
+        for (dimension, value) in &triple.assignment {
+            out.extend(check_scenario_condition(
+                &declared,
+                &triple.id,
+                dimension,
+                std::slice::from_ref(value),
+            ));
+        }
+        let combination: Vec<(&str, &str)> = triple
+            .assignment
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        if let Some(rule) = excluding_rule(&registry.applicability, &combination) {
+            out.push(Violation::new(
+                "V26",
+                &triple.id,
+                format!(
+                    "selects a combination that rule `{}` excludes; a triple must name a \
+                     combination the model says can exist",
+                    rule.id
+                ),
+            ));
+        }
+    }
+
+    // --- Dead values (FR-010) ---------------------------------------------
+    //
+    // A value is alive when it appears in at least one obligation the enumeration would
+    // emit: for a pairable dimension, in some valid pair; for the operation dimension, in
+    // some operation partition that yields at least one pair. Defining "reachable" as
+    // "reachable in the denominator we actually build" keeps the report and the model
+    // from disagreeing about what the model contains.
+    if let Some(operations) = model.operation_dimension() {
+        let mut alive: BTreeSet<(&str, &str)> = BTreeSet::new();
+        for operation in &operations.values {
+            let applicable = model.applicable_dimensions(operation);
+            let mut any_pair = false;
+            for (i, (first, first_values)) in applicable.iter().enumerate() {
+                for (second, second_values) in applicable.iter().skip(i + 1) {
+                    for a in first_values {
+                        for b in second_values {
+                            let combination = [
+                                (OPERATION_DIMENSION, operation.as_str()),
+                                (first.id.as_str(), *a),
+                                (second.id.as_str(), *b),
+                            ];
+                            if is_invalid(model.rules, &combination) {
+                                continue;
+                            }
+                            any_pair = true;
+                            alive.insert((first.id.as_str(), a));
+                            alive.insert((second.id.as_str(), b));
+                        }
+                    }
+                }
+            }
+            if any_pair {
+                alive.insert((OPERATION_DIMENSION, operation.as_str()));
+            }
+        }
+        for dimension in &registry.scenario {
+            for value in &dimension.values {
+                if !alive.contains(&(dimension.id.as_str(), value.as_str())) {
+                    out.push(Violation::new(
+                        "V26",
+                        &dimension.id,
+                        format!(
+                            "value {value:?} is DEAD — no applicability rule permits it in any \
+                             valid combination, so it can never be covered. Remove the value or \
+                             narrow the rule that strands it (FR-010)"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    // --- Case scenario contexts (V16 extended, data-model.md §3) -----------
+    let dimension_ids: Vec<&str> = registry.scenario.iter().map(|d| d.id.as_str()).collect();
+    for case in &registry.cases {
+        if case.scenario_context.is_empty() {
+            // A legacy (or not-yet-annotated) case declares nothing and covers no
+            // combination obligation. That is a coverage fact, not a malformation.
+            continue;
+        }
+        for (dimension, value) in &case.scenario_context {
+            out.extend(check_scenario_condition(
+                &declared,
+                &case.id,
+                dimension,
+                std::slice::from_ref(value),
+            ));
+        }
+        for dimension in &dimension_ids {
+            if !case.scenario_context.contains_key(*dimension) {
+                out.push(Violation::new(
+                    "V26",
+                    &case.id,
+                    format!(
+                        "`scenarioContext` assigns no value for `{dimension}`; a case must \
+                         assign EVERY scenario dimension or none at all, because a partial \
+                         assignment makes \"which pairs does this cover?\" ambiguous \
+                         (data-model.md §3)"
+                    ),
+                ));
+            }
+        }
+        let combination: Vec<(&str, &str)> = case
+            .scenario_context
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        if let Some(rule) = excluding_rule(&registry.applicability, &combination) {
+            out.push(Violation::new(
+                "V26",
+                &case.id,
+                format!(
+                    "`scenarioContext` is a combination rule `{}` excludes; a case cannot \
+                     exercise a combination the model says cannot exist",
+                    rule.id
+                ),
+            ));
+        }
+    }
+
+    out
+}
+
+/// Check one `(dimension, values)` reference against the declared scenario model,
+/// reporting an unknown dimension once and each unknown value individually.
+fn check_scenario_condition(
+    declared: &BTreeMap<&str, BTreeSet<&str>>,
+    record: &str,
+    dimension: &str,
+    values: &[String],
+) -> Vec<Violation> {
+    let mut out = Vec::new();
+    let Some(known) = declared.get(dimension) else {
+        out.push(Violation::new(
+            "V26",
+            record,
+            format!("names scenario dimension {dimension:?}, which is not declared"),
+        ));
+        return out;
+    };
+    for value in values {
+        if !known.contains(value.as_str()) {
+            out.push(Violation::new(
+                "V26",
+                record,
+                format!("names value {value:?}, which dimension `{dimension}` does not declare"),
+            ));
+        }
+    }
+    out
+}
+
+/// Whether a `ground` / `reason` is filler rather than an argument.
+///
+/// Reuses the V23 vocabulary (`VAGUE_CAPABILITY_MARKERS`) rather than forking a second
+/// filler test, and adds a prose floor: a ground must be long enough to have explained
+/// something. Deliberately NOT [`names_an_exclusion_ground`], whose marker list is tuned
+/// for permanent *out-of-scope* claims ("constitution", "principle", "authoring") — an
+/// applicability ground argues from a mechanism, not from a principle, so requiring those
+/// markers would reject every correct ground.
+fn is_filler_ground(ground: &str) -> bool {
+    let lowered = ground.trim().to_ascii_lowercase();
+    if lowered.split_whitespace().count() < 8 {
+        return true;
+    }
+    VAGUE_CAPABILITY_MARKERS
+        .iter()
+        .any(|marker| lowered.contains(marker))
+}
+
+// ---------------------------------------------------------------------------
+// V27 — obligation provenance (024-deterministic-conformance-coverage, US1)
+// ---------------------------------------------------------------------------
+
+/// **V27 — obligation provenance** (024, US1; data-model.md §9).
+///
+/// The committed `obligations.json` is machine-owned: it must byte-equal a fresh
+/// regeneration, pin the registry's `spec`-kind revision, and reference only declared
+/// dimension values. A hand edit is indistinguishable from staleness and is caught by the
+/// same comparison — which is the point: there is no way to edit the generated file that
+/// the check would treat as legitimate.
+///
+/// A registry that declares no scenario model and produces no obligations is silent (a
+/// fixture predating this feature). A registry that DOES declare a model but ships no
+/// committed inventory is a violation, not a skip: the absent file would otherwise read
+/// as "nothing to check".
+pub fn check_obligations(registry: &Registry, obligations_file: &Path) -> Vec<Violation> {
+    let mut out = Vec::new();
+
+    let regenerated = match generate_obligations(registry) {
+        Ok(inventory) => inventory,
+        Err(e) => {
+            out.push(Violation::new(
+                "V27",
+                obligations_file.display().to_string(),
+                format!("could not regenerate the obligation inventory: {e}"),
+            ));
+            return out;
+        }
+    };
+
+    let raw = match std::fs::read_to_string(obligations_file) {
+        Ok(raw) => raw,
+        Err(_) => {
+            if !registry.scenario.is_empty() && !regenerated.units.is_empty() {
+                out.push(Violation::new(
+                    "V27",
+                    obligations_file.display().to_string(),
+                    format!(
+                        "the registry declares a scenario model but no committed obligation \
+                         inventory exists; {} obligation(s) would be generated (run `coverage \
+                         generate`)",
+                        regenerated.units.len()
+                    ),
+                ));
+            }
+            return out;
+        }
+    };
+
+    let committed: ObligationInventory = match serde_json::from_str(&raw) {
+        Ok(inventory) => inventory,
+        Err(e) => {
+            out.push(Violation::new(
+                "V27",
+                obligations_file.display().to_string(),
+                format!("committed obligation inventory is malformed: {e}"),
+            ));
+            return out;
+        }
+    };
+
+    // Provenance pin: the inventory's revision must name a declared `spec`-kind revision.
+    let spec_revisions: Vec<&str> = registry
+        .revisions
+        .iter()
+        .filter(|r| r.kind == RevisionKind::Spec)
+        .map(|r| r.id.as_str())
+        .collect();
+    if !spec_revisions.contains(&committed.revision.as_str()) {
+        out.push(Violation::new(
+            "V27",
+            &committed.revision,
+            format!(
+                "obligation inventory revision {:?} names no `spec`-kind revision record \
+                 (declared: {})",
+                committed.revision,
+                if spec_revisions.is_empty() {
+                    "none".to_string()
+                } else {
+                    spec_revisions.join(", ")
+                }
+            ),
+        ));
+    }
+
+    // Dangling references: a value (or behavior) removed from the registry while the
+    // inventory still names it.
+    let declared: BTreeMap<&str, BTreeSet<&str>> = registry
+        .scenario
+        .iter()
+        .map(|d| {
+            (
+                d.id.as_str(),
+                d.values.iter().map(|v| v.as_str()).collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect();
+    let behaviors: BTreeSet<&str> = registry.behaviors.iter().map(|b| b.id.as_str()).collect();
+    let operations: BTreeSet<&str> = declared
+        .get(OPERATION_DIMENSION)
+        .cloned()
+        .unwrap_or_default();
+    for unit in &committed.units {
+        if let Some(operation) = unit.operation.as_deref()
+            && !operations.contains(operation)
+        {
+            out.push(Violation::new(
+                "V27",
+                &unit.id,
+                format!(
+                    "names operation {operation:?}, which `{OPERATION_DIMENSION}` no longer \
+                     declares"
+                ),
+            ));
+        }
+        if let Some(assignment) = unit.assignment.as_ref() {
+            for (dimension, value) in assignment {
+                match declared.get(dimension.as_str()) {
+                    None => out.push(Violation::new(
+                        "V27",
+                        &unit.id,
+                        format!("names scenario dimension {dimension:?}, which is not declared"),
+                    )),
+                    Some(known) if !known.contains(value.as_str()) => {
+                        out.push(Violation::new(
+                            "V27",
+                            &unit.id,
+                            format!(
+                                "names value {value:?}, which dimension `{dimension}` no longer \
+                                 declares"
+                            ),
+                        ));
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        if let Some(behavior) = unit.behavior.as_deref()
+            && !behaviors.contains(behavior)
+        {
+            out.push(Violation::new(
+                "V27",
+                &unit.id,
+                format!("names behavior {behavior:?}, which the registry no longer declares"),
+            ));
+        }
+    }
+
+    // Byte comparison is the contract; the unit-level drift is the diagnostic.
+    if raw != render_obligations(&regenerated) {
+        let drift = compare_obligations(&committed, &regenerated);
+        let detail = match drift.first_difference() {
+            Some((id, how)) => format!(
+                "first difference: `{id}` was {how} (+{} added, -{} removed, ~{} changed)",
+                drift.added.len(),
+                drift.removed.len(),
+                drift.changed.len()
+            ),
+            None => "the unit sets agree, so the difference is in formatting or the revision pin"
+                .to_string(),
+        };
+        out.push(Violation::new(
+            "V27",
+            obligations_file.display().to_string(),
+            format!(
+                "committed obligation inventory does not byte-match a fresh regeneration \
+                 (run `coverage generate`); {detail}"
+            ),
+        ));
+    }
+
+    out
+}
+
 /// Whether a behavior applies in a profile's context: every applicability condition
 /// must be satisfied by the profile's assignment (empty applicability = everywhere).
 /// A condition on a dimension the profile does not assign is treated as unsatisfied.
@@ -2776,6 +3325,10 @@ fn record_type_name(ty: RecordType) -> &'static str {
         RecordType::Classification => "classification",
         RecordType::ClauseUnit => "clause-unit",
         RecordType::ClauseClassification => "clause-classification",
+        RecordType::ScenarioDimension => "scenario-dimension",
+        RecordType::ApplicabilityRule => "applicability-rule",
+        RecordType::HighRiskTriple => "high-risk-triple",
+        RecordType::Obligation => "obligation",
     }
 }
 
