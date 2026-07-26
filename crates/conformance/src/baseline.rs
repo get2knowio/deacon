@@ -963,6 +963,30 @@ const FUNCTION_UNITS: &[(&str, &[(&str, Authored)])] = &[
                     diff_classes: DIFF_NONE,
                 },
             ),
+            // 024 Block B (T022). Added after the freeze, exactly as User Story 4 of 023
+            // added its seven fault-injection guards: the enumeration must still describe
+            // every `#[test]` it finds, so a guard function without an authored assertion
+            // is a hard error rather than an undescribed unit.
+            (
+                "the_docker_conformance_driver_is_registered_selected_and_excluded",
+                Authored {
+                    assertion: "the Docker-backed declarative conformance driver is registered as a Docker-requiring live binary, has a source file, is selected by the parity nextest profile, and is excluded by every other profile",
+                    channels: CH_NONE,
+                    error_path: false,
+                    fixtures: FX_NONE,
+                    diff_classes: DIFF_NONE,
+                },
+            ),
+            (
+                "no_coverage_or_regression_command_reaches_the_shipped_cli",
+                Authored {
+                    assertion: "no coverage or regression command introduced by the deterministic-coverage tooling appears at any depth of the shipped `deacon` command tree",
+                    channels: CH_NONE,
+                    error_path: false,
+                    fixtures: FX_NONE,
+                    diff_classes: DIFF_NONE,
+                },
+            ),
         ],
     ),
     (
