@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-user-profiles",
+      "behaviors": [
+        "bhv-user-profiles"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "integration_profiles"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-exit-code",
+          "expectation": "the selected profile's flags/config are applied to the invocation"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-trust-gate",
+      "behaviors": [
+        "bhv-trust-host-hook-gate"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "integration_trust"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-exit-code",
+          "expectation": "an untrusted workspace fails closed rather than executing host-side hooks"
+        },
+        {
+          "channel": "chan-stderr",
+          "expectation": "the diagnostic names the workspace and the trust opt-in flags"
+        }
+      ]
+    }
+  ]
+}

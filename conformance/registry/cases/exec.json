@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-exec-decl-tty",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-tty"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-lc",
+            "test -t 1 && echo TTY || echo NOTTY"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Migrated from parity_exec::tty: both CLIs present the same TTY allocation to the executed command. The same argv runs on both sides (the declarative model has one argv per operation), so the comparison is a true differential. Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-exec-decl-user",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-user"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-lc",
+            "id -u"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Migrated from parity_exec::user: both CLIs run the command as the same container user (an explicit `containerUser`). The same argv runs on both sides (the declarative model has one argv per operation), so the comparison is a true differential. Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-exec-decl-working-directory",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-working-directory"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-lc",
+            "pwd"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Migrated from parity_exec::working-directory: both CLIs run the command in the same container working directory (an explicit `workspaceFolder`). The same argv runs on both sides (the declarative model has one argv per operation), so the comparison is a true differential. Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-exec-parity",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "parity_exec"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-stdout",
+          "expectation": "the executed command's stdout matches the reference"
+        },
+        {
+          "channel": "chan-exit-code",
+          "expectation": "the executed command's exit code is propagated, matching the reference"
+        }
+      ]
+    }
+  ]
+}

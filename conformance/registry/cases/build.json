@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-build-parity",
+      "behaviors": [
+        "bhv-build-image-parity"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "parity_build"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-exit-code",
+          "expectation": "exits 0 on a successful build"
+        },
+        {
+          "channel": "chan-stdout",
+          "expectation": "reports a build outcome matching the reference after normalization"
+        }
+      ]
+    }
+  ]
+}

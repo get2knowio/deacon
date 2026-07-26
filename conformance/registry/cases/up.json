@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-up-docker-channels",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "labels": {
+                "devcontainer.source": "deacon"
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-injected-process",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "env": {
+                "CONF_TOKEN": "us5"
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-process-graph",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {}
+          }
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "status": "running"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Declarative Docker-backed spec-expectation case (022-conformance-runner US5): `deacon up` in an ISOLATED external temp workspace (collision-resistant, guaranteed cleanup) exercises all four Docker channels \u2014 chan-image (deacon stamps devcontainer.source), chan-injected-process (containerEnv CONF_TOKEN injected), chan-process-graph (mount/network/volume graph captured), chan-temporal (container running). Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-up-exec-decl-traditional",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-exec-traditional"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-lc",
+            "cat /tmp/parity_marker /tmp/parity_env_marker"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Migrated from parity_up_exec::traditional: after `up` on a traditional (non-compose) workspace, both CLIs' `exec` reach that workspace's own container and observe the same postCreate markers \u2014 including the #332 parity that neither CLI substitutes `${containerEnv:VAR}` inside a lifecycle command string (both must print the same EMPTY marker). Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-up-exec-parity",
+      "behaviors": [
+        "bhv-up-exec-parity",
+        "bhv-exec-container-id-metadata"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "parity_up_exec"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-container-state",
+          "expectation": "the created container's environment and remote user match the reference for the observed fixtures"
+        },
+        {
+          "channel": "chan-stdout",
+          "expectation": "exec --container-id recovers the config-only remoteEnv from the container's devcontainer.metadata label, byte-identical to the reference"
+        }
+      ],
+      "notes": "Research D2's INVERSE defect, resolved (023 T054). `parity_up_exec` asserts two things \u2014 up/exec container parity AND `exec --container-id` recovering remoteUser/remoteEnv from the devcontainer.metadata label \u2014 but emits a SINGLE CaseResult (`traditional`), so the registry previously claimed two independently-evidenced cases from one reported outcome and one of them had no evidence of its own. Both assertions are genuinely exercised (a regression fails the binary); only the REPORTING granularity is coarse. The two pointer cases are therefore merged into this one: one reported outcome, two behaviors, stated rather than disguised. `bhv-up-exec-parity` additionally has independent declarative evidence in case-up-exec-decl-traditional; `bhv-exec-container-id-metadata` awaits its own independently-reported case, which needs a runtime-resolved container-id token in an operation's argv (deferred, tasks.md#T110). THIS CASE IS WHY `parity_up_exec.rs` SURVIVES: its equivalence verdict is clean, but it carries the ONLY evidence for bhv-exec-container-id-metadata, so deleting it would leave that behavior uncovered (V5). See tasks.md#T110."
+    },
+    {
+      "id": "case-up-idempotent",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "oracleType": "invariant-metamorphic",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-1",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        },
+        {
+          "id": "op-up-2",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "relationship": {
+            "kind": "idempotence",
+            "againstOp": "op-up-1"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up-2"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Declarative invariant-metamorphic case (022-conformance-runner US6): a second `deacon up` on the same isolated workspace must be IDEMPOTENT \u2014 it reuses the running container created by the first up (same container id, still running) rather than recreating it. The oracle verdicts on the DECLARED RELATIONSHIP between op-up-2 and op-up-1's chan-temporal state, not a fixed output (FR-008). Image pinned to alpine:3.19 (V18)."
+    }
+  ]
+}
