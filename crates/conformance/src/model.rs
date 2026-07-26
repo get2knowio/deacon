@@ -58,6 +58,17 @@ pub enum RecordType {
     Classification,
     ClauseUnit,
     ClauseClassification,
+    /// A scenario dimension (`sdim-`) — 024-deterministic-conformance-coverage. A
+    /// SEPARATE namespace from [`RecordType::Dimension`] (`dim-`), which stays
+    /// environment-only (research Decision 1).
+    ScenarioDimension,
+    /// An applicability exclusion rule (`rule-`).
+    ApplicabilityRule,
+    /// A hand-selected high-risk triple (`hrt-`).
+    HighRiskTriple,
+    /// A generated coverage obligation (`obl-`); machine-owned inventory, like `cst-`
+    /// and `clu-`.
+    Obligation,
 }
 
 impl RecordType {
@@ -78,6 +89,10 @@ impl RecordType {
             RecordType::Classification => "cls",
             RecordType::ClauseUnit => "clu",
             RecordType::ClauseClassification => "clc",
+            RecordType::ScenarioDimension => "sdim",
+            RecordType::ApplicabilityRule => "rule",
+            RecordType::HighRiskTriple => "hrt",
+            RecordType::Obligation => "obl",
         }
     }
 
@@ -98,6 +113,10 @@ impl RecordType {
             "cls" => RecordType::Classification,
             "clu" => RecordType::ClauseUnit,
             "clc" => RecordType::ClauseClassification,
+            "sdim" => RecordType::ScenarioDimension,
+            "rule" => RecordType::ApplicabilityRule,
+            "hrt" => RecordType::HighRiskTriple,
+            "obl" => RecordType::Obligation,
             _ => return None,
         })
     }
@@ -111,7 +130,8 @@ pub enum IdError {
     /// uppercase, or disallowed characters.
     #[error(
         "id {id:?} is malformed: expected \
-         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls|clu|clc)-[a-z0-9]+(-[a-z0-9]+)*$`"
+         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls|clu|clc|sdim|rule|hrt|obl)\
+          -[a-z0-9]+(-[a-z0-9]+)*$`"
     )]
     Format { id: String },
     /// The id is well-formed but its leading segment is not a known record prefix.
