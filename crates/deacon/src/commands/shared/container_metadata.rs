@@ -106,18 +106,26 @@ mod tests {
     /// the later env-probe pass.
     #[test]
     fn read_back_resolves_host_env_and_leaves_workspace_tokens_literal() {
-        // `PATH` rather than a var this test sets: `unsafe_code` is denied
-        // workspace-wide, so `set_var` is unavailable, and PATH is always present.
-        let want = std::env::var("PATH").expect("PATH is set");
+        // The probe variable is taken from the environment rather than set, because
+        // `unsafe_code` is denied workspace-wide so `set_var` is unavailable. It is also
+        // read through `env::vars()` — the same iteration the substitution context uses —
+        // rather than `env::var("PATH")`: on Windows the variable is spelled `Path`, and
+        // `env::var` matches it case-insensitively while a `HashMap` lookup does not. The
+        // first draft hard-coded `PATH` and failed only on the Windows lane.
+        let (probe_name, want) = std::env::vars()
+            .find(|(k, v)| {
+                !v.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+            .expect("at least one non-empty environment variable with a simple name");
 
-        let cfg = config_from_metadata_label(&container_with_label(
-            r#"[{"remoteEnv":{
-                 "HOSTENV":"${localEnv:PATH}",
-                 "LWF":"${localWorkspaceFolder}",
-                 "CWF":"${containerWorkspaceFolder}",
-                 "CENV":"${containerEnv:PATH}"
-               }}]"#,
-        ))
+        let cfg = config_from_metadata_label(&container_with_label(&format!(
+            r#"[{{"remoteEnv":{{
+                 "HOSTENV":"${{localEnv:{probe_name}}}",
+                 "LWF":"${{localWorkspaceFolder}}",
+                 "CWF":"${{containerWorkspaceFolder}}",
+                 "CENV":"${{containerEnv:PATH}}"
+               }}}}]"#
+        )))
         .unwrap()
         .expect("label present");
 
