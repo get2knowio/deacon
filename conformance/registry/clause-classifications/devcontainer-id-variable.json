@@ -5,49 +5,49 @@
       "id": "clc-devcontainer-id-variable-compute-a-sha-256-hash-from-the-utf-8-encoded-in-algo-ff771e6e",
       "clause": "clu-devcontainer-id-variable-compute-a-sha-256-hash-from-the-utf-8-encoded-in-algo-ff771e6e",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "rationale": "One step of the label-based `${devcontainerId}` derivation. Only the derived identifier is externally observable; the choice of digest function is an internal computation with no channel of its own, and asserting it would mean reaching inside compute_dev_container_id rather than observing an operation's output."
     },
     {
       "id": "clc-devcontainer-id-variable-excluding-boolean-numbers-and-enum-properties-th-desc-45721081",
       "clause": "clu-devcontainer-id-variable-excluding-boolean-numbers-and-enum-properties-th-desc-45721081",
       "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "rationale": "A scope enumeration: it lists which Feature-metadata properties admit `${devcontainerId}` and states no outcome. The substitutable properties it names (`entrypoint`, `mounts`, `customizations`) are already observed through their effects by bhv-up-feature-entrypoint-chain and bhv-up-mount-source-and-shape; the list itself has no separately-observable form."
     },
     {
       "id": "clc-devcontainer-id-variable-excluding-boolean-numbers-and-enum-properties-th-desc-bd0ca7d0",
       "clause": "clu-devcontainer-id-variable-excluding-boolean-numbers-and-enum-properties-th-desc-bd0ca7d0",
       "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "rationale": "A scope enumeration of the devcontainer.json properties that admit `${devcontainerId}`; it states which fields are in scope for substitution, not what any substitution must produce. The observable consequence, a substituted value in the resolved configuration, is claimed by bhv-readconfig-substitution-object-fields."
     },
     {
       "id": "clc-devcontainer-id-variable-it-should-only-be-used-in-parts-of-the-configura-desc-556d8d7d",
       "clause": "clu-devcontainer-id-variable-it-should-only-be-used-in-parts-of-the-configura-desc-556d8d7d",
       "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "rationale": "An authoring recommendation addressed to the configuration/Feature author (keep the variable out of anything used to build the image so pre-building stays possible), with its rationale. It constrains the author's document, not the implementation: deacon substitutes the variable wherever it appears and has no policy that could be observed to enforce or relax the advice."
     },
     {
       "id": "clc-devcontainer-id-variable-the-identifier-must-only-contain-alphanumeric-ch-desc-13534537",
       "clause": "clu-devcontainer-id-variable-the-identifier-must-only-contain-alphanumeric-ch-desc-13534537",
       "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "rationale": "A well-formedness constraint on the derived identifier. deacon's derivation emits a fixed-width base-32 alphanumeric string by construction, so no input can produce a violating value; a property that cannot fail admits no discriminating observation."
     },
     {
       "id": "clc-devcontainer-id-variable-they-must-ensure-that-it-is-unique-among-other-d-desc-f5994239",
       "clause": "clu-devcontainer-id-variable-they-must-ensure-that-it-is-unique-among-other-d-desc-f5994239",
       "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "rationale": "Two properties of the derived identifier: uniqueness across the dev containers on one host, and stability across rebuilds. Stability is a metamorphic relation the runner can express in principle, but neither property has an observation here, because `${devcontainerId}` reaches a channel only where an author substituted it into some other value; the identifier is not itself a reported field of any consumer subcommand."
     },
     {
       "id": "clc-devcontainer-id-variable-to-ensure-implementations-get-to-the-same-result-algo-001cb9f4",
       "clause": "clu-devcontainer-id-variable-to-ensure-implementations-get-to-the-same-result-algo-001cb9f4",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "rationale": "A canonicalization step (sort object keys, strip optional whitespace) inside the label-based `${devcontainerId}` derivation, stated so independent implementations agree. It is an input normalization with no output of its own; whatever it affects is folded into the derived identifier before anything observable is produced."
     },
     {
       "id": "clc-devcontainer-id-variable-use-a-base-32-encoded-representation-left-padded-algo-26efae91",
       "clause": "clu-devcontainer-id-variable-use-a-base-32-encoded-representation-left-padded-algo-26efae91",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "rationale": "The output encoding step of the label-based `${devcontainerId}` derivation. Like the other steps of that computation it has no observation independent of the derived identifier itself, which the runner sees only where an author substituted the variable into some other observable value."
     }
   ]
 }

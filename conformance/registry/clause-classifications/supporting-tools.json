@@ -10,14 +10,14 @@
     {
       "id": "clc-supporting-tools-a-dev-container-command-line-interface-cli-that-desc-b5b7198a",
       "clause": "clu-supporting-tools-a-dev-container-command-line-interface-cli-that-desc-b5b7198a",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "not-applicable",
+      "rationale": "Catalogue entry naming a third-party product in the ecosystem list (the reference CLI). It describes what another tool is, not an obligation on a consuming implementation, and deacon has no surface on which 'a CLI exists' could be observed. Same ground as this document's other tool-catalogue records."
     },
     {
       "id": "clc-supporting-tools-an-array-of-extension-ids-that-specify-the-exten-desc-e843b6ac",
       "clause": "clu-supporting-tools-an-array-of-extension-ids-that-specify-the-exten-desc-e843b6ac",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "not-applicable",
+      "rationale": "Documents `customizations.vscode.extensions`, a key owned by an editor. deacon carries `customizations` through verbatim (variable-substituted per bhv-readconfig-substitution-object-fields) and attributes no meaning to its contents; installing editor extensions is editor behavior deacon has no command for. Out of consumer-only scope."
     },
     {
       "id": "clc-supporting-tools-codespaces-disableautomaticconfiguration-true-io-38f1cf46",
@@ -46,8 +46,8 @@
     {
       "id": "clc-supporting-tools-set-default-container-specific-settings-json-val-io-fc3a41cd",
       "clause": "clu-supporting-tools-set-default-container-specific-settings-json-val-io-fc3a41cd",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "not-applicable",
+      "rationale": "The `settings`/`extensions` snippet under `customizations.vscode`: default editor settings applied on container create. deacon has no editor session to apply settings to, and preserves the object without interpreting it. Editor-owned surface, out of consumer-only scope."
     },
     {
       "id": "clc-supporting-tools-shutdownaction-enum-does-not-apply-to-codespaces-desc-55b06d3b",
@@ -64,8 +64,8 @@
     {
       "id": "clc-supporting-tools-visual-studio-code-specific-properties-go-under-desc-94ff0710",
       "clause": "clu-supporting-tools-visual-studio-code-specific-properties-go-under-desc-94ff0710",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "not-applicable",
+      "rationale": "A placement convention for one editor's own namespace inside `customizations`. deacon treats every `customizations.<product>` sub-object opaquely, so which product owns the `vscode` key is not a distinction deacon draws. Editor-owned surface, out of consumer-only scope."
     },
     {
       "id": "clc-supporting-tools-workspacemount-string-not-yet-supported-when-usi-desc-ea06083a",
