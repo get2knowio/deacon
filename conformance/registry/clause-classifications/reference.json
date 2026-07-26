@@ -49,13 +49,15 @@
       "id": "clc-reference-container-mounts-environment-variables-and-user-algo-fc512eb6",
       "clause": "clu-reference-container-mounts-environment-variables-and-user-algo-fc512eb6",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
     },
     {
       "id": "clc-reference-each-command-must-exit-successfully-for-the-stag-algo-bc7ea234",
       "clause": "clu-reference-each-command-must-exit-successfully-for-the-stag-algo-bc7ea234",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ]
     },
     {
       "id": "clc-reference-each-entry-in-the-object-will-be-run-in-parallel-algo-6d33de69",
@@ -77,7 +79,7 @@
       "id": "clc-reference-however-remote-user-and-environment-variable-con-algo-a74a1d41",
       "clause": "clu-reference-however-remote-user-and-environment-variable-con-algo-a74a1d41",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
     },
     {
       "id": "clc-reference-if-the-waitfor-property-is-defined-then-executio-algo-0000032a",
@@ -91,7 +93,7 @@
       "id": "clc-reference-per-variable-last-value-wins-algo-c8dcfd00",
       "clause": "clu-reference-per-variable-last-value-wins-algo-c8dcfd00",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
     },
     {
       "id": "clc-reference-probed-environment-variables-should-be-merged-wi-algo-bc58ffe5",
@@ -184,14 +186,16 @@
     {
       "id": "clc-reference-this-set-of-commands-is-executed-in-sequence-on-algo-462a5272",
       "clause": "clu-reference-this-set-of-commands-is-executed-in-sequence-on-algo-462a5272",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-run-user-commands-hook-order"
+      ]
     },
     {
       "id": "clc-reference-true-if-at-least-one-is-true-false-otherwise-algo-219a6637",
       "clause": "clu-reference-true-if-at-least-one-is-true-false-otherwise-algo-219a6637",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
     },
     {
       "id": "clc-reference-uid-gid-sync-ing-is-an-optional-task-for-linux-o-algo-6c12fea6",
@@ -221,7 +225,7 @@
       "id": "clc-reference-validate-that-a-workspace-source-folder-has-been-algo-bb15890d",
       "clause": "clu-reference-validate-that-a-workspace-source-folder-has-been-algo-bb15890d",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
     },
     {
       "id": "clc-reference-variables-in-string-values-will-be-substituted-a-algo-9107fc1e",
@@ -235,7 +239,7 @@
       "id": "clc-reference-when-the-order-matters-the-devcontainer-json-is-algo-b1bacaaf",
       "clause": "clu-reference-when-the-order-matters-the-devcontainer-json-is-algo-b1bacaaf",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
     }
   ]
 }

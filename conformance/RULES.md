@@ -64,7 +64,7 @@ checkable at a glance rather than by reading every section.
 | **V18** | a Docker case referencing a fixture with an unpinned image | `validate.rs` |
 | **V19** | an allowed-difference whose backing waiver/divergence id does not resolve | `validate.rs` |
 | **V20** | invariant-metamorphic arity (≥2 operations + a relationship naming a sibling) | `validate.rs` |
-| **V21** | migration mapping integrity, both directions, incl. exception correspondence | [Migration mapping](#migration-mapping-v21--v23--transitional) |
+| **V21** | migration mapping integrity (forward direction) incl. exception correspondence; the reverse orphan-case direction is **retired** | [Migration mapping](#migration-mapping-v21--v23--transitional) |
 | **V22** | fixture correspondence and unreferenced migrated fixtures | [Migration mapping](#migration-mapping-v21--v23--transitional) |
 | **V23** | malformed residual | [Migration mapping](#migration-mapping-v21--v23--transitional) |
 | **V24** | unscoped or unjustified normalization rule | [Normalization rules](#normalization-rules-v24--transitional) |
@@ -405,13 +405,33 @@ destination is reachable from a unit.
 
 | Class | Statement | Remedy |
 |-------|-----------|--------|
-| **V21** | **mapping integrity, both directions**: a baseline unit with no mapping entry (an orphan *test*); a mapping naming a unit or case that does not exist; a **declarative** case no mapping entry reaches (an orphan *case*); a disposition whose arity is wrong (`migrated`/`deduplicated` without `caseIds`, `residual`/`retired` with them, `residual` without a resolvable `residualId`, `deduplicated`/`retired` without a `rationale`); a destination case that resolves to no behavior or declares no observable channel, or names a dangling behavior/channel id; and, for a characterized **exception**, a mapping to zero or to more than one mechanism, a missing mapping entry, or a mechanism whose current direction/scope is BROADER than the recorded pre-migration form. **Also: a registry that carries mapping or residual records with NO committed `baseline.json`** | Give the unit a destination, the case a reachable mapping, the exception exactly one mechanism. A tolerance may be narrowed, never widened. Restore the baseline (or, if the records are genuinely obsolete, delete them too). |
+| **V21** | **mapping integrity (forward)**: a baseline unit with no mapping entry (an orphan *test*); a mapping naming a unit or case that does not exist; a disposition whose arity is wrong (`migrated`/`deduplicated` without `caseIds`, `residual`/`retired` with them, `residual` without a resolvable `residualId`, `deduplicated`/`retired` without a `rationale`); a destination case that resolves to no behavior or declares no observable channel, or names a dangling behavior/channel id; and, for a characterized **exception**, a mapping to zero or to more than one mechanism, a missing mapping entry, or a mechanism whose current direction/scope is BROADER than the recorded pre-migration form. **Also: a registry that carries mapping or residual records with NO committed `baseline.json`** | Give the unit a destination, the case a reachable mapping, the exception exactly one mechanism. A tolerance may be narrowed, never widened. Restore the baseline (or, if the records are genuinely obsolete, delete them too). |
 | **V22** | **fixture correspondence**: a `from` split across two `to`s; a `to` fed by two `from`s (a silent merge); a `from` that is not one of the unit's baseline fixtures; a baseline fixture of a migrated unit with no `fixtureMapping` entry (a silent drop); and a migrated fixture no case references (an unreferenced orphan) | Make the correspondence one-to-one and account for every fixture the unit consumed. Declaring the SAME `(from, to)` pair from two units is fine — two modes of one workspace legitimately share one fixture. |
 | **V23** | **malformed residual**: a vague `missingCapability` (a filler phrase, or too short to name a mechanism); a `followUp` that is not a tracked reference; an `outOfScopeRationale` that names no ground for permanent exclusion (024 — see [Queued vs permanent](#queued-vs-permanent-residuals-024)); a `blockedCarrier` that is absent on a residual whose units are not ALL `external-corpus-entry`, that names no baseline program, or that is present on an `external-corpus-entry` residual; a `units`/`behaviors` entry that does not resolve; and a unit claimed by a residual while its mapping says it was migrated | Name the specific missing capability, and either a tracked follow-up (`queued`) or the principle that forbids expression (`permanent`); name the carrier the residual pins. A residual never blocks certification, which is exactly why its shape must be strict. |
 
-**Legacy pointer cases are exempt from V21's orphan-case direction.** They are the
-pre-migration *carriers*, not destinations; they are retired in US7/US6 once the
-equivalence gate clears them, not mapped into.
+### The orphan-*case* direction is retired (024 US3)
+
+V21 originally also ran in reverse: every **declarative** case had to be reached by some
+mapping entry, on the reasoning that a declarative case IS a migration destination. That
+was true exactly while the declarative case set *was* the migration's output. The moment a
+case is authored for coverage the migration never had — which is what 024 US3 does, 81
+times — the rule reports a correct record as an orphan, and the only way to satisfy it
+would be to invent a baseline unit for a case that migrated from nothing.
+
+So it is retired, for the same reason V25 was: a permanent gate here would forbid exactly
+the growth the migration exists to make room for. The **forward** direction is untouched,
+and it is the one conservation rests on — every baseline unit still needs exactly one
+destination, which is what proves nothing was lost.
+
+Legacy pointer cases were exempt from the reverse direction while it existed, and remain
+irrelevant to it: they are the pre-migration *carriers*, not destinations; they are retired
+once the equivalence gate clears them, not mapped into.
+
+**A characterized exception authored after the branch point is likewise out of scope.** A
+`wvr-` or `ext-` whose behaviors are all in `POST_BRANCH_BEHAVIORS` describes something the
+pre-migration system never observed, so it has no pre-migration form for `mapping.json` to
+preserve. The exemption covers **both** mechanisms — scoping it to extensions alone would
+make it depend on which one an author reached for rather than on when the fact was learned.
 
 **Direction and scope breadth are structural orders, not string comparisons** (FR-027).
 Direction: `none` < agreement (`both-reject`/`both-accept`) < one-directional
@@ -767,6 +787,16 @@ blocker list that is mostly noise stops being read.
 generated — they are hand-selected, precisely because interaction defects hide where
 individually-covered dimensions meet. An argument that such an interaction needs no test is
 the one argument the model does not accept: either exercise it, or admit the gap.
+
+**And the case it names must be EXECUTABLE** (024 US3). FR-015 asks for an executable case,
+not merely a declared one, so a triple dispositioned `case` against a legacy carrier whose
+residual has closed names a program that no longer exists. On any other obligation that is
+a coverage question; on a triple — the one place an argument may not stand in for evidence
+— a dead pointer is the quietest possible way to lose the evidence entirely.
+
+Note that `gap` remains available on a triple and remains blocking. It is honest, and it is
+not sufficient: **SC-003 requires 100% of selected triples to be covered by executable
+cases**, which is asserted per triple in `crates/conformance/tests/workflow_coverage.rs`.
 
 ### Stale dispositions, and why they are reported rather than dropped
 
