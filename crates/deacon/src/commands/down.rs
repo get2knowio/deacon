@@ -90,16 +90,15 @@ pub async fn execute_down(
         }
     };
 
-    let config = match config_result {
-        Ok(config) => config,
-        Err(e) => {
-            warn!(
-                "Failed to load configuration: {}, attempting auto-discovery",
-                e
-            );
-            return execute_down_with_auto_discovery(workspace_folder, &args, runtime).await;
-        }
-    };
+    // A configuration was FOUND but could not be read. That is a developer
+    // mistake, not an absent configuration, so it fails here rather than falling
+    // through to auto-discovery (constitution IV, "strict on mistakes"). Tolerating
+    // it was worse than merely quiet: auto-discovery re-derives the identity from a
+    // DEFAULT config, so a `down` over an unparseable document silently scoped the
+    // teardown differently from the `up` that created the container and then exited
+    // 0 having removed nothing. `up` and `exec` already reject the same document;
+    // `down` was the one subcommand that did not.
+    let config = config_result?;
 
     debug!("Loaded configuration: {:?}", config.name);
 
