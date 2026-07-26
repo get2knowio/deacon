@@ -1,0 +1,7348 @@
+{
+  "schemaVersion": 1,
+  "revision": "rev-spec-113500f4",
+  "units": [
+    {
+      "id": "obl-bhv-079ac919",
+      "kind": "behavior",
+      "behavior": "bhv-state-diff-parity",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-1a7defc1",
+      "kind": "behavior",
+      "behavior": "bhv-auto-forward-ports",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-23a8de1d",
+      "kind": "behavior",
+      "behavior": "bhv-build-image-parity",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-2730f76b",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-wrong-type-features-rejected",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-2c706c4f",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-malformed-jsonc-rejected",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-38d8218d",
+      "kind": "behavior",
+      "behavior": "bhv-state-container-parity",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-495a30ef",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-merged-configuration",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-52023030",
+      "kind": "behavior",
+      "behavior": "bhv-up-exec-parity",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-562b69e2",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-extends-merged",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-69ece1b0",
+      "kind": "behavior",
+      "behavior": "bhv-user-profiles",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-70ba7cb7",
+      "kind": "behavior",
+      "behavior": "bhv-exec-command-parity",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-73cb50e4",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-extends-cycle-rejected",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-7711b3ce",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-tier1-corpus",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-9ffff359",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-missing-config",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-a21a70a1",
+      "kind": "behavior",
+      "behavior": "bhv-trust-host-hook-gate",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-b8a717d5",
+      "kind": "behavior",
+      "behavior": "bhv-container-keepalive-command",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-c0671359",
+      "kind": "behavior",
+      "behavior": "bhv-secrets-dotenv-superset",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-c0ca20fa",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-basic-parse",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-c333dfce",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-extends-missing-rejected",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-c42382e5",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-unknown-field-preserved",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-c658c572",
+      "kind": "behavior",
+      "behavior": "bhv-container-identity-labels",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-c87a30ad",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-duplicate-keys",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-cbf57d4a",
+      "kind": "behavior",
+      "behavior": "bhv-exec-container-id-metadata",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-d8b2b5e7",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-bad-config-path",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-e4edcb80",
+      "kind": "behavior",
+      "behavior": "bhv-host-ca-injection",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-eb4f3e6c",
+      "kind": "behavior",
+      "behavior": "bhv-compose-project-name-robust",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-ecfffaa7",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-wrong-type-forwardports-rejected",
+      "context": []
+    },
+    {
+      "id": "obl-cmb-00c00e24",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-00f6bd14",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-013b6887",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0194092a",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0225b456",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0265421b",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0296114e",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0300fafb",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-030accfe",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-03439e09",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-037a318e",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0387cae0",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-038d0fba",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0412e436",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-042be3b8",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-048ffe68",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-04b42862",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-04d6ef54",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-05a70a6f",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-05aff711",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-05df8fcb",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-06abedc6",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-06d31c09",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-07439195",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-07ef9122",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-07ff6676",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0806ebda",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0887f993",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-091ad10a",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-092eb563",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-09548361",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-095afaec",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-09a97b49",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0a4ac00f",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0aa1c962",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0adc3aaf",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-layering": "image-metadata",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0b194953",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0b7267a0",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0b98f392",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0bb44199",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0c025991",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0cb4effa",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0cfe1f76",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0d0d89d2",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0d1248f0",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0d6dd24b",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0d9f1229",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0e36a098",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0e9a80ce",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0edebe9c",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0ef7fed5",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0f7b3ee2",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-0fb7277b",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-10367ad1",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1064db69",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-10b26123",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-10edc175",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1183ed1c",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-11c64820",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-11c8e700",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-11f946cd",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-121ba470",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-128e7432",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-12da68f2",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-12db93c4",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-131ad79f",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-13ab5772",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-13d8179a",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1401bdc7",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-140b774e",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-14c52dc1",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-151716f3",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-15883d89",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-15a50907",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-15cfc44a",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-16edd486",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-17b5bb6e",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-17b8e0e5",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-17d9587a",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1802ef57",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-18719fba",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-18dff2e4",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-18ec4035",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-19211b64",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-19c03a91",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1b0b98f8",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1b993bde",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1b9b1aad",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1bae26a2",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1c3d03ea",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1c6c9384",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1cc81de1",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1d2991e9",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1e423478",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1e6c0d9d",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1f614cee",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1f67fc0a",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1f90f4f8",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1fa28d7f",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1ff332bc",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-1ff67979",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-20f3cb5a",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-219d0e03",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-21e1ffec",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-22be4a75",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2321cf0e",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-236a8642",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-23a459ba",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-241b869c",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-24f12212",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-25e62aab",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2606c98e",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2627c9b2",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2652a1ec",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-268ce866",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-277b8a3a",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-278c7c8e",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2791a64b",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2799eb8c",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-27a758af",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-27e9e3c9",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-28182a4f",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-287f02b7",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-28c7fc43",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2949da63",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-29e0c6ef",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-29ea3dcb",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2a082f20",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2a29f095",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2a2e5b40",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2a744af0",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2ae655dc",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2b17b2b2",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2b613864",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2b683ee0",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2b89666e",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2bb41234",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2c525e2f",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2ce20f22",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2d2e9604",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2d44527f",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2e17b1aa",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2e7ce08b",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2f3b7c5b",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-2f76f2b5",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-301f276d",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-30357cd3",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3043811a",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-31670959",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-316cc1b7",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3173e041",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-33351e97",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-334a789e",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-339538ae",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3455e73b",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3484e92e",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-352f2c4c",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3532ca36",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3580c2a6",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3586fd0b",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-36813e4a",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-38befcad",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-38fb1158",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3938d84c",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-39d51c27",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3ab0f51e",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3aea7622",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3b09bb0d",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3c6ff02c",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3c708ae2",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3d2f26be",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3d890f23",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3dbf8b9d",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3dedc231",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3e3801ad",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3e60d85c",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3e915ab8",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3f125c4d",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3f186852",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-3f664876",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-40401100",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-40c6c014",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-413c4b3c",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4140ac9a",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-415030df",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-41e4e7c9",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-423441a5",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4249e664",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-42d2c8d7",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-43222c5b",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4354be45",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-44d5dd3c",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-453726a1",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-453cfc30",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-458c4221",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-45c83746",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-464d2825",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-470c60e0",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-47e4df0b",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-483ab0e0",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-48a3d9eb",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-499d2883",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4a3c3492",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4a4ce57b",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4a7b3111",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4a9e8c34",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4ab48e00",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4ac835f2",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4b20a180",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4b8dbc1d",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4bcf721d",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4c187d1d",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4c2f6c68",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4c541f39",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-layering": "image-metadata",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4c948c5b",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4caaad6b",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4cd05e91",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4cd6587d",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4dee04e5",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4e0bb84c",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4e21a557",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4e4c347e",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4e577ef0",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4e8797c5",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4efd4b0b",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-4f6f167d",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5079ddd0",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-508a4c6c",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-50a2fe69",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-50abbf8e",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-513d610c",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-518b3543",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-51d90cdc",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-524364a1",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-528030ed",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-53668210",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-53c5703b",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-53e1f6ec",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-54df9f12",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-55fd056a",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5612128c",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-56eda6b3",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5741d3c4",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-57fde6fa",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-582cde6f",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-584d6440",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-58f98a2e",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-59146a56",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-598d9798",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5a194c3f",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5a333610",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5a33c6bd",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5ae9f1fc",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5af02545",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5b04dace",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5b537d51",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5bdbe4ed",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5c609c33",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5d2bf1a4",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5d4be36d",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5d71ef34",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5d8a2e14",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5db885c1",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5e00fbe8",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5ec25efe",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5f0ca68d",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-5f818dc5",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-61054161",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-61612ff7",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-61969809",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-626423fe",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-62966e8d",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-63dabca3",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-641593cf",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6451dea5",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-64d59178",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6688d6da",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-66c1023a",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-66e9f2e3",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-67430817",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-679fe3cb",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-67c58787",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-687d5488",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-68fa56a9",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-691ddd91",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-696c73e7",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6986370e",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-69f9a7fa",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6a4e2da0",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6a51f1b3",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6af5e680",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6b155b16",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6b8e6d79",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6b94da7e",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6bdc164b",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6c0f3344",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6c4bb555",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6c60a98a",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6ca77f90",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6d28294c",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6d332846",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6dd9aad2",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6e252872",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6e313582",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6f45863d",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6f789877",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-6ff5475b",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-702470f7",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-705cec0f",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-707f3d11",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7089af2a",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7098d7b3",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-70ece2c5",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-714cfeeb",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-71ce71c7",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-722899d9",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7288bd0a",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-72ec1dd1",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-74668f3a",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7469b6fe",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-74c6d780",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-74ea0ea7",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-751d5a0b",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7547ea3a",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-76286197",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-764d9bc6",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7693352b",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-770a3b94",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-772e1c9b",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-781946da",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-786c86cf",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-786cf147",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-78730ed4",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7880761d",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-788f3b1f",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-79df06c3",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7a19400d",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7a2171d2",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7ac147c2",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7ac5d5d6",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7b1a48f2",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7b75c819",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-layering": "image-metadata",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7c33dd66",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7c51db88",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7d071efd",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7d2b3a90",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7d30bd1e",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7d81afca",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7db7bf89",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7dd34b50",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7dd616cd",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7dfae70a",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7f1e3dee",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7f1e79e8",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7f53de5d",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7f5de1e5",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-7fb02571",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8004dcb5",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-80f40df0",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-81246c5a",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-812d1a46",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-81377d6a",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-81606542",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-817d39ac",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-81951963",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8252b855",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-82d7e0b0",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-835fa8aa",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-83a58b7f",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-84237f34",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8440a94d",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8469f4a7",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-84b01b94",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-84c10f22",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-85effe27",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-86c91410",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-87017636",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-871512f7",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-874c24c1",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-875d182a",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-883530a6",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-883669bf",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-88a05b2c",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-88df6a40",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8948cf78",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-89498bda",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8973eeec",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-89b4e51f",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-89e41616",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8a6efe68",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8a75922d",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8ac78070",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8b93175b",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8c2e3ea4",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8c70cdf4",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8cb066ca",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8d3f1922",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8db70bca",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8dc6b98b",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8e313701",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8e5dcbf4",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8e6c2115",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8ea34153",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8edce773",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8f315d24",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8f68e39c",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-8ff0efa3",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-90018e51",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-919f8ea6",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-91e9a533",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-92b03cab",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-930aaf47",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-933df3ba",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9342e98c",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-93c0b0a3",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9416e353",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-944faea1",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-94b3768a",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-953023da",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-958c6aa0",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-95c39cdb",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-95e84e7b",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-962a21e0",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-96bf1cf6",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-96df3ac7",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-96f1b289",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-96f377dd",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-96f49c62",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-97ac81fb",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-97c09f74",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-99575a20",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9a850e53",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9b413dcc",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9ba3247f",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9bac407d",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9bce7468",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9c5acad8",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9c95a825",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9c99febe",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9c9a9bce",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9ca129e7",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9cf6eb47",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-layering": "image-metadata",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9d105152",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9d2e958f",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9d35f07b",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9d5aa770",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9ec2a4dd",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9f76e5e3",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9f83485f",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9fc56603",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9fcd4ba1",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-9fd3b052",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a00e3cf8",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a03a5761",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a0c62a63",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a115e939",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a319607b",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a325bd52",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a35bfb8f",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a39b6ed6",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a4377f4c",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a540f875",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a634c091",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a64f7177",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a69623f8",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a6a6ae8c",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a6f5791c",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a729553b",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a784aa57",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a7b82fd7",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a83cc1ca",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a83d51af",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a8f61a3a",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-a95746ab",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-aab9571d",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-aabaaca2",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-aad48d84",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ab19c8ab",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ab7db35c",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ac2fa602",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ac3b415e",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ad1d8c10",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ad33ff2c",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ad74c843",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ad7875b1",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ad876a56",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ae22c784",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ae27a584",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-aecf1873",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-aeeaadbe",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-aeffd432",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-af543338",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-af5a984c",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-afd312fa",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b0043b33",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b046a12c",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b0d8f60d",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b0f2f644",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b0fff9ae",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b12de2ee",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b149cc05",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b15f565b",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b188b213",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b1e34478",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b290e8b5",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b384b33b",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b3dbe864",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b3f4795c",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b4540ff2",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b4ace1b0",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b506d765",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b5537c6c",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b5573eb6",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b5d17638",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b651bcdc",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b6832ce4",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b6db79df",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b73b7a40",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b825ae47",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b85bee42",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b8ef9f23",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-b914a795",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ba2615ba",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ba6916b3",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ba72333d",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-badc7e5f",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bae3303e",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bb536130",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bba0ac61",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bbd92f0e",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bc127c5b",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bc5c4ec2",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bc986d3a",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bcca0d67",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bccd6083",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bcd85cc0",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bd04ffa4",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bd206bdd",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bd6d1345",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-be03ef90",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-be3818e0",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-be729589",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-be76f823",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bef16666",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bf0637bc",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bf0a9f35",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bf5d8932",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-bfe16fd3",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c024a7fb",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-layering": "image-metadata",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c060102a",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c06fae78",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c073ac7c",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c0ad0da9",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c0bf24f9",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c15f9bb1",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c1eda68a",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c1f29f46",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c21c09c0",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c23a19a1",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c24e548c",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c2c59302",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c2ef55c2",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c3956c9c",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c4fa4ad3",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c5083a84",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c59bffa5",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c5c4c350",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c66172dd",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c6917e99",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c6adecf0",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c6b98bd4",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c71b7d4f",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c770003a",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c7a699d7",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c7c70c79",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c7fe55d0",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c807063f",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c80f9e1f",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c83aaa27",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c846b04a",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c8adf857",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c8c80abf",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c96d4d29",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c98a33ad",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c998a36b",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-c9c75c4c",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ca124380",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cbdaa7cf",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cc08481e",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cc12fdd0",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cca3eefd",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ccc24c3b",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cd23eaea",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cdac5309",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cdd51fcd",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ce0cb0a8",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cebf08fb",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cf4eee46",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cf9650cb",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cf98d7c3",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-cf9e538b",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d123620b",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d1610954",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d1d2efe3",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d20ef07b",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d214dd3d",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d22efd81",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d2753769",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d2981f13",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d2bc7db8",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d2f126e7",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d2fecde3",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d37fafd1",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d3abcb59",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d57b8752",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d5ce8295",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d5ef3c3e",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d62f8200",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d70fb9cc",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d7e12b78",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d8447993",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d85553f9",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d957bebd",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d98e095d",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-d9e3da0e",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-da2cf481",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-da4a4c7e",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-da7a18c3",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-da996d07",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-daae9b56",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dad36f43",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-daf86b9a",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "running-stale-config"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-db65fbb3",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dbbcdd73",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dbe96618",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dc346367",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dca5a1e6",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dcf8d4b1",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dd248c14",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dd7825da",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dd7e5a79",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ddf0b611",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-de19fbe2",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-de50e6b0",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-de82f755",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-df1d05bf",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dfc340f1",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-dfeff6c8",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e00775ad",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e07758f3",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e08baf03",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e0954520",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e0fd6c20",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e12f3700",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e1f61524",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e330006e",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e3a3d1f8",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e41c1780",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e5530e73",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e5638543",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e5f367b4",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "lockfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e65c9ee4",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e6bb7470",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e86abdf5",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e873981b",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e944fc75",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-e9f645d4",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ea077572",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-declared-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ea867bea",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-eaaf0756",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-eadb826a",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ec03ac70",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ec3f88de",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ecc162ad",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ecf971bb",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ed34f2af",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ed639dec",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ed83e368",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-eda98a12",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ee56300c",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-eefbfbd0",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ef1e0ace",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ef2010b4",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-efb28a5f",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f08921f8",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f1a09248",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "stopped",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f1dbca6e",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f21b7c81",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f2698c7f",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-container-state": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f35d4115",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f3b4bae7",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f3d2edcd",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "stopped"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f462381e",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "lockfile"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f4b1ab8d",
+      "kind": "combination",
+      "operation": "templates-apply",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f5091758",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f559e4ce",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "single",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f6e05df6",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f783037b",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f84911d4",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f870381d",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running-stale-config",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f8bfac02",
+      "kind": "combination",
+      "operation": "doctor",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-f9e131ad",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fa7b7fc6",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fa8d7c4f",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-faede2f4",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-features": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fbddb80e",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fcb9ce2a",
+      "kind": "combination",
+      "operation": "exec",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-layering": "cli-overlay"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fcbbce91",
+      "kind": "combination",
+      "operation": "upgrade",
+      "assignment": {
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fd252a70",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-config-source": "compose",
+        "sdim-output-mode": "human"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fd3ca6ad",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fdad633a",
+      "kind": "combination",
+      "operation": "up",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fdb75cfa",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fe1d0ffa",
+      "kind": "combination",
+      "operation": "down",
+      "assignment": {
+        "sdim-config-source": "image",
+        "sdim-features": "none"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fee6e7bb",
+      "kind": "combination",
+      "operation": "build",
+      "assignment": {
+        "sdim-layering": "image-metadata",
+        "sdim-output-mode": "structured"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-fefda74b",
+      "kind": "combination",
+      "operation": "outdated",
+      "assignment": {
+        "sdim-container-state": "none",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ff37e1fb",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "extends-chain"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ff5eb264",
+      "kind": "combination",
+      "operation": "run-user-commands",
+      "assignment": {
+        "sdim-container-state": "running",
+        "sdim-layering": "single"
+      },
+      "arity": 2
+    },
+    {
+      "id": "obl-cmb-ffb51199",
+      "kind": "combination",
+      "operation": "read-configuration",
+      "assignment": {
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "image-metadata"
+      },
+      "arity": 2
+    }
+  ]
+}

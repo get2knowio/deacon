@@ -27,6 +27,7 @@ use deacon_conformance::clause_diff::{
     diff as clause_diff, render_json as render_clause_diff_json, render_md as render_clause_diff_md,
 };
 use deacon_conformance::conservation;
+use deacon_conformance::coverage_report::{build_coverage_reports, write_coverage_reports};
 use deacon_conformance::diff::{
     diff, render_json as render_diff_json, render_md as render_diff_md,
 };
@@ -37,6 +38,10 @@ use deacon_conformance::load::{
     LoadError, Registry, load_clause_inventory, load_inventory, load_spec_manifest,
 };
 use deacon_conformance::model::{ClauseInventory, ConstraintInventory, DocumentScope};
+use deacon_conformance::obligation::{
+    ObligationInventory, ObligationKind, compare as compare_obligations, generate_obligations,
+    render as render_obligations, write_obligations,
+};
 use deacon_conformance::report::write_reports;
 use deacon_conformance::residual::UNREVIEWED_SENTINEL as SCAFFOLD_SENTINEL;
 use deacon_conformance::snapshot;
@@ -483,22 +488,226 @@ fn run(cli: Cli) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// coverage (024-deterministic-conformance-coverage) — stubs, filled in User Story 1/2
+// coverage (024-deterministic-conformance-coverage)
 // ---------------------------------------------------------------------------
 
-/// `coverage generate` (contracts/coverage-cli.md). T039.
-fn coverage_generate(_registry_dir: &Path, _out: Option<PathBuf>) -> i32 {
-    todo!("024-deterministic-conformance-coverage T039: coverage generate")
+/// Load a registry for a `coverage` subcommand, reporting schema failures as located
+/// lines on stderr. `Err(code)` is the process exit code: `1` for a schema-invalid
+/// registry, `2` for an unreadable root (the same split every other command uses).
+fn load_for_coverage(registry_dir: &Path) -> Result<Registry, i32> {
+    match Registry::load(registry_dir) {
+        Ok(registry) => Ok(registry),
+        Err(LoadError::Schema(errors)) => {
+            for violation in deacon_conformance::validate::schema_violations(&errors) {
+                eprintln!(
+                    "{} {}: {}",
+                    violation.code, violation.record, violation.message
+                );
+            }
+            eprintln!(
+                "error: {} is schema-invalid; fix the records before generating obligations",
+                registry_dir.display()
+            );
+            Err(1)
+        }
+        Err(other) => {
+            eprintln!(
+                "error: cannot read registry {}: {other}",
+                registry_dir.display()
+            );
+            Err(2)
+        }
+    }
 }
 
-/// `coverage check` (contracts/coverage-cli.md). T040.
-fn coverage_check(_registry_dir: &Path) -> i32 {
-    todo!("024-deterministic-conformance-coverage T040: coverage check")
+/// `coverage generate` (contracts/coverage-cli.md): regenerate the machine-owned
+/// obligation inventory from the scenario model, the applicability rules, the high-risk
+/// triples, and the behavior records, then write it atomically.
+///
+/// Exit `0` on success, `1` on a model-integrity failure (V26) — **reported before any
+/// write**, so a broken model never produces a plausible-looking file — or on a
+/// regeneration failure, `2` on a write IO error.
+///
+/// Writes **exactly one** file and never a disposition, case, behavior, waiver, gap, or
+/// report (FR-018). That boundary is the 020/021 one, restated because it is the
+/// invariant most easily lost: a generator that could edit a disposition would convert
+/// human review into a build artifact.
+fn coverage_generate(registry_dir: &Path, out: Option<PathBuf>) -> i32 {
+    let registry = match load_for_coverage(registry_dir) {
+        Ok(registry) => registry,
+        Err(code) => return code,
+    };
+
+    let model_violations = deacon_conformance::validate::check_scenario_model(&registry);
+    if !model_violations.is_empty() {
+        for violation in &model_violations {
+            eprintln!(
+                "{} {}: {}",
+                violation.code, violation.record, violation.message
+            );
+        }
+        eprintln!(
+            "error: the scenario model has {} integrity violation(s); nothing was written",
+            model_violations.len()
+        );
+        return 1;
+    }
+
+    let inventory = match generate_obligations(&registry) {
+        Ok(inventory) => inventory,
+        Err(e) => {
+            eprintln!("error: obligation generation failed: {e}");
+            return 1;
+        }
+    };
+
+    let out_file = out.unwrap_or_else(|| deacon_conformance::obligations_file_for(registry_dir));
+    match write_obligations(&out_file, &inventory) {
+        Ok(()) => {
+            println!("{}", out_file.display());
+            let (combinations, behaviors) = obligation_tally(&inventory);
+            eprintln!(
+                "wrote {} obligation(s) to {} ({combinations} combination, {behaviors} behavior)",
+                inventory.units.len(),
+                out_file.display()
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!(
+                "error: could not write obligations to {}: {e}",
+                out_file.display()
+            );
+            2
+        }
+    }
 }
 
-/// `coverage report` (contracts/coverage-cli.md). T048.
-fn coverage_report_cmd(_registry_dir: &Path, _today: &str, _out_dir: Option<PathBuf>) -> i32 {
-    todo!("024-deterministic-conformance-coverage T048: coverage report")
+/// `(combination, behavior)` unit counts, for the generate/check diagnostics.
+fn obligation_tally(inventory: &ObligationInventory) -> (usize, usize) {
+    let combinations = inventory
+        .units
+        .iter()
+        .filter(|u| u.kind == ObligationKind::Combination)
+        .count();
+    (combinations, inventory.units.len() - combinations)
+}
+
+/// `coverage check` (contracts/coverage-cli.md): regenerate **in memory** and
+/// byte-compare against the committed inventory — the CLI face of the hermetic
+/// determinism test.
+///
+/// Exit `0` when they match, `1` on drift (naming the first differing unit id and whether
+/// it was added, removed, or changed) or on a regeneration failure, `2` when the
+/// committed file is unreadable.
+fn coverage_check(registry_dir: &Path) -> i32 {
+    let registry = match load_for_coverage(registry_dir) {
+        Ok(registry) => registry,
+        Err(code) => return code,
+    };
+
+    let regenerated = match generate_obligations(&registry) {
+        Ok(inventory) => inventory,
+        Err(e) => {
+            eprintln!("error: obligation regeneration failed: {e}");
+            return 1;
+        }
+    };
+
+    let obligations_file = deacon_conformance::obligations_file_for(registry_dir);
+    let committed_raw = match std::fs::read_to_string(&obligations_file) {
+        Ok(raw) => raw,
+        Err(e) => {
+            eprintln!(
+                "error: could not read committed obligations {}: {e}",
+                obligations_file.display()
+            );
+            return 2;
+        }
+    };
+
+    if committed_raw == render_obligations(&regenerated) {
+        eprintln!(
+            "ok: {} matches regeneration ({} obligation(s))",
+            obligations_file.display(),
+            regenerated.units.len()
+        );
+        return 0;
+    }
+
+    match serde_json::from_str::<ObligationInventory>(&committed_raw) {
+        Ok(committed) => {
+            let drift = compare_obligations(&committed, &regenerated);
+            match drift.first_difference() {
+                Some((id, how)) => eprintln!(
+                    "error: committed obligations are out of date — `{id}` was {how} \
+                     (+{} added, -{} removed, ~{} changed); run `coverage generate`",
+                    drift.added.len(),
+                    drift.removed.len(),
+                    drift.changed.len()
+                ),
+                None => eprintln!(
+                    "error: committed obligations differ from a fresh regeneration in formatting \
+                     or the revision pin, not in their unit set; run `coverage generate`"
+                ),
+            }
+        }
+        Err(e) => eprintln!(
+            "error: committed obligations are out of date and unparseable: {}: {e}",
+            obligations_file.display()
+        ),
+    }
+    1
+}
+
+/// `coverage report` (contracts/coverage-cli.md): write the coverage report families to
+/// `target/conformance/` (git-ignored).
+///
+/// **Read-only** with respect to the record — it never records, refreshes, or repairs
+/// evidence (FR-063) — and its exit code never reflects what the report says. Reporting
+/// never gates and gating never reports: a command that both measured coverage and
+/// decided the build's fate would make widening the report the cheapest way to go green.
+///
+/// Exit `0` when the reports were written, `1` when the registry or model could not be
+/// loaded, `2` on a write IO error.
+fn coverage_report_cmd(registry_dir: &Path, _today: &str, out_dir: Option<PathBuf>) -> i32 {
+    let registry = match load_for_coverage(registry_dir) {
+        Ok(registry) => registry,
+        Err(code) => return code,
+    };
+
+    let inventory = match generate_obligations(&registry) {
+        Ok(inventory) => inventory,
+        Err(e) => {
+            eprintln!("error: obligation generation failed: {e}");
+            return 1;
+        }
+    };
+
+    let dir = out_dir.unwrap_or_else(|| workspace_root().join("target").join("conformance"));
+    let reports = build_coverage_reports(&registry, &inventory);
+    match write_coverage_reports(&dir, &reports) {
+        Ok(written) => {
+            for path in &written {
+                println!("{}", path.display());
+            }
+            eprintln!(
+                "wrote {} coverage artifact(s) to {} ({} obligation(s), {} undispositioned)",
+                written.len(),
+                dir.display(),
+                reports.pairwise.summary.valid,
+                reports.pairwise.summary.undispositioned
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!(
+                "error: could not write coverage reports to {}: {e}",
+                dir.display()
+            );
+            2
+        }
+    }
 }
 
 /// `coverage scaffold` (contracts/coverage-cli.md). T069.
