@@ -71,6 +71,34 @@ parity-cli = { max-threads = 8 }
 # including on the Windows `dev-fast` lane. The live differential
 # binary `parity_conformance_runner` (US1, T026) is the ONLY 022 binary that gets
 # per-profile overrides, added in US1 (T027).
+#
+# --- 024-deterministic-conformance-coverage (T014) ---------------------------------
+# Classification of this feature's binaries, recorded here BEFORE the files exist so the
+# convention is decided once rather than re-litigated per binary (Constitution VII;
+# FR-073/FR-074). Same forward-reference style the paragraph above uses for binaries a
+# later task adds.
+#
+# 1. Hermetic, NO override — run in EVERY profile by the standing convention above:
+#    `coverage_model` (US1), `obligation_gating` (US2), `workflow_coverage` (US3),
+#    `error_path_coverage` (US4), `denormalized_coverage` (US5), all in the conformance
+#    crate. They load committed records, generate obligations in memory and compare —
+#    no Docker, no network, no oracle — so they gate every change including the Windows
+#    `dev-fast` lane.
+# 2. Hermetic WITH an `fs-heavy` override, mirroring `observation_faults` exactly:
+#    `injection_faults` (US4), `prereq_faults` (US6), both in the parity-harness crate.
+#    They are still hermetic — the group bounds their fixture-tree I/O, it does not
+#    admit a daemon — and like the other fs-heavy harness self-tests they are NOT
+#    selected by [profile.parity].
+# 3. Live, per-profile overrides in ALL profiles: `parity_conformance_docker` ONLY
+#    (added in T021, alongside its registry.json registration in T020). It drives the
+#    Docker-backed resource groups, so like every live binary it must be in the
+#    `[profile.parity]` `default-filter` AND excluded from `[profile.default]`,
+#    `[profile.dev-fast]`, `[profile.full]`, `[profile.ci]` and
+#    `[profile.mvp-integration]`, or the non-parity lanes stop being truthful by
+#    non-selection and `parity_registry_check` fails. No other 024 binary is live.
+# The `coverage` command group is a `deacon-conformance` BIN surface, not a test binary:
+# like `inventory`/`clause` it gets no override and never reaches the shipped `deacon`
+# CLI (asserted by `parity_registry_check`, T022).
 
 # Default profile: Balanced parallelization for local development
 [profile.default]
