@@ -62,6 +62,16 @@
       "notes": "Evidenced by a live differential on the outcome plus a spec-expectation case that reads the marker each Feature's install.sh writes INSIDE the container — the lesson from the --image-name defect, where an outcome-only assertion reported success for an image with no Feature in it."
     },
     {
+      "id": "bhv-up-lifecycle-command-cwd",
+      "area": "up",
+      "statement": "A lifecycle hook runs with its working directory set to the container workspace folder, so a command that resolves a relative path resolves it against the project workspace rather than against the image's default directory.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Authored by 024 T150 out of the one remaining un-restated `non-testable` clause: features-contribute-lifecycle-scripts' \"As with all lifecycle hooks, commands are executed from the context (cwd) of the project workspace folder\" is the inventory's ONLY carrier of the cwd rule, and it is a real consumer obligation no existing behavior's statement reaches. The hook reports its own `pwd` into a file at an ABSOLUTE path rather than writing to a relative one: a relative write that lands nowhere is indistinguishable from a hook that never ran, whereas the recorded value names the directory that was actually used. Measured on both sides before the record was written (deacon and oracle 0.87.0 each wrote `/workspace` for fx-lifecycle-cwd), so `reference: aligned` is an observation, not an assumption."
+    },
+    {
       "id": "bhv-up-lifecycle-command-forms",
       "area": "up",
       "statement": "A lifecycle hook declared in the array (argv) form and one declared in the object (named commands) form are both executed, the object form running every named command.",

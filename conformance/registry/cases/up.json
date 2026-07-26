@@ -1320,6 +1320,65 @@
       "notes": "FR-047, the array (argv) form. The marker file is the observation, not the exit code: a hook that silently did not run still leaves `up` exiting 0. `workspaceFolder`/`workspaceMount` are declared so the container path is FIXED, which is what lets the host-side filesystem observer read what the in-container hook wrote."
     },
     {
+      "id": "case-up-lifecycle-cwd",
+      "behaviors": [
+        "bhv-up-lifecycle-command-cwd"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-lifecycle-cwd"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-cwd.txt": "/workspace\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-cwd.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The hook records its OWN working directory (`pwd`) into a file at an absolute path, so the assertion pins the directory that was used rather than merely the fact that something was written. Writing to a RELATIVE path would have been the shorter fixture and the worse evidence: a file that lands outside the bind mount and a hook that never ran leave the host observer with the same empty allowlist. `workspaceFolder`/`workspaceMount` fix the container path so the expected value is a constant."
+    },
+    {
       "id": "case-up-lifecycle-object-differential",
       "behaviors": [
         "bhv-up-lifecycle-command-forms"

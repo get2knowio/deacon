@@ -21,6 +21,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-0b062cbf",
+      "kind": "behavior",
+      "behavior": "bhv-up-lifecycle-command-cwd",
+      "context": []
+    },
+    {
       "id": "obl-bhv-1766f639",
       "kind": "behavior",
       "behavior": "bhv-down-compose-project-teardown",

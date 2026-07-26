@@ -76,7 +76,8 @@
       "behaviors": [
         "bhv-run-user-commands-hook-order",
         "bhv-run-user-commands-hook-failure",
-        "bhv-up-lifecycle-command-forms"
+        "bhv-up-lifecycle-command-forms",
+        "bhv-up-lifecycle-command-cwd"
       ]
     },
     {

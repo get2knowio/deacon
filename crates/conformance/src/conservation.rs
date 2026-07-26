@@ -223,6 +223,18 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      second command of an object-form hook.",
     ),
     (
+        "bhv-up-lifecycle-command-cwd",
+        "The working DIRECTORY a lifecycle hook runs in. Not a variant of \
+     `bhv-up-lifecycle-command-forms`, which claims each declared FORM of a hook is \
+     executed and says nothing about where it executes from: an implementation can run \
+     both forms of every hook out of the image's default directory, satisfying that claim \
+     and breaking this one for every hook that resolves a relative path. Newly recordable \
+     because the sentence carrying the rule — features-contribute-lifecycle-scripts' \"as \
+     with all lifecycle hooks\" clause, the clause inventory's ONLY carrier of it — has no \
+     observation until a hook can report its own `pwd` into a bind-mounted file, which \
+     needs the container-backed tier 024 built.",
+    ),
+    (
         "bhv-up-feature-entrypoint-chain",
         "Entrypoints contributed by MULTIPLE Features, chained. Newly recordable in the same \
      way the labels and keep-alive behaviors were: `Config.Entrypoint` was captured and \

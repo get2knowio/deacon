@@ -10,8 +10,10 @@
     {
       "id": "clc-features-lifecycle-scripts-as-with-all-lifecycle-hooks-commands-are-execute-desc-fb55e890",
       "clause": "clu-features-lifecycle-scripts-as-with-all-lifecycle-hooks-commands-are-execute-desc-fb55e890",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-lifecycle-command-cwd"
+      ]
     },
     {
       "id": "clc-features-lifecycle-scripts-if-one-of-the-lifecycle-scripts-fails-any-subseq-algo-3e112729",

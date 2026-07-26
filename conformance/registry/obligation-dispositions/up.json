@@ -2,6 +2,14 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "odp-bhv-0b062cbf",
+      "obligation": "obl-bhv-0b062cbf",
+      "disposition": "case",
+      "cases": [
+        "case-up-lifecycle-cwd"
+      ]
+    },
+    {
       "id": "odp-bhv-20718aca",
       "obligation": "obl-bhv-20718aca",
       "disposition": "case",

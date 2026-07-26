@@ -50,7 +50,12 @@ const TODAY: &str = "2026-07-19";
 /// resources, and the null/empty/omitted distinction — each a spec-expectation pinning
 /// deacon's side and, where the two implementations have room to disagree, a live
 /// differential alongside it. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 198;
+///
+/// **198 → 199** (024 T150): re-reviewing the `non-testable` clause classifications left
+/// exactly one clause that was neither out of scope nor already covered — the cwd rule for
+/// lifecycle hooks — so it became `behavior-mapped` on a new behavior, which arrives with
+/// this one spec-expectation case as its evidence. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 199;
 
 #[test]
 fn real_registry_is_structurally_valid() {
