@@ -59,7 +59,7 @@ checkable at a glance rather than by reading every section.
 | **V9** | an expected outcome referencing an undeclared observable channel | `validate.rs` |
 | **V10** | a case whose context has an empty intersection with a linked behavior's applicability | `validate.rs` |
 | **V11 – V15** | inventory join: stale / unclassified / malformed / provenance / clause↔source integrity | [Inventory join](#inventory-join-v11--v15--constraints-and-clauses) |
-| **V16** | declarative-case well-formedness (shape, `oracleType`, consumer subcommand, assertions, `fsAllowlist`, observable channel, Docker `resourceGroup`) | `validate.rs` |
+| **V16** | declarative-case well-formedness (shape, `oracleType`, consumer subcommand, assertions, `fsAllowlist`, observable channel, Docker `resourceGroup`, [error-path tier](#the-container-backed-error-path-tier-v16-024)) | `validate.rs` |
 | **V17** | committed-snapshot integrity (orphan or malformed provenance) | `validate.rs` |
 | **V18** | a Docker case referencing a fixture with an unpinned image | `validate.rs` |
 | **V19** | an allowed-difference whose backing waiver/divergence id does not resolve | `validate.rs` |
@@ -211,6 +211,39 @@ identical `devcontainer.local_folder` label — deacon's container and the oracl
 indistinguishable, as do two cases running in parallel), no RAII cleanup guard is created
 (container, network and volume leak), and V18 skips the case's image inputs because it is
 `is_docker_case`-gated too. The case still runs, and may well pass.
+
+### The container-backed error-path tier (V16, 024)
+
+Parity testing used to stop comparing the moment **both** implementations accepted a
+configuration document. That is precisely where the reference is most lenient, so it is
+where a difference is most likely to survive unobserved — and every later stage (build,
+container creation, Feature installation, lifecycle execution, teardown) went uncompared
+for any input that read cleanly.
+
+A case joins the tier by declaring `errorPathTier: true`. Membership is **declared, not
+derived**, because a predicate over `expectFailurePhase` gets it wrong in both directions:
+`case-down-removes-container` declares `expectFailurePhase: exec` on a *verification* step
+and is not an error-path case, while a genuine tier case whose phase was left off would
+silently leave the tier with nothing to notice. Declaring it makes each of those a
+validation failure instead.
+
+| Rule | A tier case must … | Because |
+|---|---|---|
+| 1 | declare an `expectFailurePhase` later than `config-resolution` on ≥1 operation | FR-042 requires the record to say **where** the failure occurs |
+| 2 | declare `config-resolution` on **no** operation | a verdict reachable at configuration read is a verdict about the stage the tier exists to look past (FR-041) |
+| 3 | declare a Docker `resourceGroup` | every later stage needs the container runtime — and without the group there is no isolated workspace and no cleanup guard |
+| 4 | *(all declarative cases)* declare only phases its subcommand can **reach** | `read-configuration` reaches exactly one phase; a case declaring `lifecycle:postCreate` on it describes a run that cannot happen and would otherwise validate, run, and report a green nothing |
+
+Reachability is the closed, hand-reviewed `model::phases_reachable_by` mapping. **`down`
+stops at `config-resolution`**: teardown owns no phase in the closed failure-phase set
+(022-conformance-runner data-model §8, which this feature reuses rather than extends), so a
+teardown error-path case declares its failure on the operation that *observes* the teardown
+— an `exec` into the container that must no longer exist — which is the shape
+`case-down-removes-container` already uses.
+
+`errorPathTier` is **excluded from `caseHash`** (with `inputClass`, `notes` and
+`allowedDifferences`): it classifies a case, it does not change a byte the runner feeds the
+CLI, so joining the tier must never re-record a snapshot.
 
 ## Inventory join (V11 – V15) — constraints AND clauses
 

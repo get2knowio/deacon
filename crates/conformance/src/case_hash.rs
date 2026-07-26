@@ -160,8 +160,11 @@ fn collect_files(
 ///
 /// Excluded by construction: `id`, `behaviors`, `context` (environment, a selector for
 /// where evidence is gathered, not what is exercised), `notes`, `allowedDifferences`,
-/// `cleanup`, `resourceGroup`, and the legacy `executable` / `outcomes` — none affect
-/// what the runner observes.
+/// `inputClass`, `errorPathTier`, `cleanup`, `resourceGroup`, and the legacy
+/// `executable` / `outcomes` — none affect what the runner observes. `inputClass` and
+/// `errorPathTier` are the 024 additions to that list and belong on it for the same
+/// reason as `notes`: both classify a case, neither changes a byte the runner feeds the
+/// CLI, so labelling one must never mark its snapshot stale.
 pub fn case_hash(case: &TestCase, fixture_hashes: &[String]) -> String {
     // Build the canonical input document explicitly so the field set is a deliberate,
     // reviewable allow-list rather than "whatever the record happens to carry".

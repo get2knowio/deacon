@@ -446,6 +446,31 @@ pub struct TestCase {
     /// same reasoning that excludes `notes` and `allowedDifferences`, research D3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_class: Option<InputClass>,
+    /// Membership in the **container-backed error-path tier** (024 US4, FR-041).
+    ///
+    /// The tier's cases start from an input configuration read ACCEPTS on both sides and
+    /// then fail — or diverge — at a LATER stage: build, container creation, Feature
+    /// installation, lifecycle execution, or teardown. It exists because parity testing
+    /// historically stopped comparing once both sides accepted a document, which is
+    /// precisely where the reference is most lenient and therefore where a difference is
+    /// most likely to survive unobserved.
+    ///
+    /// **An explicit marker rather than a predicate over
+    /// [`Operation::expect_failure_phase`].** The stage itself is *not* re-declared here —
+    /// V16 requires an error-path case to carry a later-stage `expectFailurePhase` on at
+    /// least one operation, so the phase remains the single record of WHERE (FR-042). What
+    /// the boolean adds is the author's claim of MEMBERSHIP, which a predicate cannot
+    /// express: `case-down-removes-container` declares `expectFailurePhase: exec` on a
+    /// verification step and is not an error-path case, while an error-path case whose
+    /// declared phase was mistakenly left off would silently leave the tier. Deriving
+    /// membership from the phase would make both of those invisible; declaring it makes
+    /// each a validation failure.
+    ///
+    /// **Excluded from `caseHash`** (`case_hash.rs`), for the same reason as
+    /// [`input_class`](Self::input_class): it classifies the case, it does not change what
+    /// the runner feeds the CLI, so joining the tier must never re-record a snapshot.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub error_path_tier: bool,
 
     // ---- Legacy (binary-backed) fields — present iff this is a legacy case ----
     /// The Rust test binary that exercises this case (legacy path only).
@@ -585,6 +610,28 @@ impl TestCase {
             (true, false) => Ok(CaseKind::Legacy),
             (false, true) => Ok(CaseKind::Declarative),
         }
+    }
+
+    /// Every failure phase this case's operations declare, in operation order, paired with
+    /// the operation that declares it (024 US4).
+    pub fn declared_failure_phases(&self) -> Vec<(&str, FailurePhase)> {
+        self.operations
+            .iter()
+            .filter_map(|op| op.expect_failure_phase.map(|p| (op.id.as_str(), p)))
+            .collect()
+    }
+
+    /// The declared phases that are reached **after** configuration read (FR-041/SC-007).
+    ///
+    /// Non-empty exactly when this case can produce a verdict past the point at which both
+    /// implementations have accepted the document — which is what membership in the
+    /// error-path tier claims and what V16 checks against
+    /// [`error_path_tier`](Self::error_path_tier).
+    pub fn later_stage_failure_phases(&self) -> Vec<(&str, FailurePhase)> {
+        self.declared_failure_phases()
+            .into_iter()
+            .filter(|(_, phase)| !phase.is_configuration_read())
+            .collect()
     }
 }
 
@@ -980,6 +1027,116 @@ pub enum FailurePhase {
     LifecyclePostAttach,
     /// Executing a command in the container.
     Exec,
+}
+
+impl FailurePhase {
+    /// Every phase, in the order the run progresses through them.
+    pub const ALL: &'static [FailurePhase] = &[
+        FailurePhase::ConfigResolution,
+        FailurePhase::Build,
+        FailurePhase::ContainerCreate,
+        FailurePhase::LifecycleOnCreate,
+        FailurePhase::LifecycleUpdateContent,
+        FailurePhase::LifecyclePostCreate,
+        FailurePhase::LifecyclePostStart,
+        FailurePhase::LifecyclePostAttach,
+        FailurePhase::Exec,
+    ];
+
+    /// The wire spelling used in records and diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FailurePhase::ConfigResolution => "config-resolution",
+            FailurePhase::Build => "build",
+            FailurePhase::ContainerCreate => "container-create",
+            FailurePhase::LifecycleOnCreate => "lifecycle:onCreate",
+            FailurePhase::LifecycleUpdateContent => "lifecycle:updateContent",
+            FailurePhase::LifecyclePostCreate => "lifecycle:postCreate",
+            FailurePhase::LifecyclePostStart => "lifecycle:postStart",
+            FailurePhase::LifecyclePostAttach => "lifecycle:postAttach",
+            FailurePhase::Exec => "exec",
+        }
+    }
+
+    /// Whether this phase is reached while the configuration is still being **read**
+    /// (024 US4, SC-007).
+    ///
+    /// Exactly one phase is: [`ConfigResolution`](Self::ConfigResolution). Everything else
+    /// happens after both implementations have accepted the document, which is the entire
+    /// premise of the error-path tier — a case whose verdict is reached here proves nothing
+    /// about the stages where the reference is most lenient.
+    pub fn is_configuration_read(self) -> bool {
+        matches!(self, FailurePhase::ConfigResolution)
+    }
+
+    /// Whether this phase is a lifecycle hook (`onCreate` … `postAttach`).
+    pub fn is_lifecycle(self) -> bool {
+        matches!(
+            self,
+            FailurePhase::LifecycleOnCreate
+                | FailurePhase::LifecycleUpdateContent
+                | FailurePhase::LifecyclePostCreate
+                | FailurePhase::LifecyclePostStart
+                | FailurePhase::LifecyclePostAttach
+        )
+    }
+}
+
+/// The phases a consumer `subcommand` can actually fail in (024 US4, FR-042).
+///
+/// A closed, hand-reviewed mapping rather than an inference, because it answers a question
+/// no output can: `read-configuration` reaches exactly one phase, so an error-path case
+/// built on it is not merely untested — it is *unreachable*, and V16 says so at validation
+/// time instead of letting the case run and report a green nothing. Every subcommand can
+/// fail at `config-resolution`; what differs is how much further it gets.
+///
+/// `down` deliberately stops at `config-resolution`. Teardown has no phase of its own in
+/// the closed set (data-model §8 of 022-conformance-runner, which this feature reuses
+/// rather than extends), so a teardown error-path case declares its failure on the
+/// operation that OBSERVES the teardown — an `exec` into the container that must no longer
+/// exist — which is the shape `case-down-removes-container` already uses.
+pub fn phases_reachable_by(subcommand: &str) -> &'static [FailurePhase] {
+    use FailurePhase::*;
+    match subcommand {
+        // Resolve/merge a configuration (or probe the host) and print. Nothing else runs.
+        "read-configuration" | "doctor" => &[ConfigResolution],
+        // Resolve Feature versions against a registry and rewrite the lockfile; no image
+        // is built and no container is created.
+        "outdated" | "upgrade" => &[ConfigResolution],
+        // Scaffold files into a workspace: resolution, then the apply itself.
+        "templates-apply" => &[ConfigResolution, Exec],
+        // Resolve, then build (Features are layered INTO the image, so a failing
+        // `install.sh` surfaces as a build failure on both sides).
+        "build" => &[ConfigResolution, Build],
+        // The full creation path.
+        "up" => &[
+            ConfigResolution,
+            Build,
+            ContainerCreate,
+            LifecycleOnCreate,
+            LifecycleUpdateContent,
+            LifecyclePostCreate,
+            LifecyclePostStart,
+            LifecyclePostAttach,
+        ],
+        // Hooks in an existing container; the invocation itself can also fail (no container).
+        "run-user-commands" => &[
+            ConfigResolution,
+            LifecycleOnCreate,
+            LifecycleUpdateContent,
+            LifecyclePostCreate,
+            LifecyclePostStart,
+            LifecyclePostAttach,
+            Exec,
+        ],
+        // Attach to a container another operation created and run a command in it.
+        "exec" => &[ConfigResolution, Exec],
+        // See the note above: teardown owns no phase in the closed set.
+        "down" => &[ConfigResolution],
+        // An unknown subcommand is already a V16 failure via `CONSUMER_SUBCOMMANDS`; the
+        // conservative answer keeps this function total without inventing reachability.
+        _ => &[ConfigResolution],
+    }
 }
 
 /// A known gap (`gap-`) — `gaps.json`. Gaps satisfy structural coverage (V5) but
@@ -2080,6 +2237,139 @@ mod tests {
                 r#"{ "id": "clc-x", "clause": "clu-x", "disposition": "UNREVIEWED" }"#
             )
             .is_err()
+        );
+    }
+
+    // -- Error-path tier + failure phases (024 US4, T101) ---------------------------
+
+    /// Exactly one phase is reached while the configuration is still being read. Written
+    /// over `FailurePhase::ALL` so a phase added later must state its side explicitly
+    /// rather than inherit "later stage" by default.
+    #[test]
+    fn only_config_resolution_is_configuration_read() {
+        let read: Vec<&str> = FailurePhase::ALL
+            .iter()
+            .filter(|p| p.is_configuration_read())
+            .map(|p| p.as_str())
+            .collect();
+        assert_eq!(read, vec!["config-resolution"]);
+        assert_eq!(FailurePhase::ALL.len(), 9, "the closed set is nine phases");
+    }
+
+    /// Every phase round-trips through its wire spelling, so `as_str` and the `serde`
+    /// renaming cannot drift apart — the diagnostics V16 emits quote `as_str`, and a
+    /// mismatch would name a phase no record can contain.
+    #[test]
+    fn phase_wire_spellings_match_serde() {
+        for phase in FailurePhase::ALL {
+            let json = serde_json::to_string(phase).expect("phase serializes");
+            assert_eq!(json, format!("\"{}\"", phase.as_str()));
+            let back: FailurePhase =
+                serde_json::from_str(&json).expect("phase round-trips from its own spelling");
+            assert_eq!(back, *phase);
+        }
+    }
+
+    /// Reachability is a real restriction, not a formality: the operations that only read
+    /// configuration reach exactly one phase, so an error-path case cannot be built on
+    /// them, while `up` reaches every stage the tier covers.
+    #[test]
+    fn phase_reachability_restricts_the_read_only_operations() {
+        for subcommand in [
+            "read-configuration",
+            "doctor",
+            "outdated",
+            "upgrade",
+            "down",
+        ] {
+            assert_eq!(
+                phases_reachable_by(subcommand),
+                &[FailurePhase::ConfigResolution],
+                "{subcommand} reaches only configuration resolution"
+            );
+        }
+        let up = phases_reachable_by("up");
+        assert!(up.contains(&FailurePhase::Build));
+        assert!(up.contains(&FailurePhase::ContainerCreate));
+        assert!(up.iter().any(|p| p.is_lifecycle()));
+        assert!(
+            !up.contains(&FailurePhase::Exec),
+            "`up` runs no user command of its own; an exec failure belongs to `exec`"
+        );
+        // Every consumer subcommand can fail at configuration read — nothing runs before it.
+        for subcommand in CONSUMER_SUBCOMMANDS {
+            assert!(
+                phases_reachable_by(subcommand).contains(&FailurePhase::ConfigResolution),
+                "{subcommand} must be able to fail at configuration read"
+            );
+        }
+    }
+
+    /// `errorPathTier` defaults to false and is omitted when false, so the 88 pre-024
+    /// records round-trip byte-identically; setting it round-trips as `errorPathTier`.
+    #[test]
+    fn error_path_tier_defaults_off_and_is_omitted() {
+        let plain = TestCase {
+            id: "case-x".to_string(),
+            operations: vec![Operation {
+                id: "op-1".to_string(),
+                subcommand: "up".to_string(),
+                ..Operation::default()
+            }],
+            ..TestCase::default()
+        };
+        assert!(!plain.error_path_tier);
+        let json = serde_json::to_string(&plain).expect("serializes");
+        assert!(
+            !json.contains("errorPathTier"),
+            "a case that is not in the tier must not carry the key: {json}"
+        );
+
+        let mut tiered = plain.clone();
+        tiered.error_path_tier = true;
+        let json = serde_json::to_string(&tiered).expect("serializes");
+        assert!(json.contains("\"errorPathTier\":true"), "{json}");
+        let back: TestCase = serde_json::from_str(&json).expect("round-trips");
+        assert!(back.error_path_tier);
+    }
+
+    /// The two phase accessors report per-operation, and the later-stage filter drops
+    /// exactly the configuration-read declarations.
+    #[test]
+    fn later_stage_phases_exclude_configuration_read() {
+        let case = TestCase {
+            id: "case-x".to_string(),
+            operations: vec![
+                Operation {
+                    id: "op-read".to_string(),
+                    subcommand: "read-configuration".to_string(),
+                    expect_failure_phase: Some(FailurePhase::ConfigResolution),
+                    ..Operation::default()
+                },
+                Operation {
+                    id: "op-up".to_string(),
+                    subcommand: "up".to_string(),
+                    expect_failure_phase: Some(FailurePhase::LifecyclePostCreate),
+                    ..Operation::default()
+                },
+                Operation {
+                    id: "op-quiet".to_string(),
+                    subcommand: "up".to_string(),
+                    ..Operation::default()
+                },
+            ],
+            ..TestCase::default()
+        };
+        assert_eq!(
+            case.declared_failure_phases(),
+            vec![
+                ("op-read", FailurePhase::ConfigResolution),
+                ("op-up", FailurePhase::LifecyclePostCreate),
+            ]
+        );
+        assert_eq!(
+            case.later_stage_failure_phases(),
+            vec![("op-up", FailurePhase::LifecyclePostCreate)]
         );
     }
 }

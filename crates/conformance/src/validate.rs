@@ -2345,7 +2345,22 @@ impl<'a> Checker<'a> {
         for case in &self.reg.cases {
             match case.classify() {
                 Err(shape) => self.push("V16", &case.id, shape.message().to_string()),
-                Ok(CaseKind::Legacy) => {} // legacy cases: existing V-series apply.
+                Ok(CaseKind::Legacy) => {
+                    // Legacy cases: existing V-series apply. The one 024 addition is that
+                    // a binary-backed record cannot join the error-path tier — the tier is
+                    // defined by the declared failure STAGE of a declarative operation, and
+                    // a legacy record has no operations to declare one on.
+                    if case.error_path_tier {
+                        self.push(
+                            "V16",
+                            &case.id,
+                            "legacy (binary-backed) case declares `errorPathTier`; tier \
+                             membership is defined by a declared later-stage \
+                             `expectFailurePhase` on an operation, which a legacy record \
+                             has no operations to carry",
+                        );
+                    }
+                }
                 Ok(CaseKind::Declarative) => self.check_one_declarative_case(case),
             }
         }
@@ -2372,6 +2387,7 @@ impl<'a> Checker<'a> {
             self.check_case_fs_allowlist(case);
             self.check_case_observable_channels(case);
             self.check_case_resource_group(case);
+            self.check_case_error_path_tier(case);
             return;
         };
 
@@ -2399,6 +2415,104 @@ impl<'a> Checker<'a> {
         self.check_case_observable_channels(case);
         self.check_case_resource_group(case);
         self.check_case_oracle_availability(case, oracle_type);
+        self.check_case_error_path_tier(case);
+    }
+
+    /// **The container-backed error-path tier** (024 US4, FR-041/FR-042, SC-007).
+    ///
+    /// The tier exists because parity testing used to stop comparing the moment both
+    /// implementations accepted a configuration document — which is exactly where the
+    /// reference is most lenient, and therefore where a difference is most likely to
+    /// survive unobserved. A case that claims membership must therefore be *capable* of
+    /// reaching a verdict past that point, and this is where that capability is checked;
+    /// nothing at run time can distinguish "the later stage agreed" from "the later stage
+    /// was never reached".
+    ///
+    /// Four rules:
+    ///
+    /// 1. **Some operation declares a later-stage `expectFailurePhase`.** Without one the
+    ///    record makes no claim about WHERE the failure occurs, which FR-042 requires it
+    ///    to record.
+    /// 2. **No operation declares `config-resolution`.** This is the rule that gives the
+    ///    tier its meaning: a verdict reachable at configuration read is a verdict about
+    ///    the stage the tier was created to look past.
+    /// 3. **The case is Docker-backed.** Every later stage — build, container creation,
+    ///    Feature installation, lifecycle execution, teardown — needs a container runtime.
+    ///    A tier case without a Docker `resourceGroup` also gets no isolated workspace and
+    ///    no cleanup guard (see [`check_case_resource_group`](Self::check_case_resource_group)).
+    /// 4. **Every declared phase is reachable by the operation that declares it** — checked
+    ///    for *all* declarative cases, not only tier members. `read-configuration` reaches
+    ///    exactly one phase, so a case declaring `lifecycle:postCreate` on it describes a
+    ///    run that cannot happen; left unchecked it would validate cleanly, run, and report
+    ///    a green nothing.
+    fn check_case_error_path_tier(&mut self, case: &crate::model::TestCase) {
+        // Rule 4 — applies to every declarative case.
+        for op in &case.operations {
+            let Some(phase) = op.expect_failure_phase else {
+                continue;
+            };
+            let reachable = crate::model::phases_reachable_by(&op.subcommand);
+            if !reachable.contains(&phase) {
+                let names: Vec<&str> = reachable.iter().map(|p| p.as_str()).collect();
+                self.push(
+                    "V16",
+                    &case.id,
+                    format!(
+                        "operation {:?} declares `expectFailurePhase: {}`, which {:?} never \
+                         reaches; it can fail only at {}",
+                        op.id,
+                        phase.as_str(),
+                        op.subcommand,
+                        names.join(" | ")
+                    ),
+                );
+            }
+        }
+
+        if !case.error_path_tier {
+            return;
+        }
+
+        // Rule 2 — a verdict reachable at configuration read.
+        for (op_id, phase) in case.declared_failure_phases() {
+            if phase.is_configuration_read() {
+                self.push(
+                    "V16",
+                    &case.id,
+                    format!(
+                        "is in the error-path tier but operation {op_id:?} declares \
+                         `expectFailurePhase: {}`; the tier's premise is that configuration \
+                         read ACCEPTS the input on both sides, so a verdict reached there is \
+                         a verdict about the stage the tier exists to look past (FR-041)",
+                        phase.as_str()
+                    ),
+                );
+            }
+        }
+
+        // Rule 1 — the stage must be recorded somewhere.
+        if case.later_stage_failure_phases().is_empty() {
+            self.push(
+                "V16",
+                &case.id,
+                "is in the error-path tier but no operation declares an \
+                 `expectFailurePhase` later than `config-resolution`; FR-042 requires the \
+                 case to record the STAGE at which the failure occurs, and without one the \
+                 record claims a later-stage comparison it does not describe",
+            );
+        }
+
+        // Rule 3 — the tier is container-backed.
+        if !is_docker_case(case) {
+            self.push(
+                "V16",
+                &case.id,
+                "is in the error-path tier but declares no Docker `resourceGroup`; every \
+                 stage the tier covers (build, container creation, Feature installation, \
+                 lifecycle execution, teardown) needs the container runtime, and without \
+                 the group the case also gets no isolated workspace and no cleanup guard",
+            );
+        }
     }
 
     /// The oracle a case declares must be one that can actually be run for its operation
@@ -4228,6 +4342,135 @@ mod tests {
             out.iter()
                 .any(|v| v.code == "V16" && v.record == "case-spec-no-assertion"),
             "spec-expectation without an assertion must be V16, got {out:?}"
+        );
+    }
+
+    // -- V16: the container-backed error-path tier (024 US4, T102) -------------------
+
+    /// A well-formed error-path case: Docker-backed, one `up` operation declaring a
+    /// later-stage failure phase.
+    fn error_path_case(id: &str) -> TestCase {
+        use crate::model::{FailurePhase, ResourceGroup};
+        let mut case = declarative_case(id);
+        case.error_path_tier = true;
+        case.resource_group = Some(ResourceGroup::DockerShared);
+        case.operations[0].subcommand = "up".to_string();
+        case.operations[0].expect_failure_phase = Some(FailurePhase::ContainerCreate);
+        case
+    }
+
+    #[test]
+    fn v16_accepts_a_well_formed_error_path_case() {
+        let mut reg = Registry::default();
+        reg.cases.push(error_path_case("case-errorpath-ok"));
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            !out.iter().any(|v| v.code == "V16"),
+            "a well-formed error-path case must not trip V16, got {out:?}"
+        );
+    }
+
+    /// The four ways a tier claim can be untrue, each its own record so the message names
+    /// the case rather than the batch.
+    #[test]
+    fn v16_flags_every_untrue_error_path_tier_claim() {
+        use crate::model::{FailurePhase, Operation};
+
+        // (1) No later-stage phase declared at all — the record says nothing about WHERE.
+        let mut no_phase = error_path_case("case-errorpath-no-phase");
+        no_phase.operations[0].expect_failure_phase = None;
+
+        // (2) A verdict reachable at configuration read — the stage the tier looks past.
+        let mut at_config_read = error_path_case("case-errorpath-at-config-read");
+        at_config_read.operations.push(Operation {
+            id: "op-2".to_string(),
+            subcommand: "up".to_string(),
+            expect_failure_phase: Some(FailurePhase::ConfigResolution),
+            ..Operation::default()
+        });
+
+        // (3) Not container-backed.
+        let mut no_group = error_path_case("case-errorpath-no-group");
+        no_group.resource_group = None;
+
+        // (4) A phase the declaring operation can never reach.
+        let mut unreachable = error_path_case("case-errorpath-unreachable-phase");
+        unreachable.operations[0].subcommand = "read-configuration".to_string();
+        unreachable.operations[0].expect_failure_phase = Some(FailurePhase::LifecyclePostCreate);
+
+        for case in [no_phase, at_config_read, no_group, unreachable] {
+            let id = case.id.clone();
+            let mut reg = Registry::default();
+            reg.cases.push(case);
+            let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+            assert!(
+                out.iter().any(|v| v.code == "V16" && v.record == id),
+                "{id} must trip V16, got {out:?}"
+            );
+        }
+    }
+
+    /// Rule 4 (reachability) governs EVERY declarative case, not only tier members — a
+    /// `read-configuration` case declaring a lifecycle phase describes a run that cannot
+    /// happen whether or not it claims the tier.
+    #[test]
+    fn v16_flags_an_unreachable_phase_on_a_non_tier_case() {
+        use crate::model::FailurePhase;
+        let mut case = declarative_case("case-plain-unreachable-phase");
+        case.operations[0].expect_failure_phase = Some(FailurePhase::Build);
+        let mut reg = Registry::default();
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V16" && v.record == "case-plain-unreachable-phase"),
+            "`read-configuration` never builds, so declaring `build` must be V16, got {out:?}"
+        );
+    }
+
+    /// A `config-resolution` phase on a case that does NOT claim the tier is ordinary and
+    /// must stay silent — 12 committed cases depend on it.
+    #[test]
+    fn v16_leaves_a_plain_config_resolution_phase_alone() {
+        use crate::model::FailurePhase;
+        let mut case = declarative_case("case-plain-config-rejection");
+        case.operations[0].expect_failure_phase = Some(FailurePhase::ConfigResolution);
+        let mut reg = Registry::default();
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            !out.iter().any(|v| v.code == "V16"),
+            "a non-tier case rejecting at configuration read is ordinary, got {out:?}"
+        );
+    }
+
+    /// A legacy (binary-backed) record has no operations to carry a phase, so it can never
+    /// substantiate a tier claim.
+    #[test]
+    fn v16_flags_a_legacy_case_claiming_the_error_path_tier() {
+        let mut case = TestCase {
+            id: "case-legacy-tier".to_string(),
+            behaviors: vec!["bhv-a".to_string()],
+            error_path_tier: true,
+            executable: Some(crate::model::Executable {
+                binary: "parity_build".to_string(),
+                test: None,
+                corpus: None,
+                case: None,
+            }),
+            ..TestCase::default()
+        };
+        case.outcomes.push(crate::model::ExpectedOutcome {
+            channel: "chan-exit-code".to_string(),
+            expectation: "exits 0".to_string(),
+        });
+        let mut reg = Registry::default();
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V16" && v.record == "case-legacy-tier"),
+            "a legacy case cannot join the error-path tier, got {out:?}"
         );
     }
 }
