@@ -117,8 +117,11 @@
     {
       "id": "odp-cmb-0194092a",
       "obligation": "obl-cmb-0194092a",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-entrypoint-chain-differential",
+        "case-up-entrypoint-chained-features"
+      ]
     },
     {
       "id": "odp-cmb-04b42862",
@@ -145,8 +148,10 @@
     {
       "id": "odp-cmb-0e36a098",
       "obligation": "obl-cmb-0e36a098",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-up-feature-dependency-cycle"
+      ]
     },
     {
       "id": "odp-cmb-0ef7fed5",
@@ -223,20 +228,29 @@
     {
       "id": "odp-cmb-1f67fc0a",
       "obligation": "obl-cmb-1f67fc0a",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-up-feature-dependency-cycle"
+      ]
     },
     {
       "id": "odp-cmb-2606c98e",
       "obligation": "obl-cmb-2606c98e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-entrypoint-chain-differential",
+        "case-up-entrypoint-chained-features"
+      ]
     },
     {
       "id": "odp-cmb-2799eb8c",
       "obligation": "obl-cmb-2799eb8c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-project-resources",
+        "case-up-compose-project-resources-differential",
+        "case-up-compose-service-graph"
+      ]
     },
     {
       "id": "odp-cmb-27a758af",
@@ -334,8 +348,12 @@
     {
       "id": "odp-cmb-458c4221",
       "obligation": "obl-cmb-458c4221",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-env-merge-precedence",
+        "case-up-path-construction"
+      ]
     },
     {
       "id": "odp-cmb-45c83746",
@@ -346,8 +364,10 @@
     {
       "id": "odp-cmb-499d2883",
       "obligation": "obl-cmb-499d2883",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-up-feature-dependency-cycle"
+      ]
     },
     {
       "id": "odp-cmb-4caaad6b",
@@ -519,8 +539,12 @@
     {
       "id": "odp-cmb-7b75c819",
       "obligation": "obl-cmb-7b75c819",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-env-merge-precedence",
+        "case-up-path-construction"
+      ]
     },
     {
       "id": "odp-cmb-7d81afca",
@@ -560,8 +584,10 @@
     {
       "id": "odp-cmb-83a58b7f",
       "obligation": "obl-cmb-83a58b7f",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-up-feature-dependency-cycle"
+      ]
     },
     {
       "id": "odp-cmb-8440a94d",
@@ -716,8 +742,10 @@
     {
       "id": "odp-cmb-a319607b",
       "obligation": "obl-cmb-a319607b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-running-reattach-process-context"
+      ]
     },
     {
       "id": "odp-cmb-a35bfb8f",
@@ -754,8 +782,11 @@
     {
       "id": "odp-cmb-b5537c6c",
       "obligation": "obl-cmb-b5537c6c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-entrypoint-chain-differential",
+        "case-up-entrypoint-chained-features"
+      ]
     },
     {
       "id": "odp-cmb-b651bcdc",
@@ -834,8 +865,10 @@
     {
       "id": "odp-cmb-cf9650cb",
       "obligation": "obl-cmb-cf9650cb",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-running-reattach-process-context"
+      ]
     },
     {
       "id": "odp-cmb-d5ce8295",
@@ -912,20 +945,31 @@
     {
       "id": "odp-cmb-dfeff6c8",
       "obligation": "obl-cmb-dfeff6c8",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-env-merge-precedence",
+        "case-up-path-construction"
+      ]
     },
     {
       "id": "odp-cmb-e00775ad",
       "obligation": "obl-cmb-e00775ad",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-entrypoint-chain-differential",
+        "case-up-entrypoint-chained-features"
+      ]
     },
     {
       "id": "odp-cmb-e08baf03",
       "obligation": "obl-cmb-e08baf03",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-project-resources",
+        "case-up-compose-project-resources-differential",
+        "case-up-compose-service-graph"
+      ]
     },
     {
       "id": "odp-cmb-e41c1780",
@@ -966,8 +1010,10 @@
     {
       "id": "odp-cmb-f21b7c81",
       "obligation": "obl-cmb-f21b7c81",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-dockerfile-feature-image"
+      ]
     },
     {
       "id": "odp-cmb-f6e05df6",
@@ -1000,8 +1046,12 @@
     {
       "id": "odp-cmb-fa8d7c4f",
       "obligation": "obl-cmb-fa8d7c4f",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-env-merge-precedence",
+        "case-up-path-construction"
+      ]
     },
     {
       "id": "odp-cmb-fdad633a",

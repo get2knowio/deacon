@@ -507,6 +507,98 @@
       "notes": "The cross-CLI half of FR-054: the same Compose project must yield the same relative network and volume, and the project NAME difference is declared rather than normalized out of sight."
     },
     {
+      "id": "case-up-compose-service-graph",
+      "behaviors": [
+        "bhv-up-mount-source-and-shape"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "image": "alpine:3.19",
+              "labels": {
+                "com.docker.compose.service": "app",
+                "devcontainer.source": "deacon",
+                "devcontainer.config_name": "ConformanceUpComposeBasic"
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-process-graph",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "mounts": [
+                {
+                  "source": "<WORKSPACE>",
+                  "target": "/workspace",
+                  "type": "bind",
+                  "ro": false
+                },
+                {
+                  "target": "/data",
+                  "type": "volume",
+                  "ro": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "status": "running"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The Compose counterpart of the image-backed Docker-channel case, and the third covering case for `chan-image` and `chan-process-graph` (SC-005's floor). Two claims a Compose `up` can only make on those channels. `chan-image`: the service container is created from the image the Compose file DECLARES (`alpine:3.19`) and still carries deacon's `devcontainer.*` identity alongside Compose's own labels — delegation to Compose without losing identity, which a derived-image substitution would break. `chan-process-graph`: both mounts the service declares are present with their SHAPE — the workspace bind and the named volume — which is what distinguishes a service brought up from its Compose definition from one created directly. The volume's `source` is deliberately not pinned: it is the daemon's `/var/lib/docker/volumes/<project>_...` path and the project name is workspace-derived, so pinning it would assert the temp directory rather than the graph. The network is left out for the same reason (`<project>_default`)."
+    },
+    {
       "id": "case-up-docker-channels",
       "behaviors": [
         "bhv-up-exec-parity"
@@ -656,6 +748,104 @@
           "divergenceId": "ext-extends-resolution"
         }
       ]
+    },
+    {
+      "id": "case-up-dockerfile-feature-image",
+      "behaviors": [
+        "bhv-up-feature-install-order",
+        "bhv-up-effective-user-uid-gid"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-dockerfile-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "env": [
+                "CONF_IMAGE_ENV=dockerfile"
+              ],
+              "entrypoint": [
+                "/bin/sh"
+              ],
+              "labels": {
+                "devcontainer.source": "deacon",
+                "devcontainer.config_file": "<WORKSPACE>/.devcontainer/devcontainer.json",
+                "devcontainer.metadata": "[{\"remoteUser\":\"dev\",\"containerUser\":\"dev\",\"containerEnv\":{\"CONF_CASE\":\"up-dockerfile-feature\"}}]"
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-injected-process",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "user": "dev",
+              "env": {
+                "CONF_CASE": "up-dockerfile-feature",
+                "CONF_IMAGE_ENV": "dockerfile"
+              },
+              "path": [
+                "/usr/local/sbin",
+                "/usr/local/bin",
+                "/usr/sbin",
+                "/usr/bin",
+                "/sbin",
+                "/bin"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "status": "running"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The Dockerfile-with-a-Feature combination, which was a pairwise gap, observed on the two channels that can see the DIFFERENCE a Feature layer makes. The Feature layer rebuilds the image, so everything the Dockerfile established has to survive that rebuild: `chan-image` pins the Dockerfile's `ENV` and the base entrypoint on the image the container was finally created from, and `chan-injected-process` pins that the same value reaches the process alongside the configuration's `containerEnv` and under the configured non-root `containerUser`. A Feature layer built `FROM` the wrong base, or built and then not used, passes an outcome-only assertion and fails both of these. `PATH` is asserted segment-wise (the `path_env_segmented` rule), not as a string. `cwd` is deliberately NOT asserted: deacon leaves the container's `WorkingDir` empty here, and pinning that would record an uncharacterized value as an expectation."
     },
     {
       "id": "case-up-entrypoint-chain-differential",
@@ -1847,6 +2037,91 @@
         "tempdir": true
       },
       "notes": "FR-040 reference-lenient class for `up`, and the part of the story a `read-configuration` case cannot tell: the reference's leniency is not confined to its parse-and-echo command. It accepts `forwardPorts` written as a bare string and goes on to CREATE A CONTAINER, where deacon refuses the document. The direction is pinned by the spec-expectation twin on the same fixture."
+    },
+    {
+      "id": "case-up-running-reattach-process-context",
+      "behaviors": [
+        "bhv-up-restart-reuses-container",
+        "bhv-up-container-env-merge-precedence"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-first",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        },
+        {
+          "id": "op-up-again",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-again",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-injected-process",
+          "operation": "op-up-again",
+          "assertion": {
+            "jsonSubset": {
+              "env": {
+                "CONF_TOKEN": "us5"
+              },
+              "path": [
+                "/usr/local/sbin",
+                "/usr/local/bin",
+                "/usr/sbin",
+                "/usr/bin",
+                "/sbin",
+                "/bin"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up-again",
+          "assertion": {
+            "jsonSubset": {
+              "status": "running"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`up` against a container that is ALREADY RUNNING — the pairwise combination `image` x `running`, and `running` x `features: none`, both previously gaps. The sibling metamorphic case proves re-entry does not create a second container; this one asserts what the reattached container's process context still IS, which the relationship oracle does not look at (it produces a `chan-temporal` verdict only). A reattach that silently dropped the configured `containerEnv`, or reattached to a container built before it was set, satisfies \"same container, still running\" and fails here."
     },
     {
       "id": "case-up-stale-config-reentry",

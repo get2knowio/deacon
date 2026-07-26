@@ -186,8 +186,10 @@
     {
       "id": "odp-cmb-817d39ac",
       "obligation": "obl-cmb-817d39ac",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-multifile-tree"
+      ]
     },
     {
       "id": "odp-cmb-84237f34",

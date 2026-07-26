@@ -182,8 +182,14 @@
     {
       "id": "odp-cmb-3938d84c",
       "obligation": "obl-cmb-3938d84c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-ruc-post-create-failure-direction",
+        "case-errorpath-ruc-post-start-failure",
+        "case-errorpath-ruc-post-start-failure-direction",
+        "case-errorpath-ruc-update-content-failure",
+        "case-errorpath-ruc-update-content-failure-direction"
+      ]
     },
     {
       "id": "odp-cmb-3f186852",
@@ -420,8 +426,14 @@
     {
       "id": "odp-cmb-7098d7b3",
       "obligation": "obl-cmb-7098d7b3",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-ruc-post-create-failure-direction",
+        "case-errorpath-ruc-post-start-failure",
+        "case-errorpath-ruc-post-start-failure-direction",
+        "case-errorpath-ruc-update-content-failure",
+        "case-errorpath-ruc-update-content-failure-direction"
+      ]
     },
     {
       "id": "odp-cmb-72ec1dd1",
@@ -469,8 +481,14 @@
     {
       "id": "odp-cmb-7b1a48f2",
       "obligation": "obl-cmb-7b1a48f2",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-ruc-post-create-failure-direction",
+        "case-errorpath-ruc-post-start-failure",
+        "case-errorpath-ruc-post-start-failure-direction",
+        "case-errorpath-ruc-update-content-failure",
+        "case-errorpath-ruc-update-content-failure-direction"
+      ]
     },
     {
       "id": "odp-cmb-7d30bd1e",
@@ -746,8 +764,14 @@
     {
       "id": "odp-cmb-de82f755",
       "obligation": "obl-cmb-de82f755",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-ruc-post-create-failure-direction",
+        "case-errorpath-ruc-post-start-failure",
+        "case-errorpath-ruc-post-start-failure-direction",
+        "case-errorpath-ruc-update-content-failure",
+        "case-errorpath-ruc-update-content-failure-direction"
+      ]
     },
     {
       "id": "odp-cmb-e07758f3",

@@ -1,0 +1,4 @@
+{
+	"name": "conformance-multifile",
+	"build": { "dockerfile": "Dockerfile" }
+}

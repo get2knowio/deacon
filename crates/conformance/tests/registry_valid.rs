@@ -65,7 +65,18 @@ const TODAY: &str = "2026-07-19";
 /// the two shared one case. Splitting the PATH probe into `case-exec-image-path-overlay`
 /// gives each case one subject and scopes the exit-code tolerance to a case whose only exit
 /// code IS the probe. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 200;
+///
+/// **200 → 204** (024 T142): the observable-channel floor. `chan-image` had ONE covering
+/// case, `chan-filesystem` / `chan-injected-process` / `chan-process-graph` two each, all
+/// below the three SC-005 requires — a channel carried by a single case is one authoring
+/// mistake away from being unobserved. Four cases close it: a Compose `up` (the declared
+/// service image and both declared mounts), a Dockerfile-plus-Feature `up` (the base
+/// image's `ENV` and entrypoint surviving the Feature layer, and reaching the process
+/// under the configured non-root user), a re-entry `up` against a RUNNING container (the
+/// reattached process context, which the metamorphic relationship does not look at), and
+/// a multi-file `templates apply` (a scaffolded tree, the template manifest that must not
+/// be scaffolded, and a mode). No record was removed.
+const MIGRATED_CASE_COUNT: usize = 204;
 
 #[test]
 fn real_registry_is_structurally_valid() {
