@@ -692,3 +692,128 @@ resemble a removed one is a **new** obligation and needs its own decision — th
 reflects what the report says**. A command that both measured coverage and decided the
 build's fate would make widening the report the cheapest way to go green. The gates are
 `validate` (V26, V27) and `certify` (V28, V29 — User Story 2).
+
+---
+
+## Obligation dispositions (V28 – V29)
+
+V26/V27 make the obligation set *honest*. V28/V29 make sure someone **decided** about each
+one. The split matters: an inventory that is provably complete and provably regenerated
+still says nothing about whether the work is covered, waived, argued away, or simply
+untouched. That question has exactly one home — a hand-authored `odp-` record under
+`registry/obligation-dispositions/<area>.json`.
+
+### Four words, one payload each
+
+| `disposition` | Requires | Blocks `certify`? |
+|---|---|---|
+| `case` | `cases` — ≥1, each resolving to a declared case | no |
+| `non-testable` | `rationale` naming a ground | no |
+| `waived` | `waiver` — a resolvable `wvr-` | only once it has **expired** (V6) |
+| `gap` | `gap` — a resolvable `gap-` | **always**, through that gap record |
+
+The arity *within* a record — exactly one of the four payloads, and the one its word
+requires — is refused at **load** time, not by V28/V29. A record whose payload disagrees
+with its word is not a nuance for a validation pass to interpret; it is a half-stated
+judgement, and the only honest reading is to refuse it at the door. The same loader rejects
+the `UNREVIEWED` scaffold sentinel, so `coverage scaffold` output can never be committed
+unedited.
+
+### Explicit only: no inheritance, no default, no winner
+
+An obligation with **no** record is undispositioned — **V28**, not "implicitly fine". There
+is no document-scope fallback of the kind `clc-` clause classifications use for authoring
+documents, because a scenario combination has no document to inherit from and an obligation
+nobody looked at is not a decision anyone made.
+
+An obligation with **more than one** record is also **V28**. Resolution never picks a
+winner: two records are two judgements, and silently preferring the one that sorts first
+would turn a disagreement between reviewers into a decision neither of them made. The
+coverage report buckets such an obligation `undispositioned` for the same reason — it does
+*not* fall through to the evidence, because the evidence answers "nobody has looked at this
+yet" and someone plainly has, twice.
+
+`inactive-environment` is a **reporting bucket, not a disposition.** It is derived from the
+active profile and outranks even an explicit record. If an author could out-vote it,
+"the environment is inactive" would become a way to retire an obligation rather than a
+statement about the profile. An inactive obligation owes nobody a decision, stays in the
+denominator, and never counts as covered.
+
+### Gap vs. waiver vs. rationale, restated for obligations
+
+[Gap vs. waiver](#gap-vs-waiver) draws the line for behaviors; obligations add a third
+option, and the three are not interchangeable:
+
+| | `gap` | `waived` | `non-testable` |
+|---|---|---|---|
+| The claim | "we owe coverage here and do not have it" | "we know exactly how this differs, and accept it" | "there is nothing here that could be tested" |
+| Backed by | a `gap-` record | a `wvr-` record with an `expires` | an argument, and nothing else |
+| Blocks a release | **always** | only once expired | never |
+| Ends by | someone writing a case | someone re-confirming, or fixing | never — it is a permanent claim |
+
+`non-testable` is the only one of the three that admits **no** follow-up, which is why V29
+holds its `rationale` to the same ground-naming test V23 applies to `outOfScopeRationale`.
+A bare "out of scope" is indistinguishable from unqueued debt — and unqueued debt is what a
+gap is for. Name the principle ("Constitution II forbids feature authoring") or the specific
+unobservable mechanism, or use `gap` and be honest that it is work.
+
+The reverse mistake is just as bad: reaching for `gap` when the difference is already
+characterized inflates the release blocker list with things nobody intends to change, and a
+blocker list that is mostly noise stops being read.
+
+### A high-risk triple accepts only `case` or `gap`
+
+**V29** rejects a triple dispositioned `non-testable` or `waived` (FR-015). Triples are not
+generated — they are hand-selected, precisely because interaction defects hide where
+individually-covered dimensions meet. An argument that such an interaction needs no test is
+the one argument the model does not accept: either exercise it, or admit the gap.
+
+### Stale dispositions, and why they are reported rather than dropped
+
+An obligation's id is substance-anchored. Renaming a dimension value or editing a rule
+re-hashes every obligation that pins it, and the records that judged the old ones are left
+pointing at nothing. **V29** reports each as stale — the same self-invalidating pattern
+`waiver.rs` uses for a waiver whose difference stopped reproducing.
+
+Dropping them quietly would be worse than useless: the regenerated obligations come back
+**undispositioned** (V28) at the same moment, so a silent drop would delete the record of
+what was decided about the old shape exactly when a reviewer needs it to decide about the
+new one. **Disposition is never inherited by name** — a regenerated obligation that
+resembles a removed one is a new obligation.
+
+### A waiver backing a disposition must be specific
+
+**V29** rejects a `waived` disposition whose waiver carries a **blanket** scope — a
+`state_field` scope whose `field` is `*` or empty, matching every observable field of the
+fixture. This is the FR-023 analogue of the FR-032 rule V19 already enforces on an allowed
+difference's `observablePath`, and it exists for the same reason: a tolerance that matches
+everything can never self-invalidate when the difference stops reproducing, so it is a
+global ignore wearing a waiver's clothes. A `corpus_case` scope names one case of one
+corpus and has no wildcard form, so there is nothing there to reject.
+
+### What `certify` does with all of this
+
+| Condition | Result |
+|---|---|
+| Any undispositioned or multiply-dispositioned applicable obligation | **blocks**, `BlockingKind::Obligation`, code `V28` |
+| Any malformed or stale disposition | **blocks**, code `V29` |
+| Any `gap` disposition | **blocks** — through the `gap-` record it names, as `BlockingKind::Gap` |
+| Any `waived` disposition whose waiver has expired | **blocks**, code `V6`, naming the **waiver** |
+| `non-testable`, unexpired `waived` | listed in their own buckets, non-blocking |
+| `inactive-environment` | listed, non-blocking, counted separately |
+
+A `gap` disposition gets no blocker of its own because it already has one: V29 requires the
+`gap-` it names to resolve, and every gap record blocks. Listing it twice would double-count
+a single fact.
+
+An expired waiver has never blocked certification by itself, and still does not — a waiver
+is a decision that no further work is needed, and its expiry is a prompt to re-confirm. An
+obligation dispositioned `waived` is different: that waiver is the only thing standing
+between it and *undispositioned*, so when the waiver dies, nothing stands there.
+
+The five FR-026 buckets (`covered` / `waived` / `non-testable` / `gap` /
+`inactive-environment`) plus the undispositioned queue are reported **alongside** the
+behavior-level coverage numbers and never folded into them. The two denominators answer
+different questions — which behaviors are evidenced, versus which modelled combinations are
+exercised — and collapsing them would let progress on one hide the absence of progress on
+the other.
