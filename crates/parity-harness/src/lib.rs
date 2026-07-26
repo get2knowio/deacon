@@ -225,6 +225,18 @@ pub enum HarnessError {
          is never a silent skip."
     )]
     NoReferenceForPlatform { os_arch: String },
+
+    /// A declarative case exceeded the per-case wall-clock bound and was abandoned
+    /// (024 FR-077b). Distinct from [`OracleTimeout`](Self::OracleTimeout), which bounds a
+    /// SINGLE CLI invocation: this bounds the whole case — every operation, both sides,
+    /// and every observation — so a case that hangs between invocations is still named.
+    #[error(
+        "conformance case `{case}` exceeded its {bound:?} per-case bound and was abandoned. \
+         Remedy: investigate the hang in this case (its operations, its container teardown, or \
+         a wedged daemon) — the bound exists so ONE stuck case cannot consume the whole tier's \
+         budget and report as an unattributable lane failure."
+    )]
+    CaseTimeout { case: String, bound: Duration },
 }
 
 /// Environment override for the report/artifact root (see [`report_root`]).

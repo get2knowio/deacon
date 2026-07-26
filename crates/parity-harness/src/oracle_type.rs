@@ -50,13 +50,16 @@ async fn spec_expectation(
     case: &TestCase,
     cfg: &RunConfig<'_>,
 ) -> Result<Evaluation, HarnessError> {
-    let (ctx, _ws) = runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
+    let (ctx, ws) = runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
     // Capture every declared channel first, so the all-unobserved fault is diagnosed
     // BEFORE any assertion is evaluated against evidence that does not exist (D-2).
     let mut normalized = Vec::with_capacity(case.expected.len());
     for exp in &case.expected {
         normalized.push(runner::capture_normalized(case, exp, &ctx)?);
     }
+    // Every observer has read what it needs; reclaim the case's Docker resources off the
+    // executor before the (purely in-memory) assertion evaluation below.
+    runner::release_workspace(ws).await?;
     require_some_observation(
         case,
         normalized.iter().map(|n| (n.channel.as_str(), n.present)),
@@ -117,28 +120,20 @@ async fn live_differential(
     for exp in &case.expected {
         deacon_norm.push(runner::capture_normalized(case, exp, &deacon_ctx)?);
     }
-    if let Some(mut ws) = deacon_ws {
-        // Reclamation shells out to `deacon down` plus several `docker` calls, all via
-        // blocking `std::process::Command::output`. Running that on the async executor
-        // would stall the runtime for seconds per case — under `--profile parity` with
-        // concurrent cases, for every teardown — so it is offloaded, exactly as the
-        // runner's far cheaper `docker ps` probe already is (constitution V).
-        //
-        // `ws` MOVES into the blocking task: `cleanup_now` is idempotent and the guard's
-        // `Drop` runs there too, so the temp workspace directory is removed on the
-        // blocking pool rather than here.
-        tokio::task::spawn_blocking(move || ws.cleanup_now())
-            .await
-            .map_err(runner::blocking_join_err)?;
-    }
+    // Reclamation shells out to `deacon down` plus several `docker` calls, all via blocking
+    // `std::process::Command::output`, so it is offloaded (see `release_workspace`).
+    runner::release_workspace(deacon_ws).await?;
 
     // -- the reference side ----------------------------------------------------------
-    let (oracle_ctx, _oracle_ws) =
+    let (oracle_ctx, oracle_ws) =
         runner::execute_ops(Side::Oracle, &oracle.path, case, cfg).await?;
     let mut oracle_norm = Vec::with_capacity(case.expected.len());
     for exp in &case.expected {
         oracle_norm.push(runner::capture_normalized(case, exp, &oracle_ctx)?);
     }
+    // Symmetric with deacon's side: the reference's resources are reclaimed as soon as its
+    // evidence is in hand, so nothing is held across the comparison below.
+    runner::release_workspace(oracle_ws).await?;
 
     // A channel neither side observed is not evidence of agreement (D-2). Individual
     // channels keep FR-018's not-captured-matches-not-captured; only a case where NOTHING
@@ -325,12 +320,18 @@ async fn snapshot_oracle(case: &TestCase, cfg: &RunConfig<'_>) -> Result<Evaluat
             channel: format!("case:{}", case.id),
             cause: format!("committed normalized.json is not channel evidence: {e}"),
         })?;
-    let (ctx, _ws) = runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
+    let (ctx, ws) = runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
     let tolerances = Tolerances::new(&case.allowed_differences, &case.behaviors);
     let mut consumed = std::collections::HashSet::new();
     let mut channels = Vec::with_capacity(case.expected.len());
+    let mut captured = Vec::with_capacity(case.expected.len());
     for exp in &case.expected {
-        let deacon_norm = runner::capture_normalized(case, exp, &ctx)?;
+        captured.push(runner::capture_normalized(case, exp, &ctx)?);
+    }
+    // Observation complete — reclaim before the in-memory comparison (see the note on
+    // `release_workspace`).
+    runner::release_workspace(ws).await?;
+    for (exp, deacon_norm) in case.expected.iter().zip(&captured) {
         let op = runner::resolve_expected_op(case, exp)?;
         match recorded
             .iter()
@@ -338,7 +339,7 @@ async fn snapshot_oracle(case: &TestCase, cfg: &RunConfig<'_>) -> Result<Evaluat
         {
             Some(rec) => channels.push(verdict_differential(
                 &exp.channel,
-                &deacon_norm,
+                deacon_norm,
                 rec,
                 &tolerances,
                 &mut consumed,
@@ -364,7 +365,7 @@ async fn invariant_metamorphic(
     case: &TestCase,
     cfg: &RunConfig<'_>,
 ) -> Result<Evaluation, HarnessError> {
-    let (ctx, _ws) = runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
+    let (ctx, ws) = runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
 
     let mut channels = Vec::new();
     for op in &case.operations {
@@ -372,6 +373,9 @@ async fn invariant_metamorphic(
             channels.push(evaluate_relationship(&op.id, rel, &ctx));
         }
     }
+    // The relationships are evaluated from the already-captured per-op snapshots, so the
+    // case's Docker resources are reclaimed here — off the executor.
+    runner::release_workspace(ws).await?;
     if channels.is_empty() {
         // Validation (V20) guarantees a metamorphic case declares a relationship; the
         // runner still fails loud rather than silently pass an unverifiable case.

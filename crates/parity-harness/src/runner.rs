@@ -12,6 +12,7 @@
 //! temp workspace + RAII cleanup for Docker-backed cases lands in US5 (`workspace.rs`).
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use deacon_conformance::model::{
     CHAN_EXIT_CODE, CaseKind, ExpectedObservable, Operation, ResourceGroup, TestCase,
@@ -31,6 +32,21 @@ pub const RUNNER_BINARY: &str = "conformance_runner";
 /// The `${WORKSPACE}` token substituted in an operation's argv with the resolved
 /// workspace path (contract case-schema.md).
 const WORKSPACE_TOKEN: &str = "${WORKSPACE}";
+
+/// The per-case wall-clock bound every declarative case runs under (024 FR-077b).
+///
+/// This is deliberately NOT nextest's `slow-timeout`, which is per TEST FUNCTION. A driver
+/// function owns a whole resource group, so a `slow-timeout` failure says only "the group
+/// was slow" — indistinguishable from a wedged daemon, and naming nothing to fix. Bounding
+/// each case here fails with the CASE ID instead, and lets the remaining cases of the group
+/// still run and still report.
+///
+/// It bounds the case END TO END — every operation, both sides of a differential, and every
+/// observation — which is strictly wider than [`crate::exec`]'s per-invocation bound. A case
+/// that hangs BETWEEN invocations (a teardown that never returns, a snapshot probe against an
+/// unresponsive daemon) is invisible to the per-invocation bound and is exactly what this
+/// catches.
+pub const CASE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// Everything the runner needs from its caller: the deacon binary under test, the
 /// verified oracle (required only for `live-differential`), where fixtures live, and
@@ -53,8 +69,29 @@ pub struct RunConfig<'a> {
     pub snapshots_root: &'a Path,
 }
 
-/// Run one declarative case end to end and produce its [`CaseVerdict`].
+/// Run one declarative case end to end and produce its [`CaseVerdict`], bounded by
+/// [`CASE_TIMEOUT`].
+///
+/// The bound wraps the ENTIRE case, so expiry is reported as
+/// [`HarnessError::CaseTimeout`] naming the case id (FR-077b) rather than surfacing as an
+/// unattributable stall in whichever driver loop invoked it. Abandoning the evaluation
+/// future drops it, which runs the Docker workspace's RAII cleanup guard — a timed-out case
+/// still reclaims its container, network, volume and temp directory.
 pub async fn run_case(case: &TestCase, cfg: &RunConfig<'_>) -> Result<CaseVerdict, HarnessError> {
+    match tokio::time::timeout(CASE_TIMEOUT, run_case_unbounded(case, cfg)).await {
+        Ok(result) => result,
+        Err(_elapsed) => Err(HarnessError::CaseTimeout {
+            case: case.id.clone(),
+            bound: CASE_TIMEOUT,
+        }),
+    }
+}
+
+/// [`run_case`] without the per-case bound — the body the timeout wraps.
+async fn run_case_unbounded(
+    case: &TestCase,
+    cfg: &RunConfig<'_>,
+) -> Result<CaseVerdict, HarnessError> {
     // Only declarative cases run through the runner; a legacy/mixed/neither record is a
     // fail-loud authoring error (the loader/validator already reject it, but the runner
     // never silently accepts one either).
@@ -100,21 +137,36 @@ pub(crate) async fn execute_ops(
     let docker_case = is_docker_case(case);
     let mut docker_ws: Option<DockerWorkspace> = None;
     let isolated_workspace: Option<PathBuf> = if docker_case {
-        let ws = DockerWorkspace::new(Some(cfg.deacon_path)).map_err(|e| {
-            HarnessError::DockerUnavailable {
-                cause: format!("could not create an isolated workspace: {e}"),
+        // Creating the temp dir and recursively copying every fixture tree into it is
+        // BLOCKING filesystem work. Under the bounded-concurrency Docker driver (T018)
+        // several cases set up at once, so doing it inline would stall the executor for
+        // every other in-flight case (Principle V) — offload it exactly as the docker
+        // probes below already are.
+        let fixture_dirs: Vec<PathBuf> = unique_fixture_ids(case)
+            .into_iter()
+            .map(|id| cfg.fixtures_root.join(id))
+            .collect();
+        let deacon_path = cfg.deacon_path.to_path_buf();
+        let ws = tokio::task::spawn_blocking(move || -> Result<DockerWorkspace, HarnessError> {
+            let ws = DockerWorkspace::new(Some(&deacon_path)).map_err(|e| {
+                HarnessError::DockerUnavailable {
+                    cause: format!("could not create an isolated workspace: {e}"),
+                }
+            })?;
+            for dir in fixture_dirs {
+                if !dir.is_dir() {
+                    // `ws` drops here, ON THE BLOCKING POOL, reclaiming the temp dir.
+                    return Err(HarnessError::FixtureMissing { path: dir });
+                }
+                ws.materialize(&dir)
+                    .map_err(|e| HarnessError::FixtureMissing {
+                        path: dir.join(format!("<materialize failed: {e}>")),
+                    })?;
             }
-        })?;
-        for id in unique_fixture_ids(case) {
-            let dir = cfg.fixtures_root.join(&id);
-            if !dir.is_dir() {
-                return Err(HarnessError::FixtureMissing { path: dir });
-            }
-            ws.materialize(&dir)
-                .map_err(|e| HarnessError::FixtureMissing {
-                    path: dir.join(format!("<materialize failed: {e}>")),
-                })?;
-        }
+            Ok(ws)
+        })
+        .await
+        .map_err(blocking_join_err)??;
         let path = ws.path().to_path_buf();
         docker_ws = Some(ws);
         Some(path)
@@ -255,6 +307,28 @@ fn unique_fixture_ids(case: &TestCase) -> Vec<String> {
     ids.sort();
     ids.dedup();
     ids
+}
+
+/// Reclaim a Docker case's workspace OFF the async executor, then drop it there too.
+///
+/// Reclamation shells out to `deacon down` plus several `docker` calls, all via blocking
+/// `std::process::Command::output`, and then removes the temp tree. Letting the guard drop
+/// inline stalls the runtime for seconds — per case, per side — which under the bounded-
+/// concurrency Docker driver (T018) stalls every OTHER in-flight case too (Principle V).
+///
+/// `cleanup_now` is idempotent and the guard's `Drop` runs inside the blocking task, so the
+/// temp directory is removed there as well. `None` (a config-only case) is a no-op.
+///
+/// The error path is deliberately left to `Drop`: an early `?` return abandons the guard,
+/// which still reclaims — synchronously, on the executor — because a leaked container is
+/// worse than a stalled runtime on a path that is already failing.
+pub(crate) async fn release_workspace(ws: Option<DockerWorkspace>) -> Result<(), HarnessError> {
+    let Some(mut ws) = ws else {
+        return Ok(());
+    };
+    tokio::task::spawn_blocking(move || ws.cleanup_now())
+        .await
+        .map_err(blocking_join_err)
 }
 
 /// Map a `spawn_blocking` join failure (the offloaded blocking task panicked) to a
@@ -487,14 +561,16 @@ pub async fn collect_spec_evidence(
     case: &TestCase,
     cfg: &RunConfig<'_>,
 ) -> Result<crate::evidence::CaseEvidence, HarnessError> {
-    // `_ws` (the RAII cleanup guard) is held until after every channel is captured, then
-    // dropped to reclaim the container/network/volume/temp dir (FR-039).
-    let (ctx, _ws) = execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
+    // `ws` (the RAII cleanup guard) is held until after every channel is captured, then
+    // released to reclaim the container/network/volume/temp dir (FR-039) — off the async
+    // executor, since reclamation shells out to `deacon down` + several `docker` calls.
+    let (ctx, ws) = execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
     let mut evidence = crate::evidence::CaseEvidence::new();
     for exp in &case.expected {
         let (raw, normalized) = capture_channel(case, exp, &ctx)?;
         evidence.push(raw, normalized);
     }
+    release_workspace(ws).await?;
     Ok(evidence)
 }
 
@@ -506,12 +582,13 @@ pub async fn collect_evidence_on(
     case: &TestCase,
     cfg: &RunConfig<'_>,
 ) -> Result<crate::evidence::CaseEvidence, HarnessError> {
-    let (ctx, _ws) = execute_ops(side, program, case, cfg).await?;
+    let (ctx, ws) = execute_ops(side, program, case, cfg).await?;
     let mut evidence = crate::evidence::CaseEvidence::new();
     for exp in &case.expected {
         let (raw, normalized) = capture_channel(case, exp, &ctx)?;
         evidence.push(raw, normalized);
     }
+    release_workspace(ws).await?;
     Ok(evidence)
 }
 
