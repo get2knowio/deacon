@@ -24,12 +24,13 @@ pub struct Fixture {
 }
 
 impl Fixture {
-    /// Copy the real registry, its `migration/` sibling and its `fixtures/` sibling.
+    /// Copy the real registry, its `migration/` sibling, its `fixtures/` sibling, and its
+    /// `obligations/` sibling (024 — the machine-owned obligation inventory).
     pub fn real() -> Fixture {
         let dir = tempfile::tempdir().expect("tempdir");
         let src = workspace_root().join("conformance");
         let dst = dir.path().join("conformance");
-        for sub in ["registry", "migration", "fixtures"] {
+        for sub in ["registry", "migration", "fixtures", "obligations"] {
             let from = src.join(sub);
             if from.is_dir() {
                 copy_dir(&from, &dst.join(sub));
@@ -151,6 +152,58 @@ impl Fixture {
     /// Remove the committed baseline entirely.
     pub fn without_baseline(self) -> Fixture {
         let _ = std::fs::remove_file(self.migration_dir().join("baseline.json"));
+        self
+    }
+
+    /// The copied `conformance/` root — the parent of `registry/`, `migration/`,
+    /// `fixtures/`, and `obligations/`.
+    pub fn conformance_dir(&self) -> PathBuf {
+        self.dir.path().join("conformance")
+    }
+
+    /// The copied machine-owned obligation inventory (024).
+    pub fn obligations_file(&self) -> PathBuf {
+        self.conformance_dir()
+            .join("obligations")
+            .join("obligations.json")
+    }
+
+    /// Mutate one registry-root collection file in place (`scenario.json`,
+    /// `applicability.json`, `profiles.json`, …).
+    pub fn edit_registry_file(
+        self,
+        name: &str,
+        edit: impl FnOnce(&mut serde_json::Value),
+    ) -> Fixture {
+        self.edit_json(&self.registry_dir().join(name), edit);
+        self
+    }
+
+    /// Mutate one behavior in place, in whichever `behaviors/<area>.json` holds it.
+    pub fn edit_behavior(
+        self,
+        behavior_id: &str,
+        edit: impl Fn(&mut serde_json::Value),
+    ) -> Fixture {
+        let dir = self.registry_dir().join("behaviors");
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("json"))
+            .collect();
+        files.sort();
+        for file in files {
+            self.edit_json(&file, |doc| {
+                if let Some(records) = doc.get_mut("records").and_then(|v| v.as_array_mut()) {
+                    for record in records.iter_mut() {
+                        if record.get("id").and_then(|v| v.as_str()) == Some(behavior_id) {
+                            edit(record);
+                        }
+                    }
+                }
+            });
+        }
         self
     }
 

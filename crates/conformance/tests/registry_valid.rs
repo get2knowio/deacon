@@ -9,8 +9,12 @@
 //! override (verify: `cargo nextest list -E 'binary(=registry_valid)'`).
 
 use deacon_conformance::load::Registry;
+use deacon_conformance::obligation::{
+    ObligationInventory, compare as compare_obligations, generate_obligations,
+    render as render_obligations,
+};
 use deacon_conformance::validate::validate_path;
-use deacon_conformance::{default_registry_dir, workspace_root};
+use deacon_conformance::{default_registry_dir, obligations_file_for, workspace_root};
 
 /// A fixed injected "today" so the gate never depends on the wall clock. The seed
 /// registry has no waivers, so V6 cannot fire regardless — but pinning the date
@@ -80,5 +84,55 @@ fn every_migrated_case_survives_the_per_area_split() {
         sorted.len(),
         ids.len(),
         "two case records claim the same id across per-area files"
+    );
+}
+
+/// 024 T049: the committed obligation inventory byte-matches a fresh regeneration — the
+/// hermetic form of `coverage check`, run on every PR.
+///
+/// Byte equality is the contract (V27), because the committed file is machine-owned: a
+/// hand edit and a stale regeneration are indistinguishable, and both must fail. Editing
+/// a dimension value or an applicability rule without regenerating is precisely the drift
+/// this catches, and it catches it before the reports built on the inventory start
+/// disagreeing with the model.
+#[test]
+fn committed_obligations_match_a_fresh_regeneration() {
+    let registry_dir = default_registry_dir();
+    let registry = Registry::load(&registry_dir).unwrap_or_else(|e| {
+        panic!(
+            "the real registry at {} is unreadable: {e}",
+            registry_dir.display()
+        )
+    });
+
+    let regenerated = generate_obligations(&registry).expect("obligation generation succeeds");
+    let obligations_file = obligations_file_for(&registry_dir);
+    let committed = std::fs::read_to_string(&obligations_file).unwrap_or_else(|e| {
+        panic!(
+            "the committed obligation inventory {} is unreadable: {e} (run `cargo run -p \
+             deacon-conformance -- coverage generate`)",
+            obligations_file.display()
+        )
+    });
+
+    if committed == render_obligations(&regenerated) {
+        return;
+    }
+    let parsed: ObligationInventory = serde_json::from_str(&committed).unwrap_or_else(|e| {
+        panic!(
+            "{} is out of date AND unparseable: {e}; run `coverage generate`",
+            obligations_file.display()
+        )
+    });
+    let drift = compare_obligations(&parsed, &regenerated);
+    panic!(
+        "{} does not byte-match a fresh regeneration (V27): first difference {:?}; \
+         +{} added, -{} removed, ~{} changed. Run `cargo run -p deacon-conformance -- \
+         coverage generate`",
+        obligations_file.display(),
+        drift.first_difference(),
+        drift.added.len(),
+        drift.removed.len(),
+        drift.changed.len()
     );
 }
