@@ -364,7 +364,7 @@ pub struct ExpectedOutcome {
     pub expectation: String,
 }
 
-/// A conformance case record (`case-`) — `cases.json`.
+/// A conformance case record (`case-`) — `cases/<area>.json`.
 ///
 /// A record is either **legacy** (binary-backed, with [`executable`](Self::executable)
 /// and [`outcomes`](Self::outcomes), pointing at a hand-written Rust test) or
@@ -380,9 +380,27 @@ pub struct TestCase {
     /// Linked behaviors; ≥1 required (empty = orphan, violation V3).
     #[serde(default)]
     pub behaviors: Vec<String>,
-    /// Declared context; must intersect every linked behavior's applicability (V10).
+    /// Declared **environment** context; must intersect every linked behavior's
+    /// applicability (V10). Unchanged by 024 — it answers "where can this evidence be
+    /// gathered?", not "what does this case exercise?".
     #[serde(default)]
     pub context: Vec<Condition>,
+    /// Declared **scenario** context (024, data-model.md §3): which value of each
+    /// `sdim-` scenario dimension this case exercises, in declaration order.
+    ///
+    /// Deliberately a separate field from [`context`](Self::context) and a separate
+    /// namespace from `dimensions.json` (research Decision 1): `applies_in_profile`
+    /// treats a condition on an unassigned environment dimension as UNSATISFIED, so
+    /// folding scenario dimensions into the environment model would silently drop
+    /// behaviors out of profile and shrink the very denominator this feature exists to
+    /// expose.
+    ///
+    /// A legacy case may omit it, covering no combination obligation. Well-formedness
+    /// of the assignment — every key a declared `sdim-`, every value one of its declared
+    /// values, the assignment total and not rule-excluded — is V26/V16 (US1), not a
+    /// load-time concern; this field only has to round-trip.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub scenario_context: IndexMap<String, String>,
 
     // ---- Legacy (binary-backed) fields — present iff this is a legacy case ----
     /// The Rust test binary that exercises this case (legacy path only).
