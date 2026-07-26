@@ -710,9 +710,66 @@ fn coverage_report_cmd(registry_dir: &Path, _today: &str, out_dir: Option<PathBu
     }
 }
 
-/// `coverage scaffold` (contracts/coverage-cli.md). T069.
-fn coverage_scaffold(_registry_dir: &Path, _today: &str) -> i32 {
-    todo!("024-deterministic-conformance-coverage T069: coverage scaffold")
+/// `coverage scaffold` (contracts/coverage-cli.md, T069): emit skeleton `odp-` records to
+/// **stdout** for every undispositioned applicable obligation.
+///
+/// Mirrors `inventory scaffold` / `clause scaffold` / `migration scaffold`: generation
+/// never writes a hand-authored file, and every skeleton carries the `UNREVIEWED`
+/// sentinel the loader rejects — twice over. `disposition` carries it so the closed
+/// [`DispositionKind`](deacon_conformance::obligation::DispositionKind) enum refuses the
+/// record, which forces the author to pick one of the four words rather than accept a
+/// default; `rationale` carries it because contracts/coverage-cli.md names that field, and
+/// because a record still holding it after the disposition was chosen is the exact shape
+/// V29's filler test rejects.
+///
+/// Exit `0` even when nothing is undispositioned — an empty answer is a valid answer, and
+/// making "nothing to do" an error would put the workflow's terminal state in the failure
+/// channel.
+fn coverage_scaffold(registry_dir: &Path, _today: &str) -> i32 {
+    let registry = match load_for_coverage(registry_dir) {
+        Ok(registry) => registry,
+        Err(code) => return code,
+    };
+    let inventory = match generate_obligations(&registry) {
+        Ok(inventory) => inventory,
+        Err(e) => {
+            eprintln!("error: obligation generation failed: {e}");
+            return 1;
+        }
+    };
+
+    let audit = deacon_conformance::obligation::audit_dispositions(&registry, &inventory);
+    let records: Vec<serde_json::Value> = audit
+        .undispositioned
+        .iter()
+        .map(|unit| {
+            serde_json::json!({
+                "id": deacon_conformance::obligation::scaffold_disposition_id(&unit.id),
+                "obligation": unit.id,
+                "disposition": SCAFFOLD_SENTINEL,
+                "rationale": SCAFFOLD_SENTINEL,
+            })
+        })
+        .collect();
+
+    let document = serde_json::json!({ "schemaVersion": 1, "records": records });
+    match serde_json::to_string_pretty(&document) {
+        Ok(text) => println!("{text}"),
+        Err(e) => {
+            eprintln!("error: could not render the scaffold: {e}");
+            return 2;
+        }
+    }
+    eprintln!(
+        "scaffolded {} undispositioned obligation(s) ({} inactive-environment obligation(s) \
+         excluded — nobody owes them a decision); stdout only — nothing was written. Replace \
+         `disposition` with one of `case` / `non-testable` / `waived` / `gap`, and replace \
+         `rationale` with the payload that word requires (`cases` / `rationale` / `waiver` / \
+         `gap`). Both fields carry the `{SCAFFOLD_SENTINEL}` sentinel the loader rejects.",
+        audit.undispositioned.len(),
+        audit.inactive.len()
+    );
+    0
 }
 
 /// `snapshot check` (contract runner-cli.md §1): recompute the case/fixture hashes +
