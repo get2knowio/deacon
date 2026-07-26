@@ -4,8 +4,10 @@
     {
       "id": "clc-reference-a-default-mount-should-be-included-so-that-the-s-desc-fc22f151",
       "clause": "clu-reference-a-default-mount-should-be-included-so-that-the-s-desc-fc22f151",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-state-container-parity"
+      ]
     },
     {
       "id": "clc-reference-additionally-execute-the-poststartcommand-and-po-algo-1e29acde",
@@ -26,8 +28,10 @@
     {
       "id": "clc-reference-capadd-string-io-19b2ff76",
       "clause": "clu-reference-capadd-string-io-19b2ff76",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-container-metadata-label-content"
+      ]
     },
     {
       "id": "clc-reference-collected-list-of-all-mountpoints-conflicts-last-algo-6e3a3659",
@@ -48,8 +52,12 @@
     {
       "id": "clc-reference-container-mounts-environment-variables-and-user-algo-fc512eb6",
       "clause": "clu-reference-container-mounts-environment-variables-and-user-algo-fc512eb6",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-mount-source-and-shape",
+        "bhv-up-container-env-merge-precedence",
+        "bhv-up-effective-user-uid-gid"
+      ]
     },
     {
       "id": "clc-reference-each-command-must-exit-successfully-for-the-stag-algo-bc7ea234",
@@ -79,7 +87,7 @@
       "id": "clc-reference-however-remote-user-and-environment-variable-con-algo-a74a1d41",
       "clause": "clu-reference-however-remote-user-and-environment-variable-con-algo-a74a1d41",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
+      "rationale": "A prohibition scoped to an intermediate stage: remote user and remote environment configuration must NOT be applied while the container is being created (they belong to attach/exec time). No channel observes the container between creation and the first exec, so 'not applied at creation' and 'applied at exec' produce the same evidence; what is observable on either side of that boundary is already claimed, by bhv-up-effective-user-uid-gid for the created container's user and by bhv-exec-container-id-metadata for the remote user and remoteEnv exec applies."
     },
     {
       "id": "clc-reference-if-the-waitfor-property-is-defined-then-executio-algo-0000032a",
@@ -92,8 +100,10 @@
     {
       "id": "clc-reference-per-variable-last-value-wins-algo-c8dcfd00",
       "clause": "clu-reference-per-variable-last-value-wins-algo-c8dcfd00",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-container-env-merge-precedence"
+      ]
     },
     {
       "id": "clc-reference-probed-environment-variables-should-be-merged-wi-algo-bc58ffe5",
@@ -122,26 +132,34 @@
     {
       "id": "clc-reference-server-npm-start-io-c402ff95",
       "clause": "clu-reference-server-npm-start-io-c402ff95",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-lifecycle-command-forms"
+      ]
     },
     {
       "id": "clc-reference-service-declares-the-main-container-that-will-be-desc-63a9b6bf",
       "clause": "clu-reference-service-declares-the-main-container-that-will-be-desc-63a9b6bf",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-compose-project-name-robust"
+      ]
     },
     {
       "id": "clc-reference-set-using-the-remoteuser-property-in-all-cases-a-desc-317a6ed2",
       "clause": "clu-reference-set-using-the-remoteuser-property-in-all-cases-a-desc-317a6ed2",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-exec-container-id-metadata"
+      ]
     },
     {
       "id": "clc-reference-the-default-mount-point-for-the-source-code-can-desc-53d64f45",
       "clause": "clu-reference-the-default-mount-point-for-the-source-code-can-desc-53d64f45",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-mount-source-and-shape"
+      ]
     },
     {
       "id": "clc-reference-the-metadata-is-added-to-the-image-as-a-devconta-io-421635c0",
@@ -154,20 +172,26 @@
     {
       "id": "clc-reference-the-only-required-parameter-in-this-case-is-the-desc-2d275895",
       "clause": "clu-reference-the-only-required-parameter-in-this-case-is-the-desc-2d275895",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-build-image-parity"
+      ]
     },
     {
       "id": "clc-reference-the-only-required-parameter-is-image-desc-96bf70dd",
       "clause": "clu-reference-the-only-required-parameter-is-image-desc-96bf70dd",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ]
     },
     {
       "id": "clc-reference-the-project-workspace-folder-is-where-an-impleme-desc-042d067e",
       "clause": "clu-reference-the-project-workspace-folder-is-where-an-impleme-desc-042d067e",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-discovery-locations"
+      ]
     },
     {
       "id": "clc-reference-these-contents-should-then-be-merged-with-any-lo-algo-a8e77908",
@@ -180,8 +204,10 @@
     {
       "id": "clc-reference-these-variables-can-change-during-the-lifetime-o-desc-57c3f38c",
       "clause": "clu-reference-these-variables-can-change-during-the-lifetime-o-desc-57c3f38c",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-exec-container-id-metadata"
+      ]
     },
     {
       "id": "clc-reference-this-set-of-commands-is-executed-in-sequence-on-algo-462a5272",
@@ -194,8 +220,10 @@
     {
       "id": "clc-reference-true-if-at-least-one-is-true-false-otherwise-algo-219a6637",
       "clause": "clu-reference-true-if-at-least-one-is-true-false-otherwise-algo-219a6637",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
     },
     {
       "id": "clc-reference-uid-gid-sync-ing-is-an-optional-task-for-linux-o-algo-6c12fea6",
@@ -225,7 +253,7 @@
       "id": "clc-reference-validate-that-a-workspace-source-folder-has-been-algo-bb15890d",
       "clause": "clu-reference-validate-that-a-workspace-source-folder-has-been-algo-bb15890d",
       "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
+      "rationale": "A validation step over the tool's own invocation inputs (a workspace source folder must have been supplied). deacon's CLI defaults `--workspace-folder` to the current directory, so 'no workspace source folder' is not a state a declarative operation's argv can reach; the failures that ARE reachable are separate clauses already claimed by bhv-readconfig-missing-config (a folder with no configuration) and bhv-readconfig-bad-config-path (an explicit --config that does not exist)."
     },
     {
       "id": "clc-reference-variables-in-string-values-will-be-substituted-a-algo-9107fc1e",
@@ -238,8 +266,10 @@
     {
       "id": "clc-reference-when-the-order-matters-the-devcontainer-json-is-algo-b1bacaaf",
       "clause": "clu-reference-when-the-order-matters-the-devcontainer-json-is-algo-b1bacaaf",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 — no evidence-free behavior is minted)."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
     }
   ]
 }
