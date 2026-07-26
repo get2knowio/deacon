@@ -729,22 +729,63 @@ reject every correct ground.
 1. `coverage generate` — regenerate the inventory.
 2. `coverage check` — confirms the commit matches; a mismatch is V27 and names the first
    differing unit id and whether it was added, removed, or changed.
-3. `validate` — V26 lists dead values; V28 (User Story 2) enumerates the new
-   undispositioned queue.
-4. `coverage scaffold` (User Story 2) — skeletons to stdout with `UNREVIEWED` sentinels the
-   loader rejects.
+3. `validate` — V26 lists dead values; V28 enumerates the new undispositioned queue.
+4. `coverage scaffold` — skeletons to stdout with `UNREVIEWED` sentinels the loader rejects.
 5. Disposition until `certify` unblocks.
 
 **Disposition is never inherited by name.** A regenerated obligation that happens to
 resemble a removed one is a **new** obligation and needs its own decision — the same rule
 020 states for classifications, for the same reason: a name is not evidence.
 
+### Drift workflow (adding a case)
+
+The obligation set does not change, so nothing is regenerated. The *dispositions* do.
+
+1. Author the case with a **full** `scenarioContext` — every dimension or none (V26).
+2. `validate` — the case must load and be well-formed (V16/V18/V20).
+3. `coverage report` — read `coverage-pairwise.md` for the combinations the new
+   `scenarioContext` now satisfies, and `coverage-observables.md` for the channels it now
+   covers.
+4. **Flip every `odp-cmb-*` the case now covers from `gap` to `case`, in the SAME commit.**
+
+Step 4 is the one that gets skipped, and skipping it is silent. An explicit disposition
+takes **precedence over the evidence** (see "Explicit only" below) — deliberately, so a
+reviewer can rule that a mechanical `scenarioContext` match is not real coverage. The cost
+is that a commit which adds cases and registers only the new `obl-bhv-` dispositions leaves
+the combination records reading `gap` while a case matches them, and nothing fires:
+`validate` sees a well-formed record, `certify` sees a gap that is genuinely blocking-shaped,
+and the report under-counts coverage. It happened on this branch — 22 records across three
+areas, added by User Story 4, User Story 5 and T150 — and it was found by hand, not by a
+check. The direction is the safe one (over-reporting gaps, never claiming absent coverage),
+which is exactly why nothing catches it.
+
+### The five reporting buckets
+
+Every applicable obligation lands in exactly one of five buckets (FR-026), and the sixth
+row is the queue that must be empty:
+
+| Bucket | Means | Blocks `certify`? |
+|---|---|---|
+| `covered` | a `case` disposition naming ≥1 executable case | no |
+| `waived` | a `waived` disposition naming an unexpired, scoped `wvr-` | no (an EXPIRED waiver blocks as V6) |
+| `non-testable` | a `non-testable` disposition whose `rationale` names a ground | no |
+| `gap` | a `gap` disposition naming a `gap-` record | **yes**, through that record |
+| `inactive-environment` | derived, not authored: the behavior is out of profile for the active environment | no, counted separately |
+| *undispositioned* | zero records, or more than one | **yes**, V28 |
+
+The buckets are reported **alongside** the behavior-level coverage numbers and never folded
+into them: the two denominators answer different questions — which behaviors are evidenced,
+versus which modelled combinations are exercised — and collapsing them would let progress on
+one hide the absence of progress on the other.
+
 ### Reporting never gates, and gating never reports
 
 `coverage report` is read-only with respect to the record and its **exit code never
-reflects what the report says**. A command that both measured coverage and decided the
-build's fate would make widening the report the cheapest way to go green. The gates are
-`validate` (V26, V27) and `certify` (V28, V29 — User Story 2).
+reflects what the report says**. Its exit code reflects only whether it could write its
+artifacts. A command that both measured coverage and decided the build's fate would make
+widening the report the cheapest way to go green. The gates are `validate` (V26, V27) and
+`certify` (V28, V29). The same rule holds in the other direction: `certify` names what
+blocks and why, and does not attempt to reproduce the reports' numbers.
 
 ---
 
@@ -875,11 +916,8 @@ obligation dispositioned `waived` is different: that waiver is the only thing st
 between it and *undispositioned*, so when the waiver dies, nothing stands there.
 
 The five FR-026 buckets (`covered` / `waived` / `non-testable` / `gap` /
-`inactive-environment`) plus the undispositioned queue are reported **alongside** the
-behavior-level coverage numbers and never folded into them. The two denominators answer
-different questions — which behaviors are evidenced, versus which modelled combinations are
-exercised — and collapsing them would let progress on one hide the absence of progress on
-the other.
+`inactive-environment`) plus the undispositioned queue are defined in "The five reporting
+buckets" above; `certify` consumes them, it does not restate their counts.
 
 ---
 
