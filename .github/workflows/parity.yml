@@ -139,6 +139,27 @@ jobs:
       - name: Aggregate + enforce completeness gate
         run: cargo run -p parity-harness --bin parity-report
 
+      # 024-deterministic-conformance-coverage (US6, T139): prove the suite above can
+      # actually FAIL. One declarative, reversible perturbation per observable channel is
+      # injected at the evidence-source boundary and the run asserts that a case which was
+      # clean before is red after — and, critically, red ON THAT CHANNEL.
+      #
+      # Deliberately NOT `continue-on-error`. A green comparison whose channels are inert
+      # is worse than no comparison, because it is trusted: an inert channel means every
+      # green result resting on it was unearned. The step therefore fails the lane exactly
+      # as the comparison itself does, and it runs AFTER the comparison so a real
+      # divergence is reported on its own terms first.
+      - name: Prove every observable channel can fail (injected regressions)
+        run: cargo run -p parity-harness --bin coverage-regressions
+
+      - name: Upload the injected-regression report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: conformance-regressions
+          path: target/conformance/regressions.json
+          if-no-files-found: warn
+
       # 023-migrate-parity-to-conformance (US7, T082/T083): the equivalent-or-stricter
       # ledger that gates deleting a superseded carrier. Informational here — a
       # `more-permissive` unit blocks a DELETION, not the parity run — so it never masks
