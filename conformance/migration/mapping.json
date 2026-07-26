@@ -1116,17 +1116,26 @@
     {
       "unit": "parity_state_diff::compose-parity-with-feature-mount-gap",
       "disposition": "residual",
-      "residualId": "res-state-diff-cross-cli-snapshot"
+      "residualId": "res-state-diff-compose-command-override"
     },
     {
       "unit": "parity_state_diff::compose-sidecar-and-named-volume",
       "disposition": "residual",
-      "residualId": "res-state-diff-cross-cli-snapshot"
+      "residualId": "res-state-diff-compose-command-override"
     },
     {
       "unit": "parity_state_diff::default-workspace-mount-target-parity",
-      "disposition": "residual",
-      "residualId": "res-state-diff-cross-cli-snapshot"
+      "disposition": "migrated",
+      "caseIds": [
+        "case-state-default-mount",
+        "case-state-default-mount-target"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:state_diff_default_workspace_mount_target_parity",
+          "to": "conformance/fixtures/fx-state-default-mount"
+        }
+      ]
     },
     {
       "unit": "parity_state_diff::dockerfile-build-and-nonroot-user",

@@ -47,8 +47,23 @@ pub const PRE_MIGRATION_BEHAVIORS: usize = 25;
 /// new *variant* its own behavior — 24 per-workspace cases proving one claim must count as
 /// one behavior, not 24. That guard is about **re-describing** existing coverage.
 ///
-/// It is not about **newly observed** conformance facts, and conflating the two would make
-/// the guard forbid the thing the migration is for. `chan-container-state` became an
+/// It is not about **newly observed** conformance facts, nor about a claim the baseline
+/// already carried that the registry had simply never NAMED — and conflating either of
+/// those with a variant would make the guard forbid the thing the migration is for.
+///
+/// Two categories therefore live here, and each entry says which it is:
+///
+/// 1. **Newly observed** — a fact no pre-migration record could state because nothing
+///    compared the field. `bhv-container-identity-labels` and
+///    `bhv-container-keepalive-command` are these.
+/// 2. **Newly named** — a claim a legacy unit genuinely asserted while the registry
+///    described only part of it, so the unit reported several claims through one outcome.
+///    That is research D2's inverse defect, and correcting it necessarily produces a
+///    behavior the frozen count never held. Refusing it would mean migrating the unit at
+///    reduced fidelity — losing a claim to keep a number — which is the precise failure
+///    023 exists to prevent. `bhv-state-default-workspace-mount-target` is this.
+///
+/// `chan-container-state` became an
 /// observed channel in 024 Phase 4, which retired a blanket rule that had been hiding
 /// whole label namespaces from comparison; what it exposed is a real, previously
 /// unrecorded difference between the two CLIs. Refusing to record it would keep the
@@ -105,6 +120,23 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      command. Classified intentional only after measuring `docker stop` equal (245 ms / \
      exit 0 vs 215 ms / exit 0); the same field's earlier 'cannot matter behaviorally' \
      assumption hid a 10s stall.",
+    ),
+    (
+        "bhv-state-default-workspace-mount-target",
+        "NEWLY NAMED, not newly observed — the second category above. \
+     `parity_state_diff::default-workspace-mount-target-parity` asserted TWO distinct \
+     claims through one reported outcome: that the two CLIs agree, and the absolute claim \
+     that NEITHER mounts the workspace at `workspaceFolder` and BOTH mount it at the spec \
+     default `/workspaces/<basename>` (#273). The registry named only the agreement half \
+     (`bhv-state-diff-parity`). A live differential cannot carry the absolute half — it \
+     would pass if both sides regressed together — so migrating the unit faithfully needs a \
+     spec-expectation case, and a spec-expectation case needs a behavior. Not a variant of \
+     `bhv-state-diff-parity` or `bhv-state-container-parity`: those state that deacon \
+     AGREES with the reference, this states WHERE the workspace is bound, which stays \
+     false-if-broken even when both sides break identically. Dropping it to keep the \
+     denominator lower would migrate the unit at reduced fidelity — losing a claim to \
+     preserve a number, which is research D2's inverse defect reintroduced by the very \
+     guard meant to catch it (024 Phase 5b).",
     ),
 ];
 

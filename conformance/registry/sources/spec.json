@@ -13,6 +13,16 @@
       ]
     },
     {
+      "id": "src-spec-default-workspace-mount",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainerjson-reference.md workspaceFolder / workspaceMount",
+      "summary": "`workspaceFolder` sets the path to open inside the container; `workspaceMount` overrides the default workspace mount. With no `workspaceMount` the default source-to-`/workspaces/<basename>` bind applies, so `workspaceFolder` is a working directory, not a mount target.",
+      "behaviors": [
+        "bhv-state-default-workspace-mount-target"
+      ]
+    },
+    {
       "id": "src-spec-exec-command",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",

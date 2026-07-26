@@ -1882,6 +1882,139 @@
       "notes": "Migrated from parity_state_diff::appport-published-ports (024 Phase 5). `appPort: [3000]` publishes the same container port in both CLIs. This case was unmigratable before 024 Phase 3: with a FIXED host port both sides collided, because deacon's container was still running while the oracle's `up` ran. The side sequencing fix (capture deacon's evidence, reclaim, then run the oracle) is what makes a fixed-host-port differential expressible at all. Image pinned to debian:bookworm-slim (V18)."
     },
     {
+      "id": "case-state-default-mount",
+      "behaviors": [
+        "bhv-container-identity-labels",
+        "bhv-container-keepalive-command",
+        "bhv-container-metadata-label-authored",
+        "bhv-state-diff-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-state-default-mount"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.configHash",
+          "rationale": "deacon sets `devcontainer.configHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.config_name",
+          "rationale": "deacon sets `devcontainer.config_name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.name",
+          "rationale": "deacon sets `devcontainer.name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.source",
+          "rationale": "deacon sets `devcontainer.source`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-identity-labels",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
+          "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-keepalive-command",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (`docker stop` 245 ms / exit 0 vs 215 ms / exit 0). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
+          "divergenceId": "bhv-container-keepalive-command"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Migrated from parity_state_diff::default-workspace-mount-target-parity (024 Phase 5b). A config with `workspaceFolder` but NO explicit `workspaceMount`: both CLIs must produce equivalent container state, including where the workspace is bound. The legacy unit wrote NO report fragment at all (its `assert_parity` call was absent), so migrating it is a coverage GAIN, not a transfer. Its `∄ /workspace ∧ ∃ /workspaces/*` claim is an ABSOLUTE claim about each side, which a differential cannot express — that half lives in the spec-expectation twin `case-state-default-mount-target` (the T072 pattern). Image pinned to debian:bookworm-slim (V18)."
+    },
+    {
+      "id": "case-state-default-mount-target",
+      "behaviors": [
+        "bhv-state-default-workspace-mount-target"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-state-default-mount"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "workspaceBindTargets": [
+                "/workspaces/<WORKSPACE_NAME>"
+              ]
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The spec-expectation twin of case-state-default-mount (024 Phase 5b), carrying the half a differential structurally cannot: the legacy unit asserted an ABSOLUTE fact about each side — NEITHER CLI mounts the workspace at `workspaceFolder` (/workspace), BOTH mount it at the spec default /workspaces/<basename> (#273) — and a differential would pass if both regressed together. `workspaceBindTargets` is the observer's DERIVED field (the destinations of binds rooted at the workspace), so the quantified `∄ ∧ ∃` claim becomes plain equality with no new assertion predicate: a single-element list at the spec default is exactly '∃ the right one and ∄ any other', including /workspace. `<WORKSPACE_NAME>` is the `workspace_basename_token` rewrite. Image pinned to debian:bookworm-slim (V18)."
+    },
+    {
       "id": "case-state-diff",
       "behaviors": [
         "bhv-state-diff-parity"
