@@ -911,7 +911,10 @@ mod tests {
         assert_eq!(inventory.schema_version, OBLIGATION_SCHEMA_VERSION);
 
         let rendered = render(&inventory);
-        assert!(rendered.ends_with('\n'), "canonical form is newline-terminated");
+        assert!(
+            rendered.ends_with('\n'),
+            "canonical form is newline-terminated"
+        );
         assert_eq!(rendered, render(&generate_obligations(&registry).unwrap()));
     }
 
