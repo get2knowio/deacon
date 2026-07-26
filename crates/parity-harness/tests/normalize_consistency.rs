@@ -469,3 +469,204 @@ fn no_second_normalization_or_comparison_implementation_exists() {
         offenders.join("\n")
     );
 }
+
+// ===========================================================================
+// 024 US5 (T111/T113): the three FR-055 states, and the V24 rule contract.
+// ===========================================================================
+
+/// **T111 / FR-055, US5 acceptance scenario 2.** An authored `null`, an authored empty
+/// collection, and an OMITTED property must produce THREE distinguishable observations.
+///
+/// This is the property the pre-024-US5 normalizer destroyed. `drop_absent_optional` ran on
+/// both sides of every differential, so all three states normalized to "the key is absent on
+/// both sides" — one observation where the requirement asks for three, and a comparison that
+/// was green while proving nothing about any of them.
+///
+/// Checked on the REFERENCE side, because that is the side that has the information: its
+/// `configuration` is an echo of the authored document. The deacon side is asserted too, and
+/// deliberately: it collapses two of the three, which is the characterized defect
+/// (`bhv-readconfig-authored-empty-omitted-collapsed`) and must stay visible here rather than
+/// being quietly re-hidden by a future widening of the rule.
+#[test]
+fn null_empty_and_omitted_are_three_distinguishable_observations() {
+    let doc = |body: &str| format!(r#"{{ "configuration": {{ "name": "demo"{body} }} }}"#);
+    let authored_null = doc(r#", "forwardPorts": null"#);
+    let authored_empty = doc(r#", "forwardPorts": []"#);
+    let omitted = doc("");
+
+    let observe = |raw: &str, side: Side| normalize::config("fr055", raw, side).expect("normalize");
+
+    let ref_null = observe(&authored_null, Side::Oracle);
+    let ref_empty = observe(&authored_empty, Side::Oracle);
+    let ref_omitted = observe(&omitted, Side::Oracle);
+
+    assert_ne!(
+        ref_null, ref_empty,
+        "an authored null and an authored empty collection are different documents"
+    );
+    assert_ne!(ref_null, ref_omitted, "an authored null is not an omission");
+    assert_ne!(
+        ref_empty, ref_omitted,
+        "an authored empty collection is not an omission"
+    );
+    assert_eq!(ref_null["forwardPorts"], json!(null));
+    assert_eq!(ref_empty["forwardPorts"], json!([]));
+    assert!(ref_omitted.get("forwardPorts").is_none());
+
+    // deacon's side: the characterized collapse, pinned so it cannot widen unnoticed.
+    let d_null = observe(&authored_null, Side::Deacon);
+    let d_empty = observe(&authored_empty, Side::Deacon);
+    let d_omitted = observe(&omitted, Side::Deacon);
+    assert_eq!(
+        d_null, d_omitted,
+        "deacon cannot distinguish an authored null from an omission — the defect the \
+         differential must now SHOW rather than normalize away"
+    );
+    assert_eq!(d_empty, d_omitted, "…nor an authored empty collection");
+
+    // And therefore the three states yield three distinguishable VERDICTS: two divergences
+    // that differ in what the reference held, and one agreement.
+    let verdict = |raw: &str| {
+        let d = observe(raw, Side::Deacon);
+        let r = observe(raw, Side::Oracle);
+        normalize::diff(&d, &r)
+            .iter()
+            .map(|x| format!("{:?}:{}", x.kind, x.path))
+            .collect::<Vec<_>>()
+    };
+    let v_null = verdict(&authored_null);
+    let v_empty = verdict(&authored_empty);
+    let v_omitted = verdict(&omitted);
+    assert!(
+        v_omitted.is_empty(),
+        "an omitted property agrees on both sides: {v_omitted:?}"
+    );
+    assert_eq!(v_null, vec!["RefOnly:forwardPorts".to_string()]);
+    assert_eq!(v_empty, vec!["RefOnly:forwardPorts".to_string()]);
+    // The two divergences agree on SHAPE, so the recorded evidence is what separates them.
+    assert_ne!(
+        ref_null["forwardPorts"], ref_empty["forwardPorts"],
+        "the two divergences are told apart by the value the reference reported, which is \
+         retained in the normalized evidence"
+    );
+}
+
+/// **T113 / FR-056, US5 acceptance scenario 4.** A normalization rule that removes or
+/// collapses observable content must be named, scoped to a specific field or channel, and
+/// justified; an UNSCOPED rule is rejected (V24).
+///
+/// Two halves, and both matter. The first is that the real registry is clean. The second is
+/// that the check is LIVE — a guard that reports nothing because it accepts everything is
+/// indistinguishable from a clean registry, so each way a rule can be unscoped is fed to it
+/// as a negative control and must be reported.
+#[test]
+fn an_unscoped_normalization_rule_is_rejected() {
+    use deacon_conformance::conservation::{
+        NORMALIZATION_RULES, NormalizationRule, RuleAction, check_normalization_rules,
+    };
+
+    assert!(
+        check_normalization_rules(NORMALIZATION_RULES).is_empty(),
+        "the shipped rule set must be clean; a V24 here is a real finding, not a test bug"
+    );
+
+    let ok = NormalizationRule {
+        name: "us5_probe",
+        scopes: &["channel:chan-container-state"],
+        action: RuleAction::Drop,
+        removes: &["SOME_KEY"],
+        justification: Some("a scoped, enumerated, justified drop"),
+        known_non_compliant: None,
+    };
+    assert!(
+        check_normalization_rules(&[ok]).is_empty(),
+        "a well-formed rule must NOT be reported, or the check proves nothing"
+    );
+
+    for (label, rule) in [
+        ("no scope at all", NormalizationRule { scopes: &[], ..ok }),
+        (
+            "an `all` pseudo-scope",
+            NormalizationRule {
+                scopes: &["all"],
+                ..ok
+            },
+        ),
+        (
+            "an unqualified scope",
+            NormalizationRule {
+                scopes: &["container-state"],
+                ..ok
+            },
+        ),
+        (
+            "an open-ended removal set",
+            NormalizationRule {
+                removes: &["devcontainer.*"],
+                ..ok
+            },
+        ),
+        (
+            "a drop with no justification",
+            NormalizationRule {
+                justification: None,
+                ..ok
+            },
+        ),
+    ] {
+        let problems = check_normalization_rules(&[rule]);
+        assert!(
+            !problems.is_empty(),
+            "V24 must reject {label}; a rule a reviewer cannot bound by reading its registry \
+             entry is the blanket rule FR-056 forbids"
+        );
+    }
+}
+
+/// Every rule the 024 US5 audit touched is registered, and each registration says the same
+/// thing the implementation does.
+///
+/// `compose_project_prefix` and `user_default_root` were applied for two stories without
+/// appearing in the registry at all, which is the failure mode V24 cannot catch on its own:
+/// it validates the rules it is GIVEN, and an unregistered rule is never given to it.
+#[test]
+fn the_us5_audited_rules_are_registered_with_the_right_action() {
+    use deacon_conformance::conservation::{NORMALIZATION_RULES, RuleAction};
+
+    for (name, action) in [
+        ("compose_project_prefix", RuleAction::Rewrite),
+        ("container_hostname_token", RuleAction::Rewrite),
+        ("user_default_root", RuleAction::Canonicalize),
+        ("drop_noise_env", RuleAction::Drop),
+        ("drop_absent_optional", RuleAction::Drop),
+    ] {
+        let rule = NORMALIZATION_RULES
+            .iter()
+            .find(|r| r.name == name)
+            .unwrap_or_else(|| panic!("`{name}` must be registered"));
+        assert_eq!(rule.action, action, "`{name}` action");
+        assert!(
+            rule.justification.is_some_and(|j| !j.trim().is_empty()),
+            "`{name}` must carry a justification"
+        );
+        if action == RuleAction::Rewrite || action == RuleAction::Canonicalize {
+            assert!(
+                rule.removes.is_empty(),
+                "`{name}` rewrites or canonicalizes; it must remove nothing"
+            );
+        }
+    }
+
+    // `drop_noise_env` no longer runs at capture, so its registered scope must no longer
+    // claim the declarative channel — the registry entry is the reviewable statement of
+    // where a rule reaches, and it read as a channel-wide removal while it was one.
+    let noise = NORMALIZATION_RULES
+        .iter()
+        .find(|r| r.name == "drop_noise_env")
+        .expect("registered");
+    assert!(
+        !noise.scopes.contains(&"channel:chan-container-state"),
+        "`drop_noise_env` applies to the legacy comparison, not to the channel; a scope \
+         that overstates a drop's reach is how PATH stayed uncompared"
+    );
+}

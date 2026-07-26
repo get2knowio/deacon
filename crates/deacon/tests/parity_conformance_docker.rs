@@ -489,3 +489,98 @@ fn docker_lines(args: &[&str]) -> Vec<String> {
         })
         .unwrap_or_default()
 }
+
+// ---------------------------------------------------------------------------------
+// T112 (US5 acceptance scenario 3): both lifecycle-hook FORMS are observed distinctly.
+// ---------------------------------------------------------------------------------
+
+/// A lifecycle hook declared as an ARRAY (`["sh","-c",…]`, an argv) and one declared as an
+/// OBJECT (`{"first": …, "second": …}`, named commands) are two different spellings that a
+/// CLI can implement independently — and an implementation that ran only the first named
+/// command of an object hook, or that treated the argv array as a sequence of shell
+/// commands, would still exit 0.
+///
+/// So the assertion is not "the cases pass". It is that the two forms produced DISTINCT,
+/// non-empty observations that could not have come from the other form: the array case wrote
+/// exactly the one file its argv writes, and the object case wrote BOTH of its files, each
+/// with its own command's output. Running the two cases in one test is what makes them
+/// comparable — a form observed in isolation cannot show that it was distinguished.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn both_lifecycle_hook_forms_are_observed_distinctly() {
+    let report_root = report_root().join("us5-lifecycle-forms");
+    let cfg = tier_config(&report_root).await;
+
+    let registry = Registry::load(&default_registry_dir())
+        .unwrap_or_else(|e| panic!("conformance registry must load: {e}"));
+    let cases: Vec<_> = registry
+        .cases
+        .iter()
+        .filter(|c| {
+            c.id == "case-up-lifecycle-array-form" || c.id == "case-up-lifecycle-object-form"
+        })
+        .cloned()
+        .collect();
+    assert_eq!(
+        cases.len(),
+        2,
+        "both lifecycle-form cases must exist; FR-047 needs the array form AND the object \
+         form, and one without the other proves neither was distinguished"
+    );
+
+    let run = ff(driver::drive_group(Arc::clone(&cfg), cases, ResourceGroup::DockerShared).await);
+    assert!(
+        run.failures.is_empty(),
+        "both lifecycle forms must be observed as declared: {}",
+        run.failures.join("\n")
+    );
+
+    // Live agreement is necessary but not sufficient: it says each case matched its own
+    // declaration, not that the two declarations describe DIFFERENT observations. That part
+    // is structural, and it is checked against the records the runner just executed.
+    let asserted_files = |case_id: &str| -> std::collections::BTreeMap<String, String> {
+        let case = registry
+            .cases
+            .iter()
+            .find(|c| c.id == case_id)
+            .unwrap_or_else(|| panic!("{case_id} is in the registry"));
+        case.expected
+            .iter()
+            .filter(|e| e.channel == "chan-file-content")
+            .filter_map(|e| e.assertion.as_ref())
+            .filter_map(|a| a.get("jsonSubset"))
+            .filter_map(|s| s.as_object())
+            .flat_map(|o| o.iter())
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+            .collect()
+    };
+
+    let array = asserted_files("case-up-lifecycle-array-form");
+    let object = asserted_files("case-up-lifecycle-object-form");
+
+    assert_eq!(
+        array.get("lifecycle-array.txt").map(String::as_str),
+        Some("array-form\n"),
+        "the array form is observed by the one file its argv writes: {array:?}"
+    );
+    assert_eq!(
+        object.get("lifecycle-object-first.txt").map(String::as_str),
+        Some("object-first\n"),
+        "the object form is observed by its FIRST named command's file: {object:?}"
+    );
+    assert_eq!(
+        object
+            .get("lifecycle-object-second.txt")
+            .map(String::as_str),
+        Some("object-second\n"),
+        "…and its SECOND — an implementation that stopped after one command would pass \
+         every exit-code assertion, so both files must be observed: {object:?}"
+    );
+
+    // Distinct, not merely both present: neither form's observation overlaps the other's,
+    // so a green run cannot be a green run of the same thing twice.
+    assert!(
+        array.keys().all(|k| !object.contains_key(k)),
+        "the two forms must be told apart by their observations, not by the case id alone: \
+         array={array:?} object={object:?}"
+    );
+}
