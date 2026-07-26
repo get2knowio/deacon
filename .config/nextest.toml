@@ -85,7 +85,8 @@ parity-cli = { max-threads = 8 }
 #    no Docker, no network, no oracle — so they gate every change including the Windows
 #    `dev-fast` lane.
 # 2. Hermetic WITH an `fs-heavy` override, mirroring `observation_faults` exactly:
-#    `injection_faults` (US4), `prereq_faults` (US6), both in the parity-harness crate.
+#    `injection_faults` (US6), `prereq_faults` (US4 T097), both in the parity-harness
+#    crate.
 #    They are still hermetic — the group bounds their fixture-tree I/O, it does not
 #    admit a daemon — and like the other fs-heavy harness self-tests they are NOT
 #    selected by [profile.parity].
@@ -157,7 +158,7 @@ test-group = 'parity'
 # are selected by [profile.parity]. `parity_registry_check` + `normalize_consistency`
 # intentionally stay ungrouped (default group).
 [[profile.default.overrides]]
-filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel)'
+filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel) | binary(=prereq_faults)'
 test-group = 'fs-heavy'
 
 # parity_observable_state runs multiple up/down cycles against a real Docker
@@ -288,7 +289,7 @@ test-group = 'parity'
 # Hermetic harness self-tests + parity-harness integration tests (018 US5, T046):
 # fs-heavy; the rest stay ungrouped. NONE are selected by [profile.parity].
 [[profile.dev-fast.overrides]]
-filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel)'
+filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel) | binary(=prereq_faults)'
 test-group = 'fs-heavy'
 
 # parity_observable_state runs multiple up/down cycles against a real Docker
@@ -417,7 +418,7 @@ test-group = 'parity'
 # Hermetic harness self-tests (018 US5, T046): fs-heavy where selected; the rest
 # ungrouped. NONE are selected by [profile.parity].
 [[profile.docker.overrides]]
-filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel)'
+filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel) | binary(=prereq_faults)'
 test-group = 'fs-heavy'
 
 # parity_observable_state runs multiple up/down cycles against a real Docker
@@ -518,7 +519,7 @@ test-group = 'parity'
 # Hermetic harness self-tests + parity-harness integration tests (018 US5, T046):
 # fs-heavy; the rest ungrouped. NONE are selected by [profile.parity].
 [[profile.full.overrides]]
-filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel)'
+filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel) | binary(=prereq_faults)'
 test-group = 'fs-heavy'
 
 # parity_observable_state runs multiple up/down cycles against a real Docker
@@ -622,7 +623,7 @@ test-group = 'parity'
 # Hermetic harness self-tests + parity-harness integration tests (018 US5, T046):
 # fs-heavy; the rest ungrouped. NONE are selected by [profile.parity].
 [[profile.ci.overrides]]
-filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel)'
+filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel) | binary(=prereq_faults)'
 test-group = 'fs-heavy'
 
 # parity_observable_state runs multiple up/down cycles against a real Docker
@@ -728,7 +729,7 @@ test-group = 'parity'
 # Hermetic harness self-tests + parity-harness integration tests (018 US5, T046):
 # fs-heavy; the rest ungrouped. NONE are selected by [profile.parity].
 [[profile.mvp-integration.overrides]]
-filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel)'
+filter = 'binary(=parity_harness_faults) | binary(=aggregator) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel) | binary(=prereq_faults)'
 test-group = 'fs-heavy'
 
 # parity_observable_state runs multiple up/down cycles against a real Docker

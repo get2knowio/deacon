@@ -143,3 +143,349 @@ async fn conformance_group_docker_shared() {
 async fn conformance_group_docker_exclusive() {
     drive(ResourceGroup::DockerExclusive).await;
 }
+
+// ---------------------------------------------------------------------------------
+// The container-backed error-path tier (024 US4, T096/T098/T099)
+// ---------------------------------------------------------------------------------
+
+/// The registry's error-path cases, id-sorted.
+fn error_path_cases() -> Vec<deacon_conformance::model::TestCase> {
+    let registry = Registry::load(&default_registry_dir())
+        .unwrap_or_else(|e| panic!("conformance registry must load: {e}"));
+    let mut cases: Vec<_> = registry
+        .cases
+        .iter()
+        .filter(|c| c.error_path_tier)
+        .cloned()
+        .collect();
+    cases.sort_by(|a, b| a.id.cmp(&b.id));
+    assert!(
+        !cases.is_empty(),
+        "the error-path tier is empty; SC-007 requires a case for each later-stage failure \
+         point"
+    );
+    cases
+}
+
+/// A `DriverConfig` for the tier tests below, with prerequisites already checked.
+async fn tier_config(report_root: &std::path::Path) -> Arc<DriverConfig> {
+    ff(prereq::require_docker().await);
+    let oracle = ff(Oracle::acquire().await);
+    let root = workspace_root();
+    Arc::new(DriverConfig {
+        binary: BINARY.to_string(),
+        deacon_path: PathBuf::from(env!("CARGO_BIN_EXE_deacon")),
+        oracle: Some(oracle),
+        fixtures_root: root.join("conformance").join("fixtures"),
+        report_root: report_root.to_path_buf(),
+        snapshots_root: root.join("conformance").join("snapshots"),
+    })
+}
+
+/// T096 (US4 scenario 1, FR-042): an error-path case records the failing STAGE and each
+/// side's outcome, and reaches a definite verdict.
+///
+/// This is the tier's whole claim, and it is the one thing a green run does not by itself
+/// establish. A case that never got past configuration read agrees too; so does one whose
+/// declared later stage was never reached. What is asserted is therefore not "it passed"
+/// but "the evidence says which stage, and what each side did there":
+///
+/// - the verdict is `agree` or `allowed-difference` — a definite verdict, never absent;
+/// - the exit-code detail names the DECLARED stage, not a coarser inference of it;
+/// - the operation that declared the failure really did fail on deacon's side (a declared
+///   stage nothing reached would otherwise be a claim the run silently contradicts);
+/// - for a differential, the REFERENCE's outcome is recorded too, so a divergence is a
+///   statement about two observed behaviours rather than about one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_error_path_case_records_the_failing_stage_and_each_sides_outcome() {
+    use deacon_conformance::model::{CHAN_EXIT_CODE, OracleType};
+    use parity_harness::evidence::Outcome;
+
+    let reports = tempfile::tempdir().expect("tempdir");
+    let cfg = tier_config(reports.path()).await;
+    let cases = error_path_cases();
+
+    for case in &cases {
+        let verdict = ff(parity_harness::runner::run_case(case, &cfg.run_config()).await);
+        assert!(
+            matches!(verdict.overall, Outcome::Agree | Outcome::AllowedDifference),
+            "{}: reached `{}` — the tier's cases are characterized, so an uncharacterized \
+             outcome means the later stage stopped behaving as recorded",
+            case.id,
+            verdict.overall.as_str()
+        );
+
+        for (op_id, declared) in case.later_stage_failure_phases() {
+            // `ChannelVerdict` carries no operation id, and a case may declare the same
+            // channel on several operations (the teardown case observes `chan-exit-code`
+            // three times). The verdicts are produced in `case.expected` order, so the
+            // DECLARING operation's verdict is found by resolving each expectation's target
+            // — matching on channel alone would silently read a different operation's.
+            let position = case
+                .expected
+                .iter()
+                .position(|exp| {
+                    exp.channel == CHAN_EXIT_CODE
+                        && match &exp.operation {
+                            Some(id) => id == op_id,
+                            None => case.operations.last().map(|o| o.id.as_str()) == Some(op_id),
+                        }
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{}: operation {op_id:?} declares `{}` but no exit-code expectation \
+                         observes it",
+                        case.id,
+                        declared.as_str()
+                    )
+                });
+            let exit = verdict.channels.get(position).unwrap_or_else(|| {
+                panic!(
+                    "{}: expected {} channel verdicts, got {}",
+                    case.id,
+                    case.expected.len(),
+                    verdict.channels.len()
+                )
+            });
+            let detail = exit.detail.as_ref().unwrap_or_else(|| {
+                panic!(
+                    "{}: the exit-code verdict for operation {op_id:?} carries no detail",
+                    case.id
+                )
+            });
+
+            assert_eq!(
+                detail.get("failurePhase").and_then(|v| v.as_str()),
+                Some(declared.as_str()),
+                "{}: operation {op_id:?} declares `{}` but the verdict records {:?}; the \
+                 recorded stage must be the reviewed one (FR-042)",
+                case.id,
+                declared.as_str(),
+                detail.get("failurePhase")
+            );
+
+            let sides = detail
+                .get("sides")
+                .unwrap_or_else(|| panic!("{}: verdict records no per-side outcome", case.id));
+            assert_eq!(
+                sides.pointer("/deacon/failed").and_then(|v| v.as_bool()),
+                Some(true),
+                "{}: declares a failure at `{}` that deacon's run did not produce — the \
+                 stage is recorded and nothing reached it: {sides}",
+                case.id,
+                declared.as_str()
+            );
+            if case.oracle_type == Some(OracleType::LiveDifferential) {
+                assert!(
+                    sides
+                        .get("reference")
+                        .is_some_and(|r| r.get("failed").is_some()),
+                    "{}: is a differential but records no outcome for the reference side, so \
+                     its verdict states a disagreement without saying what the other side \
+                     did (FR-042): {sides}",
+                    case.id
+                );
+            }
+        }
+    }
+}
+
+/// T098 (US4 scenario 3, FR-045): every container, network, volume and temp directory is
+/// reclaimed — on success AND on the failing runs the tier is made of.
+///
+/// An error-path case fails partway BY CONSTRUCTION, which is exactly the run where cleanup
+/// is skipped: the teardown step never happens because the step before it did not finish.
+/// `docker_channels.rs` proves the RAII guard fires on an unwind in isolation; what is
+/// checked here is the property in situ, over the real tier.
+///
+/// **Measured by attribution, not by a global count.** The obvious check — total containers
+/// before vs after — is wrong here for a reason worth recording: nextest's `parity` group
+/// runs two test functions at a time, so a sibling driver is creating and destroying
+/// resources throughout this window, and a global count reports its churn as this tier's
+/// leak (and could hide a real leak behind its cleanup). Every leak this tier can produce is
+/// instead identifiable by NAME: a container labelled with an isolated workspace path that no
+/// longer exists on disk is orphaned by definition, and the harness's own resource names are
+/// `dcr-<pid>-<seq>-…`. Both are checked as SET differences across the window, so a
+/// pre-existing orphan is not blamed on this run.
+///
+/// **The temp directory is deliberately not measured here**, for the same reason. A
+/// `deacon-conf-*` directory that appears during this window and is still present at the end
+/// is indistinguishable from a sibling driver's IN-FLIGHT workspace — the first draft of this
+/// test asserted on it and failed naming four directories that a concurrent group was still
+/// using. Attribution needs the creating process, which a directory name does not carry. It
+/// is covered instead where attribution is exact: `workspace.rs::tempdir_is_removed_on_drop`
+/// (the guard removes it on drop) and `docker_channels.rs::cleanup_runs_on_unwind_drop` (the
+/// drop happens on an unwind, which is the failing-run case this tier is made of). What
+/// remains observable here — a *container* whose workspace directory is already gone — is
+/// asserted above, and is the stronger half: it is the residue that survives the process.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_error_path_tier_reclaims_every_resource_it_creates() {
+    let reports = tempfile::tempdir().expect("tempdir");
+    let cfg = tier_config(reports.path()).await;
+    let cases = error_path_cases();
+
+    let before = residual_snapshot();
+    for case in &cases {
+        // The verdict is T096's subject; here only the side effects matter, so a failure to
+        // run is still surfaced (fail-loud) but the outcome itself is not re-asserted.
+        let _ = ff(parity_harness::runner::run_case(case, &cfg.run_config()).await);
+    }
+    let after = residual_snapshot();
+
+    let leaked_containers = after
+        .orphaned_containers
+        .difference(&before.orphaned_containers);
+    let leaked: Vec<&String> = leaked_containers.collect();
+    assert!(
+        leaked.is_empty(),
+        "the tier left container(s) behind, each labelled with an isolated workspace that no \
+         longer exists: {leaked:?}. A case that fails partway must still reclaim what it \
+         created (FR-045)"
+    );
+
+    let leaked_named: Vec<&String> = after
+        .harness_named
+        .difference(&before.harness_named)
+        .collect();
+    assert!(
+        leaked_named.is_empty(),
+        "the tier left harness-named network(s)/volume(s) behind: {leaked_named:?}"
+    );
+}
+
+/// T099 (US4 scenario 4, FR-045): two concurrent cases observe none of each other's
+/// resources.
+///
+/// Driven by running the SAME case twice at once, which is the strongest form of the
+/// question: identical fixture, identical configuration, therefore identical container
+/// identity — UNLESS each run's isolated workspace really does make it different. The case
+/// chosen creates a container and then tears it down, so a collision is not merely
+/// theoretical: two runs sharing a `devcontainer.local_folder` label would have one run's
+/// `down` remove the other's container, and the other's teardown assertions would then be
+/// reporting on a container it never created.
+///
+/// Both runs must reach the same definite verdict they reach alone. A weaker check — that
+/// the workspaces differ — would pass on a harness that computed distinct paths and then
+/// labelled both containers identically anyway.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_concurrent_error_path_cases_observe_none_of_each_others_resources() {
+    use parity_harness::evidence::Outcome;
+
+    let reports = tempfile::tempdir().expect("tempdir");
+    let cfg = tier_config(reports.path()).await;
+    let case = error_path_cases()
+        .into_iter()
+        .find(|c| {
+            c.operations
+                .iter()
+                .any(|op| op.subcommand == "up" && op.expect_failure_phase.is_none())
+        })
+        .expect(
+            "the tier needs a case whose `up` SUCCEEDS, or a collision could not manifest as \
+             a shared container in the first place",
+        );
+
+    let a = {
+        let (cfg, case) = (Arc::clone(&cfg), case.clone());
+        tokio::spawn(
+            async move { parity_harness::runner::run_case(&case, &cfg.run_config()).await },
+        )
+    };
+    let b = {
+        let (cfg, case) = (Arc::clone(&cfg), case.clone());
+        tokio::spawn(
+            async move { parity_harness::runner::run_case(&case, &cfg.run_config()).await },
+        )
+    };
+    let a = ff(a.await.expect("concurrent case A completed"));
+    let b = ff(b.await.expect("concurrent case B completed"));
+
+    for (label, verdict) in [("A", &a), ("B", &b)] {
+        assert!(
+            matches!(verdict.overall, Outcome::Agree | Outcome::AllowedDifference),
+            "concurrent run {label} of `{}` reached `{}`; run alone it does not, so the two \
+             runs saw each other's resources",
+            case.id,
+            verdict.overall.as_str()
+        );
+    }
+    assert_eq!(
+        a.overall, b.overall,
+        "two concurrent runs of `{}` disagreed with each other, which they can only do by \
+         sharing something",
+        case.id
+    );
+}
+
+/// What the daemon and the temp tree hold that is ATTRIBUTABLE to the harness, for the
+/// before/after set comparison in T098.
+struct Residual {
+    /// Containers whose `devcontainer.local_folder` label names an isolated workspace that
+    /// no longer exists — orphaned by definition, whichever case created them.
+    orphaned_containers: std::collections::BTreeSet<String>,
+    /// Networks and volumes named by `DockerWorkspace::resource_name` (`dcr-<pid>-<seq>-…`).
+    harness_named: std::collections::BTreeSet<String>,
+}
+
+/// The prefix `workspace.rs` gives every isolated workspace directory.
+const WORKSPACE_PREFIX: &str = "deacon-conf-";
+/// The prefix `DockerWorkspace::resource_name` gives every network/volume it names.
+const HARNESS_RESOURCE_PREFIX: &str = "dcr-";
+
+fn residual_snapshot() -> Residual {
+    let mut orphaned_containers = std::collections::BTreeSet::new();
+    for line in docker_lines(&[
+        "ps",
+        "-a",
+        "--no-trunc",
+        "--format",
+        "{{.ID}}\t{{.Label \"devcontainer.local_folder\"}}",
+    ]) {
+        let Some((id, folder)) = line.split_once('\t') else {
+            continue;
+        };
+        let folder = folder.trim();
+        let is_isolated = std::path::Path::new(folder)
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with(WORKSPACE_PREFIX));
+        if is_isolated && !std::path::Path::new(folder).exists() {
+            orphaned_containers.insert(format!("{} ({folder})", &id[..12.min(id.len())]));
+        }
+    }
+
+    let mut harness_named = std::collections::BTreeSet::new();
+    for (kind, args) in [
+        ("network", vec!["network", "ls", "--format", "{{.Name}}"]),
+        ("volume", vec!["volume", "ls", "--format", "{{.Name}}"]),
+    ] {
+        for name in docker_lines(&args) {
+            if name.starts_with(HARNESS_RESOURCE_PREFIX) {
+                harness_named.insert(format!("{kind}:{name}"));
+            }
+        }
+    }
+
+    Residual {
+        orphaned_containers,
+        harness_named,
+    }
+}
+
+/// The non-empty lines `docker <args>` printed. A probe that cannot run yields nothing on
+/// BOTH sides of the comparison, so it can never manufacture a pass by shrinking the "after".
+fn docker_lines(args: &[&str]) -> Vec<String> {
+    std::process::Command::new("docker")
+        .args(args)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
