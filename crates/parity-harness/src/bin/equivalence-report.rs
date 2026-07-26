@@ -56,14 +56,18 @@ const SURVIVING_RUNNER: &str = "parity_conformance_runner";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut carrier: Option<String> = None;
+    // `--carrier` is REPEATABLE. Deleting two carriers in one change needs both judged in one
+    // ledger, because the ledger file is rewritten per run — and the alternative, judging
+    // every carrier, drags in ones that are legitimately red for unrelated reasons and so
+    // cannot clear anything (024 Phase 6).
+    let mut carriers: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--carrier" => {
                 i += 1;
                 match args.get(i) {
-                    Some(v) => carrier = Some(v.clone()),
+                    Some(v) => carriers.push(v.clone()),
                     None => return usage("--carrier requires a value"),
                 }
             }
@@ -79,7 +83,7 @@ fn main() -> ExitCode {
             return ExitCode::from(4);
         }
     };
-    match runtime.block_on(produce(carrier.as_deref())) {
+    match runtime.block_on(produce(&carriers)) {
         Ok(ledger) => {
             let permissive: Vec<&EquivalenceEntry> = ledger
                 .entries
@@ -114,7 +118,7 @@ fn main() -> ExitCode {
 
 fn usage(message: &str) -> ExitCode {
     eprintln!("error: {message}");
-    eprintln!("usage: equivalence-report [--carrier <name>]");
+    eprintln!("usage: equivalence-report [--carrier <name>]...   (repeatable; omit for all)");
     ExitCode::from(2)
 }
 
@@ -262,7 +266,9 @@ fn deacon_binary() -> Result<PathBuf, HarnessError> {
 }
 
 /// Produce the ledger, writing `target/parity/equivalence.json`.
-async fn produce(carrier_filter: Option<&str>) -> Result<EquivalenceLedger, HarnessError> {
+/// `carrier_filter` is the (possibly empty) set of carrier names to judge; empty means every
+/// superseded carrier.
+async fn produce(carrier_filter: &[String]) -> Result<EquivalenceLedger, HarnessError> {
     // Fail loud on every precondition BEFORE any comparison runs.
     let oracle = Oracle::acquire().await?;
     let deacon = deacon_binary()?;
@@ -304,7 +310,7 @@ async fn produce(carrier_filter: Option<&str>) -> Result<EquivalenceLedger, Harn
         .live_names()
         .into_iter()
         .filter(|name| *name != SURVIVING_RUNNER)
-        .filter(|name| carrier_filter.is_none_or(|f| f == *name))
+        .filter(|name| carrier_filter.is_empty() || carrier_filter.iter().any(|f| f == *name))
         .map(str::to_string)
         .collect();
     if carriers.is_empty() {
@@ -315,6 +321,20 @@ async fn produce(carrier_filter: Option<&str>) -> Result<EquivalenceLedger, Harn
                 parity_registry.live_names()
             ),
         });
+    }
+    // A name that matched nothing is an authoring mistake, not an empty result: silently
+    // judging 1 of 2 requested carriers would let a deletion be authorized by a ledger that
+    // never looked at it.
+    for requested in carrier_filter {
+        if !carriers.iter().any(|c| c == requested) {
+            return Err(HarnessError::Report {
+                cause: format!(
+                    "--carrier {requested:?} is not a superseded live carrier — the \
+                     registry's live binaries are {:?}",
+                    parity_registry.live_names()
+                ),
+            });
+        }
     }
 
     let mut entries: Vec<EquivalenceEntry> = Vec::new();

@@ -634,16 +634,25 @@ mod tests {
         profiles
             .default_filters
             .insert("parity".to_string(), Some(parity_filter));
-        // A rogue profile that positively selects a live binary must be flagged.
-        profiles.default_filters.insert(
-            "rogue".to_string(),
-            Some("binary(=parity_exec)".to_string()),
-        );
+        // A rogue profile that positively selects a live binary must be flagged. The probe
+        // name is taken FROM the registry rather than hard-coded: this assertion previously
+        // named `parity_exec`, and when 024 Phase 6 retired that carrier the guard went green
+        // by selecting a binary that no longer exists — it would have stopped detecting leaks
+        // silently. Deriving the name means the guard cannot outlive its subject.
+        let leaked = reg
+            .live_names()
+            .into_iter()
+            .find(|n| *n != "parity_conformance_runner")
+            .expect("at least one superseded live binary to probe with")
+            .to_string();
+        profiles
+            .default_filters
+            .insert("rogue".to_string(), Some(format!("binary(={leaked})")));
         let problems = check_nextest_profiles(&reg, &profiles);
         assert!(
             problems
                 .iter()
-                .any(|p| p.contains("rogue") && p.contains("parity_exec")),
+                .any(|p| p.contains("rogue") && p.contains(&leaked)),
             "a leaked live binary in another profile must be flagged, got: {problems:?}"
         );
     }

@@ -873,8 +873,16 @@
     },
     {
       "unit": "parity_exec::env-propagation",
-      "disposition": "residual",
-      "residualId": "res-exec-per-side-argv"
+      "disposition": "migrated",
+      "caseIds": [
+        "case-exec-decl-env-propagation"
+      ],
+      "fixtureMapping": [
+        {
+          "from": "inline:parity_exec#env-propagation",
+          "to": "conformance/fixtures/fx-exec-env"
+        }
+      ]
     },
     {
       "unit": "parity_exec::tty",
@@ -1176,6 +1184,7 @@
       "unit": "parity_up_exec::traditional",
       "disposition": "migrated",
       "caseIds": [
+        "case-exec-decl-container-id-metadata",
         "case-up-exec-decl-traditional"
       ],
       "fixtureMapping": [

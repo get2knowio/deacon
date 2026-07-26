@@ -143,12 +143,13 @@ fn no_parity_source_uses_ignore_or_legacy_skip_idioms() {
         }
     }
 
-    // The floor tracks the surviving source set: 6 live `parity_*` binaries + 2 hermetic
-    // meta-test binaries + 2 `consistency_*` binaries. It exists so a scan that silently
-    // stopped finding files cannot pass by auditing nothing — it is NOT a coverage claim,
-    // and it drops as carriers retire (023 US7 removed four).
+    // The floor tracks the surviving source set: 4 live `parity_*` binaries + 2 hermetic
+    // meta-test binaries (one of which is SELF and skipped) + 2 `consistency_*` binaries = 7
+    // audited. It exists so a scan that silently stopped finding files cannot pass by
+    // auditing nothing — it is NOT a coverage claim, and it drops as carriers retire
+    // (023 US7 removed four; 024 Phase 6 removed `parity_exec` and `parity_up_exec`).
     assert!(
-        audited >= 9,
+        audited >= 7,
         "expected to audit the full parity/consistency source set, only saw {audited} file(s)"
     );
     assert!(
@@ -592,9 +593,13 @@ fn the_surviving_set_is_mutually_consistent() {
 
     assert_eq!(
         reg.live_names().len(),
-        6,
-        "the surviving live set is 5 Docker scenario binaries + the declarative runner; \
-         found {:?}",
+        4,
+        "the surviving live set is 3 Docker scenario binaries + the declarative runner; \
+         found {:?}. 024 Phase 6 retired `parity_exec` (all 4 units declarative and \
+         equivalence-clean, `res-exec-per-side-argv` disproven) and `parity_up_exec` (its \
+         sole-evidence hold on `bhv-exec-container-id-metadata` released by \
+         `case-exec-decl-container-id-metadata`, which the `${{CONTAINER_ID}}` argv token \
+         made expressible)",
         reg.live_names()
     );
     assert!(

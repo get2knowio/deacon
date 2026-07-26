@@ -382,10 +382,32 @@ surviving live binaries run **only** under `cargo nextest run --profile parity`
 |---|---|
 | `parity_conformance_runner` | the authoritative declarative runner — every migrated case runs here |
 | `parity_build` | 6/6 units residual (`res-build-image-discovery`, `res-build-tolerant-outcome`) |
-| `parity_exec` | 3/4 migrated; `res-exec-per-side-argv` blocks deletion |
-| `parity_up_exec` | equivalence-clean, but its legacy case is the ONLY evidence for `bhv-exec-container-id-metadata` |
 | `parity_observable_state` | 7/7 units residual (research D4) |
-| `parity_state_diff` | 8/8 units residual (research D4) |
+| `parity_state_diff` | 5/8 units migrated; 2 compose units held back by the T117 defect, 1 permanent intra-deacon residual |
+
+Two more carriers were **deleted** in 024 Phase 6, once the equivalence ledger judged all
+five of their units `equivalent`:
+
+- `parity_exec` — deleted; its 4 units are `case-exec-decl-*`. The last one,
+  `env-propagation`, was blocked by `res-exec-per-side-argv`, which claimed a declarative
+  operation needed PER-SIDE argv because deacon took `--env` where the reference takes
+  `--remote-env`. That was **obsolete, not pending**: `cli.rs` already declares
+  `--remote-env` as the primary flag with `--env` as a hidden legacy alias, so one shared
+  argv runs on both sides and no capability was missing. The residual is gone.
+- `parity_up_exec` — deleted; its sole-evidence hold on `bhv-exec-container-id-metadata`
+  was released by `case-exec-decl-container-id-metadata`. That needed the new
+  **`${CONTAINER_ID}` argv token** (`runner::substitute_argv`), which resolves to the
+  container the preceding `up` created. It is a string inside the existing `argv`, so
+  `Operation` gained no field and every existing `caseHash` stayed byte-identical. A token
+  with no preceding successful `up` fails LOUD, matching the `${WORKSPACE}`-without-a-fixture
+  discipline — passing the literal token to the CLI would make the op fail for an unrelated
+  reason and read as a real divergence.
+
+`equivalence-report`'s `--carrier` is **repeatable** (024 Phase 6). Deleting two carriers in
+one change needs both judged in ONE ledger, because the ledger file is rewritten per run —
+and judging every carrier instead drags in ones that are legitimately red for unrelated
+reasons and so can never clear anything. A `--carrier` naming a non-carrier is a fail-loud
+error, so a deletion cannot be authorized by a ledger that never looked at it.
 
 Four config-corpus carriers plus their shared runner module were **deleted** in
 023 (US7) once the equivalence ledger proved their declarative replacements lose

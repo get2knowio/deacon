@@ -32,6 +32,16 @@ pub const RUNNER_BINARY: &str = "conformance_runner";
 /// workspace path (contract case-schema.md).
 const WORKSPACE_TOKEN: &str = "${WORKSPACE}";
 
+/// The argv token replaced with the container id of the most recent successful `up`/`exec`
+/// operation (024 Phase 6).
+///
+/// It exists so a declarative case can address the container a PREVIOUS operation created —
+/// `exec --container-id ${CONTAINER_ID}` — which `bhv-exec-container-id-metadata` needs and
+/// which was the reason 023 T110 recorded that behavior as having no independent evidence.
+/// Being a string inside the existing `argv` costs no `Operation` field and leaves every
+/// existing `caseHash` byte-identical.
+const CONTAINER_ID_TOKEN: &str = "${CONTAINER_ID}";
+
 /// Everything the runner needs from its caller: the deacon binary under test, the
 /// verified oracle (required only for `live-differential`), where fixtures live, and
 /// where to write raw capture. The binary paths are supplied explicitly — only the test
@@ -141,7 +151,13 @@ pub(crate) async fn execute_ops(
         }
         // For a Docker case every op shares the ISOLATED workspace (materialized once), so
         // `${WORKSPACE}` always resolves even for a later op that declares no fixture.
-        let argv = substitute_argv(case, op, &workspace, isolated_workspace.is_some())?;
+        let argv = substitute_argv(
+            case,
+            op,
+            &workspace,
+            isolated_workspace.is_some(),
+            container_id.as_deref(),
+        )?;
         let mut full: Vec<String> = Vec::with_capacity(argv.len() + 1);
         full.push(op.subcommand.clone());
         full.extend(argv);
@@ -652,14 +668,20 @@ fn resolve_workspace(
     }
 }
 
-/// Substitute `${WORKSPACE}` in an operation's argv with the resolved workspace path. An
-/// argv that references the token with no resolvable fixture is a fail-loud authoring
-/// error.
+/// Substitute the runner's argv tokens — `${WORKSPACE}` and `${CONTAINER_ID}` — in an
+/// operation's argv. An argv that references a token the runner cannot resolve is a
+/// fail-loud authoring error, never a literal token handed to the CLI.
+///
+/// `container_id` is the id of the container the most recent successful `up`/`exec` op
+/// produced, or `None` before any. `${CONTAINER_ID}` is a plain string INSIDE the existing
+/// `argv`, so `Operation` gains no field and every existing `caseHash` is byte-identical —
+/// `tokenized_argv` records the declared form, which is already portable.
 fn substitute_argv(
     case: &TestCase,
     op: &Operation,
     workspace: &Path,
     workspace_is_rooted: bool,
+    container_id: Option<&str>,
 ) -> Result<Vec<String>, HarnessError> {
     let ws = workspace.to_string_lossy();
     let mut out = Vec::with_capacity(op.argv.len());
@@ -675,7 +697,28 @@ fn substitute_argv(
                 ),
             ));
         }
-        out.push(arg.replace(WORKSPACE_TOKEN, &ws));
+        // Same discipline as the `${WORKSPACE}`-without-a-fixture case above: a token with
+        // nothing to resolve it fails loud. Passing the literal `${CONTAINER_ID}` to the CLI
+        // would make the op fail for an unrelated reason and read as a real divergence.
+        let resolved_container = match (arg.contains(CONTAINER_ID_TOKEN), container_id) {
+            (true, None) => {
+                return Err(shape_error(
+                    case,
+                    &format!(
+                        "operation {:?} uses {CONTAINER_ID_TOKEN} but no preceding operation \
+                         successfully created a container to resolve it",
+                        op.id
+                    ),
+                ));
+            }
+            (true, Some(id)) => Some(id),
+            (false, _) => None,
+        };
+        let arg = arg.replace(WORKSPACE_TOKEN, &ws);
+        out.push(match resolved_container {
+            Some(id) => arg.replace(CONTAINER_ID_TOKEN, id),
+            None => arg,
+        });
     }
     Ok(out)
 }
@@ -713,19 +756,95 @@ mod tests {
     fn substitute_argv_requires_a_fixture_for_the_token() {
         let case = case_with_op(&["--workspace-folder", "${WORKSPACE}"], &[]);
         // Config-only (not rooted) + no fixture → fail loud.
-        let err = substitute_argv(&case, &case.operations[0], Path::new("/tmp/ws"), false)
-            .expect_err("token with no fixture must fail loud");
+        let err = substitute_argv(
+            &case,
+            &case.operations[0],
+            Path::new("/tmp/ws"),
+            false,
+            None,
+        )
+        .expect_err("token with no fixture must fail loud");
         assert!(matches!(err, HarnessError::NormalizationFailed { .. }));
         // But a rooted (isolated Docker) workspace resolves the token even with no fixture.
-        let ok = substitute_argv(&case, &case.operations[0], Path::new("/tmp/ws"), true)
+        let ok = substitute_argv(&case, &case.operations[0], Path::new("/tmp/ws"), true, None)
             .expect("rooted workspace resolves the token");
         assert_eq!(ok, vec!["--workspace-folder", "/tmp/ws"]);
+    }
+
+    /// 024 Phase 6: `${CONTAINER_ID}` resolves from the previous successful op, and fails
+    /// loud when there is nothing to resolve it — the same discipline `${WORKSPACE}`-without-
+    /// a-fixture already has. Passing the literal token to the CLI would make the op fail for
+    /// an unrelated reason and read as a real divergence.
+    #[test]
+    fn substitute_argv_resolves_container_id_or_fails_loud() {
+        let case = case_with_op(
+            &["--container-id", "${CONTAINER_ID}", "--", "true"],
+            &["fx-x"],
+        );
+        let op = &case.operations[0];
+
+        let err = substitute_argv(&case, op, Path::new("/tmp/ws"), false, None)
+            .expect_err("no preceding container must fail loud, not pass the literal token");
+        match err {
+            HarnessError::NormalizationFailed { ref cause, .. } => assert!(
+                cause.contains("${CONTAINER_ID}") && cause.contains("no preceding operation"),
+                "the message must name the token and the reason: {cause}"
+            ),
+            other => panic!("expected a shape error, got {other:?}"),
+        }
+
+        let out = substitute_argv(&case, op, Path::new("/tmp/ws"), false, Some("abc123")).unwrap();
+        assert_eq!(out, vec!["--container-id", "abc123", "--", "true"]);
+    }
+
+    /// Both tokens in one argv, and an argv using neither is unaffected by an available id.
+    #[test]
+    fn substitute_argv_handles_both_tokens_independently() {
+        let case = case_with_op(
+            &[
+                "--workspace-folder",
+                "${WORKSPACE}",
+                "--container-id",
+                "${CONTAINER_ID}",
+            ],
+            &["fx-x"],
+        );
+        let out = substitute_argv(
+            &case,
+            &case.operations[0],
+            Path::new("/tmp/ws"),
+            false,
+            Some("cid"),
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            vec!["--workspace-folder", "/tmp/ws", "--container-id", "cid"]
+        );
+
+        let plain = case_with_op(&["--log-level", "debug"], &["fx-x"]);
+        let out = substitute_argv(
+            &plain,
+            &plain.operations[0],
+            Path::new("/tmp/ws"),
+            false,
+            Some("cid"),
+        )
+        .unwrap();
+        assert_eq!(out, vec!["--log-level", "debug"], "no token, no rewrite");
     }
 
     #[test]
     fn substitute_argv_replaces_token() {
         let case = case_with_op(&["--workspace-folder", "${WORKSPACE}"], &["fx-x"]);
-        let out = substitute_argv(&case, &case.operations[0], Path::new("/tmp/ws"), false).unwrap();
+        let out = substitute_argv(
+            &case,
+            &case.operations[0],
+            Path::new("/tmp/ws"),
+            false,
+            None,
+        )
+        .unwrap();
         assert_eq!(out, vec!["--workspace-folder", "/tmp/ws"]);
     }
 
