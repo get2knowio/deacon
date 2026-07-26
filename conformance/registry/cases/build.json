@@ -382,6 +382,100 @@
         "tempdir": true
       },
       "notes": "FR-040 unsupported class for `build`: a well-formed configuration naming an image reference no registry serves. Nothing about the document is wrong; the failure can only appear once something tries to obtain the image."
+    },
+    {
+      "id": "case-errorpath-build-arg-failure",
+      "behaviors": [
+        "bhv-build-failure-reported"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-build-arg-failure"
+          ],
+          "expectFailurePhase": "build"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, build stage, with the build ARGUMENT as the thing under test. The Dockerfile's `RUN` exits non-zero only when `CONF_FAIL=1` reaches it, and the configuration is the only place that value comes from — so a CLI that dropped `build.args` would SUCCEED here. The failure is therefore evidence that the argument was delivered, which the ordinary build-args case (`case-tier1-build-args-subst`, a configuration comparison) cannot supply: it observes the resolved document, not what the builder received. Both sides fail (verified against oracle 0.87.0)."
+    },
+    {
+      "id": "case-errorpath-build-missing-target",
+      "behaviors": [
+        "bhv-build-failure-reported"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "unsupported",
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-build-missing-target"
+          ],
+          "expectFailurePhase": "build"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, build stage: `build.target` names a stage the Dockerfile does not define. Nothing about the document is wrong and BOTH CLIs read it without complaint — the target is a free-form string, and no reader can know which stages exist until the builder resolves the Dockerfile graph. That is the point: the failure is unreachable until after the stage where the reference is most lenient, which is exactly where parity used to stop comparing. Both sides fail (verified against oracle 0.87.0 in an isolated workspace)."
     }
   ]
 }

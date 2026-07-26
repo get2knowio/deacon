@@ -123,6 +123,14 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      behavior's case reads is the first evidence of.",
     ),
     (
+        "bhv-up-feature-install-failure",
+        "A Feature that cannot be installed failing `up`. Not a variant of the install-ORDER \
+     claim: an implementation that installs the right Features in the right order and \
+     swallows a failing install script satisfies that one and not this one, and hands back a \
+     container that looks complete. Newly recordable because the pre-migration corpora had no \
+     container-backed failure tier at all — 024 US4 is that tier.",
+    ),
+    (
         "bhv-up-restart-reuses-container",
         "Re-entry into an existing container versus first creation. Newly recordable because the \
      metamorphic oracle that can express a RELATIONSHIP between two runs arrived in 022; \

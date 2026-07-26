@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceErrorPathCreateRunArgs",
+	"image": "alpine:3.19",
+	"remoteUser": "root",
+	"runArgs": ["--cpus", "not-a-number"]
+}

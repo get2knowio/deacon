@@ -36,7 +36,13 @@ const TODAY: &str = "2026-07-19";
 /// cases, taking every one of the ten operations from the three that had coverage to all
 /// ten, and every operation to a case in each of the five input classes and each permitted
 /// configuration source. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 169;
+///
+/// **169 → 181** (024 US4): the container-backed error-path tier added 12 cases — nine
+/// error-path cases spanning the five later-stage failure points (build ×2, container
+/// creation ×2, Feature installation ×2, lifecycle execution ×2, teardown ×1) and three
+/// `-direction` spec-expectation twins pinning which side is right where the two
+/// implementations disagree. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 181;
 
 #[test]
 fn real_registry_is_structurally_valid() {

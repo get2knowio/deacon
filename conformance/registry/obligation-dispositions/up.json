@@ -15,6 +15,15 @@
       ]
     },
     {
+      "id": "odp-bhv-56c5f338",
+      "obligation": "obl-bhv-56c5f338",
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-up-feature-dependency-cycle",
+        "case-errorpath-up-feature-install-failure"
+      ]
+    },
+    {
       "id": "odp-bhv-a08d7b2a",
       "obligation": "obl-bhv-a08d7b2a",
       "disposition": "case",

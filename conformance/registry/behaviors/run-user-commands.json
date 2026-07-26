@@ -7,9 +7,9 @@
       "statement": "A lifecycle hook that exits non-zero fails the run rather than being reported as a successful setup.",
       "applicability": [],
       "spec": "conformant",
-      "reference": "aligned",
+      "reference": "divergent",
       "decision": "follow-spec",
-      "notes": "The failing hook arrives as a command-line override so the preceding `up` can succeed: a hook failure during creation is a different case, and conflating the two would leave neither pinned."
+      "notes": "The failing hook arrives as a command-line override so the preceding `up` can succeed: a hook failure during creation is a different case, and conflating the two would leave neither pinned. `reference` was recorded as `aligned` when this behavior was authored (024 US3) and is corrected to `divergent` here: the 024 US4 error-path tier ran both sides and found the reference exits 0 without executing the hook at all, because it skips a lifecycle command the container has already completed. Characterized by `wvr-ruc-completed-hooks-not-rerun`; deacon's direction is pinned by the `-direction` spec-expectation twins, not by the differential alone."
     },
     {
       "id": "bhv-run-user-commands-hook-order",

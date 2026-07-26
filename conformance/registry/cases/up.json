@@ -2,6 +2,194 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "case-errorpath-up-feature-dependency-cycle",
+      "behaviors": [
+        "bhv-up-feature-install-failure"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "malformed",
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-up-feature-cycle"
+          ],
+          "expectFailurePhase": "build"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, Feature-installation stage, failing EARLIER than the install-script case: two local Features whose `dependsOn` entries name each other, so no installation order exists. Every individual record is well-formed and configuration read accepts on both sides; the contradiction only appears once the dependency graph is resolved. Paired with the failing-`install.sh` case deliberately — one fails inside an install, the other before any install runs, and an implementation can propagate one while defaulting the other to declaration order and installing both Features anyway. Both sides fail (verified against oracle 0.87.0)."
+    },
+    {
+      "id": "case-errorpath-up-feature-install-failure",
+      "behaviors": [
+        "bhv-up-feature-install-failure"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "malformed",
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-up-feature-install-failure"
+          ],
+          "expectFailurePhase": "build"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, Feature-installation stage: a local Feature whose `install.sh` exits 29. Configuration read accepts on both sides — a Feature reference is just a key, and nothing reads the install script until it runs — and the failure appears while the Feature is being layered into the image, which is why the declared phase is `build`: on BOTH implementations Features are installed by a Docker build over the base image, so there is no separate install phase for the closed failure-phase set to name. The claim under test is that the failure PROPAGATES: swallowing it would produce a container that looks complete and is missing the Feature, which no success-path case can distinguish. Both sides fail (verified against oracle 0.87.0)."
+    },
+    {
+      "id": "case-errorpath-up-invalid-run-args",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "unsupported",
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-up-invalid-run-args"
+          ],
+          "expectFailurePhase": "container-create"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, container-creation stage: `runArgs` carries `--cpus not-a-number`. The document is a well-formed array of strings and both CLIs read it without complaint — `runArgs` is passed through to the runtime verbatim by design, so neither can know the value is bad. The daemon rejects it at create time, after the image is resolved and before any container exists. Chosen over a malformed-config input precisely because nothing upstream of the daemon could have caught it, which is what makes it a later-STAGE failure rather than a slow configuration error. Both sides fail (verified against oracle 0.87.0)."
+    },
+    {
+      "id": "case-errorpath-up-missing-mount-source",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "unsupported",
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-up-missing-mount-source"
+          ],
+          "expectFailurePhase": "container-create"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, container-creation stage: a bind mount whose SOURCE path does not exist on the host. The mount string parses, the target is sane, and configuration read echoes it on both sides; only the daemon, at create time, can observe that the source is absent. Distinct from the `runArgs` case in where the rejection comes from — an argument the runtime CLI refuses to parse versus a request the daemon refuses to satisfy — and the two are worth pinning separately because a CLI can validate its own argv construction without ever asking the daemon. Both sides fail (verified against oracle 0.87.0)."
+    },
+    {
       "id": "case-up-boundary-empty-collections",
       "behaviors": [
         "bhv-up-exec-parity"

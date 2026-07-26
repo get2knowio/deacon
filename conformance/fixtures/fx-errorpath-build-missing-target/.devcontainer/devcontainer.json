@@ -1,0 +1,4 @@
+{
+	"name": "ConformanceErrorPathBuildMissingTarget",
+	"build": { "dockerfile": "Dockerfile", "target": "deacon-conformance-absent-stage" }
+}

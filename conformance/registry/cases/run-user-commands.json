@@ -2,6 +2,339 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "case-errorpath-ruc-post-create-failure-direction",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "run-user-commands",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "errorPathTier": true,
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-ruc-hook-failure"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:postCreate"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Pins the direction of the divergence characterized by `wvr-ruc-completed-hooks-not-rerun` for `postCreateCommand`, the hook whose differential (`case-run-user-commands-hook-failure`) was authored in 024 US3 believing the reference agreed. Direction-pinning twin (FR-043, the 023 T074 lesson). Its differential sibling proves only that the two CLIs disagree, and would stay green if BOTH started reporting success — at which point the record that was supposed to say which side is right would say nothing. This case asserts deacon's side outright: the run FAILS. That is the side the specification's account of lifecycle commands supports (a command that exits non-zero has not completed the container's setup) and the side that keeps `run-user-commands` usable as an explicit re-run, its `--skip-post-create` / `--skip-post-attach` / `--skip-non-blocking-commands` flags being the opt-out. The preceding `up` is asserted to SUCCEED, so a failure here can only come from the hook rather than from a container that never came up."
+    },
+    {
+      "id": "case-errorpath-ruc-post-start-failure",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "run-user-commands",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "reference-lenient",
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-ruc-late-hooks"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/post-start-failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:postStart"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-run-user-commands-hook-failure",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon re-runs the configured lifecycle commands on every invocation and propagates the hook's non-zero exit; the reference skips a hook the container has already completed and reports success without running it.",
+          "waiverId": "wvr-ruc-completed-hooks-not-rerun"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, lifecycle stage, at `postStartCommand` — the LAST blocking hook, and the one whose failure is easiest to drop: it runs after the container is already usable, so an implementation that reports success once the container is up satisfies every earlier hook's case and not this one. Same shape and same characterized divergence as the `updateContentCommand` case (`wvr-ruc-completed-hooks-not-rerun`), kept separate because the two hooks fail at different points in the sequence. Direction pinned by `case-errorpath-ruc-post-start-failure-direction`."
+    },
+    {
+      "id": "case-errorpath-ruc-post-start-failure-direction",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "run-user-commands",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "errorPathTier": true,
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-ruc-late-hooks"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/post-start-failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:postStart"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Pins the direction for `postStartCommand`, the twin of `case-errorpath-ruc-post-start-failure`. Direction-pinning twin (FR-043, the 023 T074 lesson). Its differential sibling proves only that the two CLIs disagree, and would stay green if BOTH started reporting success — at which point the record that was supposed to say which side is right would say nothing. This case asserts deacon's side outright: the run FAILS. That is the side the specification's account of lifecycle commands supports (a command that exits non-zero has not completed the container's setup) and the side that keeps `run-user-commands` usable as an explicit re-run, its `--skip-post-create` / `--skip-post-attach` / `--skip-non-blocking-commands` flags being the opt-out. The preceding `up` is asserted to SUCCEED, so a failure here can only come from the hook rather than from a container that never came up."
+    },
+    {
+      "id": "case-errorpath-ruc-update-content-failure",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "run-user-commands",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "reference-lenient",
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-ruc-late-hooks"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/update-content-failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:updateContent"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-run-user-commands-hook-failure",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon re-runs the configured lifecycle commands on every invocation and propagates the hook's non-zero exit; the reference skips a hook the container has already completed and reports success without running it.",
+          "waiverId": "wvr-ruc-completed-hooks-not-rerun"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, lifecycle stage, at `updateContentCommand` — the hook BEFORE `postCreateCommand`, so the case pins that a mid-sequence failure stops the sequence rather than being carried past. The preceding `up` succeeds on a configuration with no hooks at all, so both sides reach the lifecycle stage from a clean container and the failing hooks arrive as a command-line overlay. The two sides then disagree: deacon runs the overlay's hooks and exits non-zero; the reference skips every hook the container has already completed and exits 0 having executed nothing. Tolerated on `chan-exit-code.exitCode` under `wvr-ruc-completed-hooks-not-rerun`; the DIRECTION is pinned by the spec-expectation twin `case-errorpath-ruc-update-content-failure-direction`, because a differential alone stays green if both sides start reporting success."
+    },
+    {
+      "id": "case-errorpath-ruc-update-content-failure-direction",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "run-user-commands",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "errorPathTier": true,
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-ruc-late-hooks"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/update-content-failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:updateContent"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Pins the direction for `updateContentCommand`, the twin of `case-errorpath-ruc-update-content-failure`. Direction-pinning twin (FR-043, the 023 T074 lesson). Its differential sibling proves only that the two CLIs disagree, and would stay green if BOTH started reporting success — at which point the record that was supposed to say which side is right would say nothing. This case asserts deacon's side outright: the run FAILS. That is the side the specification's account of lifecycle commands supports (a command that exits non-zero has not completed the container's setup) and the side that keeps `run-user-commands` usable as an explicit re-run, its `--skip-post-create` / `--skip-post-attach` / `--skip-non-blocking-commands` flags being the opt-out. The preceding `up` is asserted to SUCCEED, so a failure here can only come from the hook rather than from a container that never came up."
+    },
+    {
       "id": "case-run-user-commands-boundary-no-hooks",
       "behaviors": [
         "bhv-run-user-commands-hook-order"
@@ -357,6 +690,15 @@
           "operation": "op-ruc"
         }
       ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-run-user-commands-hook-failure",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon re-runs the configured lifecycle commands on every invocation and propagates the hook's non-zero exit; the reference skips a hook the container has already completed and reports success without running it.",
+          "waiverId": "wvr-ruc-completed-hooks-not-rerun"
+        }
+      ],
       "cleanup": {
         "containers": true,
         "images": false,
@@ -364,7 +706,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-037 hook failure: `postCreateCommand` exits 23, and the run must fail rather than report success for a container whose setup did not complete. The failing configuration is supplied as an override so the preceding `up` can succeed — a hook failure during creation is a different case, and conflating them would leave neither pinned."
+      "notes": "FR-037 hook failure: `postCreateCommand` exits 23, and the run must fail rather than report success for a container whose setup did not complete. The failing configuration is supplied as an override so the preceding `up` can succeed — a hook failure during creation is a different case, and conflating them would leave neither pinned. The two sides DISAGREE here, which 024 US4 established by running both: the reference skips a lifecycle command the container has already completed and exits 0 without executing the hook, so the failure is invisible on its side. Tolerated under `wvr-ruc-completed-hooks-not-rerun` and pinned in direction by `case-errorpath-ruc-post-create-failure-direction`."
     },
     {
       "id": "case-run-user-commands-hook-order",

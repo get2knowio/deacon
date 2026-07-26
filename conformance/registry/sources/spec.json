@@ -51,6 +51,7 @@
       "behaviors": [
         "bhv-readconfig-feature-resolution-order",
         "bhv-up-feature-install-order",
+        "bhv-up-feature-install-failure",
         "bhv-build-features-extended-image"
       ]
     },

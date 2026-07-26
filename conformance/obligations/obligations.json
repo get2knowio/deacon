@@ -87,6 +87,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-56c5f338",
+      "kind": "behavior",
+      "behavior": "bhv-up-feature-install-failure",
+      "context": []
+    },
+    {
       "id": "obl-bhv-59913e4b",
       "kind": "behavior",
       "behavior": "bhv-outdated-reports-feature-versions",

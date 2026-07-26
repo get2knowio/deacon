@@ -376,6 +376,100 @@
         "tempdir": true
       },
       "notes": "FR-040 unsupported class: a workspace folder with no devcontainer configuration at all. The request is well-formed and the folder exists; there is simply no configuration from which the resources to remove could be identified."
+    },
+    {
+      "id": "case-errorpath-down-repeat-teardown",
+      "behaviors": [
+        "bhv-down-removes-container"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "down",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "boundary",
+      "errorPathTier": true,
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        },
+        {
+          "id": "op-down",
+          "subcommand": "down",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remove",
+            "--all"
+          ]
+        },
+        {
+          "id": "op-down-again",
+          "subcommand": "down",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remove",
+            "--all"
+          ]
+        },
+        {
+          "id": "op-verify",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "true"
+          ],
+          "expectFailurePhase": "exec"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-down",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-down-again",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-verify",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, teardown stage: `down --remove --all` against a workspace whose resources were ALREADY removed by the preceding teardown. Every operation runs past configuration read, and the input is one both implementations accept — the tier's premise. The second teardown is the case's subject: `down` derives what to remove from labels and the resolved configuration, and encountering a container that is no longer there is an error path it must absorb, because `down` is used as a cleanup step whose whole value is that it can be run when the state is unknown. The failure the case records is the exec's: a `down` exit code cannot distinguish a teardown that removed something from one that removed nothing, so removal is evidenced by a command targeting the container that must no longer exist. The failing operation is that exec rather than `down` itself because the closed failure-phase set (022 data-model §8) names no teardown phase — see `phases_reachable_by`. Spec-expectation because the pinned reference has no `down` command at all.\n\n`--all` is deliberate and load-bearing. Plain `down --remove` resolves the container through the host-global workspace-state index under `$TMPDIR/deacon-state/`, which is written atomically but READ-MODIFY-WRITTEN without a lock: two concurrent `deacon up` runs clobber each other's entries, and the loser's `down` then finds no state, logs \"No running containers or compose projects found for workspace\" and exits 0 having removed nothing. Reproduced 3 runs in 4 at concurrency 4 (024 US4). `--all` takes the LABEL-driven path instead — 6 of 6 under the same load — and is also the identification the reference and the VS Code extension use, so it is the more spec-faithful teardown to pin. The state-index defect is deacon's to fix and is not characterized away here; it is reported as a runtime bug, and the pre-existing `case-down-*` cases that still use plain `down --remove` remain intermittent because of it."
     }
   ]
 }

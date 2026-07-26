@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceErrorPathCreateMountSource",
+	"image": "alpine:3.19",
+	"remoteUser": "root",
+	"mounts": ["source=/deacon-conformance/definitely-not-here,target=/mnt/absent,type=bind"]
+}

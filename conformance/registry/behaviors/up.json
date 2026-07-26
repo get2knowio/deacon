@@ -12,6 +12,16 @@
       "notes": "Backed by case-up-exec-parity (parity_up_exec, a single reported outcome shared with bhv-exec-container-id-metadata) and, independently, by the declarative case-up-exec-decl-traditional (023 T040)."
     },
     {
+      "id": "bhv-up-feature-install-failure",
+      "area": "up",
+      "statement": "A Feature that cannot be installed — its install script exiting non-zero, or a dependency graph with no resolvable order — fails `up` rather than producing a container without the Feature.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Authored by the 024 US4 error-path tier. Deliberately separate from `bhv-up-feature-install-order`: that claim is about WHICH Features run and in what order on the success path, and an implementation that gets the order right while swallowing a failing install script satisfies it and not this one — the container it hands back looks complete and is missing the Feature. Both halves of the statement are exercised (a failing `install.sh`, and a two-Feature `dependsOn` cycle) because the two fail at different points: one inside the install, one before any install runs. Verified against oracle 0.87.0 — both sides fail on both inputs."
+    },
+    {
       "id": "bhv-up-feature-install-order",
       "area": "up",
       "statement": "`up` installs the configuration's Features into the container it creates, in the resolved install order, across image, Dockerfile, and Compose configuration sources.",

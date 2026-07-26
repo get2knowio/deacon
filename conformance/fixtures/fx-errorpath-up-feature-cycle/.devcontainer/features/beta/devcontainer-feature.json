@@ -1,0 +1,6 @@
+{
+	"id": "beta",
+	"version": "1.0.0",
+	"name": "Conformance beta",
+	"dependsOn": { "./features/alpha": {} }
+}

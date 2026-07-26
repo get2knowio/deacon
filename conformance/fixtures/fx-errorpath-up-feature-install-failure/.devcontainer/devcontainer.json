@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceErrorPathFeatureInstall",
+	"image": "alpine:3.19",
+	"remoteUser": "root",
+	"features": { "./features/failing": {} }
+}
