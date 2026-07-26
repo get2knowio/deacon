@@ -2739,7 +2739,6 @@ impl ConfigLoader {
     /// ## Returns
     ///
     /// Returns the merged and substituted configuration with substitution report.
-    #[instrument(skip_all, fields(path = %path.display(), merges = merge_config_paths.len()))]
     pub async fn load_with_overrides_and_substitution(
         path: &Path,
         merge_config_paths: &[&Path],
@@ -2747,6 +2746,39 @@ impl ConfigLoader {
         workspace_path: &Path,
         resolve_devcontainer_id: bool,
     ) -> Result<(DevContainerConfig, crate::variable::SubstitutionReport)> {
+        let (_raw, substituted, report) = Self::load_with_overrides_and_substitution_raw(
+            path,
+            merge_config_paths,
+            secrets,
+            workspace_path,
+            resolve_devcontainer_id,
+        )
+        .await?;
+        Ok((substituted, report))
+    }
+
+    /// As [`ConfigLoader::load_with_overrides_and_substitution`], but also returns
+    /// the merged configuration **before** variable substitution.
+    ///
+    /// Returns `(raw, substituted, report)`, mirroring the reference CLI's
+    /// `SubstitutedConfig { raw, config }`: some outputs describe the resolved
+    /// configuration (substituted) and some describe the authored one (raw). The
+    /// `devcontainer.metadata` container label is the second kind — it exists so a
+    /// later reader can recover the configuration, so it must carry the templates,
+    /// not this machine's absolute paths (measured against pinned oracle 0.87.0;
+    /// see `up::merged_config::build_container_metadata_label`).
+    #[instrument(skip_all, fields(path = %path.display(), merges = merge_config_paths.len()))]
+    pub async fn load_with_overrides_and_substitution_raw(
+        path: &Path,
+        merge_config_paths: &[&Path],
+        secrets: Option<&crate::secrets::SecretsCollection>,
+        workspace_path: &Path,
+        resolve_devcontainer_id: bool,
+    ) -> Result<(
+        DevContainerConfig,
+        DevContainerConfig,
+        crate::variable::SubstitutionReport,
+    )> {
         debug!(
             "Loading configuration with merge fragments and substitution from {}",
             path.display()
@@ -2810,7 +2842,7 @@ impl ConfigLoader {
             merged.apply_variable_substitution(&substitution_context);
 
         debug!("Configuration loading with overrides and substitution complete");
-        Ok((substituted_config, substitution_report))
+        Ok((merged, substituted_config, substitution_report))
     }
 
     /// Load configuration with variable substitution applied
@@ -4201,6 +4233,66 @@ mod tests {
         assert_eq!(
             config.container_env.get("APP_DIR").map(String::as_str),
             Some("/srv/app")
+        );
+    }
+
+    /// T115: `load_with_overrides_and_substitution_raw` must return BOTH shapes of
+    /// the same configuration — the reference CLI's `SubstitutedConfig { raw,
+    /// config }`. Outputs describing the resolved container use `config`; the
+    /// `devcontainer.metadata` label, which a later reader recovers config from,
+    /// uses `raw`.
+    #[test]
+    fn test_load_raw_returns_pre_substitution_config() {
+        let temp_dir = TempDir::new().unwrap();
+        let dc_dir = temp_dir.path().join(".devcontainer");
+        std::fs::create_dir_all(&dc_dir).unwrap();
+        let config_path = dc_dir.join("devcontainer.json");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "image": "debian:bookworm-slim",
+                "workspaceFolder": "/srv/app",
+                "containerEnv": { "APP_DIR": "${containerWorkspaceFolder}" },
+                "mounts": ["source=${localWorkspaceFolder}/sib,target=/workspaces/sib,type=bind"]
+            }"#,
+        )
+        .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (raw, substituted, _report) = rt
+            .block_on(ConfigLoader::load_with_overrides_and_substitution_raw(
+                &config_path,
+                &[],
+                None,
+                temp_dir.path(),
+                true,
+            ))
+            .unwrap();
+
+        // raw: templates intact.
+        assert_eq!(
+            raw.container_env.get("APP_DIR").map(String::as_str),
+            Some("${containerWorkspaceFolder}")
+        );
+        assert_eq!(
+            raw.mounts.first().and_then(|m| m.as_str()),
+            Some("source=${localWorkspaceFolder}/sib,target=/workspaces/sib,type=bind")
+        );
+
+        // substituted: resolved, and identical to the non-`_raw` entry point.
+        assert_eq!(
+            substituted.container_env.get("APP_DIR").map(String::as_str),
+            Some("/srv/app")
+        );
+        let mount = substituted
+            .mounts
+            .first()
+            .and_then(|m| m.as_str())
+            .unwrap()
+            .to_string();
+        assert!(
+            !mount.contains("${localWorkspaceFolder}"),
+            "substituted mount should be resolved, got {mount}"
         );
     }
 

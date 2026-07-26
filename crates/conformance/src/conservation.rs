@@ -72,9 +72,29 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      fx-up-basic. This is a deacon EXTENSION, not a variant of any pre-migration claim: \
      no existing behavior describes what either CLI labels a container with, because the \
      retired `strip_intentional_labels` rule removed the whole `devcontainer.*` namespace \
-     before comparison. The three shared keys are NOT part of this behavior — \
-     `devcontainer.metadata` compares byte-equal, and `.local_folder` / `.config_file` \
-     differ only by each side's own temp workspace path and are normalized, not tolerated.",
+     before comparison. The three shared keys are NOT part of this behavior: \
+     `.local_folder` / `.config_file` differ only by each side's own temp workspace path \
+     and are normalized, not tolerated, and `devcontainer.metadata`'s CONTENT is its own \
+     claim — see `bhv-container-metadata-label-authored`. (This entry originally read \
+     '`devcontainer.metadata` compares byte-equal'. True on fx-up-basic, whose bare config \
+     contributes no picked property so both sides stamp `[]` — and false in general, which \
+     T115 measured. Corrected here rather than left standing, because a measurement on one \
+     fixture is not a claim about the field.)",
+    ),
+    (
+        "bhv-container-metadata-label-authored",
+        "The `devcontainer.metadata` label records the AUTHORED configuration — variable \
+     templates intact — while the substituted values are applied to the container. Newly \
+     RECORDABLE for the same reason as the two entries around it: until \
+     `chan-container-state` became an observed channel no behavior described any label's \
+     CONTENT, and the one pre-migration source record that mentioned this label measured a \
+     fixture where both sides stamp `[]`. Not a variant of any pre-migration claim, and not \
+     a variant of `bhv-container-identity-labels` either: that behavior is about WHICH \
+     labels each CLI sets, this one about what the shared one CONTAINS — deacon set the \
+     label all along and still got its content wrong. Nor is it merely observed: \
+     image-metadata.md's Merge Logic states variables are substituted 'at the time the \
+     value is applied', so this is `spec: conformant` / `follow-spec` after fixing deacon, \
+     not a tolerated difference (T115).",
     ),
     (
         "bhv-container-keepalive-command",
@@ -662,6 +682,31 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
              every container regardless of the CLI that created it, so they carry no \
              cross-CLI outcome meaning. The set is finite and enumerated; the newer \
              `chan-injected-process` channel removes no env var at all.",
+        ),
+        known_non_compliant: None,
+    },
+    NormalizationRule {
+        name: "label_json_document",
+        scopes: &["channel:chan-container-state"],
+        action: RuleAction::Canonicalize,
+        removes: &[],
+        justification: Some(
+            "Parses the value of ONE enumerated label — `devcontainer.metadata`, whose \
+             value is itself a JSON document — and compares it structurally instead of as \
+             a byte string. This is `label_semantic` applied one level deeper: a label SET \
+             is a key/value mapping rather than an opaque string, and so is a label VALUE \
+             that is a JSON document. Measured against pinned oracle 0.87.0, both CLIs \
+             stamp the same fragments with different key insertion order and two extra \
+             spaces, e.g. deacon's \
+             `[{\"remoteUser\":\"dev\",\"containerUser\":\"dev\",…}]` versus the \
+             reference's `[ {\"containerEnv\":…,\"containerUser\":\"dev\",\"remoteUser\":\
+             \"dev\"} ]`. Removes nothing: every key and value is preserved and compared, \
+             only key order and insignificant whitespace stop mattering, array order is \
+             kept, a value that is not valid JSON is left verbatim so a malformed label \
+             still diverges, and a label key outside the enumerated set is untouched. The \
+             alternative — aligning deacon's insertion order with upstream's \
+             `pickConfigProperties` — would pin deacon to an implementation detail of the \
+             reference's serializer that carries no meaning and no stability guarantee.",
         ),
         known_non_compliant: None,
     },

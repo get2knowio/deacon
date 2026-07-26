@@ -261,6 +261,76 @@ pub fn label_semantic(labels: &Value) -> Value {
     }
 }
 
+/// The FINITE, ENUMERATED label keys whose VALUE is itself a JSON document rather than an
+/// opaque string, and which [`label_json_document`] therefore compares structurally.
+///
+/// One entry today. `devcontainer.metadata` is the array of configuration fragments both
+/// CLIs stamp so a later reader can recover the configuration from the container alone.
+pub const JSON_DOCUMENT_LABELS: &[&str] = &["devcontainer.metadata"];
+
+/// **Rule `label_json_document`**: for the enumerated [`JSON_DOCUMENT_LABELS`], parse the
+/// label's string value as JSON and canonicalize it, so a label whose value IS a JSON
+/// document compares as that document rather than as a byte string.
+///
+/// This is [`label_semantic`] applied one level deeper. `label_semantic` exists because a
+/// label *set* is a key/value mapping, not an opaque string; the same reasoning applies to
+/// a label *value* that is a JSON document: whichever order the emitter happened to insert
+/// its keys in, and whatever insignificant whitespace `JSON.stringify` produced, every
+/// reader parses it. Measured against pinned oracle 0.87.0 on `fx-state-dockerfile-nonroot`:
+///
+/// ```text
+/// deacon: [{"remoteUser":"dev","containerUser":"dev","containerEnv":{"DF_ENV":"yes"}}]
+/// ref:    [ {"containerEnv":{"DF_ENV":"yes"},"containerUser":"dev","remoteUser":"dev"} ]
+/// ```
+///
+/// Identical documents; three keys in a different order and two extra spaces. Aligning
+/// deacon's insertion order with upstream's `pickConfigProperties` order would make this
+/// one fixture pass while pinning deacon to an implementation detail of the reference's
+/// serializer that carries no meaning and no stability guarantee.
+///
+/// **Removes nothing** (FR-029). Every key and value is preserved and compared; only the
+/// key ORDER and insignificant whitespace stop mattering. A value that is not valid JSON,
+/// or a key not in the enumerated list, is left exactly as captured — so a malformed label
+/// still surfaces as a divergence rather than being quietly accepted.
+pub fn label_json_document(labels: &Value) -> Value {
+    let Value::Object(obj) = labels else {
+        return labels.clone();
+    };
+    let mut out = obj.clone();
+    for key in JSON_DOCUMENT_LABELS {
+        let Some(raw) = obj.get(*key).and_then(Value::as_str) else {
+            continue;
+        };
+        // Not-valid-JSON is left verbatim: this rule canonicalizes a document, it does
+        // not sanitize a string.
+        if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+            out.insert((*key).to_string(), canonical_json(&parsed));
+        }
+    }
+    Value::Object(out)
+}
+
+/// Recursively sort object keys so two structurally equal JSON documents compare equal.
+///
+/// Needed because the workspace enables serde_json's `preserve_order`: parsing keeps
+/// insertion order, which is exactly the difference being canonicalized away. Arrays keep
+/// their order — element order in a JSON array IS meaningful.
+fn canonical_json(value: &Value) -> Value {
+    match value {
+        Value::Object(obj) => {
+            let mut keys: Vec<&String> = obj.keys().collect();
+            keys.sort_unstable();
+            let mut out = Map::new();
+            for k in keys {
+                out.insert(k.clone(), canonical_json(&obj[k]));
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(canonical_json).collect()),
+        other => other.clone(),
+    }
+}
+
 /// **Rule `mount_source_canonical`** (FR-027): path-substitute each mount `source`
 /// before compare, so two mounts that differ ONLY by a temp path compare equal. Given a
 /// mounts array `[{ source, target, ... }]`, rewrites each `source` via the token map.
@@ -374,12 +444,30 @@ fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap) -> Value
         // `chan-container-state`: `workspace_basename_token` (carried by the token map
         // from `tokens_for_channel`) + `path_token` over the whole snapshot — object KEYS
         // included, so mount destinations keyed by the container-side workspace path
-        // normalize on both sides — then `null_preserving`. NOTHING is removed: labels,
-        // entrypoint, cmd and networks are emitted verbatim and any characterized
-        // difference is covered by a scoped, backed `allowedDifference` (024 Phase 4).
-        CHAN_CONTAINER_STATE => null_preserving(&path_token(value, tokens)),
+        // normalize on both sides — then `label_json_document` on the labels whose value is
+        // a JSON document, then `null_preserving`. NOTHING is removed: labels, entrypoint,
+        // cmd and networks are emitted verbatim and any characterized difference is covered
+        // by a scoped, backed `allowedDifference` (024 Phase 4).
+        CHAN_CONTAINER_STATE => normalize_container_state(value, tokens),
         _ => value.clone(),
     }
+}
+
+/// `chan-container-state`: `path_token` (carrying `workspace_basename_token`) over the
+/// whole snapshot, then `label_json_document` on `labels`, then `null_preserving`.
+///
+/// The label pass runs AFTER `path_token` deliberately: a path inside the metadata document
+/// must still be tokenized, and tokenizing first means the parse sees the already-tokenized
+/// text. Order matters only in that direction — canonicalizing keys never introduces a path.
+fn normalize_container_state(value: &Value, tokens: &TokenMap) -> Value {
+    let mut v = path_token(value, tokens);
+    if let Value::Object(obj) = &mut v {
+        if let Some(labels) = obj.get("labels") {
+            let canonical = label_json_document(labels);
+            obj.insert("labels".to_string(), canonical);
+        }
+    }
+    null_preserving(&v)
 }
 
 /// `chan-image`: `label_semantic` on the `labels` field, `path_token` elsewhere,
@@ -1276,6 +1364,83 @@ mod tests {
         assert!(i.value.get("env").is_some() && i.value.get("command").is_some());
     }
 
+    // -- T115: label_json_document -----------------------------------------------------
+
+    /// The measured case: the two CLIs' `devcontainer.metadata` documents differ only in
+    /// key insertion order and insignificant whitespace, and must compare equal.
+    #[test]
+    fn label_json_document_compares_metadata_as_a_document() {
+        let deacon = json!({
+            "devcontainer.metadata":
+                r#"[{"remoteUser":"dev","containerUser":"dev","containerEnv":{"DF_ENV":"yes"}}]"#,
+        });
+        let reference = json!({
+            "devcontainer.metadata":
+                "[ {\"containerEnv\":{\"DF_ENV\":\"yes\"},\"containerUser\":\"dev\",\"remoteUser\":\"dev\"} ]",
+        });
+        assert_eq!(
+            label_json_document(&deacon),
+            label_json_document(&reference),
+            "same document, different key order and whitespace → equal"
+        );
+    }
+
+    /// The rule must still SEE a real difference. This is the property that separates it
+    /// from a blanket rule: it changes the comparison's representation, not its strictness.
+    #[test]
+    fn label_json_document_still_diverges_on_different_content() {
+        let a = json!({ "devcontainer.metadata": r#"[{"remoteUser":"dev"}]"# });
+        let b = json!({ "devcontainer.metadata": r#"[{"remoteUser":"root"}]"# });
+        assert_ne!(label_json_document(&a), label_json_document(&b));
+
+        // A missing key is still a difference, not an absence to be smoothed over.
+        let c = json!({ "devcontainer.metadata": r#"[{"remoteUser":"dev","init":true}]"# });
+        assert_ne!(label_json_document(&a), label_json_document(&c));
+
+        // Array ORDER is meaningful — metadata fragments are precedence-ordered.
+        let d = json!({ "devcontainer.metadata": r#"[{"a":1},{"b":2}]"# });
+        let e = json!({ "devcontainer.metadata": r#"[{"b":2},{"a":1}]"# });
+        assert_ne!(
+            label_json_document(&d),
+            label_json_document(&e),
+            "fragment order carries precedence and must not be canonicalized away"
+        );
+    }
+
+    #[test]
+    fn label_json_document_leaves_other_labels_and_malformed_values_verbatim() {
+        // Not in the enumerated set → untouched, even though it parses as JSON.
+        let other = json!({ "devcontainer.local_folder": r#"{"b":1,"a":2}"# });
+        assert_eq!(label_json_document(&other), other);
+
+        // In the set but not valid JSON → untouched, so it still surfaces as a divergence
+        // rather than being quietly accepted.
+        let malformed = json!({ "devcontainer.metadata": "[{not json" });
+        assert_eq!(label_json_document(&malformed), malformed);
+    }
+
+    /// The rule is reachable through the real channel chain, not just callable directly —
+    /// a rule that exists but is never wired in is the shape of defect 022 T115 caught
+    /// (an observer landing without its evaluator).
+    #[test]
+    fn container_state_chain_applies_label_json_document() {
+        let tokens = TokenMap::workspace(Path::new("/tmp/ws-a"));
+        let ev = raw(
+            deacon_conformance::model::CHAN_CONTAINER_STATE,
+            json!({ "labels": { "devcontainer.metadata": r#"[{"b":2,"a":1}]"# } }),
+        );
+        let n = normalize_channel(
+            deacon_conformance::model::CHAN_CONTAINER_STATE,
+            &ev,
+            &tokens,
+        );
+        assert_eq!(
+            n.value["labels"]["devcontainer.metadata"],
+            json!([{ "a": 1, "b": 2 }]),
+            "the label value must arrive as a parsed, key-sorted document"
+        );
+    }
+
     // -- T040: label_semantic / mount_source_canonical / path_env_segmented ------------
 
     #[test]
@@ -1350,11 +1515,14 @@ mod tests {
     #[test]
     fn normalizer_version_is_bumped_for_named_rules() {
         assert_eq!(
-            NORMALIZER_VERSION, "5",
-            "the 024 review bounded `drop_absent_optional` to the document root plus \
-             `hostRequirements`/`portsAttributes`; it previously elided an enumerated key \
-             name at ANY depth, including inside `customizations` — a change to what \
-             \"equal\" means, so every recorded snapshot must go stale and be re-reviewed"
+            NORMALIZER_VERSION, "6",
+            "T115 added `label_json_document` to the `chan-container-state` chain, so the \
+             one label whose value is a JSON document (`devcontainer.metadata`) compares as \
+             that document rather than as a byte string — a change to what \"equal\" means, \
+             so every recorded snapshot must go stale and be re-reviewed. (\"5\" was the 024 \
+             review bounding `drop_absent_optional` to the document root plus \
+             `hostRequirements`/`portsAttributes`, which previously elided an enumerated key \
+             name at ANY depth, including inside `customizations`.)"
         );
     }
 

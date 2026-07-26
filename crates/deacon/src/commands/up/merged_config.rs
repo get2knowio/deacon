@@ -449,6 +449,17 @@ fn apply_image_metadata_label(
 /// notably `remoteEnv` — is recoverable from the container by
 /// exec/read-configuration/set-up. Mirrors upstream `pickConfigProperties`.
 /// Null/empty values are dropped so the entry stays minimal.
+///
+/// **Pass the PRE-substitution config** (`ConfigLoadResult::raw_config`, upstream's
+/// `SubstitutedConfig.raw`). The label describes the *authored* configuration to
+/// whoever reads the container later, so it must carry `${localWorkspaceFolder}`,
+/// not the recording machine's absolute path. Measured against pinned oracle
+/// 0.87.0: for `mounts: ["source=${localWorkspaceFolder}/sib,…"]` the reference
+/// stamps the template verbatim while applying the substituted value to the
+/// container itself, and the same holds for `remoteEnv`, `containerEnv` and
+/// `postCreateCommand`. deacon stamped substituted values until this fix (T115),
+/// baking a host path into container metadata. Normalization could not paper over
+/// it: tokenizing deacon's side yields `<WORKSPACE>/sib`, still a different form.
 pub(crate) fn config_metadata_entry(config: &DevContainerConfig) -> serde_json::Value {
     const PICK: &[&str] = &[
         "init",
@@ -511,10 +522,15 @@ pub(crate) fn config_metadata_entry(config: &DevContainerConfig) -> serde_json::
 /// exactly the one where no inherited label exists — the container ended up with no
 /// `devcontainer.metadata` label at all where the reference has `[]`. Measured against the
 /// pinned oracle 0.87.0 by the declarative `chan-container-state` differential (024).
+///
+/// `config_entry` is the caller's [`config_metadata_entry`] over the **raw**
+/// (pre-substitution) config. It is passed in rather than derived here because the
+/// raw config only exists at the top of `up`, before the runtime mutations — the
+/// signature is what keeps a substituted config from being handed in by accident.
 pub(crate) async fn build_container_metadata_label(
     docker: &impl Docker,
     image_ref: &str,
-    config: &DevContainerConfig,
+    config_entry: &serde_json::Value,
 ) -> Option<String> {
     let mut entries: Vec<serde_json::Value> = match docker.inspect_image(image_ref).await {
         Ok(Some(info)) => match info.labels.get("devcontainer.metadata") {
@@ -528,13 +544,12 @@ pub(crate) async fn build_container_metadata_label(
         _ => Vec::new(),
     };
 
-    let cfg_entry = config_metadata_entry(config);
-    let cfg_nonempty = cfg_entry
+    let cfg_nonempty = config_entry
         .as_object()
         .map(|o| !o.is_empty())
         .unwrap_or(false);
     if cfg_nonempty {
-        entries.push(cfg_entry);
+        entries.push(config_entry.clone());
     }
     serde_json::to_string(&serde_json::Value::Array(entries)).ok()
 }
@@ -578,6 +593,51 @@ mod tests {
         assert!(!obj.contains_key("features"));
         assert!(!obj.contains_key("forwardPorts"));
         assert!(!obj.contains_key("securityOpt"), "empty arrays are dropped");
+    }
+
+    /// T115: the picked entry must carry the AUTHORED templates, because the
+    /// label is what a later reader recovers the configuration from. Measured
+    /// against pinned oracle 0.87.0, which stamps
+    /// `"source=${localWorkspaceFolder}/sib,target=/workspaces/sib,type=bind"`
+    /// while deacon stamped the recording machine's absolute path.
+    ///
+    /// This test is over the RAW config on purpose: it pins the shape of what
+    /// callers must pass, and it fails the moment someone re-derives the entry
+    /// from a substituted config (every template below would be a concrete path).
+    #[test]
+    fn config_metadata_entry_preserves_authored_templates() {
+        let raw: DevContainerConfig = serde_json::from_str(
+            r#"{
+                "name": "t115",
+                "image": "debian:bookworm-slim",
+                "workspaceFolder": "/workspace",
+                "mounts": ["source=${localWorkspaceFolder}/sib,target=/workspaces/sib,type=bind"],
+                "containerEnv": { "CE": "${localWorkspaceFolder}" },
+                "remoteEnv": { "RE": "${localEnv:HOME}", "CWF": "${containerWorkspaceFolder}" },
+                "postCreateCommand": "echo ${containerWorkspaceFolder}"
+            }"#,
+        )
+        .unwrap();
+        let entry = config_metadata_entry(&raw);
+        let text = serde_json::to_string(&entry).unwrap();
+
+        // Each of the four field kinds measured on the reference's label.
+        assert!(
+            text.contains("source=${localWorkspaceFolder}/sib"),
+            "mounts must keep the template, got {text}"
+        );
+        assert!(
+            text.contains(r#""CE":"${localWorkspaceFolder}""#),
+            "containerEnv must keep the template, got {text}"
+        );
+        assert!(
+            text.contains(r#""RE":"${localEnv:HOME}""#),
+            "remoteEnv must keep the template, got {text}"
+        );
+        assert!(
+            text.contains("echo ${containerWorkspaceFolder}"),
+            "postCreateCommand must keep the template, got {text}"
+        );
     }
 
     #[test]

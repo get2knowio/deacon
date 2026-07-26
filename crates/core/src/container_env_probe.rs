@@ -620,6 +620,13 @@ impl ContainerEnvironmentProber {
                 feature_vars: HashMap::new(),
                 template_options: None,
                 resolve_devcontainer_id: true,
+                // No workspace in this context, so `${localWorkspaceFolder}`
+                // must stay literal rather than collapse to the empty string.
+                // In the ordinary flow config substitution already resolved it;
+                // the one path where the token can still arrive here is a config
+                // recovered from a container's `devcontainer.metadata` label,
+                // where the reference also leaves it literal.
+                resolve_local_workspace_folder: false,
             };
             let mut report = crate::variable::SubstitutionReport::new();
             for (k, v_opt) in remote {

@@ -90,6 +90,14 @@ pub struct SubstitutionContext {
     /// (which set `devcontainer_id` to a meaningful value) keep resolving it;
     /// `read-configuration`'s pre-container output passes set this to `false`.
     pub resolve_devcontainer_id: bool,
+    /// Whether `${localWorkspaceFolder}` / `${localWorkspaceFolderBasename}`
+    /// should be resolved in this pass.
+    ///
+    /// Defaults to `true`, because every ordinary pass runs with a workspace in
+    /// hand. It is `false` only in [`SubstitutionContext::host_env_only`], where
+    /// there is no workspace to resolve against and inventing one would be worse
+    /// than leaving the token literal.
+    pub resolve_local_workspace_folder: bool,
 }
 
 impl SubstitutionContext {
@@ -162,7 +170,39 @@ impl SubstitutionContext {
             feature_vars: HashMap::new(),
             template_options: None,
             resolve_devcontainer_id: true,
+            resolve_local_workspace_folder: true,
         })
+    }
+
+    /// Create a context that can resolve **only host-environment** tokens —
+    /// `${localEnv:VAR}` and its `${env:VAR}` alias — leaving every
+    /// workspace-relative and container-relative token literal.
+    ///
+    /// This is the context for re-substituting a config recovered from a
+    /// container's `devcontainer.metadata` label, where no workspace folder
+    /// exists to resolve against. It reproduces the reference CLI's measured
+    /// behavior on that path: with pinned oracle 0.87.0, `devcontainer exec
+    /// --container-id <id>` over a container whose label carries
+    /// `remoteEnv: { LWF: "${localWorkspaceFolder}", LENV: "${localEnv:HOME}" }`
+    /// prints `LWF=[${localWorkspaceFolder}]` and `LENV=[/home/vscode]` — the
+    /// host-env token resolves, the workspace token stays literal.
+    ///
+    /// Unlike [`SubstitutionContext::new`] this is infallible: there is no path
+    /// to canonicalize.
+    pub fn host_env_only() -> Self {
+        Self {
+            local_workspace_folder: String::new(),
+            local_env: env::vars().collect(),
+            // No workspace, so no meaningful identity. Gated off below as well,
+            // but keep the field empty rather than a hash of "".
+            devcontainer_id: String::new(),
+            container_workspace_folder: None,
+            container_env: None,
+            feature_vars: HashMap::new(),
+            template_options: None,
+            resolve_devcontainer_id: false,
+            resolve_local_workspace_folder: false,
+        }
     }
 
     /// Generate a deterministic devcontainer ID from workspace path
@@ -464,13 +504,19 @@ impl VariableSubstitution {
     /// - `feature:VAR` - Returns feature-provided variable (if available)
     fn resolve_variable(variable_expr: &str, context: &SubstitutionContext) -> Option<String> {
         match variable_expr {
-            "localWorkspaceFolder" => Some(context.local_workspace_folder.clone()),
-            "localWorkspaceFolderBasename" => Some(
+            // Gated exactly like `devcontainerId` below: when there is no
+            // workspace to resolve against (`host_env_only`), return None so the
+            // literal token is preserved rather than substituting an empty path.
+            "localWorkspaceFolder" if context.resolve_local_workspace_folder => {
+                Some(context.local_workspace_folder.clone())
+            }
+            "localWorkspaceFolderBasename" if context.resolve_local_workspace_folder => Some(
                 std::path::Path::new(&context.local_workspace_folder)
                     .file_name()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default(),
             ),
+            "localWorkspaceFolder" | "localWorkspaceFolderBasename" => None,
             // Per the reference CLI, `${devcontainerId}` is only resolved once a
             // container identity exists. When `resolve_devcontainer_id` is false
             // (config-load / `read-configuration` output before any container),

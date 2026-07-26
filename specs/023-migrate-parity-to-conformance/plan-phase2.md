@@ -1,6 +1,6 @@
 # Phase 2 — draining the deferrals (in-repo record of the "024" work)
 
-**Status**: in progress. Steps 1–4 complete, step 5 partial, steps 6–8 not started.
+**Status**: in progress. Steps 1–4 complete, step 5 complete through T115, steps 5b–8 in progress.
 
 This document exists because the work below was driven by a plan that lived outside
 the repository. Four substantial commits landed with their rationale recorded only in
@@ -49,6 +49,7 @@ opposite answer twice (see step 5).
 | 3 | `b7ebd1b` | D-2 + D-3: an unobserved differential fails loud; deacon's side is reclaimed before the oracle's runs |
 | 4 | `8b81f52` | `chan-container-state` becomes an observed channel; `strip_intentional_labels` retired (`nonCompliantRules` → 0). Plus 15 review findings |
 | 5 | `1a502e5`, `e243921`, `2547340`, `3489f6d` | Container-state units migrate (69 → 74). Three deacon defects found; two fixed |
+| 5a | — | T115: stamp the AUTHORED config in `devcontainer.metadata` (spec-mandated), re-substitute host-env tokens on read-back, `label_json_document` (`NORMALIZER_VERSION` 6). All three `case-state-*` agree |
 | 6 | — | `${CONTAINER_ID}` argv token; delete `parity_up_exec`, `parity_exec` |
 | 7 | — | `require_buildkit()`; image-by-name observation; delete `parity_build` |
 | 8 | — | Close out migration classes; retire V21/V22 or justify keeping them |
@@ -90,8 +91,19 @@ Three divergences surfaced. Reasoning would have mis-classified two of them:
    measured, and the record says so, so the next reader sees what changed: not the field,
    the evidence.
 3. **`devcontainer.metadata`** — two separate defects. deacon omitted the label entirely
-   where the reference stamps `[]` (fixed); and deacon substitutes `${localWorkspaceFolder}`
-   before stamping where the reference stores the template (T115, open).
+   where the reference stamps `[]` (fixed); and deacon substituted `${localWorkspaceFolder}`
+   before stamping where the reference stores the template (T115, **fixed** — see below).
+
+4. **T115 turned out not to be a parity question.** It was planned as "match the reference",
+   and the vendored spec settles it outright: *"Variables in string values will be
+   substituted at the time the value is applied"* (`image-metadata.md`, Merge Logic).
+   Recording is not applying. So the axis is `spec: nonconformant` → `conformant`, and the
+   right instrument was never a waiver. Measuring also widened the defect from `mounts` to
+   every picked string field, and caught a *second* divergence the fix would otherwise have
+   introduced: with templates in the label, the `--container-id` read-back must
+   re-substitute the host-env tokens the reference re-substitutes there (`${localEnv:…}`
+   resolves; workspace tokens stay literal — measured, not assumed). Fixing only the stamp
+   would have traded one divergence for another.
 
 The general lesson, worth stating plainly: *"captured but not compared, because it cannot
 matter"* is itself a claim about behavior, and an uncompared field is exactly where such a
@@ -109,8 +121,8 @@ claim never gets tested. The legacy `diff_states` captured `cmd` and skipped it 
 
 ## Blocking work
 
-**T115 blocks deleting `parity_state_diff`**, and correctly so. The declarative replacements
+**T115 blocked deleting `parity_state_diff`**, and correctly so. The declarative replacements
 compare more than the legacy carrier did, so they are *stricter* — and `equivalence-report`
 refuses a `stricter` verdict carrying no `characterizedAs`, because unproven-stricter is
-indistinguishable from a newly introduced bug. Fixing or characterizing T115 is the
-precondition for finishing step 5.
+indistinguishable from a newly introduced bug. **Cleared in step 5a** by fixing deacon: the
+three cases now `agree`, so the strictness is demonstrated rather than asserted.

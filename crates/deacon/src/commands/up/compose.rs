@@ -81,6 +81,7 @@ pub(crate) async fn execute_compose_up(
     config_path: &Path,
     runtime: &ContainerRuntimeImpl,
     host_ca_set: Option<&CorporateCaSet>,
+    metadata_config_entry: &serde_json::Value,
 ) -> Result<UpContainerInfo> {
     debug!("Starting Docker Compose project");
 
@@ -413,6 +414,9 @@ pub(crate) async fn execute_compose_up(
     // is recoverable by exec/read-configuration/set-up `--container-id`, exactly
     // like the single-container path. The effective image is the feature-extended
     // one when features were built, else the service's own `image:`.
+    //
+    // `metadata_config_entry` is picked from the RAW (pre-substitution) config by
+    // the caller, symmetrically with the single-container path (T115).
     {
         use deacon_core::compose::ServiceShape;
         let effective_image = match &project.service_image_override {
@@ -430,7 +434,7 @@ pub(crate) async fn execute_compose_up(
             if let Some(json) = super::merged_config::build_container_metadata_label(
                 &runtime.cli_docker(),
                 &img,
-                config,
+                metadata_config_entry,
             )
             .await
             {

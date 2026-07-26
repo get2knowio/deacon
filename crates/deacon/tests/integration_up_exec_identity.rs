@@ -225,3 +225,100 @@ fn exec_honors_remote_user_from_image_metadata() {
         "exec must run as the image-metadata remoteUser (#223), got {got:?}"
     );
 }
+
+/// T115: the `devcontainer.metadata` label must carry the **authored** templates,
+/// not this machine's substituted absolute paths.
+///
+/// The label exists so a later reader can recover the configuration from the
+/// container alone. Baking in the recording machine's workspace path makes it
+/// host-specific and leaks a host path into container metadata. Measured against
+/// pinned oracle 0.87.0, which stamps
+/// `"source=${localWorkspaceFolder}/sib,target=/workspaces/sib,type=bind"` where
+/// deacon stamped `"source=/tmp/…/ws/sib,…"`.
+///
+/// The second half pins the consequence: because the label now holds templates,
+/// the `--container-id` read-back applies a host-env-only pass — `${localEnv:…}`
+/// resolves, `${localWorkspaceFolder}` stays literal. That is also the reference's
+/// measured behavior on `devcontainer exec --container-id`, so the fix does not
+/// trade one divergence for another.
+#[test]
+fn up_stamps_authored_templates_in_devcontainer_metadata() {
+    if !is_docker_available() {
+        eprintln!("skipping: docker unavailable");
+        return;
+    }
+    let ws = TempDir::new().unwrap();
+    write(ws.path(), "sib/marker.txt", "sib\n");
+    write(
+        ws.path(),
+        ".devcontainer/devcontainer.json",
+        r#"{
+             "name": "t115",
+             "image": "debian:bookworm-slim",
+             "workspaceFolder": "/workspace",
+             "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+             "mounts": ["source=${localWorkspaceFolder}/sib,target=/workspaces/sib,type=bind"],
+             "remoteEnv": { "T115_HOST": "${localEnv:HOME}", "T115_LWF": "${localWorkspaceFolder}" },
+             "overrideCommand": true
+           }"#,
+    );
+
+    up(ws.path());
+
+    let inspected = deacon()
+        .args(["read-configuration", "--workspace-folder"])
+        .arg(ws.path())
+        .stderr(Stdio::null())
+        .output()
+        .expect("spawn deacon read-configuration");
+    assert!(inspected.status.success(), "read-configuration failed");
+
+    let label = StdCommand::new(runtime_bin())
+        .args([
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"devcontainer.metadata\"}}",
+        ])
+        .arg(
+            String::from_utf8_lossy(
+                &StdCommand::new(runtime_bin())
+                    .args([
+                        "ps",
+                        "-q",
+                        "--filter",
+                        &format!("label=devcontainer.local_folder={}", ws.path().display()),
+                    ])
+                    .output()
+                    .expect("spawn docker ps")
+                    .stdout,
+            )
+            .trim(),
+        )
+        .output()
+        .expect("spawn docker inspect");
+    let label = String::from_utf8_lossy(&label.stdout).trim().to_string();
+
+    // Read back through exec BEFORE tearing down.
+    let host_env = exec_cmd(ws.path(), &["sh", "-lc", "printf %s \"$T115_HOST\""]);
+    down(ws.path());
+
+    assert!(
+        label.contains("source=${localWorkspaceFolder}/sib"),
+        "the label must keep the authored mount template (T115); got {label}"
+    );
+    assert!(
+        label.contains("${localEnv:HOME}"),
+        "the label must keep the authored remoteEnv template (T115); got {label}"
+    );
+    assert!(
+        !label.contains(&ws.path().display().to_string()),
+        "the label must not leak this machine's workspace path (T115); got {label}"
+    );
+    // `up` itself still resolves the value it applies to the container.
+    assert_eq!(
+        host_env,
+        std::env::var("HOME").unwrap_or_default(),
+        "`up` must still APPLY the substituted remoteEnv value even though the label \
+         records the template"
+    );
+}
