@@ -144,7 +144,12 @@ pub struct DriverConfig {
 
 impl DriverConfig {
     /// Borrow this owned config as the [`RunConfig`] the runner takes.
-    fn run_config(&self) -> RunConfig<'_> {
+    ///
+    /// Public so a live test binary can drive a hand-picked slice of the case set through
+    /// [`crate::runner::run_case`] directly — the error-path tier's acceptance tests (024
+    /// US4) assert per-case properties that [`drive_group`]'s aggregate `GroupRun` does not
+    /// expose, and rebuilding an equivalent `RunConfig` there would fork the field list.
+    pub fn run_config(&self) -> RunConfig<'_> {
         RunConfig {
             deacon_path: &self.deacon_path,
             oracle: self.oracle.as_ref(),

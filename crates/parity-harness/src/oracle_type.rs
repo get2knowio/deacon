@@ -78,7 +78,7 @@ async fn spec_expectation(
                     ),
                 })?;
         let mut verdict = verdict_spec_expectation(&exp.channel, normalized, assertion)?;
-        runner::attach_failure_phase(&mut verdict, case, exp, &ctx);
+        runner::attach_failure_phase(&mut verdict, case, exp, &ctx, None);
         channels.push(verdict);
     }
     // Allowed differences do not apply to spec-expectation (no reference to diverge from);
@@ -159,7 +159,7 @@ async fn live_differential(
             &tolerances,
             &mut consumed,
         );
-        runner::attach_failure_phase(&mut verdict, case, exp, &deacon_ctx);
+        runner::attach_failure_phase(&mut verdict, case, exp, &deacon_ctx, Some(&oracle_ctx));
         channels.push(verdict);
     }
     Ok((channels, tolerances.stale(&consumed)))

@@ -12,7 +12,7 @@ pub const DOCKER_OVERRIDE_ENV: &str = "DEACON_PARITY_DOCKER";
 
 /// Bound on the `docker version` probe. Docker's version handshake is quick; a
 /// slow/hung daemon is itself a "Docker unavailable" signal.
-const DOCKER_PROBE_BOUND: Duration = Duration::from_secs(60);
+pub const DOCKER_PROBE_BOUND: Duration = Duration::from_secs(60);
 
 /// Require a working Docker CLI. Honors `DEACON_PARITY_DOCKER` (else `docker` on
 /// PATH) and probes `docker version`. Any failure → [`HarnessError::DockerMissing`].
@@ -25,7 +25,13 @@ pub async fn require_docker() -> Result<(), HarnessError> {
 
 /// Probe a specific docker binary. Pure over its inputs so fault-injection can
 /// point it at a failing stub.
-async fn probe_docker(bin: &Path, bound: Duration) -> Result<(), HarnessError> {
+///
+/// **Public as the injection seam** (mirroring
+/// [`runner::containers_for_workspace_with`](crate::runner::containers_for_workspace_with)):
+/// the alternative is for a test to set `DEACON_PARITY_DOCKER`, and `std::env::set_var`
+/// is `unsafe` under this workspace's edition — which `unsafe_code = "deny"` forbids —
+/// besides being process-global and therefore hostile to a parallel test runner.
+pub async fn probe_docker(bin: &Path, bound: Duration) -> Result<(), HarnessError> {
     let mut cmd = tokio::process::Command::new(bin);
     cmd.arg("version")
         .stdin(std::process::Stdio::null())

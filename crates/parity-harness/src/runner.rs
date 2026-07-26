@@ -689,14 +689,33 @@ fn subcommand_tokens(subcommand: &str) -> Vec<String> {
     }
 }
 
-/// Attach the failure phase to the `chan-exit-code` verdict's detail when the producing
-/// operation failed (FR-009). Path-free and deterministic, so the report stays
-/// byte-stable (T018).
+/// Attach the failing STAGE and each side's outcome to the `chan-exit-code` verdict's
+/// detail (FR-009, and FR-042 for the error-path tier). Path-free and deterministic, so the
+/// report stays byte-stable (T018).
+///
+/// Two things are recorded, and the distinction is the point:
+///
+/// - **`failurePhase`** — the DECLARED `expectFailurePhase` when the operation carries one,
+///   else the coarse inference from the subcommand. The declaration wins because it is the
+///   reviewed record and the inference cannot see past the subcommand:
+///   [`cli_process::infer_failure_phase`] maps every `run-user-commands` failure to `exec`,
+///   so a case pinning `lifecycle:postStart` would have its own recorded stage contradicted
+///   by the report it appears in. `inferredFailurePhase` is kept alongside whenever it
+///   differs, so nothing is hidden.
+/// - **`sides`** — each side's exit code and whether it failed. A differential verdict says
+///   only *that* the two disagree; the error-path tier has to record *what each side did*
+///   (FR-042), and "deacon exited 1, the reference exited 0" is that fact. Recorded for the
+///   reference only when there is a reference run (a `spec-expectation` case has none).
+///
+/// Attached whenever the operation declares a phase or actually failed — a verdict on an
+/// operation that neither declared nor produced a failure has nothing to say here and keeps
+/// its detail unchanged.
 pub(crate) fn attach_failure_phase(
     verdict: &mut ChannelVerdict,
     case: &TestCase,
     exp: &ExpectedObservable,
     ctx: &RunContext,
+    reference: Option<&RunContext>,
 ) {
     if verdict.channel != CHAN_EXIT_CODE {
         return;
@@ -704,17 +723,55 @@ pub(crate) fn attach_failure_phase(
     let Ok(op) = resolve_expected_op(case, exp) else {
         return;
     };
-    let Some(phase) = ctx.outcome(&op.id).and_then(|o| o.failure_phase) else {
+    let outcome = ctx.outcome(&op.id);
+    let inferred = outcome.and_then(|o| o.failure_phase);
+    let declared = op.expect_failure_phase;
+    if declared.is_none() && inferred.is_none() {
         return;
-    };
-    let phase_value = serde_json::to_value(phase).unwrap_or(serde_json::Value::Null);
+    }
+
+    let mut fields = serde_json::Map::new();
+    if let Some(phase) = declared.or(inferred) {
+        fields.insert(
+            "failurePhase".to_string(),
+            serde_json::to_value(phase).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    if let (Some(declared), Some(inferred)) = (declared, inferred)
+        && declared != inferred
+    {
+        fields.insert(
+            "inferredFailurePhase".to_string(),
+            serde_json::to_value(inferred).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    let mut sides = serde_json::Map::new();
+    sides.insert("deacon".to_string(), side_outcome(outcome));
+    if let Some(reference) = reference {
+        sides.insert(
+            "reference".to_string(),
+            side_outcome(reference.outcome(&op.id)),
+        );
+    }
+    fields.insert("sides".to_string(), serde_json::Value::Object(sides));
+
     match verdict.detail.as_mut() {
-        Some(serde_json::Value::Object(map)) => {
-            map.insert("failurePhase".to_string(), phase_value);
-        }
-        _ => {
-            verdict.detail = Some(serde_json::json!({ "failurePhase": phase_value }));
-        }
+        Some(serde_json::Value::Object(map)) => map.append(&mut fields),
+        _ => verdict.detail = Some(serde_json::Value::Object(fields)),
+    }
+}
+
+/// One side's observable outcome for the exit-code channel: the exit code (`null` for a
+/// signal-terminated process, which stays distinct from `0`) and whether it failed.
+/// `null` throughout when the operation did not run on that side at all — which is a
+/// different claim from "it ran and succeeded".
+fn side_outcome(outcome: Option<&ProcessOutcome>) -> serde_json::Value {
+    match outcome {
+        Some(o) => serde_json::json!({
+            "exitCode": o.exit_code,
+            "failed": !o.success,
+        }),
+        None => serde_json::json!({ "exitCode": null, "failed": null }),
     }
 }
 

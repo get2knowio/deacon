@@ -159,6 +159,23 @@ fn find_on_path(name: &str, path_env: Option<&OsStr>) -> Option<PathBuf> {
     None
 }
 
+/// Verify a specific binary reports exactly `pin`'s version — the **fault-injection seam**
+/// for oracle verification (024 US4, FR-044).
+///
+/// [`Oracle::acquire`] resolves from `DEACON_PARITY_DEVCONTAINER` or `PATH` and then calls
+/// this. A test cannot drive that resolution without `std::env::set_var`, which is `unsafe`
+/// under this workspace's edition (and `unsafe_code = "deny"`) and process-global besides;
+/// so the verification half is exposed directly, exactly as
+/// [`prereq::probe_docker`](crate::prereq::probe_docker) is. Resolution is reported as
+/// [`OracleSource::Override`] because that is what an explicitly supplied path is.
+pub async fn verify_binary(
+    bin: &Path,
+    pin: &OraclePin,
+    bound: Duration,
+) -> Result<VerifiedOracle, HarnessError> {
+    verify(bin, OracleSource::Override, pin, bound).await
+}
+
 /// Verify a resolved binary reports exactly the pinned version.
 async fn verify(
     bin: &Path,
