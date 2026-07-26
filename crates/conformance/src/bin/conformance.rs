@@ -2259,7 +2259,7 @@ fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
         .parent()
         .map(|p| p.join("snapshots"))
         .unwrap_or_else(|| registry_dir.join("snapshots"));
-    let result = certify(&registry, &inputs, &clause_inputs, &snapshots_dir);
+    let result = certify(&registry, today, &inputs, &clause_inputs, &snapshots_dir);
 
     if json {
         match serde_json::to_string_pretty(&result) {
@@ -2282,6 +2282,11 @@ fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
                 ),
                 BlockingKind::Clause => println!(
                     "blocking clause ({}): {}",
+                    item.code.as_deref().unwrap_or("?"),
+                    item.id
+                ),
+                BlockingKind::Obligation => println!(
+                    "blocking obligation ({}): {}",
                     item.code.as_deref().unwrap_or("?"),
                     item.id
                 ),
@@ -2337,6 +2342,23 @@ fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
             println!(
                 "info normalization-rule non-compliant: {} — {}",
                 rule.name, rule.reason
+            );
+        }
+        // The five FR-026 obligation buckets plus the undispositioned queue, on ONE line
+        // and never folded together (T068) — the numbers a reviewer needs to tell "the
+        // hole is documented" from "the hole is closed".
+        let o = &result.obligations;
+        if o.total > 0 {
+            println!(
+                "info obligations ({} total): covered {}, waived {}, non-testable {}, gap {}, \
+                 inactive-environment {}, undispositioned {}",
+                o.total,
+                o.covered,
+                o.waived,
+                o.non_testable,
+                o.gap,
+                o.inactive_environment,
+                o.undispositioned
             );
         }
         if result.certified {

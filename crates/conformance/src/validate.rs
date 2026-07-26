@@ -65,12 +65,12 @@ use crate::model::{
     BehaviorUnit, CONSUMER_SUBCOMMANDS, CONTAINER_SUBCOMMANDS, CaseKind, CertificationProfile,
     Classification, ClauseClassification, ClauseInventory, ClauseUnit, Condition,
     ConstraintInventory, ConstraintUnit, Decision, Disposition, DocumentScope, FILESYSTEM_CHANNELS,
-    OBSERVED_CHANNELS, OracleType, RecordType, ReferenceStatus, RevisionKind, SpecManifest,
-    SpecStatus, Strength, Testability, parse_id,
+    OBSERVED_CHANNELS, OracleType, RecordType, ReferenceStatus, RevisionKind, Scope, SpecManifest,
+    SpecStatus, Strength, Testability, Waiver, parse_id,
 };
 use crate::obligation::{
-    ObligationInventory, compare as compare_obligations, generate_obligations,
-    render as render_obligations,
+    DispositionKind, ObligationInventory, audit_dispositions, compare as compare_obligations,
+    describe as describe_obligation, generate_obligations, render as render_obligations,
 };
 use crate::prose::Document;
 use crate::prose::strength::{has_family, hides_mandatory_keyword};
@@ -1643,6 +1643,11 @@ pub fn run(registry: &Registry, today: &str, repo_root: &Path) -> Vec<Violation>
     // `Checker` method — the scenario model is a self-contained sub-record and
     // `validate.rs` is already 3,300 lines (Principle V, modular boundaries).
     out.extend(check_scenario_model(registry));
+    // V28/V29: obligation dispositions (024, US2). Registry-only — unlike V27 it needs no
+    // committed file, because the obligations it joins against are regenerated from the
+    // same records (and V27 is what guarantees the commit matches). Living in `run` means
+    // `report` and `certify` see it too, not only the `validate` command.
+    out.extend(check_obligation_dispositions(registry));
     sort_violations(&mut out);
     out
 }
@@ -3226,6 +3231,227 @@ pub fn check_obligations(registry: &Registry, obligations_file: &Path) -> Vec<Vi
     }
 
     out
+}
+
+// ---------------------------------------------------------------------------
+// V28 / V29 — obligation dispositions (024-deterministic-conformance-coverage, US2)
+// ---------------------------------------------------------------------------
+
+/// **V28 — disposition arity** and **V29 — disposition semantics** (024 US2;
+/// data-model.md §6, contracts/obligation.md "Disposition resolution").
+///
+/// | Class | What it refuses |
+/// |---|---|
+/// | **V28** | an applicable obligation with **zero** dispositions, or one with **more than one** |
+/// | **V29** | a `non-testable` rationale that names no ground; a high-risk **triple** argued rather than tested; a **stale** record whose obligation no longer resolves; a payload naming a record that does not exist; a `waived` record backed by a blanket waiver scope |
+///
+/// Both are computed from ONE join ([`audit_dispositions`]) — the same one `certify`
+/// blocks on and `coverage scaffold` emits from, so the three can never disagree about
+/// what is undispositioned.
+///
+/// **Scoped to registries that declare a scenario model**, exactly as V27 is. A registry
+/// with no `scenario.json` has not opted into the obligation regime at all; without this
+/// scoping every pre-024 fixture would suddenly owe a decision on one behavior obligation
+/// per behavior, which would say nothing true about those fixtures.
+///
+/// The *arity within a single record* — exactly one of `cases`/`rationale`/`waiver`/`gap`
+/// — is deliberately NOT here: it is refused at deserialize time (see
+/// [`ObligationDisposition`](crate::obligation::ObligationDisposition)), so by the time
+/// this runs every record is internally coherent and the only open questions are the ones
+/// that need the rest of the registry.
+pub fn check_obligation_dispositions(registry: &Registry) -> Vec<Violation> {
+    let mut out = Vec::new();
+    if registry.scenario.is_empty() {
+        return out;
+    }
+    let inventory = match generate_obligations(registry) {
+        Ok(inventory) => inventory,
+        // Generation failure is V27's diagnosis (it names the modelling mistake); saying
+        // it twice in different words would send a reviewer looking for two problems.
+        Err(_) => return out,
+    };
+
+    let audit = audit_dispositions(registry, &inventory);
+
+    // -- V28: zero ----------------------------------------------------------
+    for unit in &audit.undispositioned {
+        out.push(Violation::new(
+            "V28",
+            &unit.id,
+            format!(
+                "obligation has no disposition — {}. Every applicable obligation needs \
+                 exactly one of `case` / `non-testable` / `waived` / `gap`; there is no \
+                 default, because \"nobody decided\" is not a decision. Run `coverage \
+                 scaffold` for a skeleton.",
+                describe_obligation(unit)
+            ),
+        ));
+    }
+
+    // -- V28: more than one -------------------------------------------------
+    for (unit, records) in &audit.conflicting {
+        let ids: Vec<&str> = records.iter().map(|r| r.id.as_str()).collect();
+        out.push(Violation::new(
+            "V28",
+            &unit.id,
+            format!(
+                "obligation carries {} dispositions ({}) — {}. Two records are two \
+                 judgements; resolution never picks a winner, because doing so would turn \
+                 a disagreement into a decision nobody made. Delete or merge until one \
+                 remains.",
+                records.len(),
+                ids.join(", "),
+                describe_obligation(unit)
+            ),
+        ));
+    }
+
+    // -- V29: stale ---------------------------------------------------------
+    for record in &audit.stale {
+        out.push(Violation::new(
+            "V29",
+            &record.id,
+            format!(
+                "disposition names obligation {:?}, which the generated inventory no \
+                 longer contains — the combination or behavior it judged changed \
+                 substance or was removed. Stale, not silently dropped: a regenerated \
+                 obligation that merely resembles the old one is a NEW obligation needing \
+                 its own decision (disposition is never inherited by name).",
+                record.obligation
+            ),
+        ));
+    }
+
+    // -- V29: semantics of each cleanly-resolved record ----------------------
+    let case_ids: HashSet<&str> = registry.cases.iter().map(|c| c.id.as_str()).collect();
+    let waivers: HashMap<&str, &Waiver> = registry
+        .waivers
+        .iter()
+        .map(|w| (w.id.as_str(), w))
+        .collect();
+    let gap_ids: HashSet<&str> = registry.gaps.iter().map(|g| g.id.as_str()).collect();
+
+    for (unit, record) in &audit.resolved {
+        match record.disposition {
+            DispositionKind::Case => {
+                for case in &record.cases {
+                    if !case_ids.contains(case.as_str()) {
+                        out.push(Violation::new(
+                            "V29",
+                            &record.id,
+                            format!(
+                                "claims coverage by case {case:?}, which is not a declared case"
+                            ),
+                        ));
+                    }
+                }
+            }
+            DispositionKind::NonTestable => {
+                if unit.is_triple() {
+                    out.push(Violation::new(
+                        "V29",
+                        &record.id,
+                        "a high-risk triple may be dispositioned only by `case` or `gap` \
+                         (FR-015). Triples are selected precisely because interaction \
+                         defects hide there, so an argument that one needs no test is the \
+                         one argument the model does not accept."
+                            .to_string(),
+                    ));
+                }
+                let rationale = record.rationale.as_deref().unwrap_or_default();
+                if !names_an_exclusion_ground(rationale) {
+                    out.push(Violation::new(
+                        "V29",
+                        &record.id,
+                        format!(
+                            "`rationale` {rationale:?} does not name a ground for calling \
+                             this obligation untestable — name the principle (e.g. \
+                             \"Constitution II forbids feature authoring\") or the specific \
+                             unobservable mechanism. A bare restatement that it is out of \
+                             scope is indistinguishable from unqueued debt, which is what a \
+                             gap is for."
+                        ),
+                    ));
+                }
+            }
+            DispositionKind::Waived => {
+                if unit.is_triple() {
+                    out.push(Violation::new(
+                        "V29",
+                        &record.id,
+                        "a high-risk triple may be dispositioned only by `case` or `gap` \
+                         (FR-015); a waiver is a characterized divergence, not evidence \
+                         that the interaction behaves."
+                            .to_string(),
+                    ));
+                }
+                let id = record.waiver.as_deref().unwrap_or_default();
+                match waivers.get(id) {
+                    None => out.push(Violation::new(
+                        "V29",
+                        &record.id,
+                        format!("names waiver {id:?}, which the registry does not declare"),
+                    )),
+                    Some(waiver) => {
+                        if let Some(reason) = blanket_waiver_scope(&waiver.scope) {
+                            out.push(Violation::new(
+                                "V29",
+                                &record.id,
+                                format!(
+                                    "is backed by waiver {id:?}, whose scope is blanket \
+                                     rather than specific: {reason}. A tolerance must name \
+                                     the observable content it tolerates — the same rule \
+                                     V19 enforces on an allowed difference, for the same \
+                                     reason: a scope that matches everything cannot \
+                                     self-invalidate when the difference stops reproducing."
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+            DispositionKind::Gap => {
+                let id = record.gap.as_deref().unwrap_or_default();
+                if !gap_ids.contains(id) {
+                    out.push(Violation::new(
+                        "V29",
+                        &record.id,
+                        format!(
+                            "names gap {id:?}, which the registry does not declare — an \
+                             admitted gap that no `gap-` record backs blocks nothing, so \
+                             the admission would be free"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Whether a waiver's scope is too broad to attach a disposition to, and why.
+///
+/// The FR-023 analogue of the FR-032 rule V19 already enforces on an allowed difference's
+/// `observablePath`. [`Scope`] is a closed union, and only one of its two variants can be
+/// widened: [`Scope::StateField`] matches `field` exactly OR as a trailing-`*` prefix, so
+/// a bare `"*"` (or an empty field) matches **every** field of the fixture — a global
+/// ignore wearing a waiver's clothes. [`Scope::CorpusCase`] names one case of one corpus
+/// and has no wildcard form at all, so it has no blanket shape to reject; inventing one
+/// for symmetry would reject correct records.
+fn blanket_waiver_scope(scope: &Scope) -> Option<String> {
+    match scope {
+        Scope::CorpusCase { .. } => None,
+        Scope::StateField { field, .. } => {
+            let trimmed = field.trim();
+            (trimmed.is_empty() || trimmed == "*").then(|| {
+                format!(
+                    "`field` {field:?} matches every observable field of the fixture rather \
+                     than a named one"
+                )
+            })
+        }
+    }
 }
 
 /// Whether a behavior applies in a profile's context: every applicability condition
