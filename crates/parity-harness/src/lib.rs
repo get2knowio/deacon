@@ -22,6 +22,7 @@ use std::time::Duration;
 
 pub mod aggregate;
 pub mod compare;
+pub mod driver;
 pub mod equivalence;
 pub mod evidence;
 pub mod exec;

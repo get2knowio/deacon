@@ -82,6 +82,26 @@ const TESTS_DIR_REL: &str = "crates/deacon/tests";
 /// side of the same fact.
 const GUARD_PROGRAMS: &[&str] = &["parity_harness_faults", "parity_registry_check"];
 
+/// Live programs created AFTER the freeze commit, which therefore contribute ZERO baseline
+/// units.
+///
+/// The baseline records a **pre-migration** world (`revision` is the freeze commit). A
+/// binary that did not exist then reported no pre-migration outcome, so enumerating one is
+/// not "a program with no authored metadata" — it is a program with nothing to enumerate.
+/// Erroring on it would make the parity registry unable to grow: registering any new live
+/// binary would fail `baseline generate` until someone invented pre-migration units for a
+/// world it was never part of.
+///
+/// This is an explicit ALLOW-LIST, not a fallthrough. A registry entry naming a program
+/// that is neither here nor in [`SCENARIO_UNITS`] is still
+/// [`BaselineError::UnknownProgram`], so a typo cannot silently contribute nothing.
+///
+/// - `parity_conformance_docker` — 024 T016/T020: the Docker-backed half of the
+///   declarative runner's resource-group split. Its cases are declarative records that the
+///   frozen baseline already accounts for under `parity_conformance_runner`; moving which
+///   BINARY drives them is a scheduling change, not new or lost coverage.
+const POST_FREEZE_PROGRAMS: &[&str] = &["parity_conformance_docker"];
+
 // ---------------------------------------------------------------------------
 // Record model (data-model.md §1)
 // ---------------------------------------------------------------------------
@@ -1145,6 +1165,9 @@ pub fn generate_baseline(repo_root: &Path, revision: &str) -> Result<BaselineFil
                     binary.docker_required,
                 )?);
             }
+            // Created after the freeze: no pre-migration outcome to enumerate (see
+            // `POST_FREEZE_PROGRAMS`).
+            LiveKind::Scenario if POST_FREEZE_PROGRAMS.contains(&binary.name.as_str()) => {}
             LiveKind::Scenario if binary.name == "parity_conformance_runner" => {
                 records.extend(runner_units(&binary.name, &registry.cases)?);
             }

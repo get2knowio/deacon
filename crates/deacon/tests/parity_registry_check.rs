@@ -592,9 +592,9 @@ fn the_surviving_set_is_mutually_consistent() {
 
     assert_eq!(
         reg.live_names().len(),
-        6,
-        "the surviving live set is 5 Docker scenario binaries + the declarative runner; \
-         found {:?}",
+        7,
+        "the surviving live set is 5 Docker scenario binaries + the declarative runner's \
+         two halves (config-only + Docker-backed, 024 T015/T016); found {:?}",
         reg.live_names()
     );
     assert!(

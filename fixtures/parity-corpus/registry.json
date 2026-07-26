@@ -29,6 +29,11 @@
       "name": "parity_conformance_runner",
       "kind": "scenario",
       "docker_required": false
+    },
+    {
+      "name": "parity_conformance_docker",
+      "kind": "scenario",
+      "docker_required": true
     }
   ],
   "internal_consistency_binaries": [
