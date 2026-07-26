@@ -1,0 +1,4 @@
+{
+	"name": "ConformanceTemplatesTargetDockerfile",
+	"build": { "dockerfile": "Dockerfile" }
+}

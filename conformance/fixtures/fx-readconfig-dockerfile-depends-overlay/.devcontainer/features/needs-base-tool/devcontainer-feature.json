@@ -1,0 +1,6 @@
+{
+	"id": "needs-base-tool",
+	"version": "1.0.0",
+	"name": "Conformance needs-base-tool",
+	"installsAfter": ["./features/base-tool"]
+}

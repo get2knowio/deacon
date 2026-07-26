@@ -2,130 +2,234 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "odp-bhv-de6e65f1",
+      "obligation": "obl-bhv-de6e65f1",
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-compose-workspace",
+        "case-doctor-dockerfile-workspace",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-structured-diagnostics",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
+    },
+    {
       "id": "odp-cmb-0387cae0",
       "obligation": "obl-cmb-0387cae0",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
     },
     {
       "id": "odp-cmb-07439195",
       "obligation": "obl-cmb-07439195",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-structured-diagnostics"
+      ]
     },
     {
       "id": "odp-cmb-17b8e0e5",
       "obligation": "obl-cmb-17b8e0e5",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-structured-diagnostics",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
     },
     {
       "id": "odp-cmb-19c03a91",
       "obligation": "obl-cmb-19c03a91",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-2e17b1aa",
       "obligation": "obl-cmb-2e17b1aa",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-3043811a",
       "obligation": "obl-cmb-3043811a",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-structured-diagnostics"
+      ]
     },
     {
       "id": "odp-cmb-41e4e7c9",
       "obligation": "obl-cmb-41e4e7c9",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-4dee04e5",
       "obligation": "obl-cmb-4dee04e5",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-compose-workspace",
+        "case-doctor-dockerfile-workspace",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
     },
     {
       "id": "odp-cmb-54df9f12",
       "obligation": "obl-cmb-54df9f12",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-compose-workspace",
+        "case-doctor-dockerfile-workspace",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-structured-diagnostics",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
     },
     {
       "id": "odp-cmb-6b155b16",
       "obligation": "obl-cmb-6b155b16",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-structured-diagnostics",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
     },
     {
       "id": "odp-cmb-6f45863d",
       "obligation": "obl-cmb-6f45863d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-compose-workspace",
+        "case-doctor-dockerfile-workspace",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-structured-diagnostics",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
     },
     {
       "id": "odp-cmb-883669bf",
       "obligation": "obl-cmb-883669bf",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-8ff0efa3",
       "obligation": "obl-cmb-8ff0efa3",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-9d35f07b",
       "obligation": "obl-cmb-9d35f07b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-compose-workspace",
+        "case-doctor-dockerfile-workspace",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
     },
     {
       "id": "odp-cmb-bcca0d67",
       "obligation": "obl-cmb-bcca0d67",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-compose-workspace",
+        "case-doctor-dockerfile-workspace",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-structured-diagnostics",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
     },
     {
       "id": "odp-cmb-be3818e0",
       "obligation": "obl-cmb-be3818e0",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-c9c75c4c",
       "obligation": "obl-cmb-c9c75c4c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-structured-diagnostics"
+      ]
     },
     {
       "id": "odp-cmb-cf9e538b",
       "obligation": "obl-cmb-cf9e538b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-d22efd81",
       "obligation": "obl-cmb-d22efd81",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-structured-diagnostics",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
     },
     {
       "id": "odp-cmb-e0954520",
       "obligation": "obl-cmb-e0954520",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-e330006e",
       "obligation": "obl-cmb-e330006e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-boundary-no-configuration",
+        "case-doctor-compose-workspace",
+        "case-doctor-dockerfile-workspace",
+        "case-doctor-human-diagnostics",
+        "case-doctor-malformed-configuration-still-diagnoses",
+        "case-doctor-unsupported-values-still-diagnoses"
+      ]
     },
     {
       "id": "odp-cmb-f1dbca6e",
@@ -142,8 +246,10 @@
     {
       "id": "odp-cmb-f8bfac02",
       "obligation": "obl-cmb-f8bfac02",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-structured-diagnostics"
+      ]
     }
   ]
 }

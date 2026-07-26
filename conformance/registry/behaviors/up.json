@@ -10,6 +10,26 @@
       "reference": "aligned",
       "decision": "follow-spec",
       "notes": "Backed by case-up-exec-parity (parity_up_exec, a single reported outcome shared with bhv-exec-container-id-metadata) and, independently, by the declarative case-up-exec-decl-traditional (023 T040)."
+    },
+    {
+      "id": "bhv-up-feature-install-order",
+      "area": "up",
+      "statement": "`up` installs the configuration's Features into the container it creates, in the resolved install order, across image, Dockerfile, and Compose configuration sources.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Evidenced by a live differential on the outcome plus a spec-expectation case that reads the marker each Feature's install.sh writes INSIDE the container — the lesson from the --image-name defect, where an outcome-only assertion reported success for an image with no Feature in it."
+    },
+    {
+      "id": "bhv-up-restart-reuses-container",
+      "area": "up",
+      "statement": "Re-entering a workspace whose container already exists reattaches to it rather than creating a second one, including when the configuration has changed since it was created.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Asserted as a metamorphic relationship (`first-create-vs-restart`) rather than against a fixed output, because what is being pinned is the relation between the two runs and not either run's document. The container-graph observation captures EVERY container matching the workspace label so a duplicate is visible; an exit code cannot show one."
     }
   ]
 }

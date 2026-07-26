@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceRucHookFailure",
+	"image": "alpine:3.19",
+	"postCreateCommand": "sh -c 'echo conformance: failing hook >&2; exit 23'",
+	"remoteUser": "root"
+}

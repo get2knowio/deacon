@@ -1,0 +1,17 @@
+{
+  "id": "wvr-unsupported-enum-values",
+  "behaviors": [
+    "bhv-readconfig-unsupported-enum-rejected"
+  ],
+  "scope": {
+    "kind": "corpus_case",
+    "corpus": "readconfig",
+    "case": "unsupported-enum-values"
+  },
+  "expect": {
+    "kind": "deacon-stricter"
+  },
+  "rationale": "deacon validates modelled fields against the pinned schema's closed enums during configuration resolution; the reference's read-configuration is a lenient parse-and-echo that accepts and prints the value back. Same family, and the same deliberate choice, as the wrong-type rejections: constitution IV requires failing fast on a developer's mistake in a modelled field.",
+  "added": "2026-07-26",
+  "expires": "2027-07-26"
+}

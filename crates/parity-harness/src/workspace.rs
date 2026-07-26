@@ -1,5 +1,5 @@
-//! Isolated external workspaces + guaranteed resource cleanup for Docker-backed cases
-//! (research D10, T052, FR-036/037/039).
+//! Isolated external workspaces + guaranteed resource cleanup for cases that must not run
+//! against the committed fixture tree (research D10, T052, FR-036/037/039).
 //!
 //! Each Docker case runs in an isolated external temp workspace ([`tempfile`]) with a
 //! collision-resistant run id. Because deacon derives its container identity (and the
@@ -10,6 +10,15 @@
 //! any tracked images/networks/volumes — on success AND on unwind (panic / early return),
 //! then the temp dir removes itself (FR-039). Cleanup is synchronous + best-effort (Drop
 //! cannot be async and must never itself panic).
+//!
+//! An **`fs-heavy`** case gets the same isolated temp workspace through
+//! [`DockerWorkspace::new_filesystem_only`], with Docker reclamation switched off. Its
+//! group means "significant filesystem operations, no Docker" — and *significant
+//! filesystem operations* is exactly the thing that must not happen inside
+//! `conformance/fixtures/`, which is version-controlled input shared by every other case.
+//! Running such a case in place would leave the repository dirty and let one case's writes
+//! become the next case's input. Reclaiming Docker for it, on the other hand, would make
+//! the config-only lane shell out to a daemon it is defined not to need.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,6 +38,9 @@ pub struct DockerWorkspace {
     run_id: String,
     /// `deacon` binary path for `down` (best-effort); `None` skips the down call.
     deacon_path: Option<PathBuf>,
+    /// Whether cleanup touches Docker at all (the label sweep + tracked resources).
+    /// `false` for a filesystem-only workspace, whose lane has no daemon to talk to.
+    reclaim_docker: bool,
     /// Image tags to `docker rmi -f` on cleanup.
     images: Vec<String>,
     /// Network names to `docker network rm` on cleanup.
@@ -50,11 +62,25 @@ impl DockerWorkspace {
             tempdir,
             run_id,
             deacon_path: deacon_path.map(Path::to_path_buf),
+            reclaim_docker: true,
             images: Vec::new(),
             networks: Vec::new(),
             volumes: Vec::new(),
             reclaimed: false,
         })
+    }
+
+    /// An isolated temp workspace whose cleanup is the temp dir and nothing else — for an
+    /// `fs-heavy` case, which writes to its workspace but creates no container.
+    ///
+    /// Deliberately a separate constructor rather than a boolean on [`new`](Self::new):
+    /// the two differ in whether cleanup may shell out to `docker`, and that is a property
+    /// of the lane a case runs in, not a tuning knob. `parity_conformance_runner` is
+    /// defined to need no daemon, so a workspace it creates must not try to reach one.
+    pub fn new_filesystem_only() -> std::io::Result<DockerWorkspace> {
+        let mut ws = DockerWorkspace::new(None)?;
+        ws.reclaim_docker = false;
+        Ok(ws)
     }
 
     /// The isolated workspace directory (the `--workspace-folder` for the case's ops).
@@ -115,6 +141,10 @@ impl DockerWorkspace {
                 .args(["down", "--remove", "--workspace-folder", &ws])
                 .current_dir(self.tempdir.path())
                 .output();
+        }
+
+        if !self.reclaim_docker {
+            return;
         }
 
         // Sweep any container still labeled with THIS workspace (collision-safe — the

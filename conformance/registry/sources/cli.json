@@ -7,7 +7,30 @@
       "revision": "rev-cli-surface-0-87-0",
       "locator": "auto port-forward daemon",
       "summary": "deacon exposes a host-side port-forward daemon (a superset the reference CLI does not provide).",
-      "behaviors": ["bhv-auto-forward-ports"]
+      "behaviors": [
+        "bhv-auto-forward-ports"
+      ]
+    },
+    {
+      "id": "src-cli-doctor",
+      "inventory": "cli",
+      "revision": "rev-cli-surface-0-87-0",
+      "locator": "deacon doctor [--json] [--bundle]",
+      "summary": "Host, platform, and runtime diagnostics with a human and a JSON rendering. The pinned reference exposes no equivalent.",
+      "behaviors": [
+        "bhv-doctor-diagnostics-report"
+      ]
+    },
+    {
+      "id": "src-cli-down",
+      "inventory": "cli",
+      "revision": "rev-cli-surface-0-87-0",
+      "locator": "deacon down [--remove] [--all]",
+      "summary": "The teardown command: stop, and optionally remove, the workspace's container or Compose project. The pinned reference exposes no equivalent.",
+      "behaviors": [
+        "bhv-down-removes-container",
+        "bhv-down-compose-project-teardown"
+      ]
     },
     {
       "id": "src-cli-host-ca",
@@ -15,7 +38,9 @@
       "revision": "rev-cli-surface-0-87-0",
       "locator": "host CA injection (settings.json)",
       "summary": "deacon can inject host CA certificates into its TLS trust store (a superset the reference CLI does not provide).",
-      "behaviors": ["bhv-host-ca-injection"]
+      "behaviors": [
+        "bhv-host-ca-injection"
+      ]
     },
     {
       "id": "src-cli-profile",
@@ -23,7 +48,9 @@
       "revision": "rev-cli-surface-0-87-0",
       "locator": "--profile / DEACON_PROFILE",
       "summary": "deacon applies a user-defined profile from settings.json (a superset the reference CLI does not provide).",
-      "behaviors": ["bhv-user-profiles"]
+      "behaviors": [
+        "bhv-user-profiles"
+      ]
     },
     {
       "id": "src-cli-secrets-file",
@@ -31,7 +58,9 @@
       "revision": "rev-cli-surface-0-87-0",
       "locator": "--secrets-file",
       "summary": "deacon's --secrets-file accepts both JSON and a .env-format file (a superset the reference CLI does not model).",
-      "behaviors": ["bhv-secrets-dotenv-superset"]
+      "behaviors": [
+        "bhv-secrets-dotenv-superset"
+      ]
     },
     {
       "id": "src-cli-trust-workspace",
@@ -39,7 +68,9 @@
       "revision": "rev-cli-surface-0-87-0",
       "locator": "--trust-workspace / --trust-workspace-persist",
       "summary": "deacon gates host-side lifecycle hooks behind an explicit workspace-trust opt-in (a protection the reference CLI does not provide).",
-      "behaviors": ["bhv-trust-host-hook-gate"]
+      "behaviors": [
+        "bhv-trust-host-hook-gate"
+      ]
     }
   ]
 }

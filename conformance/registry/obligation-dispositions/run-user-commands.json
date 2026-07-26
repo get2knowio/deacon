@@ -2,6 +2,28 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "odp-bhv-08a2b807",
+      "obligation": "obl-bhv-08a2b807",
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-compose-workspace",
+        "case-run-user-commands-dockerfile-workspace",
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-order"
+      ]
+    },
+    {
+      "id": "odp-bhv-2141938d",
+      "obligation": "obl-bhv-2141938d",
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-hook-failure",
+        "case-run-user-commands-unsupported-no-container"
+      ]
+    },
+    {
       "id": "odp-cmb-0300fafb",
       "obligation": "obl-cmb-0300fafb",
       "disposition": "gap",
@@ -46,8 +68,10 @@
     {
       "id": "odp-cmb-11f946cd",
       "obligation": "obl-cmb-11f946cd",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-13d8179a",
@@ -130,8 +154,16 @@
     {
       "id": "odp-cmb-339538ae",
       "obligation": "obl-cmb-339538ae",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-failure",
+        "case-run-user-commands-hook-order",
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-run-user-commands-unsupported-no-container"
+      ]
     },
     {
       "id": "odp-cmb-3484e92e",
@@ -142,8 +174,10 @@
     {
       "id": "odp-cmb-352f2c4c",
       "obligation": "obl-cmb-352f2c4c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-3938d84c",
@@ -178,14 +212,27 @@
     {
       "id": "odp-cmb-4a3c3492",
       "obligation": "obl-cmb-4a3c3492",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-compose-workspace",
+        "case-run-user-commands-dockerfile-workspace",
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-failure",
+        "case-run-user-commands-hook-order",
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-run-user-commands-unsupported-no-container"
+      ]
     },
     {
       "id": "odp-cmb-4a4ce57b",
       "obligation": "obl-cmb-4a4ce57b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-run-user-commands-unsupported-no-container"
+      ]
     },
     {
       "id": "odp-cmb-4ac835f2",
@@ -202,8 +249,16 @@
     {
       "id": "odp-cmb-4cd6587d",
       "obligation": "obl-cmb-4cd6587d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-failure",
+        "case-run-user-commands-hook-order",
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-run-user-commands-unsupported-no-container"
+      ]
     },
     {
       "id": "odp-cmb-4e8797c5",
@@ -232,14 +287,19 @@
     {
       "id": "odp-cmb-53e1f6ec",
       "obligation": "obl-cmb-53e1f6ec",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-56eda6b3",
       "obligation": "obl-cmb-56eda6b3",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-run-user-commands-unsupported-no-container"
+      ]
     },
     {
       "id": "odp-cmb-582cde6f",
@@ -268,8 +328,13 @@
     {
       "id": "odp-cmb-61054161",
       "obligation": "obl-cmb-61054161",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-compose-workspace",
+        "case-run-user-commands-dockerfile-workspace",
+        "case-run-user-commands-hook-failure"
+      ]
     },
     {
       "id": "odp-cmb-61969809",
@@ -280,8 +345,15 @@
     {
       "id": "odp-cmb-641593cf",
       "obligation": "obl-cmb-641593cf",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-compose-workspace",
+        "case-run-user-commands-dockerfile-workspace",
+        "case-run-user-commands-hook-failure",
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-run-user-commands-unsupported-no-container"
+      ]
     },
     {
       "id": "odp-cmb-66c1023a",
@@ -310,8 +382,16 @@
     {
       "id": "odp-cmb-69f9a7fa",
       "obligation": "obl-cmb-69f9a7fa",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-compose-workspace",
+        "case-run-user-commands-dockerfile-workspace",
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-failure",
+        "case-run-user-commands-hook-order"
+      ]
     },
     {
       "id": "odp-cmb-6a4e2da0",
@@ -370,14 +450,21 @@
     {
       "id": "odp-cmb-7880761d",
       "obligation": "obl-cmb-7880761d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-order"
+      ]
     },
     {
       "id": "odp-cmb-788f3b1f",
       "obligation": "obl-cmb-788f3b1f",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-run-user-commands-unsupported-no-container"
+      ]
     },
     {
       "id": "odp-cmb-7b1a48f2",
@@ -388,8 +475,10 @@
     {
       "id": "odp-cmb-7d30bd1e",
       "obligation": "obl-cmb-7d30bd1e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-7f1e3dee",
@@ -430,8 +519,10 @@
     {
       "id": "odp-cmb-9a850e53",
       "obligation": "obl-cmb-9a850e53",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-9cf6eb47",
@@ -442,8 +533,11 @@
     {
       "id": "odp-cmb-9fcd4ba1",
       "obligation": "obl-cmb-9fcd4ba1",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-run-user-commands-unsupported-no-container"
+      ]
     },
     {
       "id": "odp-cmb-a6a6ae8c",
@@ -454,8 +548,10 @@
     {
       "id": "odp-cmb-a6f5791c",
       "obligation": "obl-cmb-a6f5791c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-a729553b",
@@ -484,44 +580,74 @@
     {
       "id": "odp-cmb-aeeaadbe",
       "obligation": "obl-cmb-aeeaadbe",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-compose-workspace",
+        "case-run-user-commands-dockerfile-workspace",
+        "case-run-user-commands-hook-failure",
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-run-user-commands-unsupported-no-container"
+      ]
     },
     {
       "id": "odp-cmb-b046a12c",
       "obligation": "obl-cmb-b046a12c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-failure",
+        "case-run-user-commands-hook-order"
+      ]
     },
     {
       "id": "odp-cmb-b0d8f60d",
       "obligation": "obl-cmb-b0d8f60d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-order"
+      ]
     },
     {
       "id": "odp-cmb-b0f2f644",
       "obligation": "obl-cmb-b0f2f644",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-b188b213",
       "obligation": "obl-cmb-b188b213",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-order"
+      ]
     },
     {
       "id": "odp-cmb-b290e8b5",
       "obligation": "obl-cmb-b290e8b5",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-hook-failure",
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-run-user-commands-unsupported-no-container"
+      ]
     },
     {
       "id": "odp-cmb-b5d17638",
       "obligation": "obl-cmb-b5d17638",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-ba6916b3",
@@ -596,6 +722,16 @@
       "gap": "gap-pairwise-run-user-commands"
     },
     {
+      "id": "odp-cmb-d2018a76",
+      "obligation": "obl-cmb-d2018a76",
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-order"
+      ]
+    },
+    {
       "id": "odp-cmb-d2753769",
       "obligation": "obl-cmb-d2753769",
       "disposition": "gap",
@@ -652,8 +788,12 @@
     {
       "id": "odp-cmb-f84911d4",
       "obligation": "obl-cmb-f84911d4",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-order"
+      ]
     },
     {
       "id": "odp-cmb-f870381d",
@@ -664,8 +804,16 @@
     {
       "id": "odp-cmb-ff5eb264",
       "obligation": "obl-cmb-ff5eb264",
-      "disposition": "gap",
-      "gap": "gap-pairwise-run-user-commands"
+      "disposition": "case",
+      "cases": [
+        "case-run-user-commands-boundary-no-hooks",
+        "case-run-user-commands-compose-workspace",
+        "case-run-user-commands-dockerfile-workspace",
+        "case-run-user-commands-feature-contributed-hook",
+        "case-run-user-commands-feature-hook-sequence",
+        "case-run-user-commands-hook-failure",
+        "case-run-user-commands-hook-order"
+      ]
     }
   ]
 }

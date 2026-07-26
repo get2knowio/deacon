@@ -1,0 +1,6 @@
+{
+	"id": "hooked",
+	"version": "1.0.0",
+	"name": "Conformance hook-contributing feature",
+	"postCreateCommand": "sh -c 'echo feature-postCreate >> /tmp/conformance-hooks'"
+}

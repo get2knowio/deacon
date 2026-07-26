@@ -4,8 +4,18 @@
     {
       "id": "rule-exec-emits-no-result-document",
       "excludes": [
-        { "dimension": "sdim-operation", "values": ["exec"] },
-        { "dimension": "sdim-output-mode", "values": ["structured"] }
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "exec"
+          ]
+        },
+        {
+          "dimension": "sdim-output-mode",
+          "values": [
+            "structured"
+          ]
+        }
       ],
       "ground": "`exec` streams the invoked command's own stdout and stderr and emits no result document of its own — it carries no output-format flag — so there is no structured rendering for a case to choose between."
     },
@@ -25,7 +35,11 @@
         },
         {
           "dimension": "sdim-container-state",
-          "values": ["stopped", "running", "running-stale-config"]
+          "values": [
+            "stopped",
+            "running",
+            "running-stale-config"
+          ]
         }
       ],
       "ground": "These operations neither create nor attach to a container: they resolve configuration, build an image, resolve Feature versions, scaffold files, or probe the host. A pre-existing container is therefore not a condition they can observe or act on, and only the degenerate `none` state remains meaningful."
@@ -33,10 +47,19 @@
     {
       "id": "rule-no-feature-composition-for-attach-only-operations",
       "excludes": [
-        { "dimension": "sdim-operation", "values": ["exec"] },
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "exec"
+          ]
+        },
         {
           "dimension": "sdim-features",
-          "values": ["multiple-declared-order", "multiple-dependency-order", "lockfile"]
+          "values": [
+            "multiple-declared-order",
+            "multiple-dependency-order",
+            "lockfile"
+          ]
         }
       ],
       "ground": "`exec` attaches to a container another operation created; it never resolves, orders, or installs Features. Whether the target container has Features at all is visible to it, but the ordering and lockfile-resolution decisions belong to `up`/`build`, and a case pinning those decisions is a case for that operation."
@@ -44,7 +67,14 @@
     {
       "id": "rule-no-features-for-teardown-scaffolding-and-diagnostics",
       "excludes": [
-        { "dimension": "sdim-operation", "values": ["down", "doctor", "templates-apply"] },
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "down",
+            "doctor",
+            "templates-apply"
+          ]
+        },
         {
           "dimension": "sdim-features",
           "values": [
@@ -62,36 +92,221 @@
       "excludes": [
         {
           "dimension": "sdim-operation",
-          "values": ["down", "outdated", "upgrade", "templates-apply", "doctor"]
+          "values": [
+            "down",
+            "outdated",
+            "upgrade",
+            "templates-apply",
+            "doctor"
+          ]
         },
-        { "dimension": "sdim-layering", "values": ["image-metadata"] }
+        {
+          "dimension": "sdim-layering",
+          "values": [
+            "image-metadata"
+          ]
+        }
       ],
       "ground": "An image-metadata layer is read from the `devcontainer.metadata` label of a resolved image. These operations never resolve or inspect an image — they remove labelled resources, query a Feature registry, rewrite a lockfile, scaffold files, or probe the host — so no image-derived layer can exist to contribute to their effective configuration."
     },
     {
       "id": "rule-no-layered-configuration-for-diagnostics",
       "excludes": [
-        { "dimension": "sdim-operation", "values": ["doctor"] },
-        { "dimension": "sdim-layering", "values": ["extends-chain", "cli-overlay"] }
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "doctor"
+          ]
+        },
+        {
+          "dimension": "sdim-layering",
+          "values": [
+            "extends-chain",
+            "cli-overlay"
+          ]
+        }
       ],
       "ground": "`doctor` reports host, runtime, and environment diagnostics rather than a merged configuration; it never resolves an extends chain or applies a command-line overlay, so how a configuration would have been layered cannot affect the diagnosis it prints."
     },
     {
       "id": "rule-no-result-document-for-teardown-and-hook-execution",
       "excludes": [
-        { "dimension": "sdim-operation", "values": ["down", "run-user-commands"] },
-        { "dimension": "sdim-output-mode", "values": ["structured"] }
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "down",
+            "run-user-commands"
+          ]
+        },
+        {
+          "dimension": "sdim-output-mode",
+          "values": [
+            "structured"
+          ]
+        }
       ],
       "ground": "`down` and `run-user-commands` complete with progress and diagnostics only; neither carries an output-format flag and neither writes a result document to stdout, so a structured rendering does not exist for a case to observe."
     },
     {
       "id": "rule-structured-only-result-documents",
       "excludes": [
-        { "dimension": "sdim-operation", "values": ["read-configuration", "up"] },
-        { "dimension": "sdim-output-mode", "values": ["human"] }
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "read-configuration",
+            "up"
+          ]
+        },
+        {
+          "dimension": "sdim-output-mode",
+          "values": [
+            "human"
+          ]
+        }
       ],
       "ground": "`read-configuration` and `up` emit their result exclusively as a single JSON document on stdout; neither carries an output-format flag, so a human-readable rendering of the result does not exist and cannot be exercised."
     }
   ],
-  "triples": []
+  "triples": [
+    {
+      "id": "hrt-readconfig-extends-chain-compose-declared-order",
+      "assignment": {
+        "sdim-operation": "read-configuration",
+        "sdim-layering": "extends-chain",
+        "sdim-config-source": "compose",
+        "sdim-features": "multiple-declared-order"
+      },
+      "reason": "Three merge rules meet here and disagree about their base directory. `dockerComposeFile` resolves against the WORKSPACE folder while a child's relative `extends` target resolves against the CONFIG directory, which changes at every link of the chain; the `features` map merges key-wise with the child winning, while `dockerComposeFile` merges as a scalar or a list. Each pair of those facts is exercised elsewhere; the interaction is where a chain that inherits a Compose project and adds Features silently resolves the project file relative to the wrong link."
+    },
+    {
+      "id": "hrt-readconfig-extends-chain-dockerfile-dependency-order",
+      "assignment": {
+        "sdim-operation": "read-configuration",
+        "sdim-layering": "extends-chain",
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "reason": "`build.dockerfile` resolves relative to the directory of the configuration that DECLARED it, and an extends chain moves that directory at every link, so a Dockerfile inherited from a parent is where the build path is computed from the wrong base. Layer on Features whose install order comes from dependency resolution rather than from declaration order and a second computation joins in: the merged Feature map has to be assembled across the chain BEFORE the dependency sort runs, or the sort orders a set that is missing the parent's contribution."
+    },
+    {
+      "id": "hrt-readconfig-cli-overlay-dockerfile-dependency-order",
+      "assignment": {
+        "sdim-operation": "read-configuration",
+        "sdim-layering": "cli-overlay",
+        "sdim-config-source": "dockerfile",
+        "sdim-features": "multiple-dependency-order"
+      },
+      "reason": "A Feature set supplied on the command line has to JOIN the dependency resolution the configuration's own Features are already subject to, not be appended after it. Appending is the natural implementation and is wrong whenever an overlaid Feature is a dependency of a declared one. The Dockerfile source matters because the build is what consumes the resulting order, so an order computed only for the declared set is invisible until the image is built."
+    },
+    {
+      "id": "hrt-up-compose-single-feature-running",
+      "assignment": {
+        "sdim-operation": "up",
+        "sdim-config-source": "compose",
+        "sdim-features": "single",
+        "sdim-container-state": "running"
+      },
+      "reason": "Feature installation happens against a service container that Compose brings up, and re-entry into an already-running project must not re-run the installation nor skip the lifecycle that depends on it. The pairs are individually covered; the interaction is where a second `up` on a running Compose project either duplicates the Feature layer or attaches to a container whose Feature never finished."
+    },
+    {
+      "id": "hrt-up-dockerfile-extends-chain-absent",
+      "assignment": {
+        "sdim-operation": "up",
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "extends-chain",
+        "sdim-container-state": "none"
+      },
+      "reason": "`build.dockerfile` resolves relative to the directory of the configuration that DECLARED it, and an extends chain moves that directory at every link. A Dockerfile inherited from a parent document is therefore the exact shape in which a build context is computed from the child's directory and the build fails, or worse succeeds against the wrong file. Creating the container from absent state is what forces the build to actually run."
+    },
+    {
+      "id": "hrt-up-image-single-feature-stale-config",
+      "assignment": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-features": "single",
+        "sdim-container-state": "running-stale-config"
+      },
+      "reason": "Re-running `up` after the configuration changed must decide between reusing the existing container and recreating it. With a Feature installed, reuse is the dangerous branch: the container keeps the layer built from the OLD configuration while every observable the CLI reports comes from the NEW one, so the two agree and the container is wrong."
+    },
+    {
+      "id": "hrt-exec-dockerfile-running-cli-overlay",
+      "assignment": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running",
+        "sdim-layering": "cli-overlay"
+      },
+      "reason": "A command-line overlay on `exec` (a user, extra remote environment) is applied on top of whatever the image's own metadata already established for the running container. A Dockerfile base is where the image contributes a real user and a real PATH, so the overlay has something to win against — and PATH is the field a careless overlay replaces instead of extending."
+    },
+    {
+      "id": "hrt-build-dockerfile-cli-overlay-single-feature",
+      "assignment": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-layering": "cli-overlay",
+        "sdim-features": "single"
+      },
+      "reason": "`--image-name` must resolve to the FEATURE-EXTENDED image, not to the base the Dockerfile produced. This project has already shipped the defect once: the post-build Feature pass layered correctly and the user's tag still pointed at the pre-Feature base, which every outcome-only assertion reported as success. Only the combination of a Dockerfile build, a command-line tag overlay and an installed Feature exposes it."
+    },
+    {
+      "id": "hrt-build-compose-no-features-structured",
+      "assignment": {
+        "sdim-operation": "build",
+        "sdim-config-source": "compose",
+        "sdim-features": "none",
+        "sdim-output-mode": "structured"
+      },
+      "reason": "Building a Compose configuration has to resolve the SERVICE's build shape rather than the top-level one, and then report the image it produced in its structured result. A build that reads the top-level shape still succeeds when the service happens to declare an image, so the mistake is only visible in what the result document names."
+    },
+    {
+      "id": "hrt-run-user-commands-image-single-feature-running",
+      "assignment": {
+        "sdim-operation": "run-user-commands",
+        "sdim-config-source": "image",
+        "sdim-features": "single",
+        "sdim-container-state": "running"
+      },
+      "reason": "Lifecycle hooks contributed by a Feature must run in the same ordered sequence as the ones the configuration declares, against a container that already exists. Hook ordering and Feature-contributed hooks are separately covered; the interaction is where a hook the Feature added runs before the Feature's own installation is visible, or is dropped entirely because the container was not created by this invocation."
+    },
+    {
+      "id": "hrt-down-compose-running-cli-overlay",
+      "assignment": {
+        "sdim-operation": "down",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running",
+        "sdim-layering": "cli-overlay"
+      },
+      "reason": "Teardown identifies what to remove from the Compose project name and the workspace labels, both derived from the resolved configuration. A command-line overlay changes that configuration, so if the derivation is not identical to the one `up` used, `down` reports success and leaves the project running — a failure that is silent on every channel except the container graph."
+    },
+    {
+      "id": "hrt-outdated-extends-chain-image-single-feature",
+      "assignment": {
+        "sdim-operation": "outdated",
+        "sdim-layering": "extends-chain",
+        "sdim-config-source": "image",
+        "sdim-features": "single"
+      },
+      "reason": "Version reporting has to read the Feature set from the FULL extends chain before comparing it against the registry. Reading only the top document is the easy mistake and produces an empty report rather than an error, so a chain link that contributes the only Feature is exactly the shape in which `outdated` quietly reports that nothing is out of date."
+    },
+    {
+      "id": "hrt-upgrade-extends-chain-image-lockfile",
+      "assignment": {
+        "sdim-operation": "upgrade",
+        "sdim-layering": "extends-chain",
+        "sdim-config-source": "image",
+        "sdim-features": "lockfile"
+      },
+      "reason": "Regenerating the lockfile must write the set the EFFECTIVE configuration resolves to, assembled across the whole extends chain, and must not simply refresh the entries the existing lockfile already contains. Refreshing what is already pinned is the implementation that passes every single-document case and silently drops a Feature a parent link contributed — and it drops it into an EMPTY lockfile with a zero exit, so nothing downstream notices. Selected over the command-line-overlay form of the same risk because `upgrade` exposes no overlay flag that reaches Feature resolution, so that combination has no invocable case to evidence it."
+    },
+    {
+      "id": "hrt-templates-apply-cli-overlay-image-human",
+      "assignment": {
+        "sdim-operation": "templates-apply",
+        "sdim-layering": "cli-overlay",
+        "sdim-config-source": "image",
+        "sdim-output-mode": "human"
+      },
+      "reason": "Template options given on the command line are substituted into the files the template scaffolds, and the only evidence that they arrived is the scaffolded bytes: the operation emits no result document to inspect. An option that is parsed but never substituted therefore produces a successful, human-readable run and a configuration containing the unsubstituted placeholder."
+    }
+  ]
 }

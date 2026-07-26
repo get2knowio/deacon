@@ -1,0 +1,7 @@
+{
+	"name": "dockerfile-depends-overlay",
+	"build": { "dockerfile": "Dockerfile" },
+	"features": {
+		"./features/needs-base-tool": {}
+	}
+}

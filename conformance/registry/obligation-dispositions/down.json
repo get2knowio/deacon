@@ -2,10 +2,34 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "odp-bhv-1766f639",
+      "obligation": "obl-bhv-1766f639",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
+    },
+    {
+      "id": "odp-bhv-be0a39ad",
+      "obligation": "obl-bhv-be0a39ad",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-dockerfile-workspace",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
       "id": "odp-cmb-00c00e24",
       "obligation": "obl-cmb-00c00e24",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
     },
     {
       "id": "odp-cmb-1401bdc7",
@@ -40,8 +64,12 @@
     {
       "id": "odp-cmb-27e9e3c9",
       "obligation": "obl-cmb-27e9e3c9",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-unsupported-no-workspace-config"
+      ]
     },
     {
       "id": "odp-cmb-29ea3dcb",
@@ -52,32 +80,51 @@
     {
       "id": "odp-cmb-2ae655dc",
       "obligation": "obl-cmb-2ae655dc",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-dockerfile-workspace",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
     },
     {
       "id": "odp-cmb-2b17b2b2",
       "obligation": "obl-cmb-2b17b2b2",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-unsupported-no-workspace-config"
+      ]
     },
     {
       "id": "odp-cmb-2f3b7c5b",
       "obligation": "obl-cmb-2f3b7c5b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
     },
     {
       "id": "odp-cmb-3d2f26be",
       "obligation": "obl-cmb-3d2f26be",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
     },
     {
       "id": "odp-cmb-3dbf8b9d",
       "obligation": "obl-cmb-3dbf8b9d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
     },
     {
       "id": "odp-cmb-42d2c8d7",
@@ -100,8 +147,14 @@
     {
       "id": "odp-cmb-4a9e8c34",
       "obligation": "obl-cmb-4a9e8c34",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-dockerfile-workspace",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
     },
     {
       "id": "odp-cmb-5a194c3f",
@@ -118,26 +171,41 @@
     {
       "id": "odp-cmb-5d2bf1a4",
       "obligation": "obl-cmb-5d2bf1a4",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
     },
     {
       "id": "odp-cmb-61612ff7",
       "obligation": "obl-cmb-61612ff7",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-compose-project-teardown",
+        "case-down-dockerfile-workspace",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
     },
     {
       "id": "odp-cmb-6c4bb555",
       "obligation": "obl-cmb-6c4bb555",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown",
+        "case-down-dockerfile-workspace",
+        "case-down-removes-container"
+      ]
     },
     {
       "id": "odp-cmb-6f789877",
       "obligation": "obl-cmb-6f789877",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
     },
     {
       "id": "odp-cmb-707f3d11",
@@ -160,32 +228,46 @@
     {
       "id": "odp-cmb-8e6c2115",
       "obligation": "obl-cmb-8e6c2115",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown",
+        "case-down-dockerfile-workspace",
+        "case-down-removes-container"
+      ]
     },
     {
       "id": "odp-cmb-8f68e39c",
       "obligation": "obl-cmb-8f68e39c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-933df3ba",
       "obligation": "obl-cmb-933df3ba",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-94b3768a",
       "obligation": "obl-cmb-94b3768a",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-unsupported-no-workspace-config"
+      ]
     },
     {
       "id": "odp-cmb-953023da",
       "obligation": "obl-cmb-953023da",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-962a21e0",
@@ -196,14 +278,19 @@
     {
       "id": "odp-cmb-96f377dd",
       "obligation": "obl-cmb-96f377dd",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-removes-container"
+      ]
     },
     {
       "id": "odp-cmb-9b413dcc",
       "obligation": "obl-cmb-9b413dcc",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-dockerfile-workspace",
+        "case-down-removes-container"
+      ]
     },
     {
       "id": "odp-cmb-9f76e5e3",
@@ -220,8 +307,10 @@
     {
       "id": "odp-cmb-aad48d84",
       "obligation": "obl-cmb-aad48d84",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
     },
     {
       "id": "odp-cmb-ad74c843",
@@ -256,8 +345,10 @@
     {
       "id": "odp-cmb-d2bc7db8",
       "obligation": "obl-cmb-d2bc7db8",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
     },
     {
       "id": "odp-cmb-d8447993",
@@ -274,8 +365,10 @@
     {
       "id": "odp-cmb-da996d07",
       "obligation": "obl-cmb-da996d07",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
     },
     {
       "id": "odp-cmb-daf86b9a",
@@ -292,8 +385,18 @@
     {
       "id": "odp-cmb-df1d05bf",
       "obligation": "obl-cmb-df1d05bf",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-dockerfile-workspace"
+      ]
+    },
+    {
+      "id": "odp-cmb-e596eae9",
+      "obligation": "obl-cmb-e596eae9",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
     },
     {
       "id": "odp-cmb-f08921f8",
@@ -316,14 +419,23 @@
     {
       "id": "odp-cmb-fbddb80e",
       "obligation": "obl-cmb-fbddb80e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-unsupported-no-workspace-config"
+      ]
     },
     {
       "id": "odp-cmb-fe1d0ffa",
       "obligation": "obl-cmb-fe1d0ffa",
-      "disposition": "gap",
-      "gap": "gap-pairwise-down"
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
     }
   ]
 }

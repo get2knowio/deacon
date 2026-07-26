@@ -1,0 +1,398 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-upgrade-compose-workspace",
+      "behaviors": [
+        "bhv-upgrade-empty-feature-set"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "upgrade",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "boundary",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-upgrade",
+          "subcommand": "upgrade",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dry-run"
+          ],
+          "fixtures": [
+            "fx-tier1-compose-array"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-upgrade",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-upgrade",
+          "assertion": {
+            "jsonEquals": {
+              "features": {}
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. A Compose workspace with no Features regenerates to the empty lockfile. Spec-expectation rather than differential because the pinned reference treats the empty Feature set as a failure — the divergence characterized by wvr-upgrade-empty-feature-set, reached here through a third configuration shape."
+    },
+    {
+      "id": "case-upgrade-dockerfile-workspace",
+      "behaviors": [
+        "bhv-upgrade-regenerates-lockfile"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "upgrade",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-upgrade",
+          "subcommand": "upgrade",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dry-run"
+          ],
+          "fixtures": [
+            "fx-tier1-dockerfile-build"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-upgrade"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-upgrade"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. A Dockerfile-based workspace: the lockfile pins the Feature set, which is independent of how the base image is produced. Both CLIs must write the same document."
+    },
+    {
+      "id": "case-upgrade-extends-chain-lockfile",
+      "behaviors": [
+        "bhv-upgrade-regenerates-lockfile"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "upgrade",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile",
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-upgrade",
+          "subcommand": "upgrade",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dry-run"
+          ],
+          "fixtures": [
+            "fx-outdated-extends-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-upgrade",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-upgrade",
+          "assertion": {
+            "jsonSubset": {
+              "features": {
+                "ghcr.io/devcontainers/features/git:1.3.2": {
+                  "version": "1.3.2"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-upgrade-extends-chain-image-lockfile`: the effective Feature set is assembled across the extends chain BEFORE the lockfile is regenerated, so a Feature contributed by a parent link appears in the written lockfile. An implementation that refreshed only the entries an existing lockfile already contained would emit an empty document here and still exit 0."
+    },
+    {
+      "id": "case-upgrade-malformed-config-rejected",
+      "behaviors": [
+        "bhv-readconfig-malformed-jsonc-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "upgrade",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "malformed",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-upgrade",
+          "subcommand": "upgrade",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dry-run"
+          ],
+          "fixtures": [
+            "fx-errors-malformed-json"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-upgrade",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 malformed class: the Feature set to pin comes from the configuration, so an unparseable document has to stop the regeneration rather than produce an empty lockfile — which is a legitimate result for a different input and would be indistinguishable here."
+    },
+    {
+      "id": "case-upgrade-no-features-differential",
+      "behaviors": [
+        "bhv-upgrade-empty-feature-set"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "upgrade",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "reference-lenient",
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-upgrade",
+          "subcommand": "upgrade",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dry-run"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-upgrade"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-upgrade-empty-feature-set",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon regenerates an empty lockfile and exits 0; the reference treats the empty Feature set as a failure and exits 1.",
+          "waiverId": "wvr-upgrade-empty-feature-set"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The reference FAILS (`Failed to update lockfile`, exit 1) when asked to regenerate a lockfile for a configuration that declares no Features; deacon emits the empty lockfile and exits 0. Characterized rather than followed: an operation that cannot express 'nothing to pin' is unusable as an idempotent step, and the direction is pinned by the spec-expectation twin."
+    },
+    {
+      "id": "case-upgrade-no-features-empty-lockfile",
+      "behaviors": [
+        "bhv-upgrade-empty-feature-set"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "upgrade",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "boundary",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-upgrade",
+          "subcommand": "upgrade",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dry-run"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-upgrade",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-upgrade",
+          "assertion": {
+            "jsonEquals": {
+              "features": {}
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 boundary class, and the direction half of a real divergence: a configuration with no Features regenerates to an EMPTY lockfile and exits 0. The empty document is the correct answer — there is nothing to pin — and pinning it here is what keeps the sibling differential from being read as 'deacon is wrong'."
+    },
+    {
+      "id": "case-upgrade-regenerates-lockfile",
+      "behaviors": [
+        "bhv-upgrade-regenerates-lockfile"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "upgrade",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-upgrade",
+          "subcommand": "upgrade",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dry-run"
+          ],
+          "fixtures": [
+            "fx-upgrade-overlay-lockfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-upgrade"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-upgrade"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-033 lockfile production. `--dry-run` writes the regenerated lockfile to stdout instead of to disk, which is what makes this comparable AND keeps the case from mutating its own fixture. Both CLIs resolve the pinned `git:1.3.2` to the same digest and integrity, so the structured comparison is on the document itself rather than on the exit code alone."
+    },
+    {
+      "id": "case-upgrade-unsupported-values-rejected",
+      "behaviors": [
+        "bhv-readconfig-unsupported-enum-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "upgrade",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "unsupported",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-upgrade",
+          "subcommand": "upgrade",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dry-run"
+          ],
+          "fixtures": [
+            "fx-readconfig-unsupported-values"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-upgrade",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class for `upgrade`: a closed-enum violation is refused here as it is at configuration read. Repeating the input under a second operation is what shows the validation is a property of the configuration loader rather than of one command."
+    }
+  ]
+}

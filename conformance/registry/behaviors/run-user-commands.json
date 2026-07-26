@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-run-user-commands-hook-failure",
+      "area": "run-user-commands",
+      "statement": "A lifecycle hook that exits non-zero fails the run rather than being reported as a successful setup.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "The failing hook arrives as a command-line override so the preceding `up` can succeed: a hook failure during creation is a different case, and conflating the two would leave neither pinned."
+    },
+    {
+      "id": "bhv-run-user-commands-hook-order",
+      "area": "run-user-commands",
+      "statement": "Lifecycle hooks run in spec order — onCreate, updateContent, postCreate, postStart — and a Feature-contributed hook runs exactly once alongside the configuration's own.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Observed by having each hook append its own name to a file inside the container, so the file IS the order. `grep -c` rather than a presence check pins the Feature hook's ONCE, which presence cannot."
+    }
+  ]
+}

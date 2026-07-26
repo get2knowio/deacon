@@ -391,9 +391,6 @@ pub fn check_variants(cases: &[CaseFacts]) -> Vec<MappingProblem> {
 /// - every baseline unit appears exactly once (a missing one is an orphan test);
 /// - every mapped `unit` resolves against the baseline;
 /// - every `caseIds` entry resolves in `cases.json`;
-/// - every **declarative** case is reached by at least one mapping entry (the reverse
-///   direction — an orphan case). Legacy pointer cases are exempt: they are the
-///   pre-migration carriers, not destinations;
 /// - the disposition arity rules of data-model §2 hold;
 /// - every case a `migrated`/`deduplicated` unit names resolves to ≥1 behavior AND ≥1
 ///   observable channel, with dangling behavior/channel ids rejected (T033).
@@ -565,18 +562,16 @@ pub fn check_mapping(
         }
     }
 
-    // Reverse orphans: a declarative case no mapping entry reaches. Legacy pointer
-    // cases are exempt — they are the pre-migration carriers, not destinations.
-    for case in cases {
-        if case.declarative && !reached_cases.contains(case.id.as_str()) {
-            out.push(MappingProblem::new(
-                "V21",
-                &case.id,
-                "declarative case is reached by no mapping entry — a migration \
-                 destination that no baseline unit maps to is an orphan case",
-            ));
-        }
-    }
+    // The REVERSE direction — "every declarative case is reached by some mapping entry"
+    // — is **retired** (024 US3), for the reason V25 was retired. It was true exactly
+    // while the declarative case set WAS the migration's output; the moment a case is
+    // authored for coverage the migration never had, the rule reports a correct record as
+    // an orphan and the only way to satisfy it would be to invent a baseline unit for a
+    // case that migrated from nothing. Conservation needs the FORWARD direction (every
+    // baseline unit has exactly one destination, checked above); that is what proves
+    // nothing was lost. Nothing is proved by the reverse, and a permanent gate there would
+    // forbid the coverage growth the migration exists to make room for.
+    let _ = &reached_cases;
 
     out
 }

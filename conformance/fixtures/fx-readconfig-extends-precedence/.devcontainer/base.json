@@ -1,0 +1,8 @@
+{
+	"image": "alpine:3.19",
+	"containerEnv": { "LAYER": "base", "FROM_BASE": "yes" },
+	"forwardPorts": [2000],
+	"remoteUser": "base-user",
+	"postCreateCommand": "echo from-base",
+	"onCreateCommand": "echo base-on-create"
+}

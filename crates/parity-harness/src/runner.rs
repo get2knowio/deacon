@@ -132,11 +132,19 @@ pub(crate) async fn execute_ops(
 ) -> Result<(RunContext, Option<DockerWorkspace>), HarnessError> {
     // Docker-backed cases run in an ISOLATED external temp workspace (US5) so their
     // container identity + labels are unique (collision-safe) and an RAII guard reclaims
-    // every resource on success AND unwind. Config-only cases run against the committed
-    // fixture directory directly (read-only, no container).
+    // every resource on success AND unwind.
+    //
+    // An `fs-heavy` case gets the same isolation for a different reason: its group means
+    // "significant filesystem operations", and those must not land in
+    // `conformance/fixtures/`, which is version-controlled input every other case reads.
+    // Its workspace reclaims the temp dir ONLY — the config-only lane is defined to need
+    // no daemon, so its cleanup must not shell out to one.
+    //
+    // Everything else runs against the committed fixture directory directly (read-only).
     let docker_case = is_docker_case(case);
+    let isolated = docker_case || case.resource_group == Some(ResourceGroup::FsHeavy);
     let mut docker_ws: Option<DockerWorkspace> = None;
-    let isolated_workspace: Option<PathBuf> = if docker_case {
+    let isolated_workspace: Option<PathBuf> = if isolated {
         // Creating the temp dir and recursively copying every fixture tree into it is
         // BLOCKING filesystem work. Under the bounded-concurrency Docker driver (T018)
         // several cases set up at once, so doing it inline would stall the executor for
@@ -148,10 +156,13 @@ pub(crate) async fn execute_ops(
             .collect();
         let deacon_path = cfg.deacon_path.to_path_buf();
         let ws = tokio::task::spawn_blocking(move || -> Result<DockerWorkspace, HarnessError> {
-            let ws = DockerWorkspace::new(Some(&deacon_path)).map_err(|e| {
-                HarnessError::DockerUnavailable {
-                    cause: format!("could not create an isolated workspace: {e}"),
-                }
+            let ws = if docker_case {
+                DockerWorkspace::new(Some(&deacon_path))
+            } else {
+                DockerWorkspace::new_filesystem_only()
+            }
+            .map_err(|e| HarnessError::DockerUnavailable {
+                cause: format!("could not create an isolated workspace: {e}"),
             })?;
             for dir in fixture_dirs {
                 if !dir.is_dir() {
@@ -194,8 +205,7 @@ pub(crate) async fn execute_ops(
         // For a Docker case every op shares the ISOLATED workspace (materialized once), so
         // `${WORKSPACE}` always resolves even for a later op that declares no fixture.
         let argv = substitute_argv(case, op, &workspace, isolated_workspace.is_some())?;
-        let mut full: Vec<String> = Vec::with_capacity(argv.len() + 1);
-        full.push(op.subcommand.clone());
+        let mut full: Vec<String> = subcommand_tokens(&op.subcommand);
         full.extend(argv);
         let args: Vec<&str> = full.iter().map(String::as_str).collect();
 
@@ -655,11 +665,28 @@ fn tokenized_argv(case: &TestCase) -> Vec<String> {
     let Some(op) = case.operations.first() else {
         return Vec::new();
     };
-    let mut argv = vec![op.subcommand.clone()];
+    let mut argv = subcommand_tokens(&op.subcommand);
     for a in &op.argv {
         argv.push(a.replace(WORKSPACE_TOKEN, "<WORKSPACE>"));
     }
     argv
+}
+
+/// The command-line tokens a declared `subcommand` expands to.
+///
+/// `Operation.subcommand` is a single **registry** identifier — it has to be, because it is
+/// also an `sdim-operation` value and a key the reports partition by. Most identifiers are
+/// literally the command word, but `templates-apply` is a two-word command on BOTH sides
+/// (`deacon templates apply`, `devcontainer templates apply`), so the identifier is
+/// expanded here rather than forcing every case to smuggle `apply` into its `argv`. Doing
+/// it in the argv would put half the command name in a field the runner treats as opaque
+/// user arguments, and `tokenized_argv` — which records provenance — would then disagree
+/// with what was actually run.
+fn subcommand_tokens(subcommand: &str) -> Vec<String> {
+    match subcommand {
+        "templates-apply" => vec!["templates".to_string(), "apply".to_string()],
+        other => vec![other.to_string()],
+    }
 }
 
 /// Attach the failure phase to the `chan-exit-code` verdict's detail when the producing
@@ -694,6 +721,9 @@ pub(crate) fn attach_failure_phase(
 /// The per-invocation time bound class for a subcommand (config-only vs lifecycle).
 fn exec_kind(subcommand: &str) -> ExecKind {
     match subcommand {
+        // Config-only: no container is created and no image is pulled, so these finish in
+        // the sub-second class. `outdated` and `upgrade` are NOT here — both resolve
+        // Feature versions against an OCI registry, which is network-bound.
         "read-configuration" | "doctor" => ExecKind::Config,
         _ => ExecKind::Lifecycle,
     }

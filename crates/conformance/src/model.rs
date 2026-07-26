@@ -427,6 +427,25 @@ pub struct TestCase {
     /// load-time concern; this field only has to round-trip.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub scenario_context: IndexMap<String, String>,
+    /// The **input class** this case exercises (024 US3, FR-040): which of the five
+    /// kinds of input the operation is fed.
+    ///
+    /// Declared rather than derived. Until US3 the per-operation report *inferred* the
+    /// class from what a record happened to carry, which could only ever distinguish
+    /// three of the five — `boundary` and `unsupported` have no derivable signal at all,
+    /// so they were reported permanently missing however many such cases existed. An
+    /// author who writes a boundary case has made a judgement, and the record is where a
+    /// judgement belongs; inference cannot represent it and a report built on inference
+    /// cannot measure FR-040.
+    ///
+    /// Absent means "infer as before" — the 88 pre-US3 records keep their derived class
+    /// rather than being retro-labelled by a tool.
+    ///
+    /// **Excluded from `caseHash`**: it classifies the input, it does not change what the
+    /// runner feeds the CLI, so labelling a case must never re-record its snapshot (the
+    /// same reasoning that excludes `notes` and `allowedDifferences`, research D3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_class: Option<InputClass>,
 
     // ---- Legacy (binary-backed) fields — present iff this is a legacy case ----
     /// The Rust test binary that exercises this case (legacy path only).
@@ -463,6 +482,59 @@ pub struct TestCase {
     /// Human prose; **excluded from `caseHash`** so annotating never re-records (D3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+}
+
+/// The five input classes a case may exercise (FR-040, 024 US3).
+///
+/// A closed set, so "which classes is this operation missing?" is answerable. The names
+/// are the ones the spec uses; the distinctions that matter in practice:
+///
+/// | Class | The input is | The operation |
+/// |---|---|---|
+/// | `valid` | well-formed and supported | succeeds |
+/// | `boundary` | at the edge of the accepted domain (empty collections, extreme values) | still accepts |
+/// | `malformed` | structurally or syntactically wrong | rejects |
+/// | `unsupported` | well-formed but naming something that cannot be provided | rejects, later |
+/// | `reference-lenient` | one the reference accepts and deacon rejects (or the reverse) | differs, with a pinned direction |
+///
+/// `reference-lenient` is the only class that is a statement about **two** implementations,
+/// which is why V16 requires such a case to be a `live-differential`: there is no way to
+/// observe the reference's leniency without running the reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InputClass {
+    /// Well-formed, supported input; the operation succeeds.
+    Valid,
+    /// At the edge of the accepted domain, still accepted.
+    Boundary,
+    /// Structurally or syntactically invalid; rejected.
+    Malformed,
+    /// Well-formed but naming something the implementation cannot provide.
+    Unsupported,
+    /// An input the two implementations judge differently.
+    ReferenceLenient,
+}
+
+impl InputClass {
+    /// Every class, in the order the reports render them.
+    pub const ALL: &'static [InputClass] = &[
+        InputClass::Valid,
+        InputClass::Boundary,
+        InputClass::Malformed,
+        InputClass::Unsupported,
+        InputClass::ReferenceLenient,
+    ];
+
+    /// The wire spelling used in records and reports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            InputClass::Valid => "valid",
+            InputClass::Boundary => "boundary",
+            InputClass::Malformed => "malformed",
+            InputClass::Unsupported => "unsupported",
+            InputClass::ReferenceLenient => "reference-lenient",
+        }
+    }
 }
 
 /// The shape of a [`TestCase`] record: legacy (binary-backed) or declarative
@@ -522,6 +594,12 @@ impl TestCase {
 /// and the validator (`validate.rs`) can emit a located, human-readable message for a
 /// non-consumer subcommand rather than a cryptic enum-variant error (contract
 /// case-schema.md: "each `operations[].subcommand` ∈ consumer surface | new V-series").
+/// `outdated` and `upgrade` joined the list in 024 US3: both are shipped consumer
+/// subcommands (`deacon outdated`, `deacon upgrade`) that resolve and rewrite the
+/// devcontainer **lockfile**, and `sdim-operation` already enumerates them as in-scope
+/// operations (FR-005). They were absent only because no case had exercised them, which
+/// is the hole this story exists to fill. Feature *authoring* (`features test|publish|…`)
+/// stays out, permanently.
 pub const CONSUMER_SUBCOMMANDS: &[&str] = &[
     "up",
     "down",
@@ -529,9 +607,63 @@ pub const CONSUMER_SUBCOMMANDS: &[&str] = &[
     "build",
     "read-configuration",
     "run-user-commands",
+    "outdated",
+    "upgrade",
     "templates-apply",
     "doctor",
 ];
+
+/// The operations for which **no differential against the pinned reference can be run**,
+/// each with the substitution the report must state (spec Assumption 5 / US3 scenario 4).
+///
+/// A differential oracle needs two sides invoked the same way. Two distinct things remove
+/// that possibility, and the note says which applies:
+///
+/// - the reference implements **no such command at all** (`down`, `doctor`); or
+/// - it implements one that **cannot be invoked with the same argv** (`templates apply`,
+///   whose required `--template-id` accepts only an OCI registry reference, while deacon
+///   takes a template path or reference positionally). The runner sends one argv to both
+///   sides by construction, so there is no shared invocation to compare.
+///
+/// Either way the cases are evaluated against the declared **specification expectation**,
+/// and the per-operation report says so — a reader who sees `up` compared against a
+/// reference and `down` not compared at all is owed the reason rather than left to infer
+/// that `down` is simply under-tested.
+///
+/// Hand-listed and checked against the pinned oracle's `--help`, not probed at report
+/// time: the report is hermetic (no ambient inputs, FR-062), and a report whose content
+/// depended on whether a CLI happened to be installed would not be byte-stable.
+pub const OPERATIONS_WITHOUT_RUNNABLE_DIFFERENTIAL: &[(&str, &str)] = &[
+    (
+        "down",
+        "the pinned reference exposes no `down` command — it has no teardown surface at \
+         all — so there is no second side to run and these cases are evaluated against the \
+         declared specification expectation instead of a differential",
+    ),
+    (
+        "doctor",
+        "the pinned reference exposes no `doctor` command — host and runtime diagnostics \
+         are a deacon surface with no reference analogue — so these cases are evaluated \
+         against the declared specification expectation instead of a differential",
+    ),
+    (
+        "templates-apply",
+        "the pinned reference implements `templates apply`, but its required \
+         `--template-id` accepts only an OCI registry reference while deacon takes the \
+         template positionally, so the two cannot be invoked with the one argv the runner \
+         sends to both sides; these cases are evaluated against the declared specification \
+         expectation instead of a differential",
+    ),
+];
+
+/// The substitution note for `operation`, or `None` when a differential against the pinned
+/// reference can be run for it.
+pub fn differential_substitution(operation: &str) -> Option<&'static str> {
+    OPERATIONS_WITHOUT_RUNNABLE_DIFFERENTIAL
+        .iter()
+        .find(|(op, _)| *op == operation)
+        .map(|(_, note)| *note)
+}
 
 /// The subset of [`CONSUMER_SUBCOMMANDS`] that makes the runner TOUCH the container
 /// runtime.

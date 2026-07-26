@@ -1,0 +1,4 @@
+{
+	"name": "ConformanceBuildFailure",
+	"build": { "dockerfile": "Dockerfile" }
+}

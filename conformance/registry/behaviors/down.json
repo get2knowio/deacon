@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-down-compose-project-teardown",
+      "area": "down",
+      "statement": "`down --remove` on a Compose configuration removes the project it created, identifying it by the same project name and workspace labels `up` derived.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "Same extension as bhv-down-removes-container. The risk this record exists for is a derivation that does not reproduce what `up` used — teardown then reports success and leaves the project running, silent on every channel except the container graph."
+    },
+    {
+      "id": "bhv-down-removes-container",
+      "area": "down",
+      "statement": "`down --remove` stops and removes the workspace's container, so a subsequent command targeting that container fails.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "The containers.dev spec defines no teardown command and the pinned reference exposes none, so `down` is a deacon surface with no reference analogue — see ext-teardown-command. Removal is asserted by execing into the container that should no longer exist, because a `down` exit code is identical whether or not anything was removed."
+    }
+  ]
+}

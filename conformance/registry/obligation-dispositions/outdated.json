@@ -2,10 +2,33 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "odp-bhv-59913e4b",
+      "obligation": "obl-bhv-59913e4b",
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace",
+        "case-outdated-dockerfile-workspace",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-structured-report"
+      ]
+    },
+    {
+      "id": "odp-bhv-cd232792",
+      "obligation": "obl-bhv-cd232792",
+      "disposition": "case",
+      "cases": [
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features"
+      ]
+    },
+    {
       "id": "odp-cmb-013b6887",
       "obligation": "obl-cmb-013b6887",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features"
+      ]
     },
     {
       "id": "odp-cmb-048ffe68",
@@ -22,8 +45,21 @@
     {
       "id": "odp-cmb-09548361",
       "obligation": "obl-cmb-09548361",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-dockerfile-workspace",
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features"
+      ]
+    },
+    {
+      "id": "odp-cmb-0cea76d1",
+      "obligation": "obl-cmb-0cea76d1",
+      "disposition": "case",
+      "cases": [
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features"
+      ]
     },
     {
       "id": "odp-cmb-0d6dd24b",
@@ -52,14 +88,26 @@
     {
       "id": "odp-cmb-13ab5772",
       "obligation": "obl-cmb-13ab5772",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace",
+        "case-outdated-malformed-config-rejected",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-unsupported-values-rejected"
+      ]
     },
     {
       "id": "odp-cmb-17d9587a",
       "obligation": "obl-cmb-17d9587a",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features",
+        "case-outdated-malformed-config-rejected",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-structured-report",
+        "case-outdated-unsupported-values-rejected"
+      ]
     },
     {
       "id": "odp-cmb-219d0e03",
@@ -70,26 +118,37 @@
     {
       "id": "odp-cmb-268ce866",
       "obligation": "obl-cmb-268ce866",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-dockerfile-workspace",
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features",
+        "case-outdated-structured-report"
+      ]
     },
     {
       "id": "odp-cmb-28182a4f",
       "obligation": "obl-cmb-28182a4f",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-2f76f2b5",
       "obligation": "obl-cmb-2f76f2b5",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-structured-report"
+      ]
     },
     {
       "id": "odp-cmb-334a789e",
       "obligation": "obl-cmb-334a789e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-3532ca36",
@@ -106,8 +165,10 @@
     {
       "id": "odp-cmb-4249e664",
       "obligation": "obl-cmb-4249e664",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-4cd05e91",
@@ -118,20 +179,28 @@
     {
       "id": "odp-cmb-4e0bb84c",
       "obligation": "obl-cmb-4e0bb84c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-4e4c347e",
       "obligation": "obl-cmb-4e4c347e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-508a4c6c",
       "obligation": "obl-cmb-508a4c6c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-malformed-config-rejected",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-unsupported-values-rejected"
+      ]
     },
     {
       "id": "odp-cmb-50a2fe69",
@@ -142,8 +211,11 @@
     {
       "id": "odp-cmb-518b3543",
       "obligation": "obl-cmb-518b3543",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-dockerfile-workspace",
+        "case-outdated-structured-report"
+      ]
     },
     {
       "id": "odp-cmb-57fde6fa",
@@ -154,8 +226,16 @@
     {
       "id": "odp-cmb-5a33c6bd",
       "obligation": "obl-cmb-5a33c6bd",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace",
+        "case-outdated-dockerfile-workspace",
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features",
+        "case-outdated-malformed-config-rejected",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-unsupported-values-rejected"
+      ]
     },
     {
       "id": "odp-cmb-67c58787",
@@ -166,8 +246,11 @@
     {
       "id": "odp-cmb-6af5e680",
       "obligation": "obl-cmb-6af5e680",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features"
+      ]
     },
     {
       "id": "odp-cmb-6bdc164b",
@@ -184,14 +267,21 @@
     {
       "id": "odp-cmb-714cfeeb",
       "obligation": "obl-cmb-714cfeeb",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-malformed-config-rejected",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-structured-report",
+        "case-outdated-unsupported-values-rejected"
+      ]
     },
     {
       "id": "odp-cmb-74668f3a",
       "obligation": "obl-cmb-74668f3a",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-74c6d780",
@@ -208,14 +298,21 @@
     {
       "id": "odp-cmb-770a3b94",
       "obligation": "obl-cmb-770a3b94",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace",
+        "case-outdated-malformed-config-rejected",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-unsupported-values-rejected"
+      ]
     },
     {
       "id": "odp-cmb-7a19400d",
       "obligation": "obl-cmb-7a19400d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-structured-report"
+      ]
     },
     {
       "id": "odp-cmb-7c33dd66",
@@ -226,8 +323,10 @@
     {
       "id": "odp-cmb-7c51db88",
       "obligation": "obl-cmb-7c51db88",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-structured-report"
+      ]
     },
     {
       "id": "odp-cmb-81246c5a",
@@ -238,8 +337,14 @@
     {
       "id": "odp-cmb-812d1a46",
       "obligation": "obl-cmb-812d1a46",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace",
+        "case-outdated-dockerfile-workspace",
+        "case-outdated-malformed-config-rejected",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-unsupported-values-rejected"
+      ]
     },
     {
       "id": "odp-cmb-81951963",
@@ -262,26 +367,41 @@
     {
       "id": "odp-cmb-874c24c1",
       "obligation": "obl-cmb-874c24c1",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features",
+        "case-outdated-malformed-config-rejected",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-unsupported-values-rejected"
+      ]
     },
     {
       "id": "odp-cmb-8ac78070",
       "obligation": "obl-cmb-8ac78070",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features",
+        "case-outdated-structured-report"
+      ]
     },
     {
       "id": "odp-cmb-95c39cdb",
       "obligation": "obl-cmb-95c39cdb",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features"
+      ]
     },
     {
       "id": "odp-cmb-97c09f74",
       "obligation": "obl-cmb-97c09f74",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-9ba3247f",
@@ -328,8 +448,10 @@
     {
       "id": "odp-cmb-af5a984c",
       "obligation": "obl-cmb-af5a984c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-structured-report"
+      ]
     },
     {
       "id": "odp-cmb-b3dbe864",
@@ -370,14 +492,21 @@
     {
       "id": "odp-cmb-c8adf857",
       "obligation": "obl-cmb-c8adf857",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace",
+        "case-outdated-malformed-config-rejected",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-unsupported-values-rejected"
+      ]
     },
     {
       "id": "odp-cmb-cd23eaea",
       "obligation": "obl-cmb-cd23eaea",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-ce0cb0a8",
@@ -412,8 +541,11 @@
     {
       "id": "odp-cmb-dad36f43",
       "obligation": "obl-cmb-dad36f43",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-extends-chain-differential",
+        "case-outdated-extends-chain-features"
+      ]
     },
     {
       "id": "odp-cmb-e65c9ee4",
@@ -442,8 +574,15 @@
     {
       "id": "odp-cmb-fefda74b",
       "obligation": "obl-cmb-fefda74b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-outdated"
+      "disposition": "case",
+      "cases": [
+        "case-outdated-compose-workspace",
+        "case-outdated-dockerfile-workspace",
+        "case-outdated-malformed-config-rejected",
+        "case-outdated-no-features-empty-report",
+        "case-outdated-structured-report",
+        "case-outdated-unsupported-values-rejected"
+      ]
     }
   ]
 }

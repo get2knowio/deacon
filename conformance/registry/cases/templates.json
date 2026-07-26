@@ -1,0 +1,345 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-templates-apply-compose-target",
+      "behaviors": [
+        "bhv-templates-apply-scaffolds-options"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "templates-apply",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "fs-heavy",
+      "operations": [
+        {
+          "id": "op-apply",
+          "subcommand": "templates-apply",
+          "argv": [
+            "${WORKSPACE}/template",
+            "--output",
+            "${WORKSPACE}/applied",
+            "--option",
+            "imageVariant=3.20"
+          ],
+          "fixtures": [
+            "fx-templates-target-compose"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-apply",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-apply",
+          "assertion": {
+            "jsonSubset": {
+              "applied/.devcontainer/devcontainer.json": "{\n\t\"name\": \"conformance-minimal\",\n\t\"image\": \"alpine:3.20\"\n}\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "applied/.devcontainer/devcontainer.json"
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. The Compose counterpart, with an option supplied: the target workspace's own configuration shape is irrelevant to the substitution, which is the property worth pinning rather than assuming."
+    },
+    {
+      "id": "case-templates-apply-default-option",
+      "behaviors": [
+        "bhv-templates-apply-scaffolds-options"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "templates-apply",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "boundary",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "fs-heavy",
+      "operations": [
+        {
+          "id": "op-apply",
+          "subcommand": "templates-apply",
+          "argv": [
+            "${WORKSPACE}/template",
+            "--output",
+            "${WORKSPACE}/applied"
+          ],
+          "fixtures": [
+            "fx-templates-minimal"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-apply",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-apply",
+          "assertion": {
+            "jsonSubset": {
+              "applied/.devcontainer/devcontainer.json": "{\n\t\"name\": \"conformance-minimal\",\n\t\"image\": \"alpine:3.19\"\n}\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "applied/.devcontainer/devcontainer.json"
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 boundary class: no option is supplied, so the template's DECLARED DEFAULT has to be used. The declared default and an option-provided value take different code paths to the same substitution, and only one of them is exercised by the sibling case."
+    },
+    {
+      "id": "case-templates-apply-dockerfile-target",
+      "behaviors": [
+        "bhv-templates-apply-scaffolds-options"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "templates-apply",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "fs-heavy",
+      "operations": [
+        {
+          "id": "op-apply",
+          "subcommand": "templates-apply",
+          "argv": [
+            "${WORKSPACE}/template",
+            "--output",
+            "${WORKSPACE}/applied"
+          ],
+          "fixtures": [
+            "fx-templates-target-dockerfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-apply",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-apply",
+          "assertion": {
+            "jsonSubset": {
+              "applied/.devcontainer/devcontainer.json": "{\n\t\"name\": \"conformance-minimal\",\n\t\"image\": \"alpine:3.19\"\n}\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "applied/.devcontainer/devcontainer.json"
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. Applying a template into a workspace whose existing configuration is a Dockerfile build. The scaffolded output must be the template's, unaffected by what the target workspace already declares — `--output` writes a fresh tree rather than merging into the existing one."
+    },
+    {
+      "id": "case-templates-apply-missing-template",
+      "behaviors": [
+        "bhv-templates-apply-scaffolds-options"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "templates-apply",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "fs-heavy",
+      "operations": [
+        {
+          "id": "op-apply",
+          "subcommand": "templates-apply",
+          "argv": [
+            "${WORKSPACE}/broken",
+            "--output",
+            "${WORKSPACE}/applied"
+          ],
+          "fixtures": [
+            "fx-templates-minimal"
+          ],
+          "expectFailurePhase": "exec"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-apply",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 malformed class: the named directory exists but carries no `devcontainer-template.json`, so it is not a template. The directory is chosen deliberately over a NON-EXISTENT path: a path that resolves to nothing locally falls through to an OCI registry lookup, and the case would then be measuring the network rather than the parse."
+    },
+    {
+      "id": "case-templates-apply-option-substituted",
+      "behaviors": [
+        "bhv-templates-apply-scaffolds-options"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "templates-apply",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "fs-heavy",
+      "operations": [
+        {
+          "id": "op-apply",
+          "subcommand": "templates-apply",
+          "argv": [
+            "${WORKSPACE}/template",
+            "--output",
+            "${WORKSPACE}/applied",
+            "--option",
+            "imageVariant=3.20"
+          ],
+          "fixtures": [
+            "fx-templates-minimal"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-apply",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-apply",
+          "assertion": {
+            "exists": "applied/.devcontainer/devcontainer.json"
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-apply",
+          "assertion": {
+            "jsonSubset": {
+              "applied/.devcontainer/devcontainer.json": "{\n\t\"name\": \"conformance-minimal\",\n\t\"image\": \"alpine:3.20\"\n}\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "applied/.devcontainer/devcontainer.json"
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-templates-apply-cli-overlay-image-human`, and FR-005 for the operation. The template's option is supplied on the command line and the ONLY evidence it arrived is the scaffolded bytes: the operation emits no result document. An option that is parsed but never substituted produces a successful run and a configuration containing the raw placeholder, so the file-content assertion is the whole case. Runs `fs-heavy` in an isolated temp workspace — it WRITES, and the committed fixture tree is shared input."
+    },
+    {
+      "id": "case-templates-apply-unsupported-option",
+      "behaviors": [
+        "bhv-templates-apply-scaffolds-options"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "templates-apply",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "unsupported",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "fs-heavy",
+      "operations": [
+        {
+          "id": "op-apply",
+          "subcommand": "templates-apply",
+          "argv": [
+            "${WORKSPACE}/template",
+            "--output",
+            "${WORKSPACE}/applied",
+            "--option",
+            "notAnOption=1"
+          ],
+          "fixtures": [
+            "fx-templates-minimal"
+          ],
+          "expectFailurePhase": "exec"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-apply",
+          "assertion": {
+            "nonZero": true
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-apply",
+          "assertion": {
+            "contains": "Unknown template option"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class: an option name the template does not declare. The invocation is well-formed and the template is real; the option simply has nowhere to be substituted. deacon refuses rather than silently falling back to the declared default — the fallback would leave a user who mistyped an option with a successful run and the wrong configuration."
+    }
+  ]
+}

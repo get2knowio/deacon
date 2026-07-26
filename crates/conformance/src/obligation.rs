@@ -146,6 +146,23 @@ where
     )
 }
 
+/// The `obl-cmb-` id [`generate_triples`] derives from a high-risk triple, or `None` when
+/// the triple names no operation (a degenerate record V26 reports; generation skips it
+/// rather than invent a partition key).
+///
+/// Exposed so the triples report joins on the SAME id generation emits, rather than
+/// re-deriving the identity scheme in a second place where the two could drift.
+pub fn triple_obligation_id(triple: &HighRiskTriple) -> Option<String> {
+    let operation = triple.assignment.get(OPERATION_DIMENSION)?;
+    Some(combination_obligation_id(
+        operation,
+        triple
+            .assignment
+            .iter()
+            .filter(|(k, _)| k.as_str() != OPERATION_DIMENSION),
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // Records — `conformance/obligations/obligations.json` (machine-owned)
 // ---------------------------------------------------------------------------
@@ -344,7 +361,10 @@ fn generate_pairs(model: &ScenarioModel<'_>) -> Vec<Obligation> {
 fn generate_triples(triples: &[HighRiskTriple]) -> Vec<Obligation> {
     let mut out = Vec::new();
     for triple in triples {
-        let Some(operation) = triple.assignment.get(OPERATION_DIMENSION) else {
+        let (Some(operation), Some(id)) = (
+            triple.assignment.get(OPERATION_DIMENSION),
+            triple_obligation_id(triple),
+        ) else {
             continue;
         };
         let assignment: IndexMap<String, String> = triple
@@ -354,7 +374,7 @@ fn generate_triples(triples: &[HighRiskTriple]) -> Vec<Obligation> {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         out.push(Obligation {
-            id: combination_obligation_id(operation, &assignment),
+            id,
             kind: ObligationKind::Combination,
             operation: Some(operation.clone()),
             assignment: Some(assignment),

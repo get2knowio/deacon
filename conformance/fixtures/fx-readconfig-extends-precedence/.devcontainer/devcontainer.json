@@ -1,0 +1,7 @@
+{
+	"name": "extends-precedence-child",
+	"extends": "./middle.json",
+	"containerEnv": { "LAYER": "child", "FROM_CHILD": "yes" },
+	"forwardPorts": [4000],
+	"remoteUser": "child-user"
+}

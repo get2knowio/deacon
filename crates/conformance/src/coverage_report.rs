@@ -1,10 +1,6 @@
 //! The coverage report renderers (024-deterministic-conformance-coverage,
-//! contracts/coverage-report.md): `coverage-pairwise`, `coverage-operations`, and
-//! `coverage-observables`.
-//!
-//! `coverage-triples` (§2) lands with User Story 3, together with the `hrt-` records it
-//! renders; emitting an empty triples document before any triple is selected would report
-//! a complete triple set that nobody chose.
+//! contracts/coverage-report.md): `coverage-pairwise`, `coverage-triples`,
+//! `coverage-operations`, and `coverage-observables`.
 //!
 //! **Universal properties**, no exceptions (FR-062, SC-010):
 //!
@@ -29,20 +25,21 @@ use serde::Serialize;
 
 use crate::coverage::{ObligationBucket, ObligationOutcome, evaluate_obligations};
 use crate::load::Registry;
-use crate::model::TestCase;
+use crate::model::{InputClass, TestCase};
 use crate::obligation::{ObligationInventory, ObligationKind};
 use crate::scenario::{OPERATION_DIMENSION, ScenarioModel, excluding_rule};
 
 /// Schema version of every coverage report document.
 pub const COVERAGE_REPORT_SCHEMA_VERSION: u32 = 1;
 
-/// The five input classes FR-040 requires cases to span.
+/// The five input classes FR-040 requires cases to span, in report order.
 ///
-/// A record does not yet *declare* its input class — that field arrives with the
-/// deterministic case build-out (US3) — so the classes are **derived** from what a case
-/// already states (see [`input_class_of`]). Two of the five have no derivable signal at
-/// all and are therefore always reported missing: that is the honest answer, and a report
-/// that quietly counted them as present would be the failure this feature exists to stop.
+/// A case now **declares** its class ([`TestCase::input_class`], 024 US3); the derivation
+/// in [`input_class_of`] remains the fallback for the records that predate the field. Two
+/// of the five — `boundary` and `unsupported` — have no derivable signal at all, so before
+/// the field existed they were reported permanently missing however many such cases were
+/// written. That was the honest answer to a question inference could not answer; declaring
+/// the class is the answer to the question itself.
 pub const INPUT_CLASSES: &[&str] = &[
     "valid",
     "boundary",
@@ -171,6 +168,59 @@ pub struct PairwiseSummary {
 }
 
 // ---------------------------------------------------------------------------
+// §2 coverage-triples
+// ---------------------------------------------------------------------------
+
+/// `coverage-triples.json` (contracts/coverage-report.md §2).
+///
+/// One row per hand-selected `hrt-` record, in declaration order — the order the author
+/// chose, which is the order a reviewer reads the selection in. The row carries the
+/// triple's `reason` verbatim so the **selection** is reviewable and not only the
+/// coverage: a triple set nobody can argue with makes SC-003 a formality.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriplesReport {
+    pub schema_version: u32,
+    pub triples: Vec<TripleEntry>,
+    pub summary: TriplesSummary,
+}
+
+/// One selected high-risk triple, its generated obligation, and how it is discharged.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TripleEntry {
+    /// The `hrt-` record id.
+    pub id: String,
+    /// The `obl-cmb-` obligation generation derived from it, or `""` when the triple names
+    /// no operation and generation therefore emitted nothing (V26 reports the record).
+    pub obligation: String,
+    /// The full assignment, operation first, in the record's declaration order.
+    pub assignment: IndexMap<String, String>,
+    /// Why this interaction was selected — carried verbatim (FR-016).
+    pub reason: String,
+    /// `covered` or `gap` only. FR-015 forbids rationale/waiver on a triple and V29
+    /// rejects it at validation, so no other bucket can reach this report through a valid
+    /// registry; an `undispositioned` triple still appears, because SC-001 counts it.
+    pub bucket: String,
+    /// The covering case ids, or the backing gap id.
+    pub by: Vec<String>,
+}
+
+/// Triple-set summary. `selected` is the size of the hand-authored set — the number
+/// SC-003 is about — and never a count of what happened to be generated.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriplesSummary {
+    pub selected: usize,
+    pub covered: usize,
+    pub gap: usize,
+    /// Triples in neither bucket — undispositioned, or (invalidly) argued rather than
+    /// tested. Reported rather than folded, so a triple cannot go missing between the two
+    /// buckets the contract names.
+    pub other: usize,
+}
+
+// ---------------------------------------------------------------------------
 // §3 coverage-operations
 // ---------------------------------------------------------------------------
 
@@ -193,12 +243,22 @@ pub struct OperationCoverage {
     pub operation: String,
     /// Cases attributed to this operation (see [`case_operations`]).
     pub cases: usize,
-    /// Derived input-class tallies, in [`INPUT_CLASSES`] order.
+    /// Input-class tallies, in [`INPUT_CLASSES`] order — declared where a case declares
+    /// one, derived otherwise ([`input_class_of`]).
     pub input_classes: IndexMap<String, usize>,
     /// Case counts per configuration source, from declared `scenarioContext` only.
     pub config_sources: IndexMap<String, usize>,
     /// Observable channels this operation's cases compare, id-sorted.
     pub channels: Vec<String>,
+    /// Whether a differential against the pinned reference can be run for this operation.
+    pub differential_available: bool,
+    /// When it cannot: why, and what is substituted (spec Assumption 5). Present exactly
+    /// when `differentialAvailable` is `false`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub differential_substitution: Option<String>,
+    /// Permitted classes with no case. `reference-lenient` is **not** permitted for an
+    /// operation the reference does not implement, so it is never reported missing there
+    /// — demanding a case that cannot exist would turn an honest measure into noise.
     pub missing_input_classes: Vec<String>,
     pub missing_config_sources: Vec<String>,
 }
@@ -266,6 +326,7 @@ pub const CHANNEL_CASE_FLOOR: usize = 3;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoverageReports {
     pub pairwise: PairwiseReport,
+    pub triples: TriplesReport,
     pub operations: OperationsReport,
     pub observables: ObservablesReport,
 }
@@ -281,8 +342,66 @@ pub fn build_coverage_reports(
     let outcomes = evaluate_obligations(registry, inventory);
     CoverageReports {
         pairwise: build_pairwise(registry, &outcomes),
+        triples: build_triples(registry, &outcomes),
         operations: build_operations(registry),
         observables: build_observables(registry),
+    }
+}
+
+/// §2: one row per hand-selected `hrt-` record, joined to the obligation generation
+/// derived from it.
+///
+/// The join key is the **obligation id**, recomputed from the triple exactly as
+/// `generate_triples` computes it, rather than a positional or arity-based match against
+/// the inventory. Identity is substance-anchored (contracts/obligation.md), so recomputing
+/// is the only join that stays correct when a triple is reordered, renamed, or when a
+/// *pair* obligation happens to share the assignment — the id is what the disposition
+/// names, so the id is what the report must follow.
+fn build_triples(registry: &Registry, outcomes: &[ObligationOutcome<'_>]) -> TriplesReport {
+    let by_id: BTreeMap<&str, &ObligationOutcome<'_>> = outcomes
+        .iter()
+        .map(|outcome| (outcome.obligation.id.as_str(), outcome))
+        .collect();
+
+    let mut triples = Vec::new();
+    let (mut covered, mut gap, mut other) = (0usize, 0usize, 0usize);
+    for triple in &registry.triples {
+        let obligation = crate::obligation::triple_obligation_id(triple);
+        let outcome = obligation.as_deref().and_then(|id| by_id.get(id));
+        let (bucket, by) = match outcome {
+            Some(outcome) => (outcome.bucket.as_str().to_string(), outcome.by.clone()),
+            // A triple that generated no obligation cannot be dispositioned at all. Saying
+            // `gap` would be a coverage claim about a combination the model never emitted;
+            // V26 names the modelling mistake, and this row records that it has no bucket.
+            None => (
+                ObligationBucket::Undispositioned.as_str().to_string(),
+                Vec::new(),
+            ),
+        };
+        match bucket.as_str() {
+            b if b == ObligationBucket::Covered.as_str() => covered += 1,
+            b if b == ObligationBucket::Gap.as_str() => gap += 1,
+            _ => other += 1,
+        }
+        triples.push(TripleEntry {
+            id: triple.id.clone(),
+            obligation: obligation.unwrap_or_default(),
+            assignment: triple.assignment.clone(),
+            reason: triple.reason.clone(),
+            bucket,
+            by,
+        });
+    }
+
+    TriplesReport {
+        schema_version: COVERAGE_REPORT_SCHEMA_VERSION,
+        summary: TriplesSummary {
+            selected: triples.len(),
+            covered,
+            gap,
+            other,
+        },
+        triples,
     }
 }
 
@@ -313,12 +432,23 @@ fn build_pairwise(registry: &Registry, outcomes: &[ObligationOutcome<'_>]) -> Pa
                         .map(|outcome| {
                             let assignment =
                                 outcome.obligation.assignment.clone().unwrap_or_default();
-                            for (dimension, value) in &assignment {
-                                // Borrowed from the registry, not from the clone.
-                                if let Some(declared) = model.dimension(dimension)
-                                    && let Some(v) = declared.values.iter().find(|d| *d == value)
-                                {
-                                    alive.insert((declared.id.as_str(), v.as_str()));
+                            // Liveness is computed from the PAIR enumeration only, matching
+                            // `validate::check_scenario_model`'s definition of a dead value.
+                            // A hand-selected triple naming a value the pair space cannot
+                            // reach is itself a V26 violation ("selects a combination a rule
+                            // excludes"), so letting it rescue the value here would give the
+                            // report and the validator two different answers to the same
+                            // question — and the report's answer would be the one that hid
+                            // the modelling mistake.
+                            if outcome.obligation.arity.unwrap_or(2) == 2 {
+                                for (dimension, value) in &assignment {
+                                    // Borrowed from the registry, not from the clone.
+                                    if let Some(declared) = model.dimension(dimension)
+                                        && let Some(v) =
+                                            declared.values.iter().find(|d| *d == value)
+                                    {
+                                        alive.insert((declared.id.as_str(), v.as_str()));
+                                    }
                                 }
                             }
                             PairEntry {
@@ -467,14 +597,18 @@ fn case_operations(case: &TestCase) -> BTreeSet<String> {
         .collect()
 }
 
-/// The derived input class of a case ([`INPUT_CLASSES`]).
+/// The input class of a case: its **declared** class when it has one, otherwise the
+/// pre-US3 derivation ([`INPUT_CLASSES`]).
 ///
-/// Derived, not declared — the record has no input-class field until US3. A case that
-/// expects a failure phase exercises a `malformed` input; a case carrying a tolerated
-/// difference exercises the reference's leniency; everything else is a `valid` input.
-/// `boundary` and `unsupported` have **no** derivable signal, so they are never counted
-/// and always appear in `missingInputClasses`.
+/// The derivation is a fallback for the records that predate the field, not a second
+/// source of truth: a case that expects a failure phase exercises a `malformed` input; a
+/// case carrying a tolerated difference exercises the reference's leniency; everything
+/// else reads as `valid`. `boundary` and `unsupported` have no derivable signal at all,
+/// which is precisely why the field exists — inference cannot represent a judgement.
 fn input_class_of(case: &TestCase) -> &'static str {
+    if let Some(declared) = case.input_class {
+        return declared.as_str();
+    }
     if case
         .operations
         .iter()
@@ -486,6 +620,22 @@ fn input_class_of(case: &TestCase) -> &'static str {
     } else {
         "valid"
     }
+}
+
+/// The input classes an operation's cases are expected to span (FR-040).
+///
+/// Every class, minus `reference-lenient` for an operation the pinned reference does not
+/// implement: leniency is a difference between two implementations, and where there is
+/// only one implementation the class does not exist to be exercised. Reporting it missing
+/// there would demand a case that cannot be written, and a missing-list containing
+/// impossible entries stops being read.
+fn permitted_input_classes(operation: &str) -> Vec<&'static str> {
+    let has_reference = crate::model::differential_substitution(operation).is_none();
+    INPUT_CLASSES
+        .iter()
+        .copied()
+        .filter(|class| has_reference || *class != InputClass::ReferenceLenient.as_str())
+        .collect()
 }
 
 fn build_operations(registry: &Registry) -> OperationsReport {
@@ -538,12 +688,16 @@ fn build_operations(registry: &Registry) -> OperationsReport {
             channels.extend(case.outcomes.iter().map(|o| o.channel.clone()));
         }
 
+        let permitted = permitted_input_classes(operation);
+        let substitution = crate::model::differential_substitution(operation);
         operations.push(OperationCoverage {
             operation: operation.clone(),
             cases: cases.len(),
+            differential_available: substitution.is_none(),
+            differential_substitution: substitution.map(str::to_string),
             missing_input_classes: input_classes
                 .iter()
-                .filter(|(_, count)| **count == 0)
+                .filter(|(class, count)| **count == 0 && permitted.contains(&class.as_str()))
                 .map(|(class, _)| class.clone())
                 .collect(),
             missing_config_sources: config_sources
@@ -824,6 +978,54 @@ fn render_assignment(assignment: &IndexMap<String, String>) -> String {
         .join(" × ")
 }
 
+/// `coverage-triples.md`, rendered from the same ordered model as its JSON.
+pub fn render_triples_md(report: &TriplesReport) -> String {
+    let mut md = String::new();
+    md.push_str("# High-Risk Triple Coverage\n\n");
+    let s = &report.summary;
+    md.push_str("| Bucket | Count |\n|--------|-------|\n");
+    let _ = writeln!(md, "| selected | {} |", s.selected);
+    let _ = writeln!(md, "| covered | {} |", s.covered);
+    let _ = writeln!(md, "| gap | {} |", s.gap);
+    let _ = writeln!(md, "| other (undispositioned) | {} |", s.other);
+    md.push('\n');
+    md.push_str(
+        "A triple accepts only `case` or `gap` (FR-015): it is selected precisely because \
+         interaction defects hide there, so an argument cannot stand in for evidence. V29 \
+         rejects a rationale or a waiver on one.\n\n",
+    );
+    if report.triples.is_empty() {
+        md.push_str("_No high-risk triples selected._\n");
+        return md;
+    }
+    md.push_str("| Triple | Combination | Bucket | By |\n");
+    md.push_str("|--------|-------------|--------|----|\n");
+    for triple in &report.triples {
+        let _ = writeln!(
+            md,
+            "| `{}` | {} | {} | {} |",
+            triple.id,
+            render_assignment(&triple.assignment),
+            triple.bucket,
+            render_list(&triple.by)
+        );
+    }
+    md.push('\n');
+    md.push_str("## Why each triple was selected\n\n");
+    for triple in &report.triples {
+        let _ = writeln!(md, "### `{}`\n", triple.id);
+        let _ = writeln!(md, "- Obligation: `{}`", triple.obligation);
+        let _ = writeln!(
+            md,
+            "- Combination: {}",
+            render_assignment(&triple.assignment)
+        );
+        let _ = writeln!(md, "- Bucket: {}", triple.bucket);
+        let _ = writeln!(md, "\n{}\n", triple.reason);
+    }
+    md
+}
+
 /// `coverage-operations.md`, rendered from the same ordered model as its JSON.
 pub fn render_operations_md(report: &OperationsReport) -> String {
     let mut md = String::new();
@@ -849,6 +1051,12 @@ pub fn render_operations_md(report: &OperationsReport) -> String {
     for operation in &report.operations {
         let _ = writeln!(md, "### `{}`\n", operation.operation);
         let _ = writeln!(md, "Cases: {}\n", operation.cases);
+        if let Some(substitution) = &operation.differential_substitution {
+            let _ = writeln!(
+                md,
+                "**No runnable differential against the pinned reference** — {substitution}.\n"
+            );
+        }
         md.push_str("| Input class | Cases |\n|-------------|-------|\n");
         for (class, count) in &operation.input_classes {
             let _ = writeln!(md, "| {class} | {count} |");
@@ -937,6 +1145,8 @@ pub fn write_coverage_reports(
             "coverage-pairwise.md",
             render_pairwise_md(&reports.pairwise),
         ),
+        ("coverage-triples.json", render_json(&reports.triples)),
+        ("coverage-triples.md", render_triples_md(&reports.triples)),
         ("coverage-operations.json", render_json(&reports.operations)),
         (
             "coverage-operations.md",

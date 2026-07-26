@@ -2398,6 +2398,58 @@ impl<'a> Checker<'a> {
         self.check_case_fs_allowlist(case);
         self.check_case_observable_channels(case);
         self.check_case_resource_group(case);
+        self.check_case_oracle_availability(case, oracle_type);
+    }
+
+    /// The oracle a case declares must be one that can actually be run for its operation
+    /// (024 US3, spec Assumption 5 / scenario 4).
+    ///
+    /// Two rules, both about the same missing second side:
+    ///
+    /// 1. An operation with no runnable differential
+    ///    ([`OPERATIONS_WITHOUT_RUNNABLE_DIFFERENTIAL`](crate::model::OPERATIONS_WITHOUT_RUNNABLE_DIFFERENTIAL))
+    ///    cannot be a `live-differential`. There is no reference command to invoke — or
+    ///    none invocable with the same argv — so the "differential" would compare deacon
+    ///    against a usage error, which can only ever produce a difference nobody learns
+    ///    anything from.
+    /// 2. An `input-class: reference-lenient` case MUST be a `live-differential`,
+    ///    whichever operation it names. Leniency is a claim about what the *reference*
+    ///    accepts; asserting it without running the reference records an opinion, not
+    ///    evidence — and FR-043 asks these cases to pin a direction, which needs both
+    ///    directions observed.
+    fn check_case_oracle_availability(
+        &mut self,
+        case: &crate::model::TestCase,
+        oracle_type: OracleType,
+    ) {
+        let operation = case
+            .scenario_context
+            .get(crate::scenario::OPERATION_DIMENSION);
+        if oracle_type == OracleType::LiveDifferential
+            && let Some(operation) = operation
+            && let Some(substitution) = crate::model::differential_substitution(operation)
+        {
+            self.push(
+                "V16",
+                &case.id,
+                format!(
+                    "declares `oracleType: live-differential` under operation \
+                     {operation:?}, but {substitution}. Use `spec-expectation`."
+                ),
+            );
+        }
+        if case.input_class == Some(crate::model::InputClass::ReferenceLenient)
+            && oracle_type != OracleType::LiveDifferential
+        {
+            self.push(
+                "V16",
+                &case.id,
+                "declares `inputClass: reference-lenient` but is not a \
+                 `live-differential`; leniency is a claim about what the REFERENCE \
+                 accepts, and a case that never runs the reference records an opinion \
+                 rather than evidence (FR-040/FR-043)",
+            );
+        }
     }
 
     /// Every declared `expected[].channel` must be a channel the runner can actually
@@ -2990,6 +3042,35 @@ pub fn check_scenario_model(registry: &Registry) -> Vec<Violation> {
                 ));
             }
         }
+        // The declared operation must be one the case actually invokes. `sdim-operation`
+        // values are the consumer subcommand identifiers verbatim, so this is a direct
+        // comparison. Without it a case could be filed under an operation it never runs:
+        // `coverage-operations` treats `scenarioContext` as authoritative for attribution
+        // (it is the only thing that can be, once a case runs several subcommands), so a
+        // mislabelled case would credit coverage to an operation nothing exercised — the
+        // exact failure mode a coverage report exists to prevent.
+        if let Some(operation) = case.scenario_context.get(OPERATION_DIMENSION)
+            && !case.operations.is_empty()
+            && !case.operations.iter().any(|op| op.subcommand == *operation)
+        {
+            let invoked: Vec<&str> = case
+                .operations
+                .iter()
+                .map(|op| op.subcommand.as_str())
+                .collect();
+            out.push(Violation::new(
+                "V26",
+                &case.id,
+                format!(
+                    "`scenarioContext` declares operation {operation:?}, which the case \
+                     never invokes (it runs {}). The declared operation is what the \
+                     per-operation report attributes the case to, so it must name a \
+                     subcommand the case actually runs",
+                    invoked.join(", ")
+                ),
+            ));
+        }
+
         let combination: Vec<(&str, &str)> = case
             .scenario_context
             .iter()
@@ -3324,6 +3405,7 @@ pub fn check_obligation_dispositions(registry: &Registry) -> Vec<Violation> {
 
     // -- V29: semantics of each cleanly-resolved record ----------------------
     let case_ids: HashSet<&str> = registry.cases.iter().map(|c| c.id.as_str()).collect();
+    let executable = crate::coverage::executable_case_ids(registry);
     let waivers: HashMap<&str, &Waiver> = registry
         .waivers
         .iter()
@@ -3341,6 +3423,25 @@ pub fn check_obligation_dispositions(registry: &Registry) -> Vec<Violation> {
                             &record.id,
                             format!(
                                 "claims coverage by case {case:?}, which is not a declared case"
+                            ),
+                        ));
+                        continue;
+                    }
+                    // FR-015 asks for an EXECUTABLE case on a triple, not merely a
+                    // declared one. A legacy carrier whose residual has closed is a
+                    // record pointing at a deleted program: it satisfies nothing, and on
+                    // a triple — the one place an argument may not stand in for evidence
+                    // — a dead pointer is the quietest possible way to lose the evidence.
+                    if unit.is_triple() && !executable.contains(case.as_str()) {
+                        out.push(Violation::new(
+                            "V29",
+                            &record.id,
+                            format!(
+                                "is a high-risk triple dispositioned by case {case:?}, which \
+                                 is not executable (a legacy carrier with no open residual). \
+                                 FR-015 requires a triple to be satisfied by an EXECUTABLE \
+                                 case; a pointer at a retired program is not evidence that \
+                                 the interaction behaves."
                             ),
                         ));
                     }

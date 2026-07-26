@@ -570,10 +570,24 @@ fn the_full_cartesian_product_is_never_materialized() {
         .iter()
         .filter(|u| u.kind == ObligationKind::Combination)
         .count();
+    // Pairs are enumerated; TRIPLES are hand-selected and add one obligation each, so the
+    // two populations are counted separately. Folding them would make the brute-force
+    // cross-check drift by however many triples happen to be selected.
+    let pairs = inventory
+        .units
+        .iter()
+        .filter(|u| u.kind == ObligationKind::Combination && u.arity == Some(2))
+        .count();
+    let triples = combinations - pairs;
     let expected = brute_force_valid_pairs(&registry.scenario, &registry.applicability).len();
     assert_eq!(
-        combinations, expected,
-        "the obligation count must equal the enumerated valid-pair count"
+        pairs, expected,
+        "the pair-obligation count must equal the enumerated valid-pair count"
+    );
+    assert_eq!(
+        triples,
+        registry.triples.len(),
+        "every hand-selected triple yields exactly one obligation, and nothing else does"
     );
 
     let product: usize = registry.scenario.iter().map(|d| d.values.len()).product();
@@ -583,8 +597,9 @@ fn the_full_cartesian_product_is_never_materialized() {
          ({product}); a count at or above it would mean the product was materialized"
     );
 
-    // Every combination obligation pins exactly two dimensions (a triple pins three, and
-    // none is selected yet) — the shape that makes the space tractable.
+    // Every combination obligation pins exactly as many dimensions as its arity — two for
+    // an enumerated pair, three for a hand-selected triple — the shape that makes the
+    // space tractable.
     for unit in inventory
         .units
         .iter()

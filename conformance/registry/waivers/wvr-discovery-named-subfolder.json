@@ -1,0 +1,20 @@
+{
+  "id": "wvr-discovery-named-subfolder",
+  "behaviors": [
+    "bhv-readconfig-discovery-locations"
+  ],
+  "scope": {
+    "kind": "corpus_case",
+    "corpus": "discovery",
+    "case": "named-subfolder"
+  },
+  "expect": {
+    "kind": "reference-stricter",
+    "signal": [
+      "devcontainer.json"
+    ]
+  },
+  "rationale": "The spec's devcontainer-reference lists `.devcontainer/<folder>/devcontainer.json` (one level deep) as a discovery location. deacon searches it; the pinned reference v0.87.0 requires an explicit --config and exits non-zero. deacon is on the spec's side, so the difference is characterized rather than followed — the waiver records that the reference is blind to a location the spec names, and self-invalidates if a later oracle starts searching it.",
+  "added": "2026-07-26",
+  "expires": "2027-07-26"
+}

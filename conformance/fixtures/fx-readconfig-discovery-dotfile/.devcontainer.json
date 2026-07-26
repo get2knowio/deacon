@@ -1,0 +1,4 @@
+{
+	"name": "discovery-root-dotfile",
+	"image": "alpine:3.19"
+}

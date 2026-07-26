@@ -1,0 +1,7 @@
+{
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"shutdownAction": "stopCompose",
+	"containerEnv": { "LAYER": "base", "FROM_BASE": "yes" }
+}

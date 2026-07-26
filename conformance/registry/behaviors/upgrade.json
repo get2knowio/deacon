@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-upgrade-empty-feature-set",
+      "area": "upgrade",
+      "statement": "`upgrade` on a configuration that declares no Features regenerates an EMPTY lockfile and exits 0.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "The pinned reference treats the empty Feature set as an error (`Failed to update lockfile`, exit 1); deacon emits `{\"features\":{}}` and succeeds (observed 2026-07-26, src-obs-upgrade-empty-feature-set). Characterized rather than followed: an operation that cannot express 'nothing to pin' is unusable as an idempotent step in a script that does not know in advance whether the configuration has Features. Backed by wvr-upgrade-empty-feature-set."
+    },
+    {
+      "id": "bhv-upgrade-regenerates-lockfile",
+      "area": "upgrade",
+      "statement": "`upgrade` regenerates the devcontainer lockfile from the effective configuration's resolved Feature set, including Features contributed by a parent link of an extends chain, and `--dry-run` writes it to stdout instead of to disk.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Both CLIs resolve the same pinned Feature reference to the same digest and integrity, so the comparison is on the lockfile document itself rather than on the exit code. An implementation that refreshed only the entries an existing lockfile already contained would emit an empty document for the extends-chain case and still exit 0."
+    }
+  ]
+}

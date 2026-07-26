@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceRucImageFeature",
+	"image": "alpine:3.19",
+	"features": { "./features/hooked": {} },
+	"onCreateCommand": "sh -c 'echo config-onCreate >> /tmp/conformance-hooks'",
+	"updateContentCommand": "sh -c 'echo config-updateContent >> /tmp/conformance-hooks'",
+	"postCreateCommand": "sh -c 'echo config-postCreate >> /tmp/conformance-hooks'",
+	"postStartCommand": "sh -c 'echo config-postStart >> /tmp/conformance-hooks'",
+	"remoteUser": "root"
+}

@@ -2,11 +2,141 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "case-exec-boundary-empty-command-output",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "boundary",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-tty"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "exit 0"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 boundary class for `exec`: a command that succeeds and writes NOTHING. Empty output is the edge of the stdout domain and is a different observation from output that was not captured — the distinction `present: false` exists to keep, and the one a comparison that treats empty as absent would silently lose."
+    },
+    {
+      "id": "case-exec-compose-service",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-feature"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "echo compose-exec"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. `exec` against a Compose project has to reach the SERVICE container the configuration names, not the first container of the project. With a single service the two coincide, so the assertion is the round trip; the discrimination lives in the down cases, where a mis-identified project is observable."
+    },
+    {
       "id": "case-exec-decl-tty",
       "behaviors": [
         "bhv-exec-command-parity"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
       "oracleType": "live-differential",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -59,6 +189,14 @@
         "bhv-exec-command-parity"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
       "oracleType": "live-differential",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -111,6 +249,14 @@
         "bhv-exec-command-parity"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
       "oracleType": "live-differential",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -158,6 +304,120 @@
       "notes": "Migrated from parity_exec::working-directory: both CLIs run the command in the same container working directory (an explicit `workspaceFolder`). The same argv runs on both sides (the declarative model has one argv per operation), so the comparison is a true differential. Image pinned to alpine:3.19 (V18)."
     },
     {
+      "id": "case-exec-dockerfile-overlay",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-dockerfile-overlay"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remote-env",
+            "CONF_FROM_OVERLAY=overlay",
+            "--",
+            "sh",
+            "-lc",
+            "printf '%s|%s|%s\\n' \"$CONF_FROM_IMAGE\" \"$CONF_FROM_CONFIG\" \"$CONF_FROM_OVERLAY\"; command -v conf-tool"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-exec-dockerfile-running-cli-overlay`. Three sources of environment meet in one invocation — the image's own `ENV`, the configuration's `containerEnv`, and a `--remote-env` overlay — and the command also resolves a tool the image put on `PATH`. The `PATH` probe is the load-bearing half: an overlay implemented as a replacement rather than an extension satisfies every variable assertion and still loses the image's `PATH`."
+    },
+    {
+      "id": "case-exec-malformed-config-rejected",
+      "behaviors": [
+        "bhv-readconfig-malformed-jsonc-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "true"
+          ],
+          "fixtures": [
+            "fx-errors-malformed-json"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 malformed class for `exec`: the target container is identified from the configuration, so a document that cannot be parsed stops the run before any container is looked up. The container-state is `none` deliberately — the case never gets far enough for one to exist."
+    },
+    {
       "id": "case-exec-parity",
       "behaviors": [
         "bhv-exec-command-parity"
@@ -176,6 +436,128 @@
           "expectation": "the executed command's exit code is propagated, matching the reference"
         }
       ]
+    },
+    {
+      "id": "case-exec-reference-lenient-wrong-type",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-forwardports-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "reference-lenient",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-wrong-type-forwardports"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "echo lenient"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-wrong-type-forwardports-rejected",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon rejects the document before a container exists, so the exec never runs; the reference execs successfully in the container it created.",
+          "waiverId": "wvr-wrong-type-forwardports"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 reference-lenient class for `exec`: the reference accepts a wrongly-typed `forwardPorts`, creates the container and then execs into it successfully; deacon refuses the document and never reaches the container. Same fixture, same waiver, one stage further along than the `up` case — which is the evidence that the leniency is not a read-time quirk."
+    },
+    {
+      "id": "case-exec-unsupported-missing-command",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "unsupported",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-tty"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "definitely-not-an-installed-binary"
+          ],
+          "expectFailurePhase": "exec"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class for `exec`: the invocation is well-formed and the container is running, but the named executable does not exist inside it. Both CLIs must surface the container's own failure rather than substitute one of their own, and the exit code is where that shows."
     }
   ]
 }

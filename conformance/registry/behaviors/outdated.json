@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-outdated-extends-chain-features",
+      "area": "outdated",
+      "statement": "`outdated` resolves the full extends chain before reporting versions, so a Feature contributed by a parent link appears in the report.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "divergent",
+      "decision": "follow-spec",
+      "notes": "The pinned reference does not resolve `extends`, so it reports an EMPTY table and exits 0 for a workspace whose only Feature is declared one link up — a silent miss, not an error (observed 2026-07-26, src-obs-outdated-extends-chain). Backed by wvr-outdated-extends-chain-features; the difference is only visible on stdout, so that is the compared channel."
+    },
+    {
+      "id": "bhv-outdated-reports-feature-versions",
+      "area": "outdated",
+      "statement": "`outdated` reports each configured Feature's current, wanted, and latest version, and reports an empty result for a configuration that declares no Features.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Assertions pin `current` and `wanted`, which the configuration's exact version reference fixes; `latest` is deliberately unpinned because it is whatever the registry publishes next and an assertion on it would decay into a false failure."
+    }
+  ]
+}

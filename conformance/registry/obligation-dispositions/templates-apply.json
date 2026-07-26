@@ -2,6 +2,19 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "odp-bhv-a36e5ed6",
+      "obligation": "obl-bhv-a36e5ed6",
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target",
+        "case-templates-apply-default-option",
+        "case-templates-apply-dockerfile-target",
+        "case-templates-apply-missing-template",
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
+    },
+    {
       "id": "odp-cmb-0806ebda",
       "obligation": "obl-cmb-0806ebda",
       "disposition": "gap",
@@ -10,8 +23,13 @@
     {
       "id": "odp-cmb-0a4ac00f",
       "obligation": "obl-cmb-0a4ac00f",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-default-option",
+        "case-templates-apply-missing-template",
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
     },
     {
       "id": "odp-cmb-0c025991",
@@ -40,20 +58,37 @@
     {
       "id": "odp-cmb-1fa28d7f",
       "obligation": "obl-cmb-1fa28d7f",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target",
+        "case-templates-apply-default-option",
+        "case-templates-apply-dockerfile-target",
+        "case-templates-apply-missing-template",
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
     },
     {
       "id": "odp-cmb-1ff332bc",
       "obligation": "obl-cmb-1ff332bc",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-default-option",
+        "case-templates-apply-missing-template",
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
     },
     {
       "id": "odp-cmb-29e0c6ef",
       "obligation": "obl-cmb-29e0c6ef",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target",
+        "case-templates-apply-default-option",
+        "case-templates-apply-dockerfile-target",
+        "case-templates-apply-missing-template"
+      ]
     },
     {
       "id": "odp-cmb-31670959",
@@ -64,8 +99,10 @@
     {
       "id": "odp-cmb-3455e73b",
       "obligation": "obl-cmb-3455e73b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target"
+      ]
     },
     {
       "id": "odp-cmb-3d890f23",
@@ -76,32 +113,61 @@
     {
       "id": "odp-cmb-40c6c014",
       "obligation": "obl-cmb-40c6c014",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-default-option",
+        "case-templates-apply-missing-template",
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
     },
     {
       "id": "odp-cmb-413c4b3c",
       "obligation": "obl-cmb-413c4b3c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
     },
     {
       "id": "odp-cmb-4140ac9a",
       "obligation": "obl-cmb-4140ac9a",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target"
+      ]
     },
     {
       "id": "odp-cmb-5079ddd0",
       "obligation": "obl-cmb-5079ddd0",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target",
+        "case-templates-apply-default-option",
+        "case-templates-apply-dockerfile-target",
+        "case-templates-apply-missing-template",
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
+    },
+    {
+      "id": "odp-cmb-51f789dc",
+      "obligation": "obl-cmb-51f789dc",
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
     },
     {
       "id": "odp-cmb-626423fe",
       "obligation": "obl-cmb-626423fe",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
     },
     {
       "id": "odp-cmb-62966e8d",
@@ -112,8 +178,10 @@
     {
       "id": "odp-cmb-70ece2c5",
       "obligation": "obl-cmb-70ece2c5",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target"
+      ]
     },
     {
       "id": "odp-cmb-817d39ac",
@@ -124,20 +192,30 @@
     {
       "id": "odp-cmb-84237f34",
       "obligation": "obl-cmb-84237f34",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target",
+        "case-templates-apply-default-option",
+        "case-templates-apply-dockerfile-target",
+        "case-templates-apply-missing-template"
+      ]
     },
     {
       "id": "odp-cmb-8dc6b98b",
       "obligation": "obl-cmb-8dc6b98b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-dockerfile-target"
+      ]
     },
     {
       "id": "odp-cmb-8ea34153",
       "obligation": "obl-cmb-8ea34153",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
     },
     {
       "id": "odp-cmb-9342e98c",
@@ -148,8 +226,11 @@
     {
       "id": "odp-cmb-9416e353",
       "obligation": "obl-cmb-9416e353",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
     },
     {
       "id": "odp-cmb-95e84e7b",
@@ -160,32 +241,45 @@
     {
       "id": "odp-cmb-a540f875",
       "obligation": "obl-cmb-a540f875",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target",
+        "case-templates-apply-default-option",
+        "case-templates-apply-dockerfile-target",
+        "case-templates-apply-missing-template"
+      ]
     },
     {
       "id": "odp-cmb-ab19c8ab",
       "obligation": "obl-cmb-ab19c8ab",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-dockerfile-target"
+      ]
     },
     {
       "id": "odp-cmb-ab7db35c",
       "obligation": "obl-cmb-ab7db35c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-dockerfile-target"
+      ]
     },
     {
       "id": "odp-cmb-ae22c784",
       "obligation": "obl-cmb-ae22c784",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target"
+      ]
     },
     {
       "id": "odp-cmb-aeffd432",
       "obligation": "obl-cmb-aeffd432",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-dockerfile-target"
+      ]
     },
     {
       "id": "odp-cmb-bae3303e",
@@ -196,8 +290,11 @@
     {
       "id": "odp-cmb-c0ad0da9",
       "obligation": "obl-cmb-c0ad0da9",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-default-option",
+        "case-templates-apply-missing-template"
+      ]
     },
     {
       "id": "odp-cmb-c846b04a",
@@ -226,8 +323,15 @@
     {
       "id": "odp-cmb-f4b1ab8d",
       "obligation": "obl-cmb-f4b1ab8d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-templates-apply"
+      "disposition": "case",
+      "cases": [
+        "case-templates-apply-compose-target",
+        "case-templates-apply-default-option",
+        "case-templates-apply-dockerfile-target",
+        "case-templates-apply-missing-template",
+        "case-templates-apply-option-substituted",
+        "case-templates-apply-unsupported-option"
+      ]
     }
   ]
 }

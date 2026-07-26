@@ -41,6 +41,14 @@
         "bhv-state-diff-parity"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
       "oracleType": "live-differential",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -139,6 +147,14 @@
         "bhv-state-diff-parity"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
       "oracleType": "live-differential",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -211,7 +227,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Migrated from parity_state_diff::dockerfile-build-and-nonroot-user (024 Phase 5). A Dockerfile-built workspace with a non-root `containerUser`/`remoteUser` yields equivalent container state in both CLIs \u2014 the built image's ENV, the resolved user, and the workspace bind all compare. Image pinned to debian:bookworm-slim (V18)."
+      "notes": "Migrated from parity_state_diff::dockerfile-build-and-nonroot-user (024 Phase 5). A Dockerfile-built workspace with a non-root `containerUser`/`remoteUser` yields equivalent container state in both CLIs — the built image's ENV, the resolved user, and the workspace bind all compare. Image pinned to debian:bookworm-slim (V18)."
     },
     {
       "id": "case-state-mount-variety",
@@ -221,6 +237,14 @@
         "bhv-state-diff-parity"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
       "oracleType": "live-differential",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -293,7 +317,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Migrated from parity_state_diff::mount-variety-readonly-and-tmpfs (024 Phase 5). A read-only bind mount and a tmpfs mount are applied identically by both CLIs \u2014 the read-only flag and the tmpfs target both appear in the compared mount set. Image pinned to debian:bookworm-slim (V18)."
+      "notes": "Migrated from parity_state_diff::mount-variety-readonly-and-tmpfs (024 Phase 5). A read-only bind mount and a tmpfs mount are applied identically by both CLIs — the read-only flag and the tmpfs target both appear in the compared mount set. Image pinned to debian:bookworm-slim (V18)."
     },
     {
       "id": "case-state-single-container",
@@ -303,6 +327,14 @@
         "bhv-state-diff-parity"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
       "oracleType": "live-differential",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -384,6 +416,14 @@
         "bhv-container-keepalive-command"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
       "oracleType": "live-differential",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -445,7 +485,7 @@
           "behavior": "bhv-container-keepalive-command",
           "context": [],
           "observablePath": "chan-container-state.cmd",
-          "rationale": "The two keep-alive command strings differ; the observable behavior does not. Measured, not assumed: `docker stop` completes in 245 ms with exit 0 for deacon and 215 ms with exit 0 for the reference. Scoped to `cmd` alone \u2014 `entrypoint` and every other container-state field stay compared.",
+          "rationale": "The two keep-alive command strings differ; the observable behavior does not. Measured, not assumed: `docker stop` completes in 245 ms with exit 0 for deacon and 215 ms with exit 0 for the reference. Scoped to `cmd` alone — `entrypoint` and every other container-state field stay compared.",
           "divergenceId": "bhv-container-keepalive-command"
         }
       ],
@@ -456,7 +496,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Records the container-label surface both CLIs produce (024 Phase 5). Only the five deacon-only keys are excused; `local_folder`/`config_file` differ only by each side's own isolated temp workspace and are normalized by the workspace path token, so they must compare equal. This case's first live run reported `diverge` on two further paths \u2014 `labels.devcontainer.metadata` and `cmd` \u2014 and BOTH were fixed in deacon rather than tolerated (the cmd one was a 10s `docker stop` stall). They are now compared and must agree; no tolerance was added for either."
+      "notes": "Records the container-label surface both CLIs produce (024 Phase 5). Only the five deacon-only keys are excused; `local_folder`/`config_file` differ only by each side's own isolated temp workspace and are normalized by the workspace path token, so they must compare equal. This case's first live run reported `diverge` on two further paths — `labels.devcontainer.metadata` and `cmd` — and BOTH were fixed in deacon rather than tolerated (the cmd one was a 10s `docker stop` stall). They are now compared and must agree; no tolerance was added for either."
     },
     {
       "id": "case-up-container-labels-stamped",
@@ -464,6 +504,14 @@
         "bhv-container-identity-labels"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
       "oracleType": "spec-expectation",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -503,7 +551,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Faithful destination for parity_observable_state::container-and-image-labels (024 Phase 5). The legacy test runs DEACON ONLY \u2014 it never invokes the oracle \u2014 and asserts four facts about deacon's own container labels, so a spec-expectation is its honest shape; a live-differential would silently claim cross-CLI agreement the unit never checked. Two corrections to the baseline record, which overstated it: the unit declares chan-image but inspects no image at all (only Config.Labels of the container), and its assertion text says \"and image\" for the same reason. The hash-valued labels (configHash, workspaceHash) are deliberately NOT pinned to literals here \u2014 they are derived from the workspace path, which differs per run; the sibling live-differential case covers them by comparison. Distinguished from that sibling by oracle type. Image pinned to debian:bookworm-slim (V18)."
+      "notes": "Faithful destination for parity_observable_state::container-and-image-labels (024 Phase 5). The legacy test runs DEACON ONLY — it never invokes the oracle — and asserts four facts about deacon's own container labels, so a spec-expectation is its honest shape; a live-differential would silently claim cross-CLI agreement the unit never checked. Two corrections to the baseline record, which overstated it: the unit declares chan-image but inspects no image at all (only Config.Labels of the container), and its assertion text says \"and image\" for the same reason. The hash-valued labels (configHash, workspaceHash) are deliberately NOT pinned to literals here — they are derived from the workspace path, which differs per run; the sibling live-differential case covers them by comparison. Distinguished from that sibling by oracle type. Image pinned to debian:bookworm-slim (V18)."
     }
   ]
 }

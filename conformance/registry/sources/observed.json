@@ -26,7 +26,7 @@
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",
       "locator": "up/container-labels",
-      "summary": "On the same fixture (fx-up-basic, image alpine:3.19), `docker inspect .Config.Labels` shows the reference CLI setting exactly three labels \u2014 devcontainer.metadata, devcontainer.local_folder, devcontainer.config_file \u2014 while deacon sets those three plus five it alone defines: devcontainer.configHash, devcontainer.config_name, devcontainer.name, devcontainer.source (value \"deacon\"), devcontainer.workspaceHash. devcontainer.metadata is byte-identical between the two; local_folder and config_file differ only by each side's own workspace path.",
+      "summary": "On the same fixture (fx-up-basic, image alpine:3.19), `docker inspect .Config.Labels` shows the reference CLI setting exactly three labels — devcontainer.metadata, devcontainer.local_folder, devcontainer.config_file — while deacon sets those three plus five it alone defines: devcontainer.configHash, devcontainer.config_name, devcontainer.name, devcontainer.source (value \"deacon\"), devcontainer.workspaceHash. devcontainer.metadata is byte-identical between the two; local_folder and config_file differ only by each side's own workspace path.",
       "behaviors": [
         "bhv-container-identity-labels"
       ]
@@ -39,6 +39,16 @@
       "summary": "`docker inspect .Config.Cmd` on fx-up-container-labels shows two different shell keep-alive strings. Behavioral equivalence measured by `docker stop` wall time and exit code: deacon 245 ms / exit 0, reference 215 ms / exit 0.",
       "behaviors": [
         "bhv-container-keepalive-command"
+      ]
+    },
+    {
+      "id": "src-obs-discovery-named-subfolder",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration on .devcontainer/<folder>/devcontainer.json",
+      "summary": "The pinned reference exits non-zero for a workspace whose only configuration is one level deep under .devcontainer/, where deacon resolves it (observed 2026-07-26).",
+      "behaviors": [
+        "bhv-readconfig-discovery-locations"
       ]
     },
     {
@@ -82,6 +92,16 @@
       ]
     },
     {
+      "id": "src-obs-feature-resolution-order",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration --include-features-configuration --additional-features",
+      "summary": "Both CLIs place a dependency before its dependant in the resolved Feature set; the reported documents differ in shape, the reference additionally reporting process-local cache paths and consecutive ids (observed 2026-07-26).",
+      "behaviors": [
+        "bhv-readconfig-feature-resolution-order"
+      ]
+    },
+    {
       "id": "src-obs-malformed-json",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",
@@ -102,6 +122,26 @@
       ]
     },
     {
+      "id": "src-obs-outdated-extends-chain",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "outdated over an extends chain whose base link declares the Feature",
+      "summary": "The pinned reference reports an EMPTY table and exits 0; deacon resolves the chain and reports the inherited Feature (observed 2026-07-26).",
+      "behaviors": [
+        "bhv-outdated-extends-chain-features"
+      ]
+    },
+    {
+      "id": "src-obs-substitution-object-fields",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration over build.args / containerEnv / mounts / customizations",
+      "summary": "Both CLIs produce identical substituted values for the object-shaped template-carrying fields, and both resolve an unset ${localEnv:VAR} to the empty string (observed 2026-07-26).",
+      "behaviors": [
+        "bhv-readconfig-substitution-object-fields"
+      ]
+    },
+    {
       "id": "src-obs-unknown-field-preserved",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",
@@ -109,6 +149,36 @@
       "summary": "The reference CLI accepts and preserves unknown / forward-compatible top-level fields verbatim in read-configuration output.",
       "behaviors": [
         "bhv-readconfig-unknown-field-preserved"
+      ]
+    },
+    {
+      "id": "src-obs-unsupported-enum-values",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration with userEnvProbe outside its closed enum",
+      "summary": "The pinned reference accepts and echoes a value outside a closed schema enum and exits 0; deacon rejects it during configuration resolution (observed 2026-07-26).",
+      "behaviors": [
+        "bhv-readconfig-unsupported-enum-rejected"
+      ]
+    },
+    {
+      "id": "src-obs-upgrade-empty-feature-set",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "upgrade --dry-run on a configuration with no Features",
+      "summary": "The pinned reference fails with `Failed to update lockfile` and exits 1; deacon emits {\"features\":{}} and exits 0 (observed 2026-07-26).",
+      "behaviors": [
+        "bhv-upgrade-empty-feature-set"
+      ]
+    },
+    {
+      "id": "src-obs-upgrade-lockfile-document",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "upgrade --dry-run on a configuration with a pinned Feature",
+      "summary": "Both CLIs resolve the same pinned Feature reference to the same digest and integrity and emit the same lockfile document (observed 2026-07-26).",
+      "behaviors": [
+        "bhv-upgrade-regenerates-lockfile"
       ]
     },
     {

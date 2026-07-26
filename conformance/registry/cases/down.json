@@ -1,0 +1,381 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-down-boundary-no-container",
+      "behaviors": [
+        "bhv-down-removes-container"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "down",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "boundary",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-down",
+          "subcommand": "down",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remove"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-down",
+          "assertion": {
+            "equals": 0
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 boundary class: tearing down a workspace that has no container. Removal of nothing is the degenerate end of the operation and must succeed — a `down` that failed here would be unusable as a cleanup step, which is how it is actually used."
+    },
+    {
+      "id": "case-down-compose-project-teardown",
+      "behaviors": [
+        "bhv-down-compose-project-teardown"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "down",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-down-compose"
+          ]
+        },
+        {
+          "id": "op-down",
+          "subcommand": "down",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remove",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/devcontainer.json"
+          ]
+        },
+        {
+          "id": "op-verify",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "true"
+          ],
+          "expectFailurePhase": "exec"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-down",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-verify",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-down-compose-running-cli-overlay`. Teardown identifies what to remove from the Compose project name and the workspace labels, both derived from the resolved configuration; a command-line overlay re-enters that derivation. If it does not reproduce what `up` used, `down` reports success and leaves the project running — which is why success is not the assertion: the following exec into the service container has to fail."
+    },
+    {
+      "id": "case-down-dockerfile-workspace",
+      "behaviors": [
+        "bhv-down-removes-container"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "down",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-dockerfile-extends"
+          ]
+        },
+        {
+          "id": "op-down",
+          "subcommand": "down",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remove"
+          ]
+        },
+        {
+          "id": "op-verify",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "true"
+          ],
+          "expectFailurePhase": "exec"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-down",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-verify",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. Teardown of a container built from a Dockerfile. The container is removed; the IMAGE the build produced is deliberately not asserted on, because `down` removes containers and leaving a built image behind is the correct half of 'what it removes and what it leaves' (FR-039)."
+    },
+    {
+      "id": "case-down-malformed-config-rejected",
+      "behaviors": [
+        "bhv-readconfig-malformed-jsonc-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "down",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-down",
+          "subcommand": "down",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remove"
+          ],
+          "fixtures": [
+            "fx-errors-malformed-json"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-down",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 malformed class: `down` derives the resources to remove FROM the configuration, so an unparseable document leaves it with nothing to identify. Failing is the honest outcome; succeeding would claim a teardown that could not have been scoped."
+    },
+    {
+      "id": "case-down-removes-container",
+      "behaviors": [
+        "bhv-down-removes-container"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "down",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        },
+        {
+          "id": "op-down",
+          "subcommand": "down",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remove"
+          ]
+        },
+        {
+          "id": "op-verify",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "true"
+          ],
+          "expectFailurePhase": "exec"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-down",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-verify",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-039 teardown: after `down --remove` the workspace's container is GONE, which a `down` exit code cannot show — a teardown that removed nothing exits 0 too. The third operation execs into the container that should no longer exist and must fail; that failure is the evidence. (The container-graph channel cannot serve here: it reads an inspect the runner captures at an `up`/`exec` boundary, and after a successful removal there is nothing left to inspect.) The pinned reference has no `down` command, so this is evaluated against the declared expectation."
+    },
+    {
+      "id": "case-down-unsupported-no-workspace-config",
+      "behaviors": [
+        "bhv-down-removes-container"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "down",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "unsupported",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-down",
+          "subcommand": "down",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remove"
+          ],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-down",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class: a workspace folder with no devcontainer configuration at all. The request is well-formed and the folder exists; there is simply no configuration from which the resources to remove could be identified."
+    }
+  ]
+}

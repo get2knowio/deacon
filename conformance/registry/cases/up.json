@@ -2,11 +2,130 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "case-up-boundary-empty-collections",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "boundary",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-boundary-empty-collections"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 boundary class for `up`: every collection-valued field present and empty. An empty `features` map, an empty `runArgs` and an empty `mounts` are each a plausible place to emit an argument with nothing after it, which fails at container creation rather than at configuration read."
+    },
+    {
+      "id": "case-up-compose-feature-restart",
+      "behaviors": [
+        "bhv-up-feature-install-order",
+        "bhv-up-restart-reuses-container"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "running",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "invariant-metamorphic",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-first",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-feature"
+          ]
+        },
+        {
+          "id": "op-up-again",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "relationship": {
+            "kind": "first-create-vs-restart",
+            "againstOp": "op-up-first"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-again"
+        },
+        {
+          "channel": "chan-process-graph",
+          "operation": "op-up-again"
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up-again"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-up-compose-single-feature-restart`. The second `up` begins with the Compose project already running, so the declared `first-create-vs-restart` relationship is the oracle: re-entry must reattach to the project it created rather than stand up a second one. The process-graph channel is what makes a duplicated service container visible — an exit code cannot show it, and the observation captures EVERY container matching the workspace label for exactly that reason."
+    },
+    {
       "id": "case-up-docker-channels",
       "behaviors": [
         "bhv-up-exec-parity"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
       "oracleType": "spec-expectation",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -76,7 +195,52 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Declarative Docker-backed spec-expectation case (022-conformance-runner US5): `deacon up` in an ISOLATED external temp workspace (collision-resistant, guaranteed cleanup) exercises all four Docker channels \u2014 chan-image (deacon stamps devcontainer.source), chan-injected-process (containerEnv CONF_TOKEN injected), chan-process-graph (mount/network/volume graph captured), chan-temporal (container running). Image pinned to alpine:3.19 (V18)."
+      "notes": "Declarative Docker-backed spec-expectation case (022-conformance-runner US5): `deacon up` in an ISOLATED external temp workspace (collision-resistant, guaranteed cleanup) exercises all four Docker channels — chan-image (deacon stamps devcontainer.source), chan-injected-process (containerEnv CONF_TOKEN injected), chan-process-graph (mount/network/volume graph captured), chan-temporal (container running). Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-up-dockerfile-extends-chain",
+      "behaviors": [
+        "bhv-up-feature-install-order"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-dockerfile-extends"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-up-dockerfile-extends-chain-absent`. The `build.dockerfile` is declared by the PARENT document, so the build context has to be resolved relative to the directory of the file that declared it rather than the child's. Getting that wrong fails the build outright, which is why the exit code is a sufficient observable here and a differential is worth the reference run."
     },
     {
       "id": "case-up-exec-decl-traditional",
@@ -84,6 +248,14 @@
         "bhv-up-exec-parity"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
       "oracleType": "live-differential",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -128,7 +300,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Migrated from parity_up_exec::traditional: after `up` on a traditional (non-compose) workspace, both CLIs' `exec` reach that workspace's own container and observe the same postCreate markers \u2014 including the #332 parity that neither CLI substitutes `${containerEnv:VAR}` inside a lifecycle command string (both must print the same EMPTY marker). Image pinned to alpine:3.19 (V18)."
+      "notes": "Migrated from parity_up_exec::traditional: after `up` on a traditional (non-compose) workspace, both CLIs' `exec` reach that workspace's own container and observe the same postCreate markers — including the #332 parity that neither CLI substitutes `${containerEnv:VAR}` inside a lifecycle command string (both must print the same EMPTY marker). Image pinned to alpine:3.19 (V18)."
     },
     {
       "id": "case-up-exec-parity",
@@ -150,7 +322,129 @@
           "expectation": "exec --container-id recovers the config-only remoteEnv from the container's devcontainer.metadata label, byte-identical to the reference"
         }
       ],
-      "notes": "Research D2's INVERSE defect, resolved (023 T054). `parity_up_exec` asserts two things \u2014 up/exec container parity AND `exec --container-id` recovering remoteUser/remoteEnv from the devcontainer.metadata label \u2014 but emits a SINGLE CaseResult (`traditional`), so the registry previously claimed two independently-evidenced cases from one reported outcome and one of them had no evidence of its own. Both assertions are genuinely exercised (a regression fails the binary); only the REPORTING granularity is coarse. The two pointer cases are therefore merged into this one: one reported outcome, two behaviors, stated rather than disguised. `bhv-up-exec-parity` additionally has independent declarative evidence in case-up-exec-decl-traditional; `bhv-exec-container-id-metadata` awaits its own independently-reported case, which needs a runtime-resolved container-id token in an operation's argv (deferred, tasks.md#T110). THIS CASE IS WHY `parity_up_exec.rs` SURVIVES: its equivalence verdict is clean, but it carries the ONLY evidence for bhv-exec-container-id-metadata, so deleting it would leave that behavior uncovered (V5). See tasks.md#T110."
+      "notes": "Research D2's INVERSE defect, resolved (023 T054). `parity_up_exec` asserts two things — up/exec container parity AND `exec --container-id` recovering remoteUser/remoteEnv from the devcontainer.metadata label — but emits a SINGLE CaseResult (`traditional`), so the registry previously claimed two independently-evidenced cases from one reported outcome and one of them had no evidence of its own. Both assertions are genuinely exercised (a regression fails the binary); only the REPORTING granularity is coarse. The two pointer cases are therefore merged into this one: one reported outcome, two behaviors, stated rather than disguised. `bhv-up-exec-parity` additionally has independent declarative evidence in case-up-exec-decl-traditional; `bhv-exec-container-id-metadata` awaits its own independently-reported case, which needs a runtime-resolved container-id token in an operation's argv (deferred, tasks.md#T110). THIS CASE IS WHY `parity_up_exec.rs` SURVIVES: its equivalence verdict is clean, but it carries the ONLY evidence for bhv-exec-container-id-metadata, so deleting it would leave that behavior uncovered (V5). See tasks.md#T110."
+    },
+    {
+      "id": "case-up-feature-single-differential",
+      "behaviors": [
+        "bhv-up-feature-install-order"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-feature-single"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-032, the alignment half: both CLIs create a container from a pinned image with one LOCAL Feature installed. A local Feature is used deliberately — it keeps the case off the network and inside the Docker tier's budget while exercising the same resolution and install path an OCI Feature takes."
+    },
+    {
+      "id": "case-up-feature-single-installed",
+      "behaviors": [
+        "bhv-up-feature-install-order"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-feature-single"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "cat",
+            "/usr/local/share/conformance/install-order"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "marker"
+          }
+        },
+        {
+          "channel": "chan-injected-process",
+          "operation": "op-exec",
+          "assertion": {
+            "jsonSubset": {
+              "env": {
+                "CONF_CASE": "up-feature-single"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The content half: the differential shows the two CLIs agree on the outcome, which is not the same as showing the Feature was installed. This case reads the marker the Feature's `install.sh` wrote INSIDE the container — the lesson from the `--image-name` defect, where an outcome-only assertion reported success for an image that had no Feature in it."
     },
     {
       "id": "case-up-idempotent",
@@ -158,6 +452,14 @@
         "bhv-up-exec-parity"
       ],
       "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
       "oracleType": "invariant-metamorphic",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -198,7 +500,226 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Declarative invariant-metamorphic case (022-conformance-runner US6): a second `deacon up` on the same isolated workspace must be IDEMPOTENT \u2014 it reuses the running container created by the first up (same container id, still running) rather than recreating it. The oracle verdicts on the DECLARED RELATIONSHIP between op-up-2 and op-up-1's chan-temporal state, not a fixed output (FR-008). Image pinned to alpine:3.19 (V18)."
+      "notes": "Declarative invariant-metamorphic case (022-conformance-runner US6): a second `deacon up` on the same isolated workspace must be IDEMPOTENT — it reuses the running container created by the first up (same container id, still running) rather than recreating it. The oracle verdicts on the DECLARED RELATIONSHIP between op-up-2 and op-up-1's chan-temporal state, not a fixed output (FR-008). Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-up-malformed-config-rejected",
+      "behaviors": [
+        "bhv-readconfig-malformed-jsonc-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "malformed",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-malformed-json"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 malformed class for `up`: a hard JSONC syntax error stops the run at configuration resolution, before any container exists. The declared failure phase is the assertion that matters — an implementation that reached container creation and failed there would produce the same non-zero exit for a different reason."
+    },
+    {
+      "id": "case-up-reference-lenient-wrong-type",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-forwardports-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "reference-lenient",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-wrong-type-forwardports"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-wrong-type-forwardports-rejected",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon rejects a wrongly-typed `forwardPorts` before creating anything; the reference accepts it and completes the run.",
+          "waiverId": "wvr-wrong-type-forwardports"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 reference-lenient class for `up`, and the part of the story a `read-configuration` case cannot tell: the reference's leniency is not confined to its parse-and-echo command. It accepts `forwardPorts` written as a bare string and goes on to CREATE A CONTAINER, where deacon refuses the document. The direction is pinned by the spec-expectation twin on the same fixture."
+    },
+    {
+      "id": "case-up-stale-config-reentry",
+      "behaviors": [
+        "bhv-up-restart-reuses-container"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running-stale-config",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "invariant-metamorphic",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-first",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-stale-config"
+          ]
+        },
+        {
+          "id": "op-up-changed",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/changed.json"
+          ],
+          "relationship": {
+            "kind": "first-create-vs-restart",
+            "againstOp": "op-up-first"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-changed"
+        },
+        {
+          "channel": "chan-process-graph",
+          "operation": "op-up-changed"
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up-changed"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-up-image-single-feature-stale-config`. The second `up` runs against a configuration that has since changed (a different `containerEnv` generation), supplied as a command-line override because the runner materializes a fixture once and does not edit it mid-case — the observable situation is identical either way. With a Feature installed, reuse is the dangerous branch: the container keeps the layer built from the OLD configuration while every reported value comes from the new one."
+    },
+    {
+      "id": "case-up-unsupported-image-reference",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "up",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "unsupported",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-unsupported-image"
+          ],
+          "expectFailurePhase": "container-create"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class for `up`: the configuration is well-formed and every field is valid, but it names an image reference that no registry serves. Nothing can reject this at configuration read — which is the point of the class, and the reason the failure phase is `container-create` rather than `config-resolution`."
     }
   ]
 }

@@ -6,6 +6,7 @@
       "obligation": "obl-bhv-2730f76b",
       "disposition": "case",
       "cases": [
+        "case-build-reference-lenient-wrong-type",
         "case-errors-decl-wrong-type-features"
       ]
     },
@@ -14,7 +15,13 @@
       "obligation": "obl-bhv-2c706c4f",
       "disposition": "case",
       "cases": [
-        "case-errors-decl-malformed-json"
+        "case-down-malformed-config-rejected",
+        "case-errors-decl-malformed-json",
+        "case-exec-malformed-config-rejected",
+        "case-outdated-malformed-config-rejected",
+        "case-readconfig-malformed-json-differential",
+        "case-up-malformed-config-rejected",
+        "case-upgrade-malformed-config-rejected"
       ]
     },
     {
@@ -52,7 +59,21 @@
       "obligation": "obl-bhv-562b69e2",
       "disposition": "case",
       "cases": [
-        "case-merged-decl-extends-child"
+        "case-merged-decl-extends-child",
+        "case-readconfig-extends-compose-features",
+        "case-readconfig-extends-dockerfile-depends",
+        "case-readconfig-extends-merge-precedence"
+      ]
+    },
+    {
+      "id": "odp-bhv-66556fa0",
+      "obligation": "obl-bhv-66556fa0",
+      "disposition": "case",
+      "cases": [
+        "case-outdated-unsupported-values-rejected",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-upgrade-unsupported-values-rejected"
       ]
     },
     {
@@ -95,6 +116,15 @@
       ]
     },
     {
+      "id": "odp-bhv-9077557c",
+      "obligation": "obl-bhv-9077557c",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order"
+      ]
+    },
+    {
       "id": "odp-bhv-9ffff359",
       "obligation": "obl-bhv-9ffff359",
       "disposition": "case",
@@ -104,12 +134,33 @@
       ]
     },
     {
+      "id": "odp-bhv-a882ec44",
+      "obligation": "obl-bhv-a882ec44",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile"
+      ]
+    },
+    {
+      "id": "odp-bhv-ba06a700",
+      "obligation": "obl-bhv-ba06a700",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-substitution-object-fields"
+      ]
+    },
+    {
       "id": "odp-bhv-c0ca20fa",
       "obligation": "obl-bhv-c0ca20fa",
       "disposition": "case",
       "cases": [
+        "case-readconfig-boundary-empty-collections",
         "case-readconfig-decl-basic",
         "case-readconfig-decl-with-variables",
+        "case-readconfig-lockfile-present",
         "case-readconfig-parity-exit",
         "case-readconfig-snapshot",
         "case-readconfig-workspace-file-present"
@@ -154,7 +205,10 @@
       "obligation": "obl-bhv-ecfffaa7",
       "disposition": "case",
       "cases": [
-        "case-errors-decl-wrong-type-forwardports"
+        "case-errors-decl-wrong-type-forwardports",
+        "case-exec-reference-lenient-wrong-type",
+        "case-run-user-commands-reference-lenient-wrong-type",
+        "case-up-reference-lenient-wrong-type"
       ]
     },
     {
@@ -166,56 +220,100 @@
     {
       "id": "odp-cmb-037a318e",
       "obligation": "obl-cmb-037a318e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-lockfile-present"
+      ]
     },
     {
       "id": "odp-cmb-05df8fcb",
       "obligation": "obl-cmb-05df8fcb",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-compose-array",
+        "case-merged-decl-compose-postgres",
+        "case-readconfig-extends-compose-features",
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-compose-postgres"
+      ]
     },
     {
       "id": "odp-cmb-0aa1c962",
       "obligation": "obl-cmb-0aa1c962",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-compose-postgres",
+        "case-merged-decl-dockerfile-build",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-extends-child",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc"
+      ]
     },
     {
       "id": "odp-cmb-0d9f1229",
       "obligation": "obl-cmb-0d9f1229",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-tier1-decl-dependson-autoinstall"
+      ]
     },
     {
       "id": "odp-cmb-0e9a80ce",
       "obligation": "obl-cmb-0e9a80ce",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-substitution-object-fields",
+        "case-tier1-decl-build-args-subst",
+        "case-tier1-decl-dockerfile-build"
+      ]
     },
     {
       "id": "odp-cmb-128e7432",
       "obligation": "obl-cmb-128e7432",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-dependson-autoinstall",
+        "case-tier1-decl-dependson-autoinstall"
+      ]
     },
     {
       "id": "odp-cmb-1802ef57",
       "obligation": "obl-cmb-1802ef57",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-compose-array",
+        "case-tier1-decl-compose-array"
+      ]
     },
     {
       "id": "odp-cmb-1b993bde",
       "obligation": "obl-cmb-1b993bde",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-build-args-subst",
+        "case-merged-decl-dockerfile-build",
+        "case-readconfig-extends-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order",
+        "case-readconfig-substitution-object-fields",
+        "case-tier1-decl-build-args-subst",
+        "case-tier1-decl-dockerfile-build"
+      ]
     },
     {
       "id": "odp-cmb-21e1ffec",
       "obligation": "obl-cmb-21e1ffec",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-extends-cycle",
+        "case-errors-decl-extends-missing",
+        "case-readconfig-extends-merge-precedence",
+        "case-tier1-decl-extends-child"
+      ]
     },
     {
       "id": "odp-cmb-28c7fc43",
@@ -224,82 +322,370 @@
       "gap": "gap-pairwise-read-configuration"
     },
     {
+      "id": "odp-cmb-315cab6d",
+      "obligation": "obl-cmb-315cab6d",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-extends-dockerfile-depends"
+      ]
+    },
+    {
       "id": "odp-cmb-3173e041",
       "obligation": "obl-cmb-3173e041",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-feature-order",
+        "case-merged-decl-python-features",
+        "case-readconfig-decl-basic",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-python-features"
+      ]
     },
     {
       "id": "odp-cmb-36813e4a",
       "obligation": "obl-cmb-36813e4a",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-dependson-autoinstall",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-extends-child",
+        "case-merged-decl-feature-order",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-python-features",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-39d51c27",
       "obligation": "obl-cmb-39d51c27",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-build-args-subst",
+        "case-merged-decl-dockerfile-build",
+        "case-readconfig-extends-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order",
+        "case-readconfig-substitution-object-fields",
+        "case-tier1-decl-build-args-subst",
+        "case-tier1-decl-dockerfile-build"
+      ]
     },
     {
       "id": "odp-cmb-3ab0f51e",
       "obligation": "obl-cmb-3ab0f51e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys",
+        "case-errors-decl-extends-cycle",
+        "case-errors-decl-extends-missing",
+        "case-errors-decl-malformed-json",
+        "case-errors-decl-unknown-field-preserved",
+        "case-errors-decl-wrong-type-features",
+        "case-errors-decl-wrong-type-forwardports",
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-dependson-autoinstall",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-extends-child",
+        "case-merged-decl-feature-order",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-python-features",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom",
+        "case-readconfig-boundary-empty-collections",
+        "case-readconfig-decl-basic",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile",
+        "case-readconfig-extends-merge-precedence",
+        "case-readconfig-lockfile-present",
+        "case-readconfig-malformed-json-differential",
+        "case-readconfig-parity-exit",
+        "case-readconfig-unknown-field-echo",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-readconfig-workspace-file-present",
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-dependson-autoinstall",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-extends-child",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-python-features",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-3c6ff02c",
       "obligation": "obl-cmb-3c6ff02c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys",
+        "case-errors-decl-extends-cycle",
+        "case-errors-decl-extends-missing",
+        "case-errors-decl-malformed-json",
+        "case-errors-decl-unknown-field-preserved",
+        "case-errors-decl-wrong-type-features",
+        "case-errors-decl-wrong-type-forwardports",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom",
+        "case-readconfig-boundary-empty-collections",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile",
+        "case-readconfig-extends-merge-precedence",
+        "case-readconfig-malformed-json-differential",
+        "case-readconfig-parity-exit",
+        "case-readconfig-unknown-field-echo",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-readconfig-workspace-file-present",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-3e3801ad",
       "obligation": "obl-cmb-3e3801ad",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order"
+      ]
     },
     {
       "id": "odp-cmb-415030df",
       "obligation": "obl-cmb-415030df",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-decl-basic",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-python-features"
+      ]
     },
     {
       "id": "odp-cmb-4a7b3111",
       "obligation": "obl-cmb-4a7b3111",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-lockfile-present"
+      ]
     },
     {
       "id": "odp-cmb-4bcf721d",
       "obligation": "obl-cmb-4bcf721d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys",
+        "case-errors-decl-extends-cycle",
+        "case-errors-decl-extends-missing",
+        "case-errors-decl-malformed-json",
+        "case-errors-decl-unknown-field-preserved",
+        "case-errors-decl-wrong-type-features",
+        "case-errors-decl-wrong-type-forwardports",
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-build-args-subst",
+        "case-merged-decl-compose-array",
+        "case-merged-decl-compose-postgres",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-dependson-autoinstall",
+        "case-merged-decl-dockerfile-build",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-extends-child",
+        "case-merged-decl-feature-order",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-python-features",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom",
+        "case-readconfig-boundary-empty-collections",
+        "case-readconfig-decl-basic",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile",
+        "case-readconfig-extends-compose-features",
+        "case-readconfig-extends-dockerfile-depends",
+        "case-readconfig-extends-merge-precedence",
+        "case-readconfig-lockfile-present",
+        "case-readconfig-malformed-json-differential",
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order",
+        "case-readconfig-parity-exit",
+        "case-readconfig-substitution-object-fields",
+        "case-readconfig-unknown-field-echo",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-readconfig-workspace-file-present",
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-build-args-subst",
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-compose-postgres",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-dependson-autoinstall",
+        "case-tier1-decl-dockerfile-build",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-extends-child",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-python-features",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-4c187d1d",
       "obligation": "obl-cmb-4c187d1d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-dependson-autoinstall",
+        "case-readconfig-extends-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order",
+        "case-tier1-decl-dependson-autoinstall"
+      ]
     },
     {
       "id": "odp-cmb-4c948c5b",
       "obligation": "obl-cmb-4c948c5b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-dockerfile-build",
+        "case-tier1-decl-dockerfile-build"
+      ]
     },
     {
       "id": "odp-cmb-4e577ef0",
       "obligation": "obl-cmb-4e577ef0",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-extends-compose-features"
+      ]
     },
     {
       "id": "odp-cmb-4efd4b0b",
       "obligation": "obl-cmb-4efd4b0b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys",
+        "case-errors-decl-malformed-json",
+        "case-errors-decl-unknown-field-preserved",
+        "case-errors-decl-wrong-type-features",
+        "case-errors-decl-wrong-type-forwardports",
+        "case-readconfig-boundary-empty-collections",
+        "case-readconfig-decl-basic",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile",
+        "case-readconfig-lockfile-present",
+        "case-readconfig-malformed-json-differential",
+        "case-readconfig-parity-exit",
+        "case-readconfig-substitution-object-fields",
+        "case-readconfig-unknown-field-echo",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-readconfig-workspace-file-present",
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-build-args-subst",
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-compose-postgres",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-dependson-autoinstall",
+        "case-tier1-decl-dockerfile-build",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-python-features",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-51d90cdc",
@@ -310,14 +696,47 @@
     {
       "id": "odp-cmb-5ae9f1fc",
       "obligation": "obl-cmb-5ae9f1fc",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys",
+        "case-errors-decl-malformed-json",
+        "case-errors-decl-unknown-field-preserved",
+        "case-errors-decl-wrong-type-features",
+        "case-errors-decl-wrong-type-forwardports",
+        "case-readconfig-boundary-empty-collections",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile",
+        "case-readconfig-malformed-json-differential",
+        "case-readconfig-parity-exit",
+        "case-readconfig-substitution-object-fields",
+        "case-readconfig-unknown-field-echo",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-readconfig-workspace-file-present",
+        "case-tier1-decl-build-args-subst",
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-5d8a2e14",
       "obligation": "obl-cmb-5d8a2e14",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-tier1-decl-extends-child"
+      ]
     },
     {
       "id": "odp-cmb-5ec25efe",
@@ -328,8 +747,10 @@
     {
       "id": "odp-cmb-6b94da7e",
       "obligation": "obl-cmb-6b94da7e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-dependson-autoinstall"
+      ]
     },
     {
       "id": "odp-cmb-71ce71c7",
@@ -340,8 +761,11 @@
     {
       "id": "odp-cmb-764d9bc6",
       "obligation": "obl-cmb-764d9bc6",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-compose-postgres",
+        "case-tier1-decl-compose-postgres"
+      ]
     },
     {
       "id": "odp-cmb-7dfae70a",
@@ -352,8 +776,11 @@
     {
       "id": "odp-cmb-7fb02571",
       "obligation": "obl-cmb-7fb02571",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-feature-order",
+        "case-merged-decl-python-features"
+      ]
     },
     {
       "id": "odp-cmb-81377d6a",
@@ -364,38 +791,109 @@
     {
       "id": "odp-cmb-8252b855",
       "obligation": "obl-cmb-8252b855",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-extends-compose-features"
+      ]
     },
     {
       "id": "odp-cmb-8469f4a7",
       "obligation": "obl-cmb-8469f4a7",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-feature-order",
+        "case-merged-decl-python-features",
+        "case-readconfig-decl-basic",
+        "case-readconfig-extends-compose-features",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-python-features"
+      ]
     },
     {
       "id": "odp-cmb-8e313701",
       "obligation": "obl-cmb-8e313701",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-extends-cycle",
+        "case-errors-decl-extends-missing",
+        "case-readconfig-extends-merge-precedence"
+      ]
     },
     {
       "id": "odp-cmb-8e5dcbf4",
       "obligation": "obl-cmb-8e5dcbf4",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order"
+      ]
     },
     {
       "id": "odp-cmb-8f315d24",
       "obligation": "obl-cmb-8f315d24",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-compose-array",
+        "case-merged-decl-compose-postgres"
+      ]
+    },
+    {
+      "id": "odp-cmb-94fc8650",
+      "obligation": "obl-cmb-94fc8650",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-extends-compose-features"
+      ]
     },
     {
       "id": "odp-cmb-96f1b289",
       "obligation": "obl-cmb-96f1b289",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys",
+        "case-errors-decl-malformed-json",
+        "case-errors-decl-unknown-field-preserved",
+        "case-errors-decl-wrong-type-features",
+        "case-errors-decl-wrong-type-forwardports",
+        "case-readconfig-boundary-empty-collections",
+        "case-readconfig-decl-basic",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile",
+        "case-readconfig-lockfile-present",
+        "case-readconfig-malformed-json-differential",
+        "case-readconfig-parity-exit",
+        "case-readconfig-substitution-object-fields",
+        "case-readconfig-unknown-field-echo",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-readconfig-workspace-file-present",
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-build-args-subst",
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-compose-postgres",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-dependson-autoinstall",
+        "case-tier1-decl-dockerfile-build",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-python-features",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-9c95a825",
@@ -412,26 +910,60 @@
     {
       "id": "odp-cmb-ae27a584",
       "obligation": "obl-cmb-ae27a584",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-compose-postgres",
+        "case-merged-decl-dockerfile-build",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-extends-child",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc",
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-compose-postgres",
+        "case-tier1-decl-dockerfile-build",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-extends-child",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc"
+      ]
     },
     {
       "id": "odp-cmb-b0043b33",
       "obligation": "obl-cmb-b0043b33",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-extends-cycle",
+        "case-errors-decl-extends-missing",
+        "case-readconfig-extends-compose-features",
+        "case-readconfig-extends-dockerfile-depends",
+        "case-readconfig-extends-merge-precedence",
+        "case-tier1-decl-extends-child"
+      ]
     },
     {
       "id": "odp-cmb-b149cc05",
       "obligation": "obl-cmb-b149cc05",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-compose-array",
+        "case-merged-decl-compose-postgres",
+        "case-readconfig-extends-compose-features",
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-compose-postgres"
+      ]
     },
     {
       "id": "odp-cmb-b384b33b",
       "obligation": "obl-cmb-b384b33b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-extends-dockerfile-depends"
+      ]
     },
     {
       "id": "odp-cmb-b6832ce4",
@@ -442,26 +974,99 @@
     {
       "id": "odp-cmb-b6db79df",
       "obligation": "obl-cmb-b6db79df",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-feature-order",
+        "case-merged-decl-python-features",
+        "case-readconfig-decl-basic",
+        "case-readconfig-extends-compose-features",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-python-features"
+      ]
     },
     {
       "id": "odp-cmb-ba72333d",
       "obligation": "obl-cmb-ba72333d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys",
+        "case-errors-decl-extends-cycle",
+        "case-errors-decl-extends-missing",
+        "case-errors-decl-malformed-json",
+        "case-errors-decl-unknown-field-preserved",
+        "case-errors-decl-wrong-type-features",
+        "case-errors-decl-wrong-type-forwardports",
+        "case-merged-decl-build-args-subst",
+        "case-merged-decl-compose-array",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom",
+        "case-readconfig-boundary-empty-collections",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile",
+        "case-readconfig-extends-merge-precedence",
+        "case-readconfig-malformed-json-differential",
+        "case-readconfig-parity-exit",
+        "case-readconfig-substitution-object-fields",
+        "case-readconfig-unknown-field-echo",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-readconfig-workspace-file-present",
+        "case-tier1-decl-build-args-subst",
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
+    },
+    {
+      "id": "odp-cmb-bc0f8004",
+      "obligation": "obl-cmb-bc0f8004",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order"
+      ]
     },
     {
       "id": "odp-cmb-be729589",
       "obligation": "obl-cmb-be729589",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-lockfile-present"
+      ]
     },
     {
       "id": "odp-cmb-bf0637bc",
       "obligation": "obl-cmb-bf0637bc",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-compose-postgres",
+        "case-tier1-decl-dockerfile-build",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc"
+      ]
     },
     {
       "id": "odp-cmb-bf5d8932",
@@ -472,68 +1077,223 @@
     {
       "id": "odp-cmb-c024a7fb",
       "obligation": "obl-cmb-c024a7fb",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-build-args-subst",
+        "case-merged-decl-compose-array",
+        "case-merged-decl-compose-postgres",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-dependson-autoinstall",
+        "case-merged-decl-dockerfile-build",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-extends-child",
+        "case-merged-decl-feature-order",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-python-features",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-c2c59302",
       "obligation": "obl-cmb-c2c59302",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-extends-child",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc",
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-extends-child",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc"
+      ]
     },
     {
       "id": "odp-cmb-c2ef55c2",
       "obligation": "obl-cmb-c2ef55c2",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-compose-postgres"
+      ]
     },
     {
       "id": "odp-cmb-c3956c9c",
       "obligation": "obl-cmb-c3956c9c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-build-args-subst",
+        "case-merged-decl-compose-array",
+        "case-merged-decl-compose-postgres",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-dependson-autoinstall",
+        "case-merged-decl-dockerfile-build",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-extends-child",
+        "case-merged-decl-feature-order",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-python-features",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-c7a699d7",
       "obligation": "obl-cmb-c7a699d7",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-compose-postgres",
+        "case-merged-decl-dockerfile-build",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-extends-child",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc",
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-compose-postgres",
+        "case-tier1-decl-dockerfile-build",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-extends-child",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc"
+      ]
     },
     {
       "id": "odp-cmb-cdd51fcd",
       "obligation": "obl-cmb-cdd51fcd",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order"
+      ]
     },
     {
       "id": "odp-cmb-d1d2efe3",
       "obligation": "obl-cmb-d1d2efe3",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-extends-cycle",
+        "case-errors-decl-extends-missing",
+        "case-readconfig-extends-compose-features",
+        "case-readconfig-extends-dockerfile-depends",
+        "case-readconfig-extends-merge-precedence",
+        "case-tier1-decl-extends-child"
+      ]
     },
     {
       "id": "odp-cmb-d37fafd1",
       "obligation": "obl-cmb-d37fafd1",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-extends-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order"
+      ]
     },
     {
       "id": "odp-cmb-d7e12b78",
       "obligation": "obl-cmb-d7e12b78",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-build-args-subst",
+        "case-merged-decl-compose-array",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-da2cf481",
       "obligation": "obl-cmb-da2cf481",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-extends-compose-features"
+      ]
     },
     {
       "id": "odp-cmb-db65fbb3",
       "obligation": "obl-cmb-db65fbb3",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys",
+        "case-errors-decl-malformed-json",
+        "case-errors-decl-unknown-field-preserved",
+        "case-errors-decl-wrong-type-features",
+        "case-errors-decl-wrong-type-forwardports",
+        "case-readconfig-boundary-empty-collections",
+        "case-readconfig-decl-basic",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile",
+        "case-readconfig-lockfile-present",
+        "case-readconfig-malformed-json-differential",
+        "case-readconfig-parity-exit",
+        "case-readconfig-unknown-field-echo",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-readconfig-workspace-file-present",
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-dependson-autoinstall",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-python-features",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-dca5a1e6",
@@ -544,50 +1304,179 @@
     {
       "id": "odp-cmb-e5f367b4",
       "obligation": "obl-cmb-e5f367b4",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-lockfile-present"
+      ]
     },
     {
       "id": "odp-cmb-e944fc75",
       "obligation": "obl-cmb-e944fc75",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys",
+        "case-errors-decl-extends-cycle",
+        "case-errors-decl-extends-missing",
+        "case-errors-decl-malformed-json",
+        "case-errors-decl-unknown-field-preserved",
+        "case-errors-decl-wrong-type-features",
+        "case-errors-decl-wrong-type-forwardports",
+        "case-merged-decl-build-args-subst",
+        "case-merged-decl-compose-array",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom",
+        "case-readconfig-boundary-empty-collections",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile",
+        "case-readconfig-extends-merge-precedence",
+        "case-readconfig-malformed-json-differential",
+        "case-readconfig-parity-exit",
+        "case-readconfig-substitution-object-fields",
+        "case-readconfig-unknown-field-echo",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-readconfig-workspace-file-present",
+        "case-tier1-decl-build-args-subst",
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-eaaf0756",
       "obligation": "obl-cmb-eaaf0756",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-errors-decl-duplicate-keys",
+        "case-errors-decl-extends-cycle",
+        "case-errors-decl-extends-missing",
+        "case-errors-decl-malformed-json",
+        "case-errors-decl-unknown-field-preserved",
+        "case-errors-decl-wrong-type-features",
+        "case-errors-decl-wrong-type-forwardports",
+        "case-merged-decl-bare-base-node-feature",
+        "case-merged-decl-containerenv-subst",
+        "case-merged-decl-dependson-autoinstall",
+        "case-merged-decl-dotnet-mounts",
+        "case-merged-decl-extends-child",
+        "case-merged-decl-feature-order",
+        "case-merged-decl-go-minimal",
+        "case-merged-decl-init-privileged",
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed",
+        "case-merged-decl-mounts-bind-localenv",
+        "case-merged-decl-name-subst",
+        "case-merged-decl-node-ts",
+        "case-merged-decl-object-form-metadata",
+        "case-merged-decl-ports-mixed",
+        "case-merged-decl-python-features",
+        "case-merged-decl-ruby-node-feature",
+        "case-merged-decl-universal-jsonc",
+        "case-merged-decl-user-mapping",
+        "case-merged-decl-workspacefolder-custom",
+        "case-readconfig-boundary-empty-collections",
+        "case-readconfig-decl-basic",
+        "case-readconfig-decl-with-variables",
+        "case-readconfig-discovery-named-subfolder",
+        "case-readconfig-discovery-named-subfolder-differential",
+        "case-readconfig-discovery-non-location",
+        "case-readconfig-discovery-root-dotfile",
+        "case-readconfig-extends-merge-precedence",
+        "case-readconfig-lockfile-present",
+        "case-readconfig-malformed-json-differential",
+        "case-readconfig-parity-exit",
+        "case-readconfig-unknown-field-echo",
+        "case-readconfig-unsupported-enum-differential",
+        "case-readconfig-unsupported-enum-rejected",
+        "case-readconfig-workspace-file-present",
+        "case-tier1-decl-bare-base-node-feature",
+        "case-tier1-decl-containerenv-subst",
+        "case-tier1-decl-dependson-autoinstall",
+        "case-tier1-decl-dotnet-mounts",
+        "case-tier1-decl-extends-child",
+        "case-tier1-decl-feature-order",
+        "case-tier1-decl-go-minimal",
+        "case-tier1-decl-init-privileged",
+        "case-tier1-decl-lifecycle-arrays",
+        "case-tier1-decl-lifecycle-mixed",
+        "case-tier1-decl-mounts-bind-localenv",
+        "case-tier1-decl-name-subst",
+        "case-tier1-decl-node-ts",
+        "case-tier1-decl-object-form-metadata",
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-python-features",
+        "case-tier1-decl-ruby-node-feature",
+        "case-tier1-decl-universal-jsonc",
+        "case-tier1-decl-user-mapping",
+        "case-tier1-decl-workspacefolder-custom"
+      ]
     },
     {
       "id": "odp-cmb-ed639dec",
       "obligation": "obl-cmb-ed639dec",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-dependson-autoinstall",
+        "case-readconfig-extends-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order",
+        "case-tier1-decl-dependson-autoinstall"
+      ]
     },
     {
       "id": "odp-cmb-eefbfbd0",
       "obligation": "obl-cmb-eefbfbd0",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-overlay-dockerfile-depends",
+        "case-readconfig-overlay-dockerfile-depends-order"
+      ]
     },
     {
       "id": "odp-cmb-fdb75cfa",
       "obligation": "obl-cmb-fdb75cfa",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-build-args-subst",
+        "case-readconfig-substitution-object-fields",
+        "case-tier1-decl-build-args-subst"
+      ]
     },
     {
       "id": "odp-cmb-ff37e1fb",
       "obligation": "obl-cmb-ff37e1fb",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-extends-dockerfile-depends"
+      ]
     },
     {
       "id": "odp-cmb-ffb51199",
       "obligation": "obl-cmb-ffb51199",
-      "disposition": "gap",
-      "gap": "gap-pairwise-read-configuration"
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-build-args-subst",
+        "case-merged-decl-dockerfile-build"
+      ]
     }
   ]
 }

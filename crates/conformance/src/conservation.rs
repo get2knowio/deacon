@@ -86,6 +86,125 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      exit 0 vs 215 ms / exit 0); the same field's earlier 'cannot matter behaviorally' \
      assumption hid a 10s stall.",
     ),
+    (
+        "bhv-readconfig-discovery-locations",
+        "Which on-disk locations configuration discovery searches, including the negative half (a \
+     plain `devcontainer.json` at the workspace root is not one of them). No pre-migration \
+     behavior described discovery at all — every corpus fixture put its configuration at the \
+     one location every implementation searches — so this is a newly RECORDED fact, not a re- \
+     description. It also carries a measured divergence: the pinned oracle does not search \
+     the spec's one-level-deep sub-folder form.",
+    ),
+    (
+        "bhv-readconfig-unsupported-enum-rejected",
+        "A value outside a CLOSED schema enum. Distinct from the wrong-TYPE rejections already \
+     recorded: those are a JSON type mismatch caught by deserialization shape, this is a \
+     well-typed string outside a closed value set. An implementation can plausibly get one \
+     right and the other wrong, so they are two claims.",
+    ),
+    (
+        "bhv-readconfig-substitution-object-fields",
+        "Substitution reaching the OBJECT-shaped template-carrying fields. The pre-migration \
+     corpus exercised substitution in scalars only, and `customizations` was missed for \
+     exactly that reason (#312) — which is the evidence that this is a distinct claim rather \
+     than a variant of the scalar one.",
+    ),
+    (
+        "bhv-readconfig-feature-resolution-order",
+        "The RESOLVED Feature set and its order as `read-configuration` reports it, including a \
+     `--additional-features` overlay joining that resolution. Nothing pre-migration read the \
+     features-configuration document; the corpora compared the merged configuration only.",
+    ),
+    (
+        "bhv-up-feature-install-order",
+        "Features actually installed into the created container, in resolved order. The pre- \
+     migration `up` coverage is one behavior about a subsequent `exec` observing the \
+     environment; it says nothing about whether a Feature ran, which the marker file this \
+     behavior's case reads is the first evidence of.",
+    ),
+    (
+        "bhv-up-restart-reuses-container",
+        "Re-entry into an existing container versus first creation. Newly recordable because the \
+     metamorphic oracle that can express a RELATIONSHIP between two runs arrived in 022; \
+     before it there was no way to state this claim, only to state each run's output.",
+    ),
+    (
+        "bhv-build-features-extended-image",
+        "Which image `build` reports and tags when Features are layered. The one pre-migration \
+     `build` behavior is about the build OUTCOME; this is about the identity of the artifact \
+     — the distinction a shipped defect already turned on.",
+    ),
+    (
+        "bhv-build-failure-reported",
+        "A build-time failure and the STAGE it is attributed to. No pre-migration behavior \
+     described a failing build: the corpora's build coverage was entirely on the success \
+     path, which is the hole the container-backed error-path tier exists to close.",
+    ),
+    (
+        "bhv-run-user-commands-hook-order",
+        "Lifecycle hook ORDER, and a Feature-contributed hook running exactly once. The operation \
+     had zero cases before this story, so there is no pre-migration claim for this to be a \
+     variant of.",
+    ),
+    (
+        "bhv-run-user-commands-hook-failure",
+        "A lifecycle hook that exits non-zero failing the run. Separate from the ordering claim: \
+     an implementation that runs hooks in the right order and ignores their exit status \
+     satisfies one and not the other.",
+    ),
+    (
+        "bhv-down-removes-container",
+        "Teardown removing the workspace's container. `down` had zero cases and the pinned \
+     reference has no such command, so nothing pre-migration could have described it.",
+    ),
+    (
+        "bhv-down-compose-project-teardown",
+        "Teardown of a Compose PROJECT, identified by the project name and labels `up` derived. \
+     Distinct from the single-container claim: the identification path is different, and it \
+     is the one that fails silently.",
+    ),
+    (
+        "bhv-doctor-diagnostics-report",
+        "Host, platform and runtime diagnostics, and their independence from the workspace \
+     configuration. `doctor` had zero cases and the pinned reference has no such command.",
+    ),
+    (
+        "bhv-templates-apply-scaffolds-options",
+        "Template option substitution into the scaffolded files. `templates apply` had zero \
+     cases; its result is bytes on disk rather than a document, so no pre-migration \
+     structured-output claim could have covered it.",
+    ),
+    (
+        "bhv-outdated-reports-feature-versions",
+        "Current/wanted/latest version reporting for each configured Feature. `outdated` had \
+     ZERO cases before this story, so there is no pre-migration claim this could be a \
+     variant of: the pre-migration corpora never invoked the operation, and no behavior \
+     described what a version report contains. It is also not a variant of the lockfile \
+     behaviors — reporting what is available is a different claim from writing what is \
+     pinned, and an implementation can do either without the other.",
+    ),
+    (
+        "bhv-outdated-extends-chain-features",
+        "Version reporting over a RESOLVED extends chain, where the pinned oracle reports an \
+     empty table. Distinct from the plain reporting claim because it is the one that carries \
+     a measured divergence, and because an implementation reporting versions correctly for a \
+     single document can still miss an inherited Feature.",
+    ),
+    (
+        "bhv-upgrade-regenerates-lockfile",
+        "Lockfile regeneration from the effective configuration, including a Feature a parent \
+     link of an extends chain contributed. `upgrade` had ZERO cases before this story, so \
+     no pre-migration claim exists for this to re-describe. Not a variant of the `outdated` \
+     behaviors either: reporting available versions and WRITING the pinned set are separate \
+     operations with separate outputs, and the lockfile is the only one of the two that \
+     changes what a later run resolves.",
+    ),
+    (
+        "bhv-upgrade-empty-feature-set",
+        "Regenerating a lockfile for a configuration with NO Features. Separate from the general \
+     regeneration claim because it is the boundary the pinned oracle FAILS on, so the two \
+     have different reference axes and cannot be one record.",
+    ),
 ];
 
 /// The observable-channel count at the branch point (research §1g).
@@ -192,13 +311,26 @@ pub fn denominator_counts(registry: &Registry) -> DenominatorCounts {
 /// the accounting by acquiring a post-branch behavior.
 pub fn post_branch_exceptions(registry: &Registry) -> BTreeSet<String> {
     let post_branch: BTreeSet<&str> = POST_BRANCH_BEHAVIORS.iter().map(|(id, _)| *id).collect();
+    let qualifies = |behaviors: &[String]| {
+        !behaviors.is_empty() && behaviors.iter().all(|b| post_branch.contains(b.as_str()))
+    };
+    // BOTH exception mechanisms, not only extensions. A `wvr-` authored after the branch
+    // point characterizes a difference the pre-migration system never observed, so it has
+    // no pre-migration form for `mapping.json` to preserve — exactly the ground on which
+    // an `ext-` is exempt. Covering only one of the two would make the exemption depend on
+    // which mechanism an author reached for rather than on when the fact was learned.
     registry
         .extensions
         .iter()
-        .filter(|e| {
-            !e.behaviors.is_empty() && e.behaviors.iter().all(|b| post_branch.contains(b.as_str()))
-        })
+        .filter(|e| qualifies(&e.behaviors))
         .map(|e| e.id.clone())
+        .chain(
+            registry
+                .waivers
+                .iter()
+                .filter(|w| qualifies(&w.behaviors))
+                .map(|w| w.id.clone()),
+        )
         .collect()
 }
 

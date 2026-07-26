@@ -1,0 +1,4 @@
+{
+	"name": "conformance-minimal",
+	"image": "alpine:${templateOption:imageVariant}"
+}

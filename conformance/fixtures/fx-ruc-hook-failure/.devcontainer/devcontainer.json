@@ -1,0 +1,5 @@
+{
+	"name": "ConformanceRucHookBase",
+	"image": "alpine:3.19",
+	"remoteUser": "root"
+}

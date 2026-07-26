@@ -31,7 +31,12 @@ const TODAY: &str = "2026-07-19";
 /// PR that genuinely adds cases records that it did so, and lowering it is how a PR that
 /// genuinely retires cases records that it did so. An unexplained change to this number
 /// is exactly the event the guard exists to surface.
-const MIGRATED_CASE_COUNT: usize = 88;
+///
+/// **88 → 169** (024 US3): the deterministic build-out of the consumer workflow added 81
+/// cases, taking every one of the ten operations from the three that had coverage to all
+/// ten, and every operation to a case in each of the five input classes and each permitted
+/// configuration source. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 169;
 
 #[test]
 fn real_registry_is_structurally_valid() {

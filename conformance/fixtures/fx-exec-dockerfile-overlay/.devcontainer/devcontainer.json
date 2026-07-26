@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceExecDockerfileOverlay",
+	"build": { "dockerfile": "Dockerfile" },
+	"remoteUser": "root",
+	"containerEnv": { "CONF_FROM_CONFIG": "config" }
+}
