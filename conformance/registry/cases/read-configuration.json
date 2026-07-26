@@ -2291,13 +2291,6 @@
         {
           "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
           "context": [],
-          "observablePath": "chan-structured-output.configuration.name",
-          "rationale": "The author wrote `\"name\": null`. The reference echoes it; deacon serializes the same `null` it would emit for an omitted `name`, so the normalization that compensates for its unconditional serializer elides the author's value with it.",
-          "waiverId": "wvr-readconfig-authored-empty-omitted"
-        },
-        {
-          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
-          "context": [],
           "observablePath": "chan-structured-output.configuration.forwardPorts",
           "rationale": "The author wrote `\"forwardPorts\": []`. The reference echoes it; deacon emits the same `[]` it would emit unauthored, so the compensating normalization elides it.",
           "waiverId": "wvr-readconfig-authored-empty-omitted"
@@ -2320,7 +2313,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "The cross-CLI half of FR-055, and the case the 024 US5 normalizer narrowing exists to make possible: while `drop_absent_optional` ran on both sides, all three states normalized to 'absent on both sides' and this comparison was green while proving nothing. Four tolerances, each naming one path and all backed by the same waiver — three where deacon elides what the author wrote, one where deacon reports `empty` for a property the author never wrote."
+      "notes": "The cross-CLI half of FR-055, and the case the 024 US5 normalizer narrowing exists to make possible: while `drop_absent_optional` ran on both sides, all three states normalized to 'absent on both sides' and this comparison was green while proving nothing. Measured both ways — with the rule on both sides the tolerances below are reported STALE (the differences do not reproduce, which is the suppression stated as evidence); with it narrowed to deacon's `configuration`, they are consumed. Three tolerances, each naming one path and all backed by the same waiver: two where deacon elides an authored EMPTY collection it cannot distinguish from an omission, and one where deacon reports `empty` for a property the author never wrote. The authored NULL is deliberately NOT tolerated: `name` is not an enumerated absent-optional, so both CLIs report it as `null` and the two agree — which is the boundary of the defect, and a tolerance there would be stale."
     },
     {
       "id": "case-readconfig-overlay-dockerfile-depends",

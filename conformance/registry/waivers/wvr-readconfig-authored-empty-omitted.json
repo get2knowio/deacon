@@ -1,9 +1,17 @@
 {
   "id": "wvr-readconfig-authored-empty-omitted",
-  "behaviors": ["bhv-readconfig-authored-empty-omitted-collapsed"],
-  "scope": { "kind": "corpus_case", "corpus": "us5", "case": "readconfig-null-empty-omitted" },
-  "expect": { "kind": "reference-stricter" },
-  "rationale": "Surfaced by the 024 US5 de-suppression, which narrowed `drop_absent_optional` to deacon's side. While the rule ran on BOTH sides, an authored null, an authored empty collection and an omitted property all normalized to 'the key is absent on both sides', so the three FR-055 states produced ONE observation and the difference could not be seen. With the rule confined to the side whose serializer defect it compensates, the reference's faithful echo survives and the difference is visible at four named paths: `configuration.name`, `configuration.forwardPorts`, `configuration.containerEnv` (deacon elides what the author wrote, because it cannot distinguish it from an omission) and `nullEmptyOmitted.mounts` (deacon reports `empty` for a property the author never wrote, the reference reports `omitted`). Measured at oracle 0.87.0. This is a fidelity DEFECT in deacon, not a design choice — deacon should apply `skip_serializing_if` so unauthored optionals are omitted, tracked at specs/023-migrate-parity-to-conformance/tasks.md#T111 — and it NEEDS A `parity-drift` GITHUB ISSUE FILED. It is waived rather than fixed here because the fix touches every modeled optional on `DevContainerConfig` and the tests that assert the current document shape, which is a change of its own; and because the fix is only partial (deacon holds an authored `null` and an omission in the same `None`, so it closes the empty-vs-omitted half and leaves null-vs-omitted). The waiver is scoped to the four paths on the one case authored to demonstrate them, and it self-invalidates the moment the difference stops reproducing.",
+  "behaviors": [
+    "bhv-readconfig-authored-empty-omitted-collapsed"
+  ],
+  "scope": {
+    "kind": "corpus_case",
+    "corpus": "us5",
+    "case": "readconfig-null-empty-omitted"
+  },
+  "expect": {
+    "kind": "reference-stricter"
+  },
+  "rationale": "Surfaced by the 024 US5 de-suppression, which narrowed `drop_absent_optional` to deacon's side. While the rule ran on BOTH sides, an authored null, an authored empty collection and an omitted property all normalized to 'the key is absent on both sides', so the three FR-055 states produced ONE observation and the difference could not be seen — measured directly: with the rule on both sides the case's tolerances are reported STALE, because the differences do not reproduce. With the rule confined to the side whose serializer defect it compensates, the reference's faithful echo survives and the difference is visible at three named paths: `configuration.forwardPorts` and `configuration.containerEnv` (the author wrote `[]` / `{}`, the reference echoes them, and deacon emits the same bytes it would emit unauthored, so the compensating normalization elides the author's value with it) and `nullEmptyOmitted.mounts` (the author wrote nothing, the reference reports `omitted`, deacon reports `empty`). Measured at oracle 0.87.0. The authored NULL is NOT part of this waiver and that is the informative boundary: `name` is not an enumerated absent-optional, so both CLIs report `\"name\": null` and agree — the defect is confined to the properties deacon serializes with a non-null default. This is a fidelity DEFECT in deacon, not a design choice — deacon should apply `skip_serializing_if` so unauthored optionals are omitted, tracked at specs/023-migrate-parity-to-conformance/tasks.md#T111 — and it NEEDS A `parity-drift` GITHUB ISSUE FILED. It is waived rather than fixed here because the fix touches every modeled optional on `DevContainerConfig` and the tests that assert the current document shape, which is a change of its own; and because the fix is only partial (deacon holds an authored `null` and an omission in the same `None`, so it closes the empty-vs-omitted half and leaves null-vs-omitted). Scoped to the three paths on the one case authored to demonstrate them, and it self-invalidates the moment a difference stops reproducing.",
   "added": "2026-07-26",
   "expires": "2027-01-26"
 }
