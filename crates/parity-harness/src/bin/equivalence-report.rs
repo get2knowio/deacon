@@ -8,19 +8,23 @@
 //! ledger, because "the new thing passes" is not evidence — the new thing must not pass
 //! where the old thing *failed* (FR-033–FR-038).
 //!
-//! # Which carriers this bin can judge, and why the rest are silent
+//! # Which carriers this bin can judge
 //!
-//! The legacy comparison for a **config corpus** carrier is expressible through the shared
-//! harness API: run both CLIs, normalize through the single `normalize::config` /
-//! `merged_config`, diff. This bin therefore judges those carriers for real. The
-//! **Docker scenario** carriers (`parity_exec`, `parity_build`, `parity_up_exec`,
-//! `parity_observable_state`, `parity_state_diff`) assert through bespoke orchestration
-//! that lives inside their own test binaries; re-implementing it here would be a SECOND
-//! comparison implementation, which is the thing FR-030 forbids — so this bin records NO
-//! verdict for them.
+//! **Every live carrier**, config-corpus and Docker-scenario alike, because it never
+//! re-implements a comparison: it runs the carrier's OWN test binary and reads the
+//! `ReportFragment` that binary already writes (see [`run_legacy_carrier`]). That is the
+//! legacy path's verdict in the legacy path's own words, which is what FR-030 requires —
+//! a second comparison implementation here would be the defect, not the coverage.
 //!
-//! No verdict is not a pass. A carrier with no verdict fails deletion condition 1, which
-//! is the correct and safe reading: unproven is not the same as safe.
+//! An earlier revision of this doc claimed the Docker scenario carriers could NOT be
+//! judged, on the reasoning that their orchestration is bespoke. That was true of an
+//! earlier design and false of this one: 024 Phase 6 judged `parity_exec` (4 units) and
+//! `parity_up_exec` (1 unit) for real, all `equivalent`, and deleted both on that evidence.
+//! The claim is corrected here rather than left standing, because "this tool cannot judge
+//! X" is exactly the kind of statement that stops anyone from trying.
+//!
+//! No verdict is still not a pass. A carrier with no verdict fails deletion condition 1,
+//! which is the correct and safe reading: unproven is not the same as safe.
 //!
 //! # Preconditions (constitution IV)
 //!
@@ -56,14 +60,18 @@ const SURVIVING_RUNNER: &str = "parity_conformance_runner";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut carrier: Option<String> = None;
+    // `--carrier` is REPEATABLE. Deleting two carriers in one change needs both judged in one
+    // ledger, because the ledger file is rewritten per run — and the alternative, judging
+    // every carrier, drags in ones that are legitimately red for unrelated reasons and so
+    // cannot clear anything (024 Phase 6).
+    let mut carriers: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--carrier" => {
                 i += 1;
                 match args.get(i) {
-                    Some(v) => carrier = Some(v.clone()),
+                    Some(v) => carriers.push(v.clone()),
                     None => return usage("--carrier requires a value"),
                 }
             }
@@ -79,7 +87,7 @@ fn main() -> ExitCode {
             return ExitCode::from(4);
         }
     };
-    match runtime.block_on(produce(carrier.as_deref())) {
+    match runtime.block_on(produce(&carriers)) {
         Ok(ledger) => {
             let permissive: Vec<&EquivalenceEntry> = ledger
                 .entries
@@ -114,7 +122,7 @@ fn main() -> ExitCode {
 
 fn usage(message: &str) -> ExitCode {
     eprintln!("error: {message}");
-    eprintln!("usage: equivalence-report [--carrier <name>]");
+    eprintln!("usage: equivalence-report [--carrier <name>]...   (repeatable; omit for all)");
     ExitCode::from(2)
 }
 
@@ -262,7 +270,9 @@ fn deacon_binary() -> Result<PathBuf, HarnessError> {
 }
 
 /// Produce the ledger, writing `target/parity/equivalence.json`.
-async fn produce(carrier_filter: Option<&str>) -> Result<EquivalenceLedger, HarnessError> {
+/// `carrier_filter` is the (possibly empty) set of carrier names to judge; empty means every
+/// superseded carrier.
+async fn produce(carrier_filter: &[String]) -> Result<EquivalenceLedger, HarnessError> {
     // Fail loud on every precondition BEFORE any comparison runs.
     let oracle = Oracle::acquire().await?;
     let deacon = deacon_binary()?;
@@ -304,7 +314,7 @@ async fn produce(carrier_filter: Option<&str>) -> Result<EquivalenceLedger, Harn
         .live_names()
         .into_iter()
         .filter(|name| *name != SURVIVING_RUNNER)
-        .filter(|name| carrier_filter.is_none_or(|f| f == *name))
+        .filter(|name| carrier_filter.is_empty() || carrier_filter.iter().any(|f| f == *name))
         .map(str::to_string)
         .collect();
     if carriers.is_empty() {
@@ -315,6 +325,20 @@ async fn produce(carrier_filter: Option<&str>) -> Result<EquivalenceLedger, Harn
                 parity_registry.live_names()
             ),
         });
+    }
+    // A name that matched nothing is an authoring mistake, not an empty result: silently
+    // judging 1 of 2 requested carriers would let a deletion be authorized by a ledger that
+    // never looked at it.
+    for requested in carrier_filter {
+        if !carriers.iter().any(|c| c == requested) {
+            return Err(HarnessError::Report {
+                cause: format!(
+                    "--carrier {requested:?} is not a superseded live carrier — the \
+                     registry's live binaries are {:?}",
+                    parity_registry.live_names()
+                ),
+            });
+        }
     }
 
     let mut entries: Vec<EquivalenceEntry> = Vec::new();

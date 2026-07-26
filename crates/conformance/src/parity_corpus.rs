@@ -264,12 +264,13 @@ mod tests {
     fn embedded_registry_parses_and_matches_the_surviving_set() {
         // The three corpus binaries and `parity_read_configuration` were retired in
         // 023 US7 once the equivalence ledger cleared them, and their corpora went with
-        // them — the registry now enumerates only the surviving live binaries.
+        // them; `parity_exec` and `parity_up_exec` followed in 024 Phase 6 — the registry
+        // now enumerates only the surviving live binaries.
         let reg = ParityRegistry::load().expect("embedded registry must parse");
         assert_eq!(
             reg.live_binaries.len(),
-            6,
-            "5 Docker scenario binaries + the declarative runner"
+            4,
+            "3 Docker scenario binaries + the declarative runner"
         );
         assert!(
             reg.live_binaries
