@@ -22,10 +22,18 @@
 
 use std::path::{Path, PathBuf};
 
-use deacon_conformance::discovery::queue::{self, DiscoveryData};
+use deacon_conformance::discovery::grammar::Grammar;
+use deacon_conformance::discovery::queue::{self, CampaignsFile, DiscoveryData, FindingsFile};
 use deacon_conformance::discovery::report as discovery_report;
+use deacon_conformance::discovery::rng::Prng;
+use deacon_conformance::discovery::signature::{Divergence, DivergenceKind, Signature};
 use deacon_conformance::load::Registry;
-use parity_harness::registry::{filter_selects, parse_nextest_profiles};
+// `PULL_REQUEST_PROFILES` is the harness's single definition of "every lane a pull
+// request runs through", shared with `parity_registry_check`. Two copies of a six-element
+// list is exactly the kind of thing that drifts silently: a seventh profile added to one
+// copy and not the other would leave a lane nobody checks, which is indistinguishable
+// from a lane that checks out.
+use parity_harness::registry::{PULL_REQUEST_PROFILES, filter_selects, parse_nextest_profiles};
 
 /// The workspace root, derived from this crate's manifest directory so the paths are
 /// stable regardless of the per-package cargo/nextest working directory.
@@ -64,17 +72,6 @@ const LIVE_DISCOVERY_BINARIES: [&str; 2] = ["discovery_campaign", "discovery_met
 /// binary), but its lane requirement is identical, so both are asserted here rather than
 /// splitting one invariant across two files.
 const HERMETIC_DISCOVERY_BINARIES: [&str; 2] = ["discovery_hermetic", "discovery_cli"];
-
-/// Every profile a pull request can run through. None of them may select a live
-/// discovery binary, or a green PR run would imply a campaign ran when it did not.
-const PULL_REQUEST_PROFILES: [&str; 6] = [
-    "default",
-    "dev-fast",
-    "full",
-    "ci",
-    "mvp-integration",
-    "parity",
-];
 
 #[test]
 fn the_discovery_data_root_exists_and_is_canonically_rendered() {
@@ -287,7 +284,7 @@ fn live_discovery_binaries_are_selected_by_exactly_one_lane() {
         );
     }
 
-    for profile in PULL_REQUEST_PROFILES {
+    for &profile in PULL_REQUEST_PROFILES {
         let filter = profiles
             .default_filters
             .get(profile)
@@ -307,6 +304,409 @@ fn live_discovery_binaries_are_selected_by_exactly_one_lane() {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// T053 (US3, SC-013) — the hermetic surface cannot reach the network
+// ---------------------------------------------------------------------------
+
+/// Every source file that makes up the hermetic discovery surface.
+///
+/// Returned as `(relative path, contents)` so a failure names the file. The list is
+/// enumerated from disk rather than hard-coded: a module added by a later user story
+/// joins the scan automatically, which is the only way a guard like this keeps up with
+/// the thing it guards.
+fn hermetic_discovery_sources() -> Vec<(String, String)> {
+    let dir = workspace_root().join("crates/conformance/src/discovery");
+    let mut out = Vec::new();
+    let rd = std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("read {dir:?}: {e}"));
+    for entry in rd.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("rs") {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+        out.push((format!("crates/conformance/src/discovery/{name}"), text));
+    }
+    out.sort();
+    out
+}
+
+/// **T053 / SC-013**: the hermetic discovery surface completes with zero network requests.
+///
+/// "Zero network requests" is asserted the strongest way available — as an **absent
+/// capability**, not as an unobserved behaviour. A run that merely *happened* not to make
+/// a request proves nothing about the next run with different data, and sandboxing a Rust
+/// test's sockets from inside the test is not something the test can honestly do. So the
+/// claim is established in three parts, and each covers a way the other two can be
+/// evaded:
+///
+/// 1. **The crate declares no way to speak a network protocol.** `deacon-conformance`
+///    owns the entire hermetic surface (grammar, PRNG, signature, queue, report) and
+///    depends on no HTTP client, no async runtime, and no git/ssh transport. This is the
+///    same structural argument `clause_determinism` makes for the clause commands, taken
+///    here for the discovery ones; the git/ssh entries are specific to discovery, because
+///    the corpus canary is the one part of this feature that legitimately fetches — and
+///    it lives in `parity-harness`, deliberately on the other side of the seam (D8).
+/// 2. **No discovery module shells out.** A dependency audit is blind to
+///    `Command::new("curl")` and `git fetch`, which is exactly how a hermetic module
+///    would most plausibly acquire the network by accident: the corpus manifest model
+///    lives here while the fetch lives in the live half, so the tempting shortcut is one
+///    line away at all times.
+/// 3. **The surface actually runs.** A capability argument about code nobody executes is
+///    worth little, so the whole hermetic path is exercised end to end below. Together
+///    with (1) and (2) that is what "completes with zero network requests" means here.
+#[test]
+fn the_hermetic_discovery_surface_cannot_reach_the_network() {
+    // --- 1. No network-capable dependency in the crate that owns the surface ----------
+    let manifest_path = workspace_root().join("crates/conformance/Cargo.toml");
+    let manifest = std::fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|e| panic!("read {manifest_path:?}: {e}"));
+    // Inspect dependency-declaration lines only (`name = …`), so prose in a comment
+    // never trips the check: the guarantee is about actual dependencies.
+    let declared: Vec<String> = manifest
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| l.split_once('=').map(|(name, _)| name.trim().to_string()))
+        .collect();
+    for forbidden in [
+        // HTTP clients.
+        "reqwest",
+        "hyper",
+        "ureq",
+        "curl",
+        "isahc",
+        "surf",
+        "attohttpc",
+        "http",
+        // Async runtimes — the substrate a socket would need.
+        "tokio",
+        "async-std",
+        "smol",
+        // Git / ssh transports: the corpus canary's fetch belongs in `parity-harness`
+        // (research D8), never in the hermetic half that models the manifest.
+        "git2",
+        "gix",
+        "ssh2",
+        "russh",
+    ] {
+        assert!(
+            !declared.iter().any(|d| d == forbidden),
+            "deacon-conformance must not depend on {forbidden:?}: it owns the hermetic \
+             discovery surface, whose no-network guarantee is that the capability is \
+             ABSENT rather than merely unused (SC-013)"
+        );
+    }
+
+    // --- 2. No discovery module spawns a process or opens a socket -------------------
+    let sources = hermetic_discovery_sources();
+    assert!(
+        sources.len() >= 10,
+        "expected to scan the whole hermetic discovery surface, only saw {} file(s) — a \
+         scan that silently stopped finding files would pass by checking nothing",
+        sources.len()
+    );
+    for required in [
+        "queue.rs",
+        "grammar.rs",
+        "rng.rs",
+        "signature.rs",
+        "report.rs",
+    ] {
+        assert!(
+            sources.iter().any(|(p, _)| p.ends_with(required)),
+            "the scan must cover {required}; got {:?}",
+            sources.iter().map(|(p, _)| p).collect::<Vec<_>>()
+        );
+    }
+
+    /// Tokens that would give a hermetic module a way off the machine. Matched on
+    /// non-comment lines only, so a doc comment may still *discuss* `git fetch`.
+    const FORBIDDEN: &[&str] = &[
+        "std::net",
+        "TcpStream",
+        "TcpListener",
+        "UdpSocket",
+        "std::process",
+        "tokio::process",
+        "Command::new",
+        "reqwest",
+        "ureq",
+        "hyper::",
+        "git2",
+        "gix::",
+    ];
+    let mut problems = Vec::new();
+    for (path, text) in &sources {
+        for (line_no, line) in text.lines().enumerate() {
+            let code = line.trim_start();
+            if code.starts_with("//") || code.starts_with("/*") || code.starts_with('*') {
+                continue;
+            }
+            for needle in FORBIDDEN {
+                if code.contains(needle) {
+                    problems.push(format!(
+                        "{path}:{}: uses `{needle}` — the hermetic half must have no way to \
+                         reach the network, and shelling out is the one route a dependency \
+                         audit cannot see. Fetching belongs in \
+                         `parity_harness::discovery::corpus_fetch` (research D8).",
+                        line_no + 1
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "the hermetic discovery surface must not spawn processes or open sockets:\n{}",
+        problems.join("\n")
+    );
+
+    // --- 3. And the surface really runs -----------------------------------------------
+    // Grammar: the pinned constraint inventory, read from disk.
+    let grammar = Grammar::load_default().expect("the committed grammar must load");
+    assert!(
+        !grammar.is_empty(),
+        "an empty grammar would make every later assertion in this test vacuous"
+    );
+
+    // PRNG: a seeded draw, entirely in-process.
+    let mut prng = Prng::from_seed(0x5eed_1234);
+    let first = prng.next_u64();
+    assert_eq!(
+        Prng::from_seed(0x5eed_1234).next_u64(),
+        first,
+        "the stream is a property of committed code, not of the environment"
+    );
+
+    // Signature: derived from an in-memory divergence, never re-diffed.
+    let deacon = serde_json::json!("vscode");
+    let reference = serde_json::json!("root");
+    let signature = Signature::derive(
+        "chan-structured-output",
+        &Divergence {
+            kind: DivergenceKind::Value,
+            path: "configuration.remoteUser",
+            deacon: Some(&deacon),
+            reference: Some(&reference),
+        },
+    );
+    assert!(signature.finding_id().starts_with("fnd-"));
+
+    // Queue + report: load the committed data root, validate it, render the artifacts.
+    let registry = load_registry();
+    let data = load_discovery();
+    assert!(queue::check(&data, &queue::RegistryView::from_registry(&registry)).is_empty());
+    let report = discovery_report::build_queue_report(
+        &data,
+        &discovery_report::CurrentPins::from_registry(&registry),
+    );
+    assert!(!discovery_report::render_md(&report).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// T055 (US3, SC-014) — the surface never gates on what it found
+// ---------------------------------------------------------------------------
+
+/// Build a queue holding `paths.len()` untriaged findings plus the campaign that admitted
+/// them, using the real derived ids and the registry's real pins so it validates clean.
+///
+/// Deliberately routed through the strict loader (`FindingsFile` / `CampaignsFile`)
+/// rather than constructed as structs: the loader is part of the hermetic surface, and a
+/// fixture that bypassed it could assert a shape the real data root can never hold.
+fn synthetic_queue(registry: &Registry, paths: &[&str]) -> DiscoveryData {
+    let pins = discovery_report::CurrentPins::from_registry(registry);
+    let oracle = pins
+        .oracle_version
+        .clone()
+        .expect("the registry must record an oracle revision");
+    let campaign_id = "cmp-aaaaaaaa";
+
+    let mut records = Vec::new();
+    for (index, path) in paths.iter().enumerate() {
+        let deacon = serde_json::json!("vscode");
+        let reference = serde_json::json!("root");
+        let signature = Signature::derive(
+            "chan-structured-output",
+            &Divergence {
+                kind: DivergenceKind::Value,
+                path,
+                deacon: Some(&deacon),
+                reference: Some(&reference),
+            },
+        );
+        let candidate_id = format!("cnd-0000000{index}");
+        records.push(serde_json::json!({
+            "id": signature.finding_id(),
+            "signature": signature,
+            "witnesses": [{
+                "id": queue::Witness::derived_id(campaign_id, &candidate_id),
+                "campaignId": campaign_id,
+                "candidateId": candidate_id,
+                "minimalInput": { "image": "alpine:3.18" },
+                "isMinimal": true,
+                "reductionSteps": ["drop-optional-key"],
+                "observedValues": { "deacon": "vscode", "reference": "root" },
+                "mutationOperators": ["mop-wrong-type"]
+            }],
+            "classification": null,
+            "state": "untriaged",
+            "firstObserved": campaign_id,
+            "lastObserved": campaign_id,
+            "promotedTo": null,
+            "splitFrom": null,
+            "notes": ""
+        }));
+    }
+
+    let findings: FindingsFile = serde_json::from_value(serde_json::json!({
+        "schemaVersion": queue::SCHEMA_VERSION,
+        "records": records,
+    }))
+    .expect("the synthetic findings must satisfy the strict loader");
+
+    let campaigns: CampaignsFile = serde_json::from_value(serde_json::json!({
+        "schemaVersion": queue::SCHEMA_VERSION,
+        "records": [{
+            "id": campaign_id,
+            "seed": "0x5eed1234",
+            "lane": "scheduled",
+            "tier": "config-differential",
+            "pinnedInputSet": {
+                "schemaPin": pins.schema_pin,
+                "prosePin": pins.prose_pin,
+                "oracleVersion": oracle,
+                "normalizerVersion": deacon_conformance::snapshot::NORMALIZER_VERSION,
+                "grammarVersion": Grammar::load_default()
+                    .expect("grammar loads")
+                    .revision()
+                    .to_string(),
+                "mutationCatalogVersion": "v1",
+                "generatorVersion": deacon_conformance::discovery::rng::prng_identity()
+            },
+            "budget": {
+                "wallClockSeconds": queue::DEFAULT_WALL_CLOCK_SECONDS,
+                "perCandidateSeconds": queue::DEFAULT_PER_CANDIDATE_SECONDS_HERMETIC,
+                "shrinkStepsPerFinding": 64,
+                "admissionCap": queue::DEFAULT_ADMISSION_CAP
+            },
+            "outcome": {
+                "candidatesGenerated": 4820,
+                "candidatesExecuted": 4629,
+                "candidatesDiscardedUnsafe": 0,
+                "parseStageFailures": 191,
+                "budgetExhausted": false,
+                "spaceCoveredFraction": 0.0,
+                "mutationApplications": { "unknown-field": 512 },
+                "signaturesObserved": paths.len(),
+                "signaturesAdmitted": paths.len(),
+                "signaturesSuppressed": 0
+            }
+        }]
+    }))
+    .expect("the synthetic campaign must satisfy the strict loader");
+
+    DiscoveryData {
+        findings: findings.records,
+        campaigns: campaigns.records,
+    }
+}
+
+/// **T055 / SC-014**: a queue full of findings and an empty one are indistinguishable in
+/// *outcome* — both validate clean and both render — while remaining entirely
+/// distinguishable in *content*.
+///
+/// That pairing is the whole rule. If only the first half held, "nothing found" and
+/// "nothing ran" would look alike and the most comfortable way for the machinery to be
+/// broken would be to report success forever (FR-062). If only the second held, discovery
+/// would be a gate, and a stochastic gate makes green non-reproducible — at which point
+/// somebody eventually turns the lane off.
+///
+/// Asserted at the library level here because this binary lives in the `deacon` crate and
+/// has no handle on the `deacon-conformance` executable. The **process**-level contract —
+/// `discovery report` exiting `0` on a populated queue, `discovery check` exiting `1` only
+/// on a violation — is asserted from outside the process by
+/// `crates/conformance/tests/discovery_cli.rs`, in the crate that owns the binary. The
+/// two halves are cross-checked below so neither can be deleted while the other keeps
+/// implying it is covered.
+#[test]
+fn a_populated_queue_and_an_empty_one_are_equally_clean() {
+    let registry = load_registry();
+    let view = queue::RegistryView::from_registry(&registry);
+    let pins = discovery_report::CurrentPins::from_registry(&registry);
+
+    let empty = DiscoveryData::default();
+    let populated = synthetic_queue(
+        &registry,
+        &[
+            "configuration.remoteUser",
+            "configuration.workspaceFolder",
+            "configuration.userEnvProbe",
+        ],
+    );
+
+    // Same verdict: no quantity of findings is itself a violation.
+    for (label, data) in [("empty", &empty), ("populated", &populated)] {
+        let violations = queue::check(data, &view);
+        assert!(
+            violations.is_empty(),
+            "the {label} queue must validate clean — a finding is a candidate for an \
+             assertion, never a failure:\n{}",
+            violations
+                .iter()
+                .map(|v| format!("  {} {}: {v}", v.class(), v.record()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    // Same success: both render, and both write their artifacts.
+    let dir = tempfile::tempdir().expect("tempdir");
+    for (label, data) in [("empty", &empty), ("populated", &populated)] {
+        let report = discovery_report::build_queue_report(data, &pins);
+        let out = dir.path().join(label);
+        std::fs::create_dir_all(&out).expect("create out dir");
+        let written = discovery_report::write_queue_report(&out, &report)
+            .unwrap_or_else(|e| panic!("the {label} queue must render: {e}"));
+        assert_eq!(written.len(), 2, "queue.json + queue.md");
+        assert!(
+            discovery_report::render_md(&report).contains("never gates"),
+            "the {label} report must say what it is: a triage queue, not a gate"
+        );
+    }
+
+    // Different content: the counted untriaged bucket distinguishes "nobody has looked
+    // yet" from "nothing was found", which is precisely what a status code cannot carry.
+    let empty_md =
+        discovery_report::render_md(&discovery_report::build_queue_report(&empty, &pins));
+    let full_md =
+        discovery_report::render_md(&discovery_report::build_queue_report(&populated, &pins));
+    assert!(empty_md.contains("| untriaged | 0 |"), "{empty_md}");
+    assert!(full_md.contains("| untriaged | 3 |"), "{full_md}");
+    assert!(
+        full_md.contains("4820"),
+        "a campaign's volume is reported whether or not it found anything (FR-062): \
+         {full_md}"
+    );
+
+    // The process-level half must still exist. Without this, deleting
+    // `report_exits_zero_whether_the_queue_is_empty_or_full` would leave the exit-status
+    // contract — the rule that makes this lane safe to schedule — asserted nowhere, while
+    // this test kept passing and looking like coverage.
+    let cli_guard = workspace_root().join("crates/conformance/tests/discovery_cli.rs");
+    let cli_guard_text = std::fs::read_to_string(&cli_guard)
+        .unwrap_or_else(|e| panic!("the process-level exit-status guard {cli_guard:?}: {e}"));
+    assert!(
+        cli_guard_text.contains("fn report_exits_zero_whether_the_queue_is_empty_or_full"),
+        "{cli_guard:?} must keep asserting the exit-status contract from outside the \
+         process; the library-level property proven here does not imply it"
+    );
 }
 
 /// The discovery command group is **dev-only**. It must not reach the shipped consumer

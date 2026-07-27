@@ -987,6 +987,43 @@ const FUNCTION_UNITS: &[(&str, &[(&str, Authored)])] = &[
                     diff_classes: DIFF_NONE,
                 },
             ),
+            // 025 US3 (T054/T056/T057), on the same terms as 024 Block B above and 023
+            // User Story 4 before it. Membership is DERIVED — the enumeration scans this
+            // program's real `#[test]` functions — so a guard added after the freeze
+            // cannot be silently absent from the baseline; it appears as a unit with no
+            // authored assertion, which is a hard error. Authoring the sentence here is
+            // the only way to describe it, and describing it is the point: the baseline
+            // says what each unit ASSERTS, not merely that it exists.
+            (
+                "the_discovery_lane_selects_the_campaigns_and_no_pull_request_lane_does",
+                Authored {
+                    assertion: "the discovery nextest profile selects every live discovery campaign binary and captures no hermetic discovery guard, and no pull-request profile selects a campaign while both fast lanes select every guard",
+                    channels: CH_NONE,
+                    error_path: false,
+                    fixtures: FX_NONE,
+                    diff_classes: DIFF_NONE,
+                },
+            ),
+            (
+                "the_discovery_lane_is_wired_in_registry_tests_and_nextest",
+                Authored {
+                    assertion: "every discovery binary is registered, has a source file at its declared test directory, and is wired into the nextest profiles; every discovery source file is registered; and the parity profile selects no discovery campaign",
+                    channels: CH_NONE,
+                    error_path: false,
+                    fixtures: FX_NONE,
+                    diff_classes: DIFF_NONE,
+                },
+            ),
+            (
+                "no_discovery_command_reaches_the_shipped_cli",
+                Authored {
+                    assertion: "no discovery command introduced by the exploratory-discovery tooling appears at any depth of the shipped `deacon` command tree",
+                    channels: CH_NONE,
+                    error_path: false,
+                    fixtures: FX_NONE,
+                    diff_classes: DIFF_NONE,
+                },
+            ),
         ],
     ),
     (

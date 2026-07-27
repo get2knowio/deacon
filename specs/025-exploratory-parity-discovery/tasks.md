@@ -154,17 +154,24 @@ selects no discovery program, and performs no fetch.
 
 ### Tests for User Story 3
 
-- [ ] T053 [P] [US3] No-network test in `crates/deacon/tests/discovery_hermetic.rs`: the hermetic discovery surface completes with zero network requests (SC-013)
-- [ ] T054 [P] [US3] Profile-selection structural test in `crates/deacon/tests/parity_registry_check.rs`: every discovery binary is selected by `[profile.discovery]` and by no pull-request profile; a mismatch fails (FR-057)
-- [ ] T055 [P] [US3] Never-gates test in `crates/deacon/tests/discovery_hermetic.rs`: a campaign reporting findings and a campaign reporting none both exit `0` (SC-014)
+- [X] T053 [P] [US3] No-network test in `crates/deacon/tests/discovery_hermetic.rs`: the hermetic discovery surface completes with zero network requests (SC-013)
+- [X] T054 [P] [US3] Profile-selection structural test in `crates/deacon/tests/parity_registry_check.rs`: every discovery binary is selected by `[profile.discovery]` and by no pull-request profile; a mismatch fails (FR-057)
+- [X] T055 [P] [US3] Never-gates test in `crates/deacon/tests/discovery_hermetic.rs`: a campaign reporting findings and a campaign reporting none both exit `0` (SC-014)
 
 ### Implementation for User Story 3
 
-- [ ] T056 [US3] Extend `crates/deacon/tests/parity_registry_check.rs` with discovery-lane wiring assertions: registry ↔ `crates/deacon/tests/*.rs` ↔ `.config/nextest.toml` agreement
-- [ ] T057 [US3] Extend `crates/deacon/tests/parity_registry_check.rs` asserting `deacon --help` gains no discovery surface (FR-059)
-- [ ] T058 [US3] Create `.github/workflows/discovery.yml` with a nightly `schedule` lane and a `workflow_dispatch` lane accepting `seed` and `budget` inputs, provisioning the pinned oracle
+- [X] T056 [US3] Extend `crates/deacon/tests/parity_registry_check.rs` with discovery-lane wiring assertions: registry ↔ `crates/deacon/tests/*.rs` ↔ `.config/nextest.toml` agreement
+- [X] T057 [US3] Extend `crates/deacon/tests/parity_registry_check.rs` asserting `deacon --help` gains no discovery surface (FR-059)
+- [X] T058 [US3] Create `.github/workflows/discovery.yml` with a nightly `schedule` lane and a `workflow_dispatch` lane accepting `seed` and `budget` inputs, provisioning the pinned oracle
 - [ ] T059 [US3] Enforce the exit-status contract in `crates/parity-harness/src/bin/discovery-campaign.rs`: status reflects whether the campaign ran, never what it found (FR-058)
-- [ ] T060 [US3] Register the discovery binaries in `fixtures/parity-corpus/registry.json` so `parity_registry_check` can enforce their wiring
+  - **Blocked on US1 (T038)**, which creates that bin. The `.github/workflows/discovery.yml`
+    invocation it needs is already in place, so this is a one-file follow-up once US1 lands.
+- [X] T060 [US3] Register the discovery binaries in `fixtures/parity-corpus/registry.json` so `parity_registry_check` can enforce their wiring
+  - Registered: `discovery_campaign`, `discovery_metamorphic` (role `live`),
+    `discovery_hermetic`, `discovery_cli` (role `guard`). The `parity-harness` **bins**
+    `discovery-campaign` (T038) and `discovery-proof` (T082) are not test binaries and,
+    like `parity-report` / `conformance-snapshot` / `equivalence-report`, take no registry
+    entry and no nextest override.
 
 **Checkpoint**: A green pull-request run means exactly what it meant before this feature existed.
 

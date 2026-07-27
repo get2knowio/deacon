@@ -72,6 +72,57 @@ pub struct LiveBinary {
     pub corpus: Option<String>,
 }
 
+/// What a discovery test binary is *for*, which decides which lanes may select it
+/// (025-exploratory-parity-discovery, T060; FR-055/FR-057).
+///
+/// The two roles have **opposite** selection requirements, which is exactly why the role
+/// is recorded rather than inferred from the `discovery_` name prefix. Inferring from the
+/// prefix is the `discovery_*` glob mistake research D9 exists to prevent, one level up:
+/// it would make a hermetic guard and a stochastic campaign indistinguishable to every
+/// check that reads this file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DiscoveryRole {
+    /// A stochastic campaign binary. Selected ONLY by `[profile.discovery]`; excluded
+    /// from the `default-filter` of every pull-request profile, so a green PR run never
+    /// implies a campaign ran.
+    Live,
+    /// A hermetic guard. It MUST run in the fast lane (`default` / `dev-fast`) and MUST
+    /// NOT be captured by `[profile.discovery]`'s allow-list — a guard nobody runs is a
+    /// guard nobody notices going stale.
+    Guard,
+}
+
+impl DiscoveryRole {
+    /// The wire spelling, for diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DiscoveryRole::Live => "live",
+            DiscoveryRole::Guard => "guard",
+        }
+    }
+}
+
+/// One discovery test binary and where its source lives.
+///
+/// `tests_dir` is explicit rather than assumed: the discovery binaries are split across
+/// two crates on purpose (`discovery_cli` drives the `deacon-conformance` bin and so must
+/// live in that crate's test tree, while the campaign binaries and the repository-wiring
+/// guard live in `crates/deacon/tests`). A checker that assumed one directory would
+/// silently stop covering whichever binary moved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoveryBinary {
+    /// The nextest binary name (`<name>.rs` in `tests_dir`).
+    pub name: String,
+    /// Live campaign or hermetic guard.
+    pub role: DiscoveryRole,
+    /// Workspace-root-relative directory holding `<name>.rs`.
+    pub tests_dir: String,
+    /// Whether the binary needs a Docker daemon for any of its tiers.
+    pub docker_required: bool,
+}
+
 /// A case corpus with its minimum expected case count.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -89,6 +140,15 @@ pub struct ParityRegistry {
     pub live_binaries: Vec<LiveBinary>,
     pub internal_consistency_binaries: Vec<String>,
     pub corpora: Vec<Corpus>,
+    /// The discovery lane's binaries (025-exploratory-parity-discovery, T060).
+    ///
+    /// `#[serde(default)]` so the many synthetic registries in unit tests stay terse;
+    /// the *real* file's completeness is enforced structurally by
+    /// `parity_registry_check`, which knows the expected set and fails loudly on an
+    /// empty or partial one. Defaulting here therefore never hides a missing
+    /// registration — it only keeps a data-model concern out of the test fixtures.
+    #[serde(default)]
+    pub discovery_binaries: Vec<DiscoveryBinary>,
 }
 
 /// The (symbolic) location of the embedded registry, used in error messages.
@@ -157,7 +217,55 @@ impl ParityRegistry {
                 return Err(format!("duplicate corpus id `{}`", c.id));
             }
         }
+        // Discovery names are unique and disjoint from the parity namespaces. The two
+        // lanes have contradictory selection rules, so a name claimed by both would make
+        // the truthfulness invariant unsatisfiable rather than merely ambiguous.
+        let mut discovery_names = std::collections::HashSet::new();
+        for d in &self.discovery_binaries {
+            if !discovery_names.insert(d.name.as_str()) {
+                return Err(format!("duplicate discovery binary `{}`", d.name));
+            }
+            if seen.contains(d.name.as_str()) {
+                return Err(format!(
+                    "`{}` is both a live parity binary and a discovery binary",
+                    d.name
+                ));
+            }
+            if self
+                .internal_consistency_binaries
+                .iter()
+                .any(|n| n == &d.name)
+            {
+                return Err(format!(
+                    "`{}` is both an internal-consistency binary and a discovery binary",
+                    d.name
+                ));
+            }
+            if d.tests_dir.trim().is_empty() {
+                return Err(format!(
+                    "discovery binary `{}` declares no tests_dir — a checker cannot find \
+                     a source file it is not told where to look for",
+                    d.name
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// Every discovery binary of `role`.
+    pub fn discovery_of_role(&self, role: DiscoveryRole) -> Vec<&DiscoveryBinary> {
+        self.discovery_binaries
+            .iter()
+            .filter(|b| b.role == role)
+            .collect()
+    }
+
+    /// The names of every registered discovery binary.
+    pub fn discovery_names(&self) -> Vec<&str> {
+        self.discovery_binaries
+            .iter()
+            .map(|b| b.name.as_str())
+            .collect()
     }
 
     /// Look up a corpus by id.
@@ -303,6 +411,69 @@ mod tests {
             ParityRegistry::parse(bad).is_err(),
             "corpus binary referencing an undeclared corpus must be rejected"
         );
+    }
+
+    #[test]
+    fn embedded_registry_enumerates_the_discovery_lane() {
+        // 025 T060. The *content* of the expected set is asserted by
+        // `parity_registry_check` (which also cross-checks it against the test tree and
+        // `.config/nextest.toml`); here we only assert the registry can carry the lane
+        // and that both roles are represented — a registry with live campaigns and no
+        // guards, or guards and no campaigns, is a half-wired lane.
+        let reg = ParityRegistry::load().expect("embedded registry must parse");
+        assert!(
+            !reg.discovery_of_role(DiscoveryRole::Live).is_empty(),
+            "the discovery lane must register at least one live campaign binary"
+        );
+        assert!(
+            !reg.discovery_of_role(DiscoveryRole::Guard).is_empty(),
+            "the discovery lane must register at least one hermetic guard — the guards \
+             are what keep the campaigns out of the pull-request lanes"
+        );
+    }
+
+    #[test]
+    fn rejects_a_discovery_binary_that_collides_with_a_parity_namespace() {
+        // The two lanes' selection rules are contradictory (a live parity binary must be
+        // selected by [profile.parity]; a live discovery binary must not be selected by
+        // it), so one name in both namespaces is unsatisfiable, not merely ambiguous.
+        let with_live = r#"{
+          "live_binaries": [ { "name": "dup", "kind": "scenario", "docker_required": false } ],
+          "internal_consistency_binaries": [],
+          "corpora": [],
+          "discovery_binaries": [ { "name": "dup", "role": "live", "tests_dir": "crates/deacon/tests", "docker_required": false } ]
+        }"#;
+        assert!(ParityRegistry::parse(with_live).is_err());
+
+        let with_consistency = r#"{
+          "live_binaries": [],
+          "internal_consistency_binaries": [ "dup" ],
+          "corpora": [],
+          "discovery_binaries": [ { "name": "dup", "role": "guard", "tests_dir": "crates/deacon/tests", "docker_required": false } ]
+        }"#;
+        assert!(ParityRegistry::parse(with_consistency).is_err());
+
+        let duplicated = r#"{
+          "live_binaries": [],
+          "internal_consistency_binaries": [],
+          "corpora": [],
+          "discovery_binaries": [
+            { "name": "d", "role": "live", "tests_dir": "crates/deacon/tests", "docker_required": false },
+            { "name": "d", "role": "guard", "tests_dir": "crates/deacon/tests", "docker_required": false }
+          ]
+        }"#;
+        assert!(
+            ParityRegistry::parse(duplicated).is_err(),
+            "one name may not carry two roles — the roles' lane requirements are opposites"
+        );
+
+        let no_dir = r#"{
+          "live_binaries": [],
+          "internal_consistency_binaries": [],
+          "corpora": [],
+          "discovery_binaries": [ { "name": "d", "role": "live", "tests_dir": "  ", "docker_required": false } ]
+        }"#;
+        assert!(ParityRegistry::parse(no_dir).is_err());
     }
 
     #[test]
