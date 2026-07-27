@@ -1,0 +1,215 @@
+# Exploratory parity discovery (025-exploratory-parity-discovery, US3/T058).
+#
+# The THIRD lane. `ci` answers "did this change break something we already assert";
+# `parity / live-certification` answers "does deacon still match the reference on the
+# cases we curated"; this one answers the question neither can — "does anything differ
+# outside what we curated?".
+#
+# ## This lane GATES NOTHING
+#
+# A campaign that finds forty differences exits 0. Only a *machinery* failure — an
+# unverifiable oracle, a normalization failure, an unwritable or invalid data root — is
+# non-zero (FR-058, contracts/discovery-cli.md). That rule is the entire reason this lane
+# can be scheduled in CI at all: a status that depended on findings would be a stochastic
+# gate, and green would stop being reproducible. Nothing here is in the release path, and
+# a red run here blocks no pull request and no release.
+#
+# ## Why there is no `pull_request` trigger
+#
+# FR-055 is absolute: no discovery program may be selected by, or run in, a pull-request
+# lane. Adding a PR trigger "just to lint the workflow" would be the first step toward a
+# campaign running on a PR. The wiring is instead guarded *hermetically* on every PR by
+# `parity_registry_check` (registry ↔ `tests/*.rs` ↔ `.config/nextest.toml` agreement,
+# and that `deacon --help` gains no discovery surface) and by `discovery_hermetic`, both
+# of which run in the fast lane and need no oracle, Docker, or network.
+#
+# ## Cadence
+#
+# Nightly, offset from the parity lane's 05:00 so the two do not contend for runners.
+# The hermetic configuration-resolution tier gets the whole scheduled budget: at the
+# clarified per-candidate ceilings a single container-backed candidate can consume a sixth
+# of the 30-minute window, so sharing one budget lets the slow tier starve the fast one —
+# and the fast tier is where nearly all the exploration happens (research D10). The
+# container-backed and corpus tiers are selected explicitly via `workflow_dispatch`.
+name: discovery
+
+on:
+  # Nightly exploratory campaign on the default branch.
+  schedule:
+    - cron: '0 7 * * *'
+
+  # Explicit invocation. FR-056 requires the invoked lane to ACCEPT a seed and a budget
+  # and to RECORD both; the campaign records them in `conformance/discovery/campaigns.json`
+  # as part of the run's provenance.
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: >-
+          Hex PRNG seed. Required, never defaulted: a defaulted seed would let a campaign
+          run without its reproducibility input being a conscious choice, and FR-001
+          depends on the seed being recorded rather than inferred.
+        required: true
+        type: string
+      budget:
+        description: 'Wall-clock budget for the campaign, in seconds.'
+        required: false
+        default: '1800'
+        type: string
+      tier:
+        description: >-
+          Which tier to run. `metamorphic` needs no oracle, Docker, or network;
+          `config-differential` is the nightly tier; `container-differential` needs Docker;
+          `corpus` needs network. Selecting the container tier separately from the
+          configuration tier is FR-060.
+        required: false
+        default: 'config-differential'
+        type: choice
+        options:
+          - config-differential
+          - container-differential
+          - metamorphic
+          - corpus
+
+# Read-only. The campaign writes `conformance/discovery/{findings,campaigns}.json` in the
+# workspace and those files are uploaded as an artifact, but this lane deliberately does
+# NOT push them: a stochastic process must never author the record it is measured against
+# (FR-036). Promotion is a human reading the diff and editing the registry by hand.
+permissions:
+  contents: read
+
+concurrency:
+  # One campaign at a time. Two concurrent runs would write the same data root, and
+  # `cancel-in-progress: false` because a partially completed campaign still has findings
+  # worth keeping.
+  group: discovery-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  campaign:
+    name: campaign
+    runs-on: ubuntu-latest
+    # Above SC-015's 30-minute campaign budget. The budget is enforced by the campaign
+    # driver itself, which reports the elapsed number; this is only the backstop for a
+    # driver that stops making progress at all. A backstop that fired FIRST would replace
+    # a diagnosable failure with "the job was slow".
+    timeout-minutes: 60
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-discovery-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-discovery-
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Provision the pinned oracle
+        # Install EXACTLY the version in the pin file — the harness re-verifies it, so
+        # provisioning and harness can never disagree about the reference. A missing or
+        # mismatched oracle FAILS the run; there is no silent skip, because "found
+        # nothing" and "never compared anything" must never look alike.
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r .version fixtures/parity-corpus/oracle.json)"
+          echo "Installing @devcontainers/cli@${VERSION} from fixtures/parity-corpus/oracle.json"
+          npm install -g "@devcontainers/cli@${VERSION}"
+
+      - name: Verify oracle version
+        run: devcontainer --version
+
+      - name: Set up Docker Buildx
+        # The container-backed tier builds images; establishing the precondition here (as
+        # the parity lane does) keeps a missing builder from being reported as a
+        # divergence.
+        uses: docker/setup-buildx-action@v3
+
+      - name: Verify BuildKit is available
+        run: |
+          docker buildx version
+          docker buildx inspect --bootstrap >/dev/null
+          echo "BuildKit is available"
+
+      - name: Build deacon
+        run: cargo build -p deacon
+
+      - name: Run the discovery lane
+        # The SINGLE sanctioned entry point: `[profile.discovery]`, whose default-filter
+        # is an explicit `binary(=…)` allow-list rather than a `discovery_*` glob (the
+        # glob would capture the hermetic guards and silently remove them from the fast
+        # lane — research D9).
+        run: cargo nextest run --profile discovery
+
+      - name: Run the explicitly seeded campaign
+        # Only on explicit invocation, where a seed and a budget were supplied. The
+        # scheduled lane above runs the profile's own campaign binaries instead.
+        #
+        # The inputs reach the shell through `env:`, never through `${{ }}` interpolated
+        # into the script body. `${{ }}` in a `run:` block is substituted *before* the
+        # shell sees the text, so a value containing shell metacharacters becomes code
+        # rather than an argument. Requiring write access to dispatch a workflow narrows
+        # who can do that; it does not make the substitution safe, and this is the shape
+        # that is safe by construction.
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DISCOVERY_SEED: ${{ inputs.seed }}
+          DISCOVERY_TIER: ${{ inputs.tier }}
+          DISCOVERY_BUDGET: ${{ inputs.budget }}
+        run: |
+          cargo run -p parity-harness --bin discovery-campaign -- \
+            --seed "$DISCOVERY_SEED" \
+            --tier "$DISCOVERY_TIER" \
+            --budget-seconds "$DISCOVERY_BUDGET" \
+            --lane invoked
+
+      - name: Render the findings queue
+        # Never gates: a queue holding fifty untriaged findings still exits 0. The exit
+        # status reflects only whether the artifacts could be written.
+        run: cargo run -p deacon-conformance -- discovery report
+
+      - name: Validate the discovery data root
+        # This one DOES fail the lane, and legitimately so: D1–D5 are integrity classes
+        # over the record the campaign just wrote (a malformed record, an unresolvable
+        # reference, an undeclared channel, a stale pin). That is a machinery failure, not
+        # a finding — the distinction the whole exit-status contract rests on.
+        run: cargo run -p deacon-conformance -- discovery check
+
+      - name: Upload the findings queue and campaign artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: discovery-queue
+          path: target/discovery/
+          if-no-files-found: warn
+
+      - name: Upload the written discovery data root
+        # The data root is the durable record a reviewer triages from. Uploaded rather
+        # than pushed (see the `permissions` note above): review is a human act.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: discovery-data-root
+          path: conformance/discovery/
+          if-no-files-found: warn

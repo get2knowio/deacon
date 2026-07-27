@@ -18,9 +18,19 @@
 //!    plumbing) (FR-023).
 
 use parity_harness::registry::{
-    self, META_TEST_BINARIES, ParityRegistry, filter_selects, parse_nextest_profiles,
+    self, DISCOVERY_PROFILE, DiscoveryRole, GUARD_REQUIRED_PROFILES, META_TEST_BINARIES,
+    PULL_REQUEST_PROFILES, ParityRegistry, filter_selects, parse_nextest_profiles,
 };
 use parity_harness::workspace_root;
+
+/// Parse `.config/nextest.toml`'s `[profile.*]` `default-filter` expressions from the
+/// real file. Shared by the parity and discovery cross-checks so both read one source.
+fn real_nextest_profiles() -> registry::NextestProfiles {
+    let toml_path = workspace_root().join(".config/nextest.toml");
+    let toml_text =
+        std::fs::read_to_string(&toml_path).unwrap_or_else(|e| panic!("read {toml_path:?}: {e}"));
+    parse_nextest_profiles(&toml_text).unwrap_or_else(|e| panic!("parse nextest.toml: {e}"))
+}
 
 /// 1. Registry ↔ test-file bidirectional match.
 #[test]
@@ -56,11 +66,7 @@ fn registry_matches_test_files_both_directions() {
 #[test]
 fn nextest_parity_profile_selects_exactly_live_binaries() {
     let reg = ParityRegistry::load().unwrap_or_else(|e| panic!("registry.json: {e}"));
-    let toml_path = workspace_root().join(".config/nextest.toml");
-    let toml_text =
-        std::fs::read_to_string(&toml_path).unwrap_or_else(|e| panic!("read {toml_path:?}: {e}"));
-    let profiles =
-        parse_nextest_profiles(&toml_text).unwrap_or_else(|e| panic!("parse nextest.toml: {e}"));
+    let profiles = real_nextest_profiles();
 
     // [profile.parity] must be declared.
     assert!(
@@ -498,6 +504,271 @@ fn no_coverage_or_regression_command_reaches_the_shipped_cli() {
     );
 }
 
+/// **T054** (025 US3, FR-057): the discovery lane's profile selection.
+///
+/// Every **live** discovery binary is selected by `[profile.discovery]` and by no
+/// pull-request profile; every hermetic **guard** is the exact opposite — selected by the
+/// fast lanes and *not* captured by the discovery allow-list.
+///
+/// The role split is the substance of this test, not a technicality. FR-057 says "every
+/// discovery program is selected by a discovery lane and by no pull-request lane", and
+/// read without roles that sentence would exile `discovery_hermetic` and `discovery_cli`
+/// from the fast lane — which is precisely the `discovery_*` glob failure research D9
+/// exists to prevent. The guards are the lane's *machinery*, not campaigns: they are what
+/// makes the campaigns' exclusion checkable, so a lane that stopped running them would
+/// remove the only thing watching it.
+///
+/// Every verdict is reached by **evaluating** the filter expression. The profiles name
+/// the discovery binaries in order to *exclude* them, and a token match would read
+/// `… & not (binary(=discovery_campaign))` as a selection and fail a correct file.
+#[test]
+fn the_discovery_lane_selects_the_campaigns_and_no_pull_request_lane_does() {
+    let reg = ParityRegistry::load().unwrap_or_else(|e| panic!("registry.json: {e}"));
+    let profiles = real_nextest_profiles();
+
+    // Positive control: a registry that lost its discovery entries would make every
+    // assertion below vacuous, and the "nothing to check" state is indistinguishable
+    // from "everything checks out" in a passing run.
+    let live: Vec<String> = reg
+        .discovery_of_role(DiscoveryRole::Live)
+        .into_iter()
+        .map(|b| b.name.clone())
+        .collect();
+    let guards: Vec<String> = reg
+        .discovery_of_role(DiscoveryRole::Guard)
+        .into_iter()
+        .map(|b| b.name.clone())
+        .collect();
+    assert!(
+        !live.is_empty() && !guards.is_empty(),
+        "registry.json must enumerate both discovery roles; found live={live:?} guards={guards:?}"
+    );
+
+    let discovery_filter = profiles
+        .default_filters
+        .get(DISCOVERY_PROFILE)
+        .unwrap_or_else(|| {
+            panic!(".config/nextest.toml must declare [profile.{DISCOVERY_PROFILE}]")
+        })
+        .as_deref()
+        .unwrap_or_else(|| {
+            panic!(
+                "[profile.{DISCOVERY_PROFILE}] must declare a default-filter; without one it \
+                 selects every binary in the workspace"
+            )
+        });
+
+    for name in &live {
+        assert!(
+            filter_selects(discovery_filter, name)
+                .unwrap_or_else(|e| panic!("[profile.{DISCOVERY_PROFILE}] filter: {e}")),
+            "[profile.{DISCOVERY_PROFILE}] must select live discovery binary `{name}` — it \
+             is the only sanctioned entry point, so nothing else would ever run it"
+        );
+    }
+    for name in &guards {
+        assert!(
+            !filter_selects(discovery_filter, name)
+                .unwrap_or_else(|e| panic!("[profile.{DISCOVERY_PROFILE}] filter: {e}")),
+            "[profile.{DISCOVERY_PROFILE}] captures the hermetic guard `{name}`. Its \
+             default-filter must stay an explicit `binary(=…)` allow-list — a \
+             `discovery_*` glob would swallow the guards and silently remove them from \
+             the fast lane (research D9)"
+        );
+    }
+
+    for profile in PULL_REQUEST_PROFILES {
+        let expr = profiles
+            .default_filters
+            .get(*profile)
+            .unwrap_or_else(|| panic!("[profile.{profile}] must exist"))
+            .as_deref()
+            .unwrap_or_else(|| {
+                panic!(
+                    "[profile.{profile}] has no default-filter, so it selects every binary \
+                     including the live discovery campaigns"
+                )
+            });
+        for name in &live {
+            assert!(
+                !filter_selects(expr, name)
+                    .unwrap_or_else(|e| panic!("[profile.{profile}] filter: {e}")),
+                "[profile.{profile}] selects live discovery binary `{name}` — discovery \
+                 gates nothing, so a green pull-request run must never imply a campaign \
+                 ran (FR-055/FR-057)"
+            );
+        }
+        if GUARD_REQUIRED_PROFILES.contains(profile) {
+            for name in &guards {
+                assert!(
+                    filter_selects(expr, name)
+                        .unwrap_or_else(|e| panic!("[profile.{profile}] filter: {e}")),
+                    "[profile.{profile}] does not select the hermetic guard `{name}` — a \
+                     guard that does not run in the fast lane is a guard nobody notices \
+                     going stale"
+                );
+            }
+        }
+    }
+}
+
+/// **T056** (025 US3): registry ↔ `tests/*.rs` ↔ `.config/nextest.toml` agreement for the
+/// discovery lane, the same three-place rule the parity lane already lives under.
+///
+/// A half-landed discovery binary is the failure this catches: a source file with no
+/// registry entry has no declared lane, so nothing checks which profiles select it; a
+/// registry entry with no source file makes `binary(=…)` name a binary that does not
+/// exist, which nextest treats as a hard config error and which therefore breaks *every*
+/// lane in the workspace rather than only this one.
+///
+/// The two source directories are load-bearing: `discovery_cli` drives the
+/// `deacon-conformance` binary and so must live in that crate's test tree, while the
+/// campaigns and the repository-wiring guard live in `crates/deacon/tests`. A check that
+/// assumed one directory would silently stop covering whichever binary moved, so the
+/// registry records `tests_dir` per binary and the file→registry sweep scans both.
+#[test]
+fn the_discovery_lane_is_wired_in_registry_tests_and_nextest() {
+    let reg = ParityRegistry::load().unwrap_or_else(|e| panic!("registry.json: {e}"));
+    let root = workspace_root();
+
+    // 1 + 2. Registry ↔ source files, both directions.
+    let problems = registry::check_discovery_files(&reg, &root);
+    assert!(
+        problems.is_empty(),
+        "registry ↔ discovery tests/*.rs mismatch:\n{}",
+        problems.join("\n")
+    );
+
+    // Each entry's declared directory must be the one the file is actually in — an entry
+    // pointing at the wrong crate passes a naive existence check only when a file of the
+    // same name happens to exist in both.
+    for binary in &reg.discovery_binaries {
+        let declared = root
+            .join(&binary.tests_dir)
+            .join(format!("{}.rs", binary.name));
+        assert!(
+            declared.is_file(),
+            "discovery binary `{}` declares tests_dir `{}`, but {} does not exist",
+            binary.name,
+            binary.tests_dir,
+            declared.display()
+        );
+    }
+
+    // 3. Registry ↔ `.config/nextest.toml`.
+    let problems = registry::check_discovery_profiles(&reg, &real_nextest_profiles());
+    assert!(
+        problems.is_empty(),
+        "discovery lane nextest wiring problems:\n{}",
+        problems.join("\n")
+    );
+
+    // The two lanes must stay disjoint in BOTH directions. `check_nextest_profiles`
+    // already proves no non-parity profile selects a live parity binary (so
+    // `[profile.discovery]` cannot pick one up); this proves the converse, which nothing
+    // else states: the parity lane must not acquire a campaign. The exclusion is about
+    // the lanes answering different questions on different budgets, so "the metamorphic
+    // tier is cheap" is never a reason to relax it.
+    let profiles = real_nextest_profiles();
+    let parity_filter = profiles
+        .default_filters
+        .get("parity")
+        .and_then(|f| f.as_deref())
+        .expect("[profile.parity] must declare a default-filter");
+    for binary in reg.discovery_of_role(DiscoveryRole::Live) {
+        assert!(
+            !filter_selects(parity_filter, &binary.name).expect("evaluate the parity filter"),
+            "[profile.parity] selects the discovery campaign `{}`; a campaign would exceed \
+             the parity lane's budget and would make a certification lane stochastic",
+            binary.name
+        );
+    }
+}
+
+/// **T057** (025 US3, FR-059): this feature adds NO subcommand to the shipped `deacon`
+/// CLI, at any depth of the command tree.
+///
+/// The `discovery` command group is a `deacon-conformance` bin surface and the campaign /
+/// proof programs are `parity-harness` bins: contributor tooling about how deacon is
+/// *tested*, not consumer functionality the containers.dev spec describes. A
+/// conformance-tracking command that ships is a scope violation users can then depend on,
+/// which makes it expensive to withdraw.
+///
+/// Walks one level deeper than the top-level column for the same reason
+/// `no_coverage_or_regression_command_reaches_the_shipped_cli` does: `discovery` has
+/// subcommands (`check`/`report`/`triage`/`split`/`scaffold`), and the cheapest way to
+/// leak one is to hang it off an existing consumer command rather than add a new
+/// top-level entry.
+#[test]
+fn no_discovery_command_reaches_the_shipped_cli() {
+    /// The 025 command surfaces plus the nouns they would most plausibly leak as. Every
+    /// entry is a word that has no business being a consumer subcommand — deliberately
+    /// NOT `corpus` or `campaign`-adjacent English that a future consumer feature might
+    /// legitimately want, because a guard that forbids plausible names gets deleted.
+    const DEV_ONLY: &[&str] = &[
+        "discovery",
+        "discovery-campaign",
+        "discovery-proof",
+        "findings",
+        "triage",
+        "metamorphic",
+        "mutate",
+        "shrink",
+    ];
+
+    fn subcommands_of(args: &[&str]) -> Vec<String> {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_deacon"))
+            .args(args)
+            .arg("--help")
+            .output()
+            .unwrap_or_else(|e| panic!("`deacon {} --help` runs: {e}", args.join(" ")));
+        assert!(
+            output.status.success(),
+            "`deacon {} --help` must succeed",
+            args.join(" ")
+        );
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .skip_while(|l| !l.trim_start().starts_with("Commands:"))
+            .skip(1)
+            .take_while(|l| !l.trim().is_empty())
+            .filter_map(|l| l.split_whitespace().next())
+            .map(str::to_string)
+            .collect()
+    }
+
+    let top = subcommands_of(&[]);
+    // Positive control: a parse that silently found nothing would pass vacuously.
+    assert!(
+        top.iter().any(|c| c == "up"),
+        "expected to parse the real subcommand list from `deacon --help`; got {top:?}"
+    );
+
+    let mut leaked: Vec<String> = Vec::new();
+    for dev_only in DEV_ONLY {
+        if top.iter().any(|c| c == dev_only) {
+            leaked.push((*dev_only).to_string());
+        }
+    }
+    for parent in &top {
+        if parent == "help" {
+            continue;
+        }
+        for nested in subcommands_of(&[parent.as_str()]) {
+            if DEV_ONLY.contains(&nested.as_str()) {
+                leaked.push(format!("{parent} {nested}"));
+            }
+        }
+    }
+
+    assert!(
+        leaked.is_empty(),
+        "dev-only discovery command(s) reached the shipped consumer CLI: {leaked:?}. The \
+         discovery group belongs to `deacon-conformance` and the campaign/proof bins to \
+         `parity-harness` (constitution II, FR-059)."
+    );
+}
+
 /// Guard: the tests dir this file audits is the real one (fail loud if the anchor
 /// ever drifts, rather than silently auditing nothing).
 #[test]
@@ -571,6 +842,9 @@ fn no_surface_references_a_removed_binary() {
         "fixtures/parity-corpus/registry.json",
         "Makefile",
         ".github/workflows/parity.yml",
+        // The discovery lane's workflow is machine-consumed on the same terms (025 T058):
+        // a stale binary name in it is executed, not read.
+        ".github/workflows/discovery.yml",
     ] {
         let path = root.join(rel);
         let text = std::fs::read_to_string(&path)
