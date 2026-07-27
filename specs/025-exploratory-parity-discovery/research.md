@@ -411,3 +411,58 @@ Every `NEEDS CLARIFICATION` from Technical Context is resolved above:
 | Lane wiring and its enforcement | D9 — explicit allow-list profile, enforced by `parity_registry_check` |
 | Budget apportionment between tiers (deferred by clarify) | D10 — scheduled campaign is hermetic-tier only; cap 25 |
 | Where relations vs findings are validated | D11 — V31/V32 in `validate`; D1–D5 in `discovery check` |
+
+---
+
+## Measured thresholds (T114) — SC-002 and SC-004
+
+A threshold nobody measured is a guess. These are the **observed** values from three real
+`config-differential` campaigns against the verified pinned oracle (`@devcontainers/cli`
+0.87.0) on `prof-linux-amd64-docker-0870`, run 2026-07-27. Each campaign started from an
+empty queue so its findings were minimized on admission rather than deferring to a record
+an earlier campaign had already made.
+
+| Campaign | Seed | Candidates | Parse-stage failures | **SC-002** (≤10%) | Minimized samples | **SC-004** median (≥0.80) |
+|---|---|---|---|---|---|---|
+| 1 | `0xa1b2c3d4` | 200 | 0 | **0.00%** ✅ | 2 | 0.6219 ⚠️ (n=2) |
+| 2 | `0x5eed0002` | 40 | 1 | **2.50%** ✅ | 4 | **0.8516** ✅ |
+| 3 | `0x0badc0de` | 25 | 0 | **0.00%** ✅ | 7 | **0.8889** ✅ |
+
+**SC-002 holds with a wide margin.** The worst observed document-syntax failure rate is
+**2.50%**, against a 10% ceiling — the generator is exploring the tool, not the parser. The
+campaign additionally reports `trivialFailureFraction` against a declared
+`trivialFailureCeiling` of 0.1 and did not breach it in any run.
+
+**SC-004 holds on the pooled sample.** Pooling the 13 independent minimizations across all
+three campaigns:
+
+```
+n = 13    median = 0.8438 ✅    mean = 0.7921    min = 0.4000    max = 0.9286
+sorted: 0.400 0.400 0.763 0.824 0.839 0.842 0.844 0.861 0.861 0.889 0.918 0.929 0.929
+```
+
+The pooled median of **0.8438** clears the 0.80 floor. Campaign 1's apparent 0.6219 is an
+**n=2 artifact**, not a regression — see the measurement note below.
+
+**Measurement note — why n is much smaller than the finding count.** Only 13 of the 66
+emitted candidates carry a live reduction. A candidate re-emitted for a signature the queue
+already carries deliberately does **not** re-minimize: `campaign.rs` routes it through
+`Reduction::not_attempted` with the reason *"the findings queue already carries this
+signature, and the reduced input recorded when it was admitted still stands"*, and the
+already-reduced input lives on the admitting **witness** (`minimalInput` +
+`reductionSteps`), not on the re-emitted candidate. That is a deliberate cost gate (FR-022)
+and it states its reason rather than claiming minimality — but it means **the campaign
+report does not surface an SC-004 aggregate**, so the metric has to be recomputed from
+candidate provenance as done here. Campaign 1 generated 200 candidates over the same
+signature set, so nearly every emission was a re-emission and only 2 live reductions
+survived; campaigns 2 and 3 were deliberately run with smaller `--candidates` counts to
+raise the number of first-observations and thus the sample size.
+
+The two 0.400 outliers are both small inputs (5 → 3 nodes): a document already near-minimal
+has little to remove, so a low *fraction* there is not a shrinker deficiency. SC-004
+specifies a **median** precisely to tolerate them.
+
+**Follow-up worth considering** (not required by SC-004, which the pooled data satisfies):
+have the campaign outcome carry a reduction aggregate (count and median over the campaign's
+own live minimizations) so the threshold is readable from the report instead of recomputed
+from `target/discovery/candidates/*/provenance.json`.

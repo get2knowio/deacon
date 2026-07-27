@@ -400,18 +400,18 @@ resolves to an immutable commit, provenance is recorded, and a mutable reference
 
 ## Phase 10: Polish & Cross-Cutting Concerns
 
-- [ ] T110 [P] Add an "Exploratory Parity Discovery" section to `CLAUDE.md` covering the two data roots, the hermetic/live split, the D-class vs V-class distinction, and the never-gates rule
-- [ ] T111 [P] Add the discovery-lane row to the gate table in `CLAUDE.md` § "Parity & Conformance", making explicit that discovery is a third lane that gates nothing
-- [ ] T112 [P] Document the gap-vs-finding distinction in `conformance/RULES.md`: a finding is a *candidate* for an assertion and never blocks; a gap is missing coverage and always blocks
-- [ ] T113 Run the full quickstart walkthrough in `specs/025-exploratory-parity-discovery/quickstart.md` end to end and correct any drift
-- [ ] T114 [P] Verify SC-002 and SC-004 thresholds against three real campaigns and record the observed values in `specs/025-exploratory-parity-discovery/research.md` (a threshold nobody measured is a guess)
-- [ ] T115 [P] Verify SC-017 against a real candidate under `target/discovery/candidates/`: a reviewer on a different machine reproduces it from the candidate plus its named pins alone in under 10 minutes; record the walkthrough in `specs/025-exploratory-parity-discovery/quickstart.md` § Troubleshooting if any step proves unclear
-- [ ] T116 Confirm the three-covering-case floor holds for every channel the discovery machinery relies on: cross-check `conformance/registry/channels.json` against `conformance/registry/regressions.json` and add any missing `reg-` record (V30)
-- [ ] T117 Run `cargo fmt --all -- --check` and `cargo clippy --all-targets --all-features -- -D warnings` across the workspace
-- [ ] T118 Run `make test-nextest` (full gate) and confirm no discovery binary is selected by it
-- [ ] T119 Run `make test-discovery-check` and `make test-discovery-proof` and confirm both pass
-- [ ] T120 Confirm `cargo run -p deacon-conformance -- certify` produces an unchanged verdict with a populated findings queue
-- [ ] T129 Verify SC-015 against the nightly lane: the scheduled campaign completes within 30 minutes, the per-candidate timeout is 60 s hermetic and 5 min container-backed, and a candidate exceeding its timeout is discarded and counted rather than hanging the run
+- [X] T110 [P] Add an "Exploratory Parity Discovery" section to `CLAUDE.md` covering the two data roots, the hermetic/live split, the D-class vs V-class distinction, and the never-gates rule
+- [X] T111 [P] Add the discovery-lane row to the gate table in `CLAUDE.md` § "Parity & Conformance", making explicit that discovery is a third lane that gates nothing
+- [X] T112 [P] Document the gap-vs-finding distinction in `conformance/RULES.md`: a finding is a *candidate* for an assertion and never blocks; a gap is missing coverage and always blocks
+- [X] T113 Run the full quickstart walkthrough in `specs/025-exploratory-parity-discovery/quickstart.md` end to end and correct any drift
+- [X] T114 [P] Verify SC-002 and SC-004 thresholds against three real campaigns and record the observed values in `specs/025-exploratory-parity-discovery/research.md` (a threshold nobody measured is a guess)
+- [X] T115 [P] Verify SC-017 against a real candidate under `target/discovery/candidates/`: a reviewer on a different machine reproduces it from the candidate plus its named pins alone in under 10 minutes; record the walkthrough in `specs/025-exploratory-parity-discovery/quickstart.md` § Troubleshooting if any step proves unclear
+- [X] T116 Confirm the three-covering-case floor holds for every channel the discovery machinery relies on: cross-check `conformance/registry/channels.json` against `conformance/registry/regressions.json` and add any missing `reg-` record (V30)
+- [X] T117 Run `cargo fmt --all -- --check` and `cargo clippy --all-targets --all-features -- -D warnings` across the workspace
+- [X] T118 Run `make test-nextest` (full gate) and confirm no discovery binary is selected by it
+- [X] T119 Run `make test-discovery-check` and `make test-discovery-proof` and confirm both pass
+- [X] T120 Confirm `cargo run -p deacon-conformance -- certify` produces an unchanged verdict with a populated findings queue
+- [X] T129 Verify SC-015 against the nightly lane: the scheduled campaign completes within 30 minutes, the per-candidate timeout is 60 s hermetic and 5 min container-backed, and a candidate exceeding its timeout is discarded and counted rather than hanging the run
 
 ---
 

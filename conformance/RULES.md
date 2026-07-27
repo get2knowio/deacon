@@ -1103,3 +1103,35 @@ the only part of discovery that needs **neither** the pinned oracle **nor** Dock
 the network, so a contributor with no devcontainer CLI installed can develop and test it.
 It does **not** license running it in a pull-request lane — FR-055 is absolute, and its
 reason is stochasticity, not resource cost.
+
+## Finding vs gap (do not conflate)
+
+A **finding** is a *candidate for an assertion*: a difference a campaign surfaced that nobody
+has yet decided anything about. A **gap** is an *admission of missing coverage*. They live in
+different roots, and the distinction is what lets a stochastic search be wired into CI at all.
+
+| | `conformance/discovery/findings.json` (`fnd-`) | `conformance/registry/gaps.json` (`gap-`) |
+|---|---|---|
+| What it admits | a difference **was observed**; nobody has judged it | **coverage is missing** — no evidence exists |
+| Evidence behind it | a reproducing witness, at least one | none, by definition |
+| Blocks `certify`? | **No**, never — `certify` cannot even read this root | **Yes**, always |
+| Blocks a PR? | only via D1–D5, on queue *integrity* — never on its contents | via V5, on the registry |
+| Who may create it | a campaign, mechanically | a human, deliberately |
+| Resolution | triage, then promote it (a human edit) or classify it away | add real evidence and delete the record |
+
+**Why they must never merge.** A finding is unreviewed by construction — a campaign that
+surfaces forty differences has made forty claims nobody has checked, and some will be
+`normalizer-defect` or `fixture-defect`, i.e. defects in the *observer*, not in deacon. If a
+finding blocked, every campaign would be a release gate whose verdict changed with its seed,
+and green would stop being reproducible. Conversely, if a gap did **not** block, the one
+record whose entire purpose is to say "we do not know" would become decorative.
+
+So the queue is a **triage list, not a defect list**, and the arrow between the roots points
+one way only: a finding becomes registry content by a human promoting it (`Finding::promotedTo`
+→ a real case, **D3**), never by a program writing one. A finding is never "fixed" by editing
+the queue — it is promoted, classified away, or observed to stop reproducing.
+
+**Corollary — an untriaged finding is not a passing finding.** `discovery report` counts the
+untriaged bucket explicitly so that "nothing has been looked at" can never render as "nothing
+was found" (the same failure mode `certify` avoids by counting `non-testable` separately from
+`covered`).

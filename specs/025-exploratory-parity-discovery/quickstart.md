@@ -159,16 +159,22 @@ waiver whose difference stops reproducing must fail as stale, and a blanket one 
 Relations live **in** the registry, because they are assertions the project makes.
 
 ```jsonc
-// conformance/registry/metamorphic.json
+// conformance/registry/metamorphic.json — the committed `mrl-comment-invariance` record
 {
   "id": "mrl-comment-invariance",
   "transformation": "insert JSONC line comments and trailing commas at every legal position",
   "effect": "invariance",
-  "ground": "clu-7a2b91ce",
+  "ground": "bhv-readconfig-malformed-jsonc-rejected",
   "channels": ["chan-structured-output"],
-  "rationale": "The configuration format is JSONC; comments and trailing commas are syntax, not content."
+  "rationale": "The grounding behavior fixes the parse dialect as JSON with Comments and records that only a hard syntax error is rejected. A comment and a trailing comma are well-formed in that dialect and denote no member, so neither can alter the value the document describes."
 }
 ```
+
+**A `ground` is either a `bhv-` behavior or a `clu-` clause**, and both are in use — but a
+`clu-` id is a *substance-anchored slug*, not a short hash: the committed
+`mrl-key-order-invariance` grounds on
+`clu-json-reference-this-property-allows-you-to-override-the-feature-desc-bebdddcd`. Copy the
+real id from `conformance/inventory/clauses.json`; an invented one is V31.
 
 Then:
 
@@ -190,15 +196,15 @@ cannot see because both sides agree.
 ## 5. Re-pin the real-world corpus
 
 ```jsonc
-// conformance/discovery/corpus.json
+// conformance/discovery/corpus.json — the committed `images-python` entry
 {
-  "id": "cor-4d81f2a0",
+  "id": "cor-eb074204",
   "name": "images-python",
   "repository": "devcontainers/images",
   "commit": "31b61b521d55926d62c748b659f24ae71774c0e3",
   "path": "src/python",
   "contentDigest": null,
-  "notes": "Dockerfile + feature-heavy image recipe."
+  "notes": "Dockerfile build with multiple official features."
 }
 ```
 
@@ -207,6 +213,9 @@ cargo run -p deacon-conformance -- discovery check      # D4, hermetic — no ne
 cargo run -p parity-harness --bin discovery-campaign -- --seed 0x2 --tier corpus
 ```
 
+- **`id` is derived from the entry's own substance, never hand-authored.** A made-up id is
+  **D4** ("a corpus id that does not derive from its own substance"). Add the entry with a
+  placeholder, run `discovery check`, and take the id the violation names.
 - **`commit` must be a 40-hex object name.** A branch, tag, `HEAD`, or `latest` is **D4**,
   rejected hermetically on every PR. This is why the manifest is Rust-owned data rather than
   Python: a validation that only runs when the network is up is a validation that does not run.
@@ -255,3 +264,39 @@ campaign under the new pins and let each finding reproduce or lapse.
 Repeatedly hitting the admission cap usually means one generator change surfaced a systemic
 divergence rather than many independent ones — triage a few and look for a shared cause before
 working through the list.
+
+**"I ran both CLIs on the candidate's fixture and the outputs look identical."** You are
+comparing **raw** output; the signature is defined on **normalized** output. This is the one
+step of the SC-017 reproduction that is not self-evident from the candidate, so do it
+explicitly:
+
+```bash
+# 1. The fixture IS the reproduction input. Copy it somewhere fresh.
+cp -r target/discovery/candidates/<fnd-id>/fixture/. /tmp/repro/
+
+# 2. Verify your oracle equals the candidate's `pinnedInputSet.oracleVersion` — exactly.
+devcontainer --version
+
+# 3. Run the argv recorded in context.json on both sides.
+devcontainer read-configuration --workspace-folder /tmp/repro > ref.json
+deacon           read-configuration --workspace-folder /tmp/repro > deacon.json
+
+# 4. Compare the way the pipeline does. `raw.json` and `normalized.json` in the candidate
+#    are committed side by side precisely so you can see what the rules changed.
+diff <(jq -S . ref.json) <(jq -S . deacon.json)
+```
+
+If step 4 shows no difference at the signature's `path` while `normalized.json` does, the
+difference is produced by a **named normalization rule**, not by the two CLIs disagreeing.
+The usual one is `drop_absent_optional`, which applies to **deacon's `configuration` block
+only**: deacon serializes every modeled optional unconditionally, so the rule elides its
+empty values — but it cannot distinguish *"the author wrote `"secrets": {}`"* from *"deacon
+emitted an unset optional"*. The reference's `configuration` is an echo of the authored
+document, so its authored empty survives. A fixture that authors an empty value for any key
+in `ABSENT_OPTIONAL_KEYS` therefore yields a `ref-only` signature at that path with
+**identical raw output on both sides**.
+
+That is a finding about the observer, not about deacon's behavior — triage it
+`normalizer-defect`, which is a deliberate dead end (it cannot be promoted, FR-035). The
+underlying fix is on deacon: `skip_serializing_if` so absent optionals are omitted, which
+retires the rule entirely (`specs/023-migrate-parity-to-conformance/tasks.md#T111`).
