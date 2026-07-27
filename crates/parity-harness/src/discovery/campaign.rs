@@ -8,8 +8,24 @@
 //! tier. Budgets are per-tier rather than shared, because sharing lets the slow tier
 //! starve the fast one — and the fast tier is where nearly all the exploration happens.
 //!
-//! The `corpus` tier (T108) lands with US7 and minimization (T052) with US2. This module
-//! drives the two differential tiers and the `metamorphic` tier (T096).
+//! The `corpus` tier (T108) lands with US7. This module drives the two differential tiers
+//! and the `metamorphic` tier (T096), and — since US2 (T052) — minimizes each new finding
+//! and emits its reviewable candidate.
+//!
+//! ## What minimization costs, and the two gates on paying it
+//!
+//! A shrink probe is two CLI invocations, so it is the most expensive thing a campaign
+//! does per unit of information. The driver therefore reduces a finding only when both
+//! hold:
+//!
+//! 1. **The signature is new to this campaign.** A finding the queue already carries has a
+//!    reduced input recorded against it from the campaign that admitted it; re-deriving it
+//!    would spend a full reduction to arrive at the same document.
+//! 2. **The wall clock has not run out.** Minimization is not the place to overrun a budget
+//!    the candidate loop above already respects.
+//!
+//! Neither gate may quietly present an unreduced input as minimal: both route through
+//! `Reduction::not_attempted`, which carries `isMinimal: false` **and** the reason (FR-022).
 //!
 //! ## Two shapes of campaign, one record
 //!
@@ -56,7 +72,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use deacon_conformance::discovery::generate::{
-    Candidate, Generator, unpinned_image_inputs, unsafe_reasons,
+    Candidate, Generator, required_keys, unpinned_image_inputs, unsafe_reasons,
 };
 use deacon_conformance::discovery::grammar::Grammar;
 use deacon_conformance::discovery::mutate::{self, ApplicationCounts, MUTATION_CATALOG_VERSION};
@@ -65,8 +81,10 @@ use deacon_conformance::discovery::queue::{
     ObservedValues, PinnedInputSet, Witness, upsert_finding, write_campaigns, write_findings,
 };
 use deacon_conformance::discovery::report::{CampaignOutcomeReport, build_campaign_outcome_report};
+use deacon_conformance::discovery::shrink::{self, ReductionInput};
 use deacon_conformance::discovery::signature::Signature;
 use deacon_conformance::load::Registry;
+use serde_json::Value;
 
 use crate::HarnessError;
 use crate::normalize::NORMALIZER_VERSION;
@@ -75,6 +93,7 @@ use crate::prereq;
 
 use super::differential::{self, Characterization, DifferentialInput};
 use super::metamorphic_run::{self, Sabotage};
+use super::{candidate, minimize};
 
 /// The channel a metamorphic residual is keyed under.
 ///
@@ -153,6 +172,30 @@ pub struct CampaignRun {
     /// Not part of the record — the record's counters are the declared ones — but reported
     /// so a reader can tell "we saw nothing" from "we saw only what we already knew".
     pub characterized_observations: u64,
+    /// Probes minimization spent across every finding (T052).
+    ///
+    /// Also not part of the record: the *cost* of reduction is a property of the run, not
+    /// of the findings it produced, and a witness already carries whether its own input
+    /// reached minimality. Reported so a campaign can say what reduction cost it rather
+    /// than leaving it folded invisibly into the wall clock.
+    pub shrink_probes: u64,
+    /// Where the reviewable candidates were written (`<report_root>/candidates`).
+    pub candidates_root: PathBuf,
+    /// The findings a reviewable candidate was emitted for, in admission order.
+    ///
+    /// Deliberately **not** every finding in the queue. A finding admitted from a
+    /// *comparison* has a full `DifferentialResult` behind it — both sides' raw evidence,
+    /// both normalized documents, the diff — which is what FR-024's six parts are made of.
+    /// A finding admitted from a minimization *drift* (FR-023) does not: it was seen in
+    /// passing by a probe while reducing something else, and the campaign kept its
+    /// signature and the input that reproduces it, not a full evidence set.
+    ///
+    /// Reported separately rather than papered over. Assembling a six-part candidate for a
+    /// drift would mean either fabricating the parts we did not gather or spending another
+    /// pair of CLI invocations per drift; leaving the queue record without a candidate and
+    /// *saying so* is the honest third option — the drift is a lead, and the campaign that
+    /// generates a candidate reproducing it will evidence it properly.
+    pub candidates: Vec<String>,
 }
 
 /// Run one campaign.
@@ -230,6 +273,8 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
     let wall_clock = Duration::from_secs(request.budget.wall_clock_seconds);
     let per_candidate = Duration::from_secs(request.budget.per_candidate_seconds);
     let started = Instant::now();
+    let candidates_root = request.report_root.join("candidates");
+    let mut candidates: Vec<String> = Vec::new();
 
     while counters.generated < request.planned_candidates {
         if started.elapsed() >= wall_clock {
@@ -335,17 +380,77 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
             observed.insert(observation.signature.id.clone());
         }
 
+        // The reduction's starting point, shared by every finding this candidate produced:
+        // the same document, the same recorded operators, and the branch's `required` keys
+        // read from the grammar rather than restated (research D1).
+        let reduction_input = ReductionInput {
+            document: candidate.document.clone(),
+            mutations: candidate.mutations.clone(),
+            required_keys: candidate
+                .branch
+                .map(|branch| required_keys(&grammar, branch))
+                .unwrap_or_default(),
+        };
+        let deliberately_invalid = candidate.kind
+            == deacon_conformance::discovery::generate::CandidateKind::NearValid
+            || !candidate.mutations.is_empty();
+
         for observation in result.new_observations() {
+            let finding_id = observation.signature.finding_id();
+
+            // T052 — minimize, under a per-finding shrink budget.
+            //
+            // Two gates, both about not spending the expensive step on something already
+            // known. A finding the queue already carries has a reduced input recorded
+            // against it from the campaign that admitted it, and re-deriving it would cost
+            // a full reduction to reach the same document. A campaign past its wall clock
+            // has stopped exploring, and minimization is not the place to overrun a budget
+            // the loop above already respects.
+            //
+            // Neither gate may present the result as minimal: both route through
+            // `Reduction::not_attempted`, which carries the reason (FR-022).
+            let reduction = if !queue.is_new(&finding_id) {
+                shrink::Reduction::not_attempted(
+                    &reduction_input,
+                    "the findings queue already carries this signature, and the reduced \
+                     input recorded when it was admitted still stands",
+                )
+            } else if started.elapsed() >= wall_clock {
+                shrink::Reduction::not_attempted(
+                    &reduction_input,
+                    "the campaign's wall-clock budget was exhausted before minimization \
+                     could run",
+                )
+            } else {
+                let mut probe = minimize::DifferentialProbe::new(
+                    observation.signature.clone(),
+                    &candidate.id,
+                    &request.deacon_binary,
+                    oracle,
+                    per_candidate,
+                    &request.report_root,
+                    &characterization,
+                    deliberately_invalid,
+                );
+                shrink::reduce(
+                    &reduction_input,
+                    request.budget.shrink_steps_per_finding,
+                    &mut probe,
+                )
+                .await?
+            };
+            counters.shrink_probes += reduction.probes;
+
             let witness = Witness {
                 id: Witness::derived_id(&campaign_id, &candidate.id),
                 campaign_id: campaign_id.clone(),
                 candidate_id: candidate.id.clone(),
-                minimal_input: candidate.document.clone(),
-                // US1 performs no reduction, so the input is NOT minimal and says so.
-                // FR-022 forbids presenting a partially reduced input as minimal; an
-                // unreduced one even more so. Minimization lands with US2 (T047/T048/T052).
-                is_minimal: false,
-                reduction_steps: Vec::new(),
+                minimal_input: reduction.document.clone(),
+                // Never asserted, always reported: `true` only when a complete pass over
+                // the seven-step catalogue preserved nothing (FR-021), and `false` carries
+                // its reason (FR-022).
+                is_minimal: reduction.is_minimal,
+                reduction_steps: reduction.steps.clone(),
                 observed_values: ObservedValues {
                     deacon: observation.observed.deacon.clone(),
                     reference: observation.observed.reference.clone(),
@@ -353,6 +458,60 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
                 mutation_operators: candidate.operator_ids(),
             };
             queue.offer(observation.signature.clone(), witness);
+
+            // FR-023 — a step that changed the signature was rejected for THIS finding, and
+            // what it produced instead is a candidate finding in its own right. Admitting
+            // it here rather than waiting for a later campaign to rediscover it is the
+            // difference between observing a difference and remembering it.
+            for drifted in &reduction.drifted {
+                observed.insert(drifted.signature.id.clone());
+                let drift_witness = Witness {
+                    id: Witness::derived_id(&campaign_id, &drifted.signature.id),
+                    campaign_id: campaign_id.clone(),
+                    candidate_id: candidate.id.clone(),
+                    // The rejected proposal the drift was SEEN on — not the candidate's
+                    // document and not the reduction's result, neither of which produces
+                    // this signature. A witness naming an input that does not reproduce
+                    // its own signature is a record nobody can re-examine.
+                    minimal_input: drifted.document.clone(),
+                    // It was never itself reduced; it is a by-product of reducing
+                    // something else, and saying otherwise would claim work nobody did.
+                    is_minimal: false,
+                    reduction_steps: Vec::new(),
+                    observed_values: ObservedValues::default(),
+                    mutation_operators: candidate.operator_ids(),
+                };
+                queue.offer(drifted.signature.clone(), drift_witness);
+            }
+
+            // The reviewable candidate (FR-024 – FR-027). Emitted only for a finding the
+            // queue actually holds: a candidate directory for a signature the admission cap
+            // turned away would be a reviewable artifact for a finding nobody can find.
+            if queue.holds(&finding_id) {
+                let dir = candidate::write(candidate::CandidateInputs {
+                    finding_id: &finding_id,
+                    signature: &observation.signature,
+                    observation,
+                    campaign_id: &campaign_id,
+                    seed_hex: &request.seed_hex,
+                    lane: request.lane.as_str(),
+                    tier: request.tier.as_str(),
+                    profile: &request.profile,
+                    pinned_input_set: &pinned_input_set,
+                    candidate_id: &candidate.id,
+                    operations: &candidate.operations,
+                    mutation_operators: &candidate.operator_ids(),
+                    reduction: &reduction,
+                    result: &result,
+                    oracle,
+                    registry: &registry,
+                    root: &candidates_root,
+                })?;
+                if !candidates.contains(&finding_id) {
+                    candidates.push(finding_id.clone());
+                }
+                tracing::debug!(finding = %finding_id, path = %dir.display(), "wrote a reviewable candidate");
+            }
         }
 
         drop(workspace);
@@ -368,6 +527,7 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
             observed,
             queue,
             planned: request.planned_candidates,
+            candidates,
         },
     )
 }
@@ -573,6 +733,11 @@ async fn run_metamorphic(
             queue,
             // The plan is the catalogue — see this function's docs.
             planned: catalogue.len() as u64,
+            // No reviewable candidate is packaged here: FR-024's six parts are built from a
+            // deacon-vs-reference evidence set, and this tier compares deacon against
+            // deacon. The relation's own artifacts under `target/discovery/metamorphic/`
+            // are its review surface.
+            candidates: Vec::new(),
         },
     )
 }
@@ -610,6 +775,10 @@ struct Completion {
     queue: AdmissionQueue,
     /// The denominator of `spaceCoveredFraction` — what the run *planned* to reach.
     planned: u64,
+    /// The findings a reviewable candidate was emitted for. Empty for the metamorphic
+    /// tier, which compares deacon against deacon and so has no two-sided evidence set to
+    /// package.
+    candidates: Vec<String>,
 }
 
 /// Turn a finished run into its record, persist it if asked, and build its report.
@@ -629,6 +798,7 @@ fn complete(
         observed,
         queue,
         planned,
+        candidates,
     } = completion;
 
     // Exhaustion is "we stopped short of the plan", whatever stopped us. Reporting it only
@@ -689,6 +859,9 @@ fn complete(
         admitted: queue.admitted,
         report,
         characterized_observations: counters.characterized,
+        shrink_probes: counters.shrink_probes,
+        candidates_root: request.report_root.join("candidates"),
+        candidates,
     })
 }
 
@@ -750,6 +923,23 @@ impl AdmissionQueue {
     /// that would mean a campaign against a standing queue larger than the cap could never
     /// admit anything new — every campaign would exhaust its budget on re-witnesses before
     /// reaching its first genuinely new signature.
+    /// Whether this campaign has never seen `finding_id` — neither in the standing queue
+    /// nor earlier in its own run.
+    ///
+    /// A read-only query, added for T052 rather than a change to how admission works: it is
+    /// what lets the driver decide whether minimization is worth an oracle invocation. A
+    /// signature the queue already carries has a reduced input recorded against it, and
+    /// re-deriving that costs a full reduction to reach the same document.
+    fn is_new(&self, finding_id: &str) -> bool {
+        !self.known_before.contains(finding_id) && !self.admitted.iter().any(|id| id == finding_id)
+    }
+
+    /// Whether the queue actually holds a record for `finding_id` after everything offered
+    /// so far — false for a signature the cap turned away.
+    fn holds(&self, finding_id: &str) -> bool {
+        self.findings.iter().any(|f| f.id == finding_id)
+    }
+
     fn offer(&mut self, signature: Signature, witness: Witness) {
         let finding_id = signature.finding_id();
         let already_known =
@@ -796,32 +986,50 @@ async fn verified_oracle(request: &CampaignRequest) -> Result<VerifiedOracle, Ha
 /// the configuration. They are written at both the workspace root and inside
 /// `.devcontainer/` because a Compose path is resolved against different anchors by
 /// different code paths, and a generated candidate is not the place to adjudicate that.
-struct CandidateWorkspace {
+pub(crate) struct CandidateWorkspace {
     dir: tempfile::TempDir,
 }
 
 impl CandidateWorkspace {
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         self.dir.path()
     }
 }
 
 /// The minimal Compose project a Compose-shaped candidate needs to exist.
-const COMPOSE_SCAFFOLD: &str = "services:\n  app:\n    image: alpine:3.19\n  db:\n    image: alpine:3.19\n  cache:\n    image: alpine:3.19\n";
+pub(crate) const COMPOSE_SCAFFOLD: &str = "services:\n  app:\n    image: alpine:3.19\n  db:\n    image: alpine:3.19\n  cache:\n    image: alpine:3.19\n";
 
 /// The minimal Dockerfile a Dockerfile-shaped candidate needs to exist.
-const DOCKERFILE_SCAFFOLD: &str = "FROM alpine:3.19\n";
+pub(crate) const DOCKERFILE_SCAFFOLD: &str = "FROM alpine:3.19\n";
 
 fn materialize(candidate: &Candidate) -> std::io::Result<CandidateWorkspace> {
+    materialize_document(&candidate.document)
+}
+
+/// Materialize an arbitrary configuration document into a throwaway workspace.
+///
+/// Shared with [`super::minimize`] and [`super::candidate`] rather than reimplemented per
+/// caller. That is load-bearing rather than tidy: a minimization probe runs a *reduced*
+/// document and asks whether the same signature still appears, so a probe workspace whose
+/// scaffolding differed from the candidate workspace's would be measuring the scaffold. The
+/// emitted candidate's `fixture/` tree is the same shape for the same reason — FR-027's
+/// self-containment claim is that the fixture reproduces the observation, and it can only
+/// do that if it is the tree the observation was made in.
+pub(crate) fn materialize_document(document: &Value) -> std::io::Result<CandidateWorkspace> {
     let dir = tempfile::Builder::new()
         .prefix("deacon-discovery-")
         .tempdir()?;
-    let root = dir.path();
+    write_workspace_tree(dir.path(), document)?;
+    Ok(CandidateWorkspace { dir })
+}
+
+/// Write the candidate workspace tree (config + scaffolding) into `root`.
+pub(crate) fn write_workspace_tree(root: &Path, document: &Value) -> std::io::Result<()> {
     let config_dir = root.join(".devcontainer");
     std::fs::create_dir_all(&config_dir)?;
     std::fs::write(
         config_dir.join("devcontainer.json"),
-        serde_json::to_string_pretty(&candidate.document)
+        serde_json::to_string_pretty(document)
             .unwrap_or_else(|e| unreachable!("a candidate document always serializes: {e}")),
     )?;
     for base in [root, config_dir.as_path()] {
@@ -829,7 +1037,7 @@ fn materialize(candidate: &Candidate) -> std::io::Result<CandidateWorkspace> {
         std::fs::write(base.join("docker-compose.override.yml"), COMPOSE_SCAFFOLD)?;
         std::fs::write(base.join("Dockerfile"), DOCKERFILE_SCAFFOLD)?;
     }
-    Ok(CandidateWorkspace { dir })
+    Ok(())
 }
 
 /// The running tallies a campaign accumulates.
@@ -840,6 +1048,9 @@ struct Counters {
     timed_out: u64,
     parse_stage_failures: u64,
     characterized: u64,
+    /// Probes minimization spent — reported so the cost of reduction is visible rather
+    /// than folded invisibly into the wall clock.
+    shrink_probes: u64,
     budget_exhausted: bool,
     mutations: ApplicationCounts,
 }
@@ -853,6 +1064,7 @@ impl Counters {
             timed_out: 0,
             parse_stage_failures: 0,
             characterized: 0,
+            shrink_probes: 0,
             budget_exhausted: false,
             // All eleven keys from the start (FR-010): a category absent from the map is
             // indistinguishable from one that was never applied, so the map is never built

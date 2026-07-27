@@ -28,6 +28,13 @@ jiff = "0.2"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# NOTE: no async runtime, deliberately — not even as a dev-dependency. `discovery_hermetic`
+# asserts that this crate declares no way to speak a network protocol, and its argument is
+# that the capability must be ABSENT rather than merely unused (SC-013). The shrink
+# strategy's predicate is async (the live one runs two CLIs), and its unit tests drive that
+# future with a five-line `block_on` over `Waker::noop()` instead — see
+# `discovery::shrink::tests`. A runtime would be a far larger hammer for a future that
+# never suspends, and it would cost exactly the guarantee that guard exists to hold.
 
 [lints]
 workspace = true

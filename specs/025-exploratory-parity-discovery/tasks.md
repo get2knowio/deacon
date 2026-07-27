@@ -124,22 +124,79 @@ and is packaged with all six parts.
 
 ### Tests for User Story 2
 
-- [ ] T041 [P] [US2] Signature-preservation test in `crates/conformance/src/discovery/shrink.rs` using a synthetic predicate: the reduced input yields the same signature as the original
-- [ ] T042 [P] [US2] Minimality test in `crates/conformance/src/discovery/shrink.rs`: applying any single further catalogue step to a minimal result no longer preserves the signature (FR-021)
-- [ ] T043 [P] [US2] Determinism test in `crates/conformance/src/discovery/shrink.rs`: the same finding and seed yield the identical minimal input (SC-004)
-- [ ] T044 [P] [US2] Budget-exhaustion test in `crates/conformance/src/discovery/shrink.rs`: the best reduction is emitted with `isMinimal: false` and a reason — never silently presented as minimal
-- [ ] T045 [P] [US2] Signature-drift test in `crates/conformance/src/discovery/shrink.rs`: a step that changes the signature is rejected for the finding under reduction and the new signature is captured as a separate candidate finding (FR-023)
-- [ ] T046 [P] [US2] Candidate-completeness test in `crates/deacon/tests/discovery_campaign.rs`: every emitted candidate contains all six parts and is reproducible from the candidate plus its named pins (SC-005)
+- [X] T041 [P] [US2] Signature-preservation test in `crates/conformance/src/discovery/shrink.rs` using a synthetic predicate: the reduced input yields the same signature as the original
+- [X] T042 [P] [US2] Minimality test in `crates/conformance/src/discovery/shrink.rs`: applying any single further catalogue step to a minimal result no longer preserves the signature (FR-021)
+- [X] T043 [P] [US2] Determinism test in `crates/conformance/src/discovery/shrink.rs`: the same finding and seed yield the identical minimal input (SC-004)
+- [X] T044 [P] [US2] Budget-exhaustion test in `crates/conformance/src/discovery/shrink.rs`: the best reduction is emitted with `isMinimal: false` and a reason — never silently presented as minimal
+- [X] T045 [P] [US2] Signature-drift test in `crates/conformance/src/discovery/shrink.rs`: a step that changes the signature is rejected for the finding under reduction and the new signature is captured as a separate candidate finding (FR-023)
+- [X] T046 [P] [US2] Candidate-completeness test in `crates/deacon/tests/discovery_campaign.rs`: every emitted candidate contains all six parts and is reproducible from the candidate plus its named pins (SC-005)
+  - The completeness half is a file check; the *reproducibility* half is not. Each emitted
+    candidate's `fixture/` tree is copied into a fresh workspace and both implementations
+    are re-run over it, and the signature the candidate claims must still be observed. A
+    candidate whose six files were all present but whose fixture no longer reproduced would
+    pass a file-existence check while being worthless — and that is precisely the failure
+    mode minimization introduces, because minimization is the step that rewrites the fixture.
 
 ### Implementation for User Story 2
 
-- [ ] T047 [US2] Implement the ordered seven-step structural reduction catalogue in `crates/conformance/src/discovery/shrink.rs` per data-model.md § 6, taking the reproduction predicate as a **parameter** so the strategy stays hermetic (research D4/D5)
-- [ ] T048 [US2] Implement the live reproduction predicate in `crates/parity-harness/src/discovery/minimize.rs`, supplying it to `shrink.rs`
-- [ ] T049 [US2] Implement candidate assembly in `crates/parity-harness/src/discovery/candidate.rs`, writing `target/discovery/candidates/<fnd-id>/` per data-model.md § 9
-- [ ] T050 [US2] Write `raw.json` and `normalized.json` as **separate** files in `crates/parity-harness/src/discovery/candidate.rs` — raw and normalized evidence must never be conflated (FR-014)
-- [ ] T051 [US2] Implement the suggested behavior mapping in `crates/parity-harness/src/discovery/candidate.rs`, emitting either a resolvable `bhv-` id or an explicit `{"match": "none"}` — never an invented id (FR-025)
-- [ ] T052 [US2] Wire minimization into the campaign driver in `crates/parity-harness/src/discovery/campaign.rs` with a per-finding shrink budget
-- [ ] T124 [US2] Test in `crates/deacon/tests/discovery_campaign.rs` that the container-backed tier is selectable independently of the configuration-resolution tier, so a campaign runs where Docker is unavailable (FR-060)
+- [X] T047 [US2] Implement the ordered seven-step structural reduction catalogue in `crates/conformance/src/discovery/shrink.rs` per data-model.md § 6, taking the reproduction predicate as a **parameter** so the strategy stays hermetic (research D4/D5)
+  - The predicate is the `ReproductionProbe` trait, with **three** answers rather than a
+    boolean: FR-023 needs the third, because a `bool` would discard the drifted signature at
+    the moment it was observed.
+  - Termination is a property, not a hope: every accepted step strictly decreases a
+    lexicographic `(mutations remaining, node count, non-minimal scalars)` triple. Each
+    component exists because exactly one step reduces it — and the first must lead, because
+    `un-apply-mutation` can *grow* the document, so a size-only objective would let the
+    shrinker oscillate between emptying and un-applying forever.
+  - `un-apply-mutation` is an **exact** reversal, not a category-directed guess: `mutate.rs`
+    now records a `Reversal` per application, derived by diffing the operator's pre- and
+    post-images at the document root. It is a *local* edit rather than the pre-image
+    document, so un-applying never resurrects what an earlier reduction dropped.
+  - **No async runtime was added to `deacon-conformance`, deliberately.** `reduce` is async
+    (the live predicate runs two CLIs), and the first attempt took `tokio` as a
+    dev-dependency to drive it — which `discovery_hermetic`'s SC-013 guard correctly
+    rejected: its claim is that the network capability is *absent*, not merely unused, and a
+    dev-dependency still puts a runtime in this crate's test binary. The tests drive the
+    future with a five-line `block_on` over `Waker::noop()` instead; the synthetic predicate
+    never suspends, so there is nothing to schedule.
+- [X] T048 [US2] Implement the live reproduction predicate in `crates/parity-harness/src/discovery/minimize.rs`, supplying it to `shrink.rs`
+  - One probe is one call to `differential::compare` — same execution, same single
+    normalization, same tolerance index, same signature derivation. Two things are held
+    constant across every probe: the workspace *shape* (a probe tree that differed from the
+    candidate tree would be measuring the scaffold) and `deliberately_invalid` (it is a fact
+    about the candidate's provenance, and recomputing it as mutations are un-applied would
+    move the tolerance boundary mid-reduction).
+- [X] T049 [US2] Implement candidate assembly in `crates/parity-harness/src/discovery/candidate.rs`, writing `target/discovery/candidates/<fnd-id>/` per data-model.md § 9
+- [X] T050 [US2] Write `raw.json` and `normalized.json` as **separate** files in `crates/parity-harness/src/discovery/candidate.rs` — raw and normalized evidence must never be conflated (FR-014)
+- [X] T051 [US2] Implement the suggested behavior mapping in `crates/parity-harness/src/discovery/candidate.rs`, emitting either a resolvable `bhv-` id or an explicit `{"match": "none"}` — never an invented id (FR-025)
+  - The rule is deliberately narrow: a behavior is suggested only when a committed case
+    already declares a document-shaped assertion (`jsonSubset`/`jsonEquals`) on the **same
+    channel at the same observable path**. Whole-stream assertions (`equals`/`contains`/
+    `matches`/`nonZero`) name no path and contribute nothing — contributing the empty path
+    would match every signature on their channel.
+  - FR-025 is held **structurally**: every proposal is filtered against `registry.behaviors`
+    before it can be written, so an id that does not resolve cannot escape the function.
+    Ambiguity (several behaviors at one path) is reported as `match: none` with the
+    candidates listed, because choosing one would be a coin flip wearing a suggestion's
+    clothes.
+- [X] T052 [US2] Wire minimization into the campaign driver in `crates/parity-harness/src/discovery/campaign.rs` with a per-finding shrink budget
+  - Added to the existing differential loop; the tier dispatch and `AdmissionQueue` are
+    unchanged apart from two read-only queries (`is_new`, `holds`).
+  - Two gates on paying for a reduction, both about not spending two CLI invocations to
+    learn something already recorded: the signature must be new to this campaign, and the
+    wall clock must not have run out. **Neither may present the result as minimal** — both
+    route through `Reduction::not_attempted`, which carries `isMinimal: false` *and* the
+    reason (FR-022).
+  - Drifted signatures found during reduction are offered to the same queue as separate
+    findings (FR-023), and a reviewable candidate is emitted for every finding the queue
+    actually holds — never for one the admission cap turned away.
+- [X] T124 [US2] Test in `crates/deacon/tests/discovery_campaign.rs` that the container-backed tier is selectable independently of the configuration-resolution tier, so a campaign runs where Docker is unavailable (FR-060)
+  - Asserted as a **pair**, driven through the compiled bin with `DEACON_PARITY_DOCKER`
+    pointed at a path that cannot exist: `config-differential` still exits `0` and really
+    compares candidates, and `container-differential` in the *same* environment exits `1` at
+    its Docker prerequisite. Without the second half the first would be satisfied by a driver
+    that never probes Docker at all, and "separately selectable" would be vacuous — two tiers
+    with identical prerequisites are one tier twice.
 
 **Checkpoint**: Findings are cheap enough to triage and stable enough to deduplicate.
 

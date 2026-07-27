@@ -187,8 +187,81 @@ pub fn unapplied_categories(counts: &IndexMap<String, u64>) -> Vec<&'static str>
         .collect()
 }
 
+/// How to reverse one mutation: the root keys it touched, and what each held **before**.
+///
+/// This is what makes the shrinker's `un-apply-mutation` step (data-model.md § 6, step 2)
+/// an exact reversal rather than a guess at what an operator category probably did.
+///
+/// ## Why it is a *local* edit rather than the pre-image document
+///
+/// Reduction is greedy and cumulative: by the time `un-apply-mutation` is reached, earlier
+/// steps have already removed keys, emptied collections, and minimized scalars. Restoring a
+/// whole pre-image document would silently undo all of that, so the reversal has to name
+/// only the sites the operator actually changed.
+///
+/// ## Why it is derived by diffing rather than recorded per operator
+///
+/// Every operator in the catalogue edits keys of the document **root**, so the pre- and
+/// post-images fully determine the reversal. Recording it inside each of the eleven
+/// operators would be eleven separate chances for the recorded reversal to disagree with
+/// what the operator did — and a reversal that disagrees does not fail loudly, it quietly
+/// produces a reduced input that no longer reproduces anything.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Reversal {
+    /// `(root key, value before the mutation)`. `None` means the key was **absent**
+    /// before, so reversing removes it. Sorted by key, so the reversal is deterministic.
+    pub keys: Vec<(String, Option<Value>)>,
+}
+
+impl Reversal {
+    /// The reversal that turns `before` back out of `after`, at the document root.
+    ///
+    /// Both are expected to be objects (every candidate document is); a non-object on
+    /// either side yields an empty reversal, which reverses nothing rather than
+    /// pretending to.
+    fn between(before: &Map<String, Value>, after: &Map<String, Value>) -> Reversal {
+        let mut names: Vec<&String> = before.keys().chain(after.keys()).collect();
+        names.sort_unstable();
+        names.dedup();
+        let keys = names
+            .into_iter()
+            .filter(|name| before.get(*name) != after.get(*name))
+            .map(|name| (name.clone(), before.get(name).cloned()))
+            .collect();
+        Reversal { keys }
+    }
+
+    /// Whether this reversal names any site at all.
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+
+    /// Apply the reversal to `document`, restoring each named root key to what it held
+    /// before the mutation (removing it where it was absent).
+    ///
+    /// A non-object `document` is returned unchanged: there is no root key to restore, and
+    /// inventing an object around it would fabricate a document the campaign never saw.
+    pub fn apply(&self, document: &Value) -> Value {
+        let Value::Object(object) = document else {
+            return document.clone();
+        };
+        let mut out = object.clone();
+        for (key, previous) in &self.keys {
+            match previous {
+                Some(value) => {
+                    out.insert(key.clone(), value.clone());
+                }
+                None => {
+                    out.remove(key);
+                }
+            }
+        }
+        Value::Object(out)
+    }
+}
+
 /// One recorded mutation application (FR-009 attribution).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Mutation {
     /// The category that fired.
     pub category: MutationCategory,
@@ -197,14 +270,17 @@ pub struct Mutation {
     /// A short, human-readable description of *where* and *what*, so a reviewer reading
     /// a candidate can tell two applications of the same operator apart.
     pub detail: String,
+    /// How to undo it, for the shrinker's `un-apply-mutation` step.
+    pub reversal: Reversal,
 }
 
 impl Mutation {
-    fn new(category: MutationCategory, detail: impl Into<String>) -> Mutation {
+    fn new(category: MutationCategory, detail: impl Into<String>, reversal: Reversal) -> Mutation {
         Mutation {
             category,
             operator: category.operator_id().to_string(),
             detail: detail.into(),
+            reversal,
         }
     }
 }
@@ -247,9 +323,12 @@ pub fn apply(category: MutationCategory, document: &Value, prng: &mut Prng) -> O
         MutationCategory::ComposeCombination => compose_combination(object, prng)?,
         MutationCategory::OrderingChange => ordering_change(object, prng)?,
     };
+    // The reversal is derived from the pre- and post-images rather than reported by the
+    // operator, so it cannot disagree with what the operator actually did (see [`Reversal`]).
+    let reversal = Reversal::between(object, &mutated);
     Some(Applied {
         document: Value::Object(mutated),
-        mutation: Mutation::new(category, detail),
+        mutation: Mutation::new(category, detail, reversal),
     })
 }
 
@@ -1263,5 +1342,99 @@ mod tests {
             );
             assert_eq!(left.document, right.document);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // The reversal record (US2, data-model.md § 6 step 2)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn every_operator_records_a_reversal_that_exactly_undoes_it() {
+        // The property the shrinker's `un-apply-mutation` step rests on. Asserted for
+        // every category rather than for a representative few: a wrong reversal does not
+        // fail loudly, it quietly produces a reduced input that no longer reproduces
+        // anything, and the finding is then recorded against an input nobody can
+        // re-examine.
+        let base = rich();
+        for category in *MutationCategory::all() {
+            let applied = apply_ok(category, &base, 0x5EED_0041);
+            assert_ne!(
+                applied.document,
+                base,
+                "{} recorded an application that changed nothing",
+                category.name()
+            );
+            assert!(
+                !applied.mutation.reversal.is_empty(),
+                "{} changed the document but named no site to reverse",
+                category.name()
+            );
+            assert_eq!(
+                applied.mutation.reversal.apply(&applied.document),
+                base,
+                "{} does not reverse exactly",
+                category.name()
+            );
+        }
+    }
+
+    #[test]
+    fn a_reversal_removes_a_key_the_mutation_introduced() {
+        // The `None` arm: a key absent before the mutation must be REMOVED by the
+        // reversal, never restored as `null`. The spec distinguishes an authored `null`
+        // from an omission, and conflating them here would reverse an `unknown-field`
+        // insertion into an authored null field the campaign never produced.
+        let base = json!({ "image": "alpine:3.19" });
+        let applied = apply_ok(MutationCategory::UnknownField, &base, 0x5EED_0042);
+        assert_eq!(
+            applied.document.as_object().map(Map::len),
+            Some(2),
+            "one key was inserted"
+        );
+        let reversed = applied.mutation.reversal.apply(&applied.document);
+        assert_eq!(reversed, base);
+        assert_eq!(
+            reversed.as_object().map(Map::len),
+            Some(1),
+            "the introduced key is removed, never left behind as `null`"
+        );
+    }
+
+    #[test]
+    fn a_reversal_is_a_local_edit_and_leaves_unrelated_reductions_alone() {
+        // Why the reversal names sites rather than carrying the whole pre-image: by the
+        // time `un-apply-mutation` runs, earlier catalogue steps have already reduced
+        // other parts of the document, and restoring a whole pre-image would silently
+        // undo all of it.
+        let base = rich();
+        let applied = apply_ok(MutationCategory::NullValue, &base, 0x5EED_0043);
+
+        // Simulate an earlier reduction: drop an unrelated optional key.
+        let mut reduced = applied.document.as_object().expect("object").clone();
+        reduced.remove("runArgs");
+        let reduced = Value::Object(reduced);
+
+        let reversed = applied.mutation.reversal.apply(&reduced);
+        assert!(
+            reversed.get("runArgs").is_none(),
+            "un-applying a mutation must not resurrect a key an earlier reduction dropped"
+        );
+        // …and it did still reverse its own site.
+        let key = applied
+            .mutation
+            .reversal
+            .keys
+            .first()
+            .map(|(k, _)| k.clone())
+            .expect("one site");
+        assert_eq!(reversed.get(&key), base.get(&key));
+    }
+
+    #[test]
+    fn a_reversal_of_a_non_object_document_changes_nothing() {
+        let reversal = Reversal {
+            keys: vec![("image".to_string(), None)],
+        };
+        assert_eq!(reversal.apply(&json!([1, 2])), json!([1, 2]));
     }
 }

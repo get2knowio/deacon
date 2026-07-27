@@ -42,6 +42,7 @@ use deacon_conformance::discovery::report::{
 
 use parity_harness::HarnessError;
 use parity_harness::discovery::campaign::{self, CampaignRequest, CampaignRun};
+use parity_harness::discovery::candidate;
 use parity_harness::discovery::differential::{
     self, Characterization, DifferentialInput, OutcomeClass,
 };
@@ -152,7 +153,16 @@ fn campaign_request(
             // so a slow machine produces a slower run rather than a different one.
             wall_clock_seconds: 1800,
             per_candidate_seconds: DEFAULT_PER_CANDIDATE_SECONDS_HERMETIC,
-            shrink_steps_per_finding: 64,
+            // Deliberately far below the bin's 64 (T052). A shrink probe is two CLI
+            // invocations, and these campaigns admit dozens of new signatures — at the
+            // production budget a single test would spend hours on reduction. The
+            // reduction *strategy* is proven exhaustively and hermetically in
+            // `deacon_conformance::discovery::shrink` (T041–T045); what the live lane has
+            // to establish is that the campaign WIRES it — that a witness carries a
+            // genuinely reduced input, an honest `isMinimal`, and named catalogue steps.
+            // A small budget establishes exactly that, and `candidate_completeness`
+            // raises it for the one campaign whose subject is the reduction itself.
+            shrink_steps_per_finding: 4,
             admission_cap: DEFAULT_ADMISSION_CAP,
         },
         planned_candidates: candidates,
@@ -1135,6 +1145,439 @@ fn a_malformed_invocation_exits_two() {
             "{label} produced a campaign outcome on stdout for a run that never happened"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// T046 — candidate completeness (SC-005, FR-024 – FR-027)
+// ---------------------------------------------------------------------------
+
+/// Every emitted candidate carries all six parts and is reproducible from the candidate
+/// plus the pins it names.
+///
+/// The six parts are not six nice-to-haves; each answers a question a reviewer cannot
+/// otherwise answer, and the whole point of FR-027's self-containment is that answering
+/// them must not require re-running the campaign that found the difference. So the
+/// assertions below go past "the file exists": the fixture is *materialized and re-run*
+/// against both implementations, and the difference the candidate claims has to still be
+/// there.
+///
+/// The reproduction is the load-bearing half. A candidate whose six files were all present
+/// but whose fixture no longer produced the difference would pass a file-existence check
+/// while being worthless — and that is the failure mode minimization introduces, because
+/// minimization is precisely the step that rewrites the fixture.
+#[test]
+fn every_emitted_candidate_has_all_six_parts_and_reproduces_from_them() {
+    let scratch = Scratch::new();
+    // A small plan with a real shrink budget: this is the one campaign whose subject IS
+    // the reduction, so it pays for it rather than borrowing the shared helper's floor.
+    let mut request = campaign_request("0x5eed0046", 0x5EED_0046, 4, &scratch);
+    request.budget.shrink_steps_per_finding = 24;
+    let run = run_campaign(&request);
+
+    assert!(
+        !run.candidates.is_empty(),
+        "this campaign emitted no candidates, so the test asserts nothing. Volume: {} \
+         generated, {} executed, {} finding(s) admitted.",
+        run.report.candidates_generated,
+        run.report.candidates_executed,
+        run.findings.len()
+    );
+
+    let oracle = verified_oracle();
+    let registry =
+        deacon_conformance::load::Registry::load(&default_registry_dir()).expect("registry loads");
+    let behaviors: Vec<&str> = registry.behaviors.iter().map(|b| b.id.as_str()).collect();
+    let mut reproduced = 0usize;
+
+    for finding_id in &run.candidates {
+        let finding = run
+            .findings
+            .iter()
+            .find(|f| &f.id == finding_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "a candidate was emitted for `{finding_id}`, which the queue does not \
+                     carry — a reviewable artifact for a finding nobody can find"
+                )
+            });
+        let dir = candidate::candidate_dir(&run.candidates_root, &finding.id);
+        assert!(
+            dir.is_dir(),
+            "no reviewable candidate was emitted for admitted finding `{}` at {}",
+            finding.id,
+            dir.display()
+        );
+        assert!(
+            candidate::missing_parts(&dir).is_empty(),
+            "candidate `{}` is missing {:?}. SC-005 is 100% of six parts, not most of \
+             them — a candidate short a part sends the reviewer back to the campaign.",
+            finding.id,
+            candidate::missing_parts(&dir)
+        );
+
+        let parts = candidate::read_parts(&dir);
+        assert_eq!(parts.len(), 5, "every JSON part must parse: {parts:?}");
+
+        // (2) Context: the operations, the campaign, the seed, and the FULL pinned input
+        // set — FR-026's "the pins it names", which is what makes FR-027 checkable.
+        let context = &parts["context.json"];
+        assert_eq!(context["findingId"], finding.id.as_str());
+        assert_eq!(context["campaignId"], run.campaign.id.as_str());
+        assert_eq!(context["seed"], run.campaign.seed.as_str());
+        let operations = context["operations"]
+            .as_array()
+            .expect("the operations are an array");
+        assert!(
+            !operations.is_empty(),
+            "a candidate with no operation names no run"
+        );
+        assert_eq!(operations[0]["subcommand"], "read-configuration");
+        assert!(
+            operations[0]["argv"]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|v| v == "${WORKSPACE}")),
+            "operations must be ${{WORKSPACE}}-tokenized, the way a case's are: {}",
+            operations[0]
+        );
+        for pin in [
+            "schemaPin",
+            "prosePin",
+            "oracleVersion",
+            "normalizerVersion",
+            "grammarVersion",
+            "mutationCatalogVersion",
+            "generatorVersion",
+        ] {
+            assert!(
+                context["pinnedInputSet"][pin]
+                    .as_str()
+                    .is_some_and(|s| !s.is_empty()),
+                "the pinned input set has no optional elements (FR-002/FR-026); `{pin}` \
+                 is missing from candidate `{}`",
+                finding.id
+            );
+        }
+
+        // (3)/(4) Raw and normalized are SEPARATE documents (T050, FR-014), and neither is
+        // a view of the other.
+        let raw = &parts["raw.json"];
+        let normalized = &parts["normalized.json"];
+        for side in ["deacon", "reference"] {
+            assert!(
+                raw[side]["outcome"].is_string(),
+                "raw evidence must record each side's outcome: {raw}"
+            );
+            assert!(
+                raw[side].get("stdout").is_some() && raw[side].get("stderr").is_some(),
+                "raw evidence must carry the verbatim streams, or the reviewer cannot see \
+                 the wording the comparison declined to read: {raw}"
+            );
+        }
+        assert!(
+            raw.get("difference").is_none(),
+            "the raw document must not carry the comparison's conclusion; conflating the \
+             two is exactly what makes a `normalizer-defect` unreachable (FR-014)"
+        );
+        assert_eq!(
+            normalized["difference"]["signature"]["id"],
+            finding.signature.id.as_str(),
+            "the normalized document must name the difference the finding is about"
+        );
+        assert_eq!(
+            normalized["difference"]["channel"],
+            finding.signature.channel.as_str()
+        );
+        assert_eq!(
+            normalized["difference"]["path"],
+            finding.signature.path.as_str()
+        );
+
+        // (5) Reference provenance, and how the input was produced and reduced.
+        let provenance = &parts["provenance.json"];
+        assert_eq!(provenance["oracle"]["version"], oracle.version.as_str());
+        assert_eq!(provenance["oracle"]["verified"], serde_json::json!(true));
+        assert!(provenance["reduction"]["isMinimal"].is_boolean());
+        if provenance["reduction"]["isMinimal"] == serde_json::json!(false) {
+            assert!(
+                provenance["reduction"]["notMinimalReason"]
+                    .as_str()
+                    .is_some_and(|r| !r.trim().is_empty()),
+                "a reduction that is not minimal must say WHY (FR-022): {provenance}"
+            );
+        }
+        for step in provenance["reduction"]["steps"]
+            .as_array()
+            .expect("the applied steps are an array")
+        {
+            let step = step.as_str().expect("a step name is a string");
+            assert!(
+                deacon_conformance::discovery::shrink::REDUCTION_STEPS.contains(&step),
+                "`{step}` is not a declared catalogue step"
+            );
+        }
+
+        // (6) The suggested mapping: a resolvable id, or an explicit no-match. NEVER an
+        // invented identity (FR-025) — a fabricated id would make the reviewer's job
+        // verifying a plausible-looking mapping rather than deciding one.
+        let mapping = &parts["mapping.json"];
+        match mapping["match"].as_str() {
+            Some("behavior") => {
+                let suggested = mapping["behavior"].as_str().expect("a behavior id");
+                assert!(
+                    behaviors.contains(&suggested),
+                    "candidate `{}` suggests `{suggested}`, which does not resolve in \
+                     conformance/registry/behaviors/*.json",
+                    finding.id
+                );
+            }
+            Some("none") => {
+                assert!(
+                    mapping["reason"]
+                        .as_str()
+                        .is_some_and(|r| !r.trim().is_empty()),
+                    "a no-match must say why it found none: {mapping}"
+                );
+                for considered in mapping["considered"].as_array().unwrap_or(&Vec::new()) {
+                    let id = considered.as_str().expect("a behavior id");
+                    assert!(
+                        behaviors.contains(&id),
+                        "even a REJECTED suggestion must resolve; `{id}` does not"
+                    );
+                }
+            }
+            other => panic!("mapping.json must state `behavior` or `none`, got {other:?}"),
+        }
+
+        // (1) The fixture, and the reproduction claim itself. The candidate's fixture tree
+        // is copied into a fresh workspace and both implementations are re-run over it; the
+        // difference the candidate claims must still be observable there.
+        let workspace = tempfile::tempdir().expect("tempdir");
+        copy_tree(&dir.join("fixture"), workspace.path());
+        assert!(
+            workspace
+                .path()
+                .join(".devcontainer")
+                .join("devcontainer.json")
+                .is_file(),
+            "the fixture must be a materializable workspace tree, not a bare document"
+        );
+
+        let replay = runtime()
+            .block_on(differential::compare(
+                DifferentialInput {
+                    candidate_id: &format!("replay-{}", finding.id),
+                    workspace: workspace.path(),
+                    deacon: &deacon_binary(),
+                    oracle: &oracle,
+                    bound: Duration::from_secs(60),
+                    report_root: &scratch.path().join("replay"),
+                    deliberately_invalid: true,
+                },
+                &Characterization::default(),
+            ))
+            .expect("the replay comparison itself must succeed");
+        assert!(
+            replay
+                .observations
+                .iter()
+                .any(|o| o.signature.id == finding.signature.id),
+            "candidate `{}` does not reproduce from its own fixture and pins (FR-027 / \
+             SC-005). Expected signature `{}` at `{}`; the replay observed {:?}. A \
+             candidate that cannot be replayed is a report about a comparison nobody can \
+             repeat.",
+            finding.id,
+            finding.signature.id,
+            finding.signature.path,
+            replay
+                .observations
+                .iter()
+                .map(|o| (o.signature.channel.as_str(), o.signature.path.as_str()))
+                .collect::<Vec<_>>()
+        );
+        reproduced += 1;
+    }
+
+    assert!(
+        reproduced > 0,
+        "no candidate was replayed, so nothing was proven"
+    );
+    assert_eq!(
+        reproduced,
+        run.candidates.len(),
+        "every emitted candidate must be checked; SC-005 is 100%, not a sample"
+    );
+
+    // A finding in the queue without a candidate is permitted in exactly one case: it was
+    // admitted from a minimization DRIFT (FR-023), which has no two-sided evidence set
+    // behind it. Any other uncovered finding means the campaign admitted something it then
+    // gave the reviewer no way to look at.
+    for finding in &run.findings {
+        if run.candidates.contains(&finding.id) {
+            continue;
+        }
+        assert!(
+            finding
+                .witnesses
+                .iter()
+                .all(|w| w.reduction_steps.is_empty() && !w.is_minimal),
+            "finding `{}` has no reviewable candidate and does not look like a \
+             minimization drift — a finding admitted from a comparison must be packaged \
+             for review (FR-024)",
+            finding.id
+        );
+    }
+
+    // Minimization really ran, rather than every witness having quietly taken the
+    // not-attempted path.
+    assert!(
+        run.shrink_probes > 0,
+        "the campaign spent zero shrink probes across {} finding(s): minimization is \
+         wired in name only",
+        run.findings.len()
+    );
+    let witnesses: Vec<&deacon_conformance::discovery::queue::Witness> =
+        run.findings.iter().flat_map(|f| &f.witnesses).collect();
+    assert!(
+        witnesses.iter().any(|w| !w.reduction_steps.is_empty()),
+        "no witness records a single applied reduction step, so no finding was actually \
+         reduced"
+    );
+    for witness in &witnesses {
+        assert!(
+            witness.minimal_input.is_object(),
+            "a witness must carry a materializable document"
+        );
+        for step in &witness.reduction_steps {
+            assert!(
+                deacon_conformance::discovery::shrink::REDUCTION_STEPS.contains(&step.as_str()),
+                "witness step `{step}` is not a declared catalogue step"
+            );
+        }
+    }
+}
+
+/// Copy a directory tree, so a candidate's fixture can be materialized somewhere fresh.
+///
+/// The replay must not run *in* the candidate directory: a comparison writes raw artifacts,
+/// and a reviewable candidate that gained files by being reviewed is no longer the artifact
+/// the campaign emitted.
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create the destination");
+    for entry in std::fs::read_dir(from).expect("read the fixture tree") {
+        let entry = entry.expect("a readable entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).expect("copy a fixture file");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T124 — the container tier is separately selectable (FR-060)
+// ---------------------------------------------------------------------------
+
+/// A path that is guaranteed not to be a Docker CLI.
+const ABSENT_DOCKER: &str = "/definitely/not/here/docker";
+
+/// The container-backed tier is selectable **independently** of the configuration-resolution
+/// tier, so a campaign runs where containers are unavailable.
+///
+/// Asserted as a pair, because either half alone proves nothing:
+///
+/// - With Docker made unreachable, `config-differential` still runs to completion and exits
+///   `0`. That is FR-060's actual promise — the tier a contributor without a working
+///   container runtime can run.
+/// - With the *same* environment, `container-differential` fails at its Docker prerequisite
+///   and exits `1`. Without this half, the first would be satisfied by a driver that never
+///   probes Docker at all, and the "separately selectable" claim would be vacuous: two tiers
+///   with identical prerequisites are not separately selectable, they are the same tier
+///   twice.
+///
+/// Driven through the compiled bin as a subprocess rather than through `campaign::run`,
+/// because the environment is the subject: `std::env::set_var` is `unsafe` under this
+/// workspace's edition (and process-global, so hostile to a parallel runner), and the
+/// documented `DEACON_PARITY_DOCKER` seam is read by the child.
+#[test]
+fn the_container_tier_is_selectable_independently_of_the_configuration_tier() {
+    let bin = discovery_campaign_binary();
+    let no_docker = [(prereq::DOCKER_OVERRIDE_ENV, ABSENT_DOCKER)];
+
+    // 1. The configuration-resolution tier runs where containers are unavailable.
+    let hermetic = run_discovery_campaign(
+        &bin,
+        &[
+            "--seed",
+            "0x5eed0124",
+            "--tier",
+            "config-differential",
+            "--candidates",
+            "2",
+            "--dry-run",
+        ],
+        &no_docker,
+    );
+    let stderr = String::from_utf8_lossy(&hermetic.stderr).into_owned();
+    assert_eq!(
+        exit_code(&hermetic),
+        0,
+        "the configuration-resolution tier must run with no container runtime at all \
+         (FR-060). It compares two CLIs over a workspace tree and brings nothing up, so a \
+         Docker dependency here would be a dependency it does not have.\nstderr:\n{stderr}"
+    );
+    let document: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&hermetic.stdout))
+            .unwrap_or_else(|e| panic!("stdout must be a single JSON document ({e}):\n{stderr}"));
+    assert_eq!(document["tier"], "config-differential");
+    assert!(
+        document["candidatesExecuted"].as_u64().unwrap_or(0) > 0,
+        "the campaign must have actually compared something; otherwise \"it ran without \
+         Docker\" is a claim about a run that did nothing: {document}"
+    );
+
+    // 2. The container-backed tier, in the SAME environment, refuses at its prerequisite.
+    let container = run_discovery_campaign(
+        &bin,
+        &[
+            "--seed",
+            "0x5eed0124",
+            "--tier",
+            "container-differential",
+            "--candidates",
+            "2",
+            "--dry-run",
+        ],
+        &no_docker,
+    );
+    let container_stderr = String::from_utf8_lossy(&container.stderr).into_owned();
+    assert_eq!(
+        exit_code(&container),
+        1,
+        "the container-backed tier must fail loudly without Docker, never silently degrade \
+         into the hermetic one. If it exits 0 here, the two tiers have the same \
+         prerequisites and are not separately selectable at all.\nstderr:\n{container_stderr}"
+    );
+    assert!(
+        container.stdout.is_empty(),
+        "a campaign that never compared anything must not emit an outcome document"
+    );
+
+    // The two tiers really are two tiers, and the runtime requirement is the difference.
+    assert_ne!(
+        CampaignTier::ConfigDifferential,
+        CampaignTier::ContainerDifferential
+    );
+    let mut hermetic_request = campaign_request("0x5eed0124", 0x5EED_0124, 1, &Scratch::new());
+    assert!(
+        !hermetic_request.container_backed(),
+        "the configuration-resolution tier must not be container-backed"
+    );
+    hermetic_request.tier = CampaignTier::ContainerDifferential;
+    assert!(
+        hermetic_request.container_backed(),
+        "the container tier must be the one that declares the runtime requirement"
+    );
 }
 
 /// An unverifiable prerequisite exits `1` — a machinery failure, distinct from both a usage
