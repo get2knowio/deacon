@@ -89,7 +89,9 @@ const EMPTY_COLLECTION: &str = "{\n  \"schemaVersion\": 1,\n  \"records\": []\n}
 /// real derived ones, so the fixture passes `check` — the point of several tests below is
 /// that a *populated* queue still exits `0` from `report`.
 fn populated_queue() -> (String, String, String) {
-    use deacon_conformance::discovery::queue::Witness;
+    use deacon_conformance::discovery::queue::{
+        Campaign, CampaignLane, CampaignTier, PinnedInputSet, Witness,
+    };
     use deacon_conformance::discovery::signature::{Divergence, DivergenceKind, Signature};
 
     let deacon = serde_json::json!("vscode");
@@ -104,7 +106,25 @@ fn populated_queue() -> (String, String, String) {
         },
     );
     let finding_id = signature.finding_id();
-    let witness_id = Witness::derived_id("cmp-aaaaaaaa", "cnd-11111111");
+
+    // The campaign id is DERIVED, not chosen: `check` recomputes it from the record's own
+    // substance, so a hand-picked id would (correctly) fail the D1 identity clause and
+    // this fixture would stop being the clean queue the tests below need.
+    let seed = "0x5eed1234";
+    let profile = "prof-linux-amd64-docker-0870";
+    let lane = CampaignLane::Scheduled;
+    let tier = CampaignTier::ConfigDifferential;
+    let pins = PinnedInputSet {
+        schema_pin: deacon_conformance::CURRENT_SCHEMA_PIN.to_string(),
+        prose_pin: deacon_conformance::CURRENT_SPEC_PIN.to_string(),
+        oracle_version: "0.87.0".to_string(),
+        normalizer_version: "6".to_string(),
+        grammar_version: "rev-schema-113500f4".to_string(),
+        mutation_catalog_version: "v1".to_string(),
+        generator_version: "splitmix64-seed+xoshiro256starstar/v1".to_string(),
+    };
+    let campaign_id = Campaign::derive_id(seed, &pins, lane, profile, tier);
+    let witness_id = Witness::derived_id(&campaign_id, "cnd-11111111");
 
     let findings = serde_json::json!({
         "schemaVersion": 1,
@@ -113,7 +133,7 @@ fn populated_queue() -> (String, String, String) {
             "signature": signature,
             "witnesses": [{
                 "id": witness_id,
-                "campaignId": "cmp-aaaaaaaa",
+                "campaignId": campaign_id,
                 "candidateId": "cnd-11111111",
                 "minimalInput": { "image": "alpine:3.18" },
                 "isMinimal": true,
@@ -123,8 +143,8 @@ fn populated_queue() -> (String, String, String) {
             }],
             "classification": null,
             "state": "untriaged",
-            "firstObserved": "cmp-aaaaaaaa",
-            "lastObserved": "cmp-aaaaaaaa",
+            "firstObserved": campaign_id,
+            "lastObserved": campaign_id,
             "promotedTo": null,
             "splitFrom": null,
             "notes": ""
@@ -133,19 +153,12 @@ fn populated_queue() -> (String, String, String) {
     let campaigns = serde_json::json!({
         "schemaVersion": 1,
         "records": [{
-            "id": "cmp-aaaaaaaa",
-            "seed": "0x5eed1234",
-            "lane": "scheduled",
-            "tier": "config-differential",
-            "pinnedInputSet": {
-                "schemaPin": deacon_conformance::CURRENT_SCHEMA_PIN,
-                "prosePin": deacon_conformance::CURRENT_SPEC_PIN,
-                "oracleVersion": "0.87.0",
-                "normalizerVersion": "6",
-                "grammarVersion": "rev-schema-113500f4",
-                "mutationCatalogVersion": "v1",
-                "generatorVersion": "splitmix64-seed+xoshiro256starstar/v1"
-            },
+            "id": campaign_id,
+            "seed": seed,
+            "lane": lane.as_str(),
+            "tier": tier.as_str(),
+            "profile": profile,
+            "pinnedInputSet": pins,
             "budget": {
                 "wallClockSeconds": 1800,
                 "perCandidateSeconds": 60,

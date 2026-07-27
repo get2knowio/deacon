@@ -86,27 +86,27 @@ re-running the seed reproduces both the candidates and the findings.
 
 ### Tests for User Story 1
 
-- [ ] T025 [P] [US1] Seed-reproduction acceptance test in `crates/deacon/tests/discovery_campaign.rs`: the same seed and pinned input set produce an identical ordered candidate sequence and an identical finding set across two runs (SC-001)
-- [ ] T026 [P] [US1] Trivial-failure-ceiling test in `crates/deacon/tests/discovery_campaign.rs`: `parseStageFailures / candidatesGenerated` stays below 10% (SC-002)
-- [ ] T027 [P] [US1] Mutation-category coverage test in `crates/deacon/tests/discovery_campaign.rs`: all eleven categories applied at least once, all eleven keys present in `mutationApplications` including zeroes (SC-003)
-- [ ] T028 [P] [US1] Oracle fail-loud test in `crates/deacon/tests/discovery_campaign.rs`: a missing or wrong-version oracle fails naming the cause and reports no findings — never a silent skip
-- [ ] T029 [P] [US1] Budget-exhaustion test in `crates/deacon/tests/discovery_campaign.rs`: an exhausted budget stops the campaign, sets `budgetExhausted`, and reports `spaceCoveredFraction`
+- [X] T025 [P] [US1] Seed-reproduction acceptance test in `crates/deacon/tests/discovery_campaign.rs`: the same seed and pinned input set produce an identical ordered candidate sequence and an identical finding set across two runs (SC-001)
+- [X] T026 [P] [US1] Trivial-failure-ceiling test in `crates/deacon/tests/discovery_campaign.rs`: `parseStageFailures / candidatesGenerated` stays below 10% (SC-002)
+- [X] T027 [P] [US1] Mutation-category coverage test in `crates/deacon/tests/discovery_campaign.rs`: all eleven categories applied at least once, all eleven keys present in `mutationApplications` including zeroes (SC-003)
+- [X] T028 [P] [US1] Oracle fail-loud test in `crates/deacon/tests/discovery_campaign.rs`: a missing or wrong-version oracle fails naming the cause and reports no findings — never a silent skip
+- [X] T029 [P] [US1] Budget-exhaustion test in `crates/deacon/tests/discovery_campaign.rs`: an exhausted budget stops the campaign, sets `budgetExhausted`, and reports `spaceCoveredFraction`
 
 ### Implementation for User Story 1
 
-- [ ] T030 [US1] Implement constrained generation in `crates/conformance/src/discovery/generate.rs`: draw from the grammar so `required` keys are satisfied for valid candidates and violated deliberately for near-valid ones
-- [ ] T031 [US1] Implement the eleven-category mutation catalogue in `crates/conformance/src/discovery/mutate.rs` per data-model.md § 5, each application recording its `mop-` name
-- [ ] T032 [P] [US1] Unit tests per mutation operator in `crates/conformance/src/discovery/mutate.rs`, asserting each produces a schema-adjacent (not byte-corrupted) result
-- [ ] T033 [US1] Implement the campaign driver in `crates/parity-harness/src/discovery/campaign.rs`: seed, tier, budget, per-candidate timeout, and outcome accumulation
-- [ ] T034 [US1] Implement the differential comparison in `crates/parity-harness/src/discovery/differential.rs`, reusing `exec`, `oracle`, and `prereq` — no new process-execution path
-- [ ] T035 [US1] Wire `normalize::diff` output into `signature.rs` from `crates/parity-harness/src/discovery/differential.rs`, reusing the single normalization definition (FR-015 — a second path is a defect, not a feature)
-- [ ] T036 [US1] Implement already-characterized suppression in `crates/parity-harness/src/discovery/differential.rs`: a difference covered by an existing case, waiver, or tolerated difference reports as characterized and never enters the queue as new (FR-017)
-- [ ] T037 [US1] Implement unsafe-candidate discard-and-count in `crates/parity-harness/src/discovery/campaign.rs` (FR-011) and the unpinned-image guard for container-bound candidates (FR-012)
-- [ ] T038 [US1] Implement the `discovery-campaign` bin in `crates/parity-harness/src/bin/discovery-campaign.rs` with `--seed` **required** (never defaulted) and `--tier`/`--budget-seconds`/`--lane` per contracts/discovery-cli.md
-- [ ] T039 [US1] Implement campaign-outcome reporting in `crates/conformance/src/discovery/report.rs`, emitting all eleven `mutationApplications` keys always — an absent key is indistinguishable from a never-applied category (FR-010)
-- [ ] T040 [US1] Create the live test binary `crates/deacon/tests/discovery_campaign.rs` and verify it is selected by `[profile.discovery]`'s allow-list and excluded from all six other profiles (the allow-list entry itself lands in T006)
-- [ ] T122 [US1] Implement the outcome-only comparison guard in `crates/parity-harness/src/discovery/differential.rs` — relate exit status and structured content, never diagnostic message wording — with a test asserting two rejections differing only in wording produce no finding (FR-016)
-- [ ] T123 [US1] Implement zero-finding volume reporting in `crates/conformance/src/discovery/report.rs` and test in `crates/deacon/tests/discovery_campaign.rs` that a campaign finding nothing still reports `candidatesGenerated`/`candidatesExecuted`, so "nothing found" is distinguishable from "nothing ran" (FR-062)
+- [X] T030 [US1] Implement constrained generation in `crates/conformance/src/discovery/generate.rs`: draw from the grammar so `required` keys are satisfied for valid candidates and violated deliberately for near-valid ones
+- [X] T031 [US1] Implement the eleven-category mutation catalogue in `crates/conformance/src/discovery/mutate.rs` per data-model.md § 5, each application recording its `mop-` name
+- [X] T032 [P] [US1] Unit tests per mutation operator in `crates/conformance/src/discovery/mutate.rs`, asserting each produces a schema-adjacent (not byte-corrupted) result
+- [X] T033 [US1] Implement the campaign driver in `crates/parity-harness/src/discovery/campaign.rs`: seed, tier, budget, per-candidate timeout, and outcome accumulation
+- [X] T034 [US1] Implement the differential comparison in `crates/parity-harness/src/discovery/differential.rs`, reusing `exec`, `oracle`, and `prereq` — no new process-execution path
+- [X] T035 [US1] Wire `normalize::diff` output into `signature.rs` from `crates/parity-harness/src/discovery/differential.rs`, reusing the single normalization definition (FR-015 — a second path is a defect, not a feature)
+- [X] T036 [US1] Implement already-characterized suppression in `crates/parity-harness/src/discovery/differential.rs`: a difference covered by an existing case, waiver, or tolerated difference reports as characterized and never enters the queue as new (FR-017)
+- [X] T037 [US1] Implement unsafe-candidate discard-and-count in `crates/parity-harness/src/discovery/campaign.rs` (FR-011) and the unpinned-image guard for container-bound candidates (FR-012)
+- [X] T038 [US1] Implement the `discovery-campaign` bin in `crates/parity-harness/src/bin/discovery-campaign.rs` with `--seed` **required** (never defaulted) and `--tier`/`--budget-seconds`/`--lane` per contracts/discovery-cli.md
+- [X] T039 [US1] Implement campaign-outcome reporting in `crates/conformance/src/discovery/report.rs`, emitting all eleven `mutationApplications` keys always — an absent key is indistinguishable from a never-applied category (FR-010)
+- [X] T040 [US1] Create the live test binary `crates/deacon/tests/discovery_campaign.rs` and verify it is selected by `[profile.discovery]`'s allow-list and excluded from all six other profiles (the allow-list entry itself lands in T006)
+- [X] T122 [US1] Implement the outcome-only comparison guard in `crates/parity-harness/src/discovery/differential.rs` — relate exit status and structured content, never diagnostic message wording — with a test asserting two rejections differing only in wording produce no finding (FR-016)
+- [X] T123 [US1] Implement zero-finding volume reporting in `crates/conformance/src/discovery/report.rs` and test in `crates/deacon/tests/discovery_campaign.rs` that a campaign finding nothing still reports `candidatesGenerated`/`candidatesExecuted`, so "nothing found" is distinguishable from "nothing ran" (FR-062)
 
 **Checkpoint**: US1 answers the question the project cannot answer today — *does anything differ
 outside what we curated?*

@@ -479,7 +479,8 @@ pub struct CampaignOutcome {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Campaign {
-    /// `cmp-<hash8>` over `seed ‖ canonical(pinnedInputSet) ‖ lane ‖ profile`.
+    /// `cmp-<hash8>`, derived by [`Campaign::derive_id`] — see that function for what the
+    /// id hashes and why the tier is part of it.
     pub id: String,
     /// The recorded seed, hex (FR-001). **Never defaulted** at the CLI: a defaulted seed
     /// would let a campaign run without its reproducibility input being a conscious
@@ -489,12 +490,75 @@ pub struct Campaign {
     pub lane: CampaignLane,
     /// Which tier it ran.
     pub tier: CampaignTier,
+    /// The certification profile the run happened under — a `prof-` id declared in
+    /// `profiles.json` (**D1** when it does not resolve).
+    ///
+    /// A campaign is a claim about *this* environment: the same seed against the same
+    /// pinned pair on `linux/amd64` under Docker and on `linux/amd64` under Podman are two
+    /// different observations, and the profile is what the registry already uses to say
+    /// which. Recording it also completes the id's substance — see [`Campaign::derive_id`].
+    pub profile: String,
     /// The seven pinned inputs.
     pub pinned_input_set: PinnedInputSet,
     /// The declared budget.
     pub budget: Budget,
     /// What it did.
     pub outcome: CampaignOutcome,
+}
+
+impl Campaign {
+    /// `cmp-<hash8>` over `seed ‖ canonical(pinnedInputSet) ‖ lane ‖ profile ‖ tier`.
+    ///
+    /// # The four documented components, and the fifth
+    ///
+    /// data-model.md § 1 lists **four**: `seed ‖ canonical(pinnedInputSet) ‖ lane ‖
+    /// profile`. The `tier` is included here as a fifth, deliberately and visibly, because
+    /// the four-component form cannot distinguish two campaigns that genuinely exist:
+    /// `--seed 0x1 --tier metamorphic` and `--seed 0x1 --tier config-differential`, run in
+    /// the same lane under the same profile against the same pins, would share an id. Two
+    /// records with one id is a duplicate-id **D1** violation, so the append-only history
+    /// could not hold both — and the second run would either be rejected or silently
+    /// overwrite the first's provenance, taking every finding that names it along.
+    ///
+    /// Substance-anchoring exists so that a record which *is* the same thing keeps its id
+    /// and a record which is a different thing gets a different one. A tier is a different
+    /// thing: it decides which implementations are compared, over which observable
+    /// channels, under which prerequisites. Excluding it would make the id anchor to less
+    /// than the record's substance, which is the one failure the derivation is for.
+    ///
+    /// The `canonical(pinnedInputSet)` term is `serde_json`'s rendering of the struct,
+    /// whose field order is fixed by the declaration — so it is canonical by construction
+    /// rather than by a sorting pass that could be forgotten.
+    pub fn derive_id(
+        seed: &str,
+        pinned_input_set: &PinnedInputSet,
+        lane: CampaignLane,
+        profile: &str,
+        tier: CampaignTier,
+    ) -> String {
+        let pins = serde_json::to_string(pinned_input_set)
+            .unwrap_or_else(|e| unreachable!("a pinned input set always serializes: {e}"));
+        format!(
+            "cmp-{}",
+            super::hash8(&[seed, &pins, lane.as_str(), profile, tier.as_str()])
+        )
+    }
+
+    /// Recompute this campaign's id from its own fields.
+    ///
+    /// The identity check **D1** relies on: without it a mis-assigned campaign id is
+    /// undetectable, and an undetectable mis-assignment is worse than a missing id — every
+    /// finding that names the campaign inherits provenance the record does not actually
+    /// carry.
+    pub fn derived_id(&self) -> String {
+        Campaign::derive_id(
+            &self.seed,
+            &self.pinned_input_set,
+            self.lane,
+            &self.profile,
+            self.tier,
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -881,6 +945,9 @@ pub struct RegistryView<'a> {
     pub channels: Vec<&'a str>,
     /// Recorded source revisions (`revisions.json`).
     pub revisions: Vec<&'a SourceRevision>,
+    /// Declared certification profile ids (`profiles.json`) — what a campaign's
+    /// [`Campaign::profile`] must resolve to.
+    pub profiles: Vec<&'a str>,
 }
 
 impl<'a> RegistryView<'a> {
@@ -889,11 +956,16 @@ impl<'a> RegistryView<'a> {
         RegistryView {
             channels: registry.channels.iter().map(|c| c.id.as_str()).collect(),
             revisions: registry.revisions.iter().collect(),
+            profiles: registry.profiles.iter().map(|p| p.id.as_str()).collect(),
         }
     }
 
     fn declares_channel(&self, channel: &str) -> bool {
         self.channels.contains(&channel)
+    }
+
+    fn declares_profile(&self, profile: &str) -> bool {
+        self.profiles.contains(&profile)
     }
 
     /// Whether a revision of `kind` with this `pin` is recorded.
@@ -917,7 +989,7 @@ impl<'a> RegistryView<'a> {
 ///
 /// | Class | Checked here |
 /// |---|---|
-/// | **D1** | derived-id mismatch (signature, finding, witness); duplicate id; empty `witnesses`; a signature naming an undeclared channel; a `firstObserved`/`lastObserved` that does not resolve **or is not backed by a witness**; a witness naming an unresolvable campaign; a `splitFrom` that is self-referential or unresolvable; a non-finite `spaceCoveredFraction`; an empty seed; an empty repo-owned pinned-input element |
+/// | **D1** | derived-id mismatch (signature, finding, witness, **campaign**); duplicate id; empty `witnesses`; a signature naming an undeclared channel; a `firstObserved`/`lastObserved` that does not resolve **or is not backed by a witness**; a witness naming an unresolvable campaign; a `splitFrom` that is self-referential or unresolvable; a campaign `profile` absent from `profiles.json`; a non-finite `spaceCoveredFraction`; an empty seed; an empty repo-owned pinned-input element |
 /// | **D5** | a `schemaPin` / `prosePin` / `oracleVersion` naming a revision absent from `revisions.json` |
 ///
 /// **D2** (classification arity), **D3** (`promotedTo` resolution), and **D4** (corpus
@@ -1097,6 +1169,29 @@ fn check_campaigns(
                 cause: "duplicate campaign id".to_string(),
             });
         }
+        // Identity: the id must be derivable from the record's own substance. Without
+        // this, a mis-assigned campaign id is undetectable — and every finding naming that
+        // campaign silently inherits provenance the record does not carry.
+        let derived = campaign.derived_id();
+        if campaign.id != derived {
+            out.push(DiscoveryError::MalformedRecord {
+                record: campaign.id.clone(),
+                cause: format!(
+                    "campaign id does not match its substance `seed ‖ \
+                     canonical(pinnedInputSet) ‖ lane ‖ profile ‖ tier` (expected \
+                     `{derived}`)"
+                ),
+            });
+        }
+        // The profile is what says *which environment* the claim is about; a profile
+        // nothing declares is a claim about nowhere.
+        if !registry.declares_profile(&campaign.profile) {
+            out.push(DiscoveryError::UnresolvableReference {
+                record: campaign.id.clone(),
+                kind: "certification profile".to_string(),
+                reference: campaign.profile.clone(),
+            });
+        }
         if campaign.seed.trim().is_empty() {
             out.push(DiscoveryError::MalformedRecord {
                 record: campaign.id.clone(),
@@ -1208,10 +1303,14 @@ mod tests {
         ]
     }
 
+    /// The certification profile every test campaign runs under.
+    const TEST_PROFILE: &str = "prof-linux-amd64-docker-0870";
+
     fn view<'a>(revisions: &'a [SourceRevision]) -> RegistryView<'a> {
         RegistryView {
             channels: vec!["chan-structured-output", "chan-exit-code"],
             revisions: revisions.iter().collect(),
+            profiles: vec![TEST_PROFILE],
         }
     }
 
@@ -1227,13 +1326,22 @@ mod tests {
         }
     }
 
-    fn campaign(id: &str) -> Campaign {
+    /// A **self-consistent** campaign: its id is derived from its own substance, so
+    /// `check` sees the record the derivation promises rather than a hand-picked id that
+    /// would (correctly) fail the D1 identity clause. `tag` varies the seed, which is what
+    /// makes two calls two different campaigns.
+    fn campaign(tag: &str) -> Campaign {
+        let seed = format!("0x5eed{tag}");
+        let pinned_input_set = pins();
+        let lane = CampaignLane::Invoked;
+        let tier = CampaignTier::ConfigDifferential;
         Campaign {
-            id: id.into(),
-            seed: "0x5eed1234".into(),
-            lane: CampaignLane::Invoked,
-            tier: CampaignTier::ConfigDifferential,
-            pinned_input_set: pins(),
+            id: Campaign::derive_id(&seed, &pinned_input_set, lane, TEST_PROFILE, tier),
+            seed,
+            lane,
+            tier,
+            profile: TEST_PROFILE.to_string(),
+            pinned_input_set,
             budget: Budget {
                 wall_clock_seconds: DEFAULT_WALL_CLOCK_SECONDS,
                 per_candidate_seconds: DEFAULT_PER_CANDIDATE_SECONDS_HERMETIC,
@@ -1253,6 +1361,11 @@ mod tests {
                 signatures_suppressed: 0,
             },
         }
+    }
+
+    /// The derived id of `campaign(tag)` — what a witness or a `firstObserved` must name.
+    fn cid(tag: &str) -> String {
+        campaign(tag).id
     }
 
     fn signature(path: &str) -> Signature {
@@ -1287,10 +1400,10 @@ mod tests {
 
     fn clean_data() -> DiscoveryData {
         let sig = signature("configuration.remoteUser");
-        let w = witness("cmp-aaaaaaaa", "cnd-11111111");
+        let w = witness(&cid("a"), "cnd-11111111");
         DiscoveryData {
-            findings: vec![Finding::newly_admitted(sig, w, "cmp-aaaaaaaa")],
-            campaigns: vec![campaign("cmp-aaaaaaaa")],
+            findings: vec![Finding::newly_admitted(sig, w, &cid("a"))],
+            campaigns: vec![campaign("a")],
         }
     }
 
@@ -1300,7 +1413,7 @@ mod tests {
     fn the_contract_example_record_loads() {
         // contracts/findings-queue.md § Record schema, with ids made self-consistent.
         let sig = signature("configuration.remoteUser");
-        let w = witness("cmp-aaaaaaaa", "cnd-11111111");
+        let w = witness(&cid("a"), "cnd-11111111");
         let raw = format!(
             r#"{{
               "schemaVersion": 1,
@@ -1311,8 +1424,8 @@ mod tests {
                   "witnesses": [{}],
                   "classification": "deacon-regression",
                   "state": "triaged",
-                  "firstObserved": "cmp-aaaaaaaa",
-                  "lastObserved": "cmp-aaaaaaaa",
+                  "firstObserved": "{}",
+                  "lastObserved": "{}",
                   "promotedTo": null,
                   "splitFrom": null,
                   "notes": ""
@@ -1322,6 +1435,8 @@ mod tests {
             sig.finding_id(),
             serde_json::to_string(&sig).unwrap(),
             serde_json::to_string(&w).unwrap(),
+            cid("a"),
+            cid("a"),
         );
         let file: FindingsFile = serde_json::from_str(&raw).expect("the contract example loads");
         let finding = &file.records[0];
@@ -1447,7 +1562,7 @@ mod tests {
 
     #[test]
     fn campaign_records_round_trip_through_strict_json() {
-        let c = campaign("cmp-aaaaaaaa");
+        let c = campaign("a");
         let raw = serde_json::to_string_pretty(&c).expect("serializes");
         assert!(raw.contains("\"tier\": \"config-differential\""));
         assert!(raw.contains("\"lane\": \"invoked\""));
@@ -1558,8 +1673,8 @@ mod tests {
             upsert_finding(
                 &mut findings,
                 sig.clone(),
-                witness("cmp-aaaaaaaa", "cnd-1"),
-                "cmp-aaaaaaaa"
+                witness(&cid("a"), "cnd-1"),
+                &cid("a")
             ),
             Upsert::Inserted
         );
@@ -1571,23 +1686,23 @@ mod tests {
             upsert_finding(
                 &mut findings,
                 sig.clone(),
-                witness("cmp-bbbbbbbb", "cnd-2"),
-                "cmp-bbbbbbbb"
+                witness(&cid("b"), "cnd-2"),
+                &cid("b")
             ),
             Upsert::WitnessAppended
         );
         assert_eq!(findings.len(), 1, "a duplicate finding is unrepresentable");
         assert_eq!(findings[0].witnesses.len(), 2);
-        assert_eq!(findings[0].first_observed, "cmp-aaaaaaaa");
-        assert_eq!(findings[0].last_observed, "cmp-bbbbbbbb");
+        assert_eq!(findings[0].first_observed, cid("a"));
+        assert_eq!(findings[0].last_observed, cid("b"));
 
         // Re-observing the exact same (campaign, candidate) changes nothing.
         assert_eq!(
             upsert_finding(
                 &mut findings,
                 sig.clone(),
-                witness("cmp-bbbbbbbb", "cnd-2"),
-                "cmp-bbbbbbbb"
+                witness(&cid("b"), "cnd-2"),
+                &cid("b")
             ),
             Upsert::AlreadyWitnessed
         );
@@ -1598,8 +1713,8 @@ mod tests {
             upsert_finding(
                 &mut findings,
                 signature("configuration.remoteEnv"),
-                witness("cmp-bbbbbbbb", "cnd-3"),
-                "cmp-bbbbbbbb"
+                witness(&cid("b"), "cnd-3"),
+                &cid("b")
             ),
             Upsert::Inserted
         );
@@ -1610,8 +1725,8 @@ mod tests {
     fn re_observation_revives_a_no_longer_reproducing_finding_keeping_its_classification() {
         let mut findings = vec![Finding::newly_admitted(
             signature("p"),
-            witness("cmp-aaaaaaaa", "cnd-1"),
-            "cmp-aaaaaaaa",
+            witness(&cid("a"), "cnd-1"),
+            &cid("a"),
         )];
         findings[0].state = FindingState::NoLongerReproducing;
         findings[0].classification = Some(Classification::DeaconRegression);
@@ -1619,8 +1734,8 @@ mod tests {
         upsert_finding(
             &mut findings,
             signature("p"),
-            witness("cmp-bbbbbbbb", "cnd-2"),
-            "cmp-bbbbbbbb",
+            witness(&cid("b"), "cnd-2"),
+            &cid("b"),
         );
         assert_eq!(findings[0].state, FindingState::Triaged);
         assert_eq!(
@@ -1634,8 +1749,8 @@ mod tests {
     fn a_split_ancestor_never_accepts_a_new_witness() {
         let mut findings = vec![Finding::newly_admitted(
             signature("p"),
-            witness("cmp-aaaaaaaa", "cnd-1"),
-            "cmp-aaaaaaaa",
+            witness(&cid("a"), "cnd-1"),
+            &cid("a"),
         )];
         findings[0].state = FindingState::Split;
 
@@ -1643,14 +1758,14 @@ mod tests {
             upsert_finding(
                 &mut findings,
                 signature("p"),
-                witness("cmp-bbbbbbbb", "cnd-2"),
-                "cmp-bbbbbbbb"
+                witness(&cid("b"), "cnd-2"),
+                &cid("b")
             ),
             Upsert::AlreadyWitnessed,
             "re-merging a split lineage silently reverts a reviewer's judgement (FR-032)"
         );
         assert_eq!(findings[0].witnesses.len(), 1);
-        assert_eq!(findings[0].last_observed, "cmp-aaaaaaaa");
+        assert_eq!(findings[0].last_observed, cid("a"));
     }
 
     // --- T021 D1 / D5 ------------------------------------------------------
@@ -1728,7 +1843,7 @@ mod tests {
         let dup = data.findings[0].clone();
         data.findings.push(dup);
         data.findings[1].split_from = Some("fnd-nowhere".into());
-        data.campaigns.push(campaign("cmp-aaaaaaaa"));
+        data.campaigns.push(campaign("a"));
 
         let text: Vec<String> = check(&data, &view(&revs))
             .iter()
@@ -1756,6 +1871,98 @@ mod tests {
             violations
                 .iter()
                 .any(|v| v.to_string().contains("witness id does not match")),
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn d1_a_mis_assigned_campaign_id_is_detected() {
+        // data-model.md § 1 declares the campaign id derived, but a derivation nothing
+        // checks is a comment. Without this clause a mis-assigned id is undetectable, and
+        // every finding naming that campaign silently inherits provenance the record does
+        // not carry.
+        let revs = revisions();
+        let mut data = clean_data();
+        let real = data.campaigns[0].id.clone();
+        let forged = "cmp-deadbeef".to_string();
+        data.campaigns[0].id = forged.clone();
+        data.findings[0].first_observed = forged.clone();
+        data.findings[0].last_observed = forged.clone();
+        data.findings[0].witnesses[0].campaign_id = forged.clone();
+        data.findings[0].witnesses[0].id = Witness::derived_id(&forged, "cnd-11111111");
+
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations.iter().any(|v| v.class() == "D1"
+                && v.to_string()
+                    .contains("campaign id does not match its substance")
+                && v.to_string().contains(&real)),
+            "the diagnosis must name the id the substance derives to: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn d1_every_component_of_the_campaign_id_changes_it() {
+        // Substance-anchoring means the id changes exactly when the thing does. `tier` is
+        // the component data-model.md § 1's four-part list omits: without it, a
+        // metamorphic and a config-differential run of the same seed in the same lane
+        // under the same profile would share an id, which the append-only history cannot
+        // represent (it is a duplicate-id D1).
+        let base = campaign("a");
+        let id = base.id.clone();
+
+        let mut other_seed = base.clone();
+        other_seed.seed = "0xdifferent".into();
+        assert_ne!(id, other_seed.derived_id(), "seed");
+
+        let mut other_lane = base.clone();
+        other_lane.lane = CampaignLane::Scheduled;
+        assert_ne!(id, other_lane.derived_id(), "lane");
+
+        let mut other_profile = base.clone();
+        other_profile.profile = "prof-linux-amd64-podman-0870".into();
+        assert_ne!(id, other_profile.derived_id(), "profile");
+
+        let mut other_pins = base.clone();
+        other_pins.pinned_input_set.oracle_version = "0.86.0".into();
+        assert_ne!(id, other_pins.derived_id(), "pinnedInputSet");
+
+        let mut other_tier = base.clone();
+        other_tier.tier = CampaignTier::Metamorphic;
+        assert_ne!(
+            id,
+            other_tier.derived_id(),
+            "a tier decides which implementations are compared over which channels — two \
+             tiers are two different observations and must not share an id"
+        );
+
+        // The outcome and the budget are NOT substance: re-running the same campaign and
+        // recording different volumes does not make it a different campaign.
+        let mut other_outcome = base.clone();
+        other_outcome.outcome.candidates_generated += 1;
+        other_outcome.budget.wall_clock_seconds += 1;
+        assert_eq!(id, other_outcome.derived_id());
+    }
+
+    #[test]
+    fn d1_a_campaign_profile_must_resolve_in_profiles_json() {
+        // The profile says *which environment* the claim is about; a profile nothing
+        // declares is a claim about nowhere.
+        let revs = revisions();
+        let mut data = clean_data();
+        data.campaigns[0].profile = "prof-imaginary".into();
+        data.campaigns[0].id = data.campaigns[0].derived_id();
+        let id = data.campaigns[0].id.clone();
+        data.findings[0].first_observed = id.clone();
+        data.findings[0].last_observed = id.clone();
+        data.findings[0].witnesses[0].campaign_id = id.clone();
+        data.findings[0].witnesses[0].id = Witness::derived_id(&id, "cnd-11111111");
+
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations.iter().any(|v| v.class() == "D1"
+                && v.to_string().contains("certification profile")
+                && v.to_string().contains("prof-imaginary")),
             "{violations:?}"
         );
     }
@@ -1845,8 +2052,8 @@ mod tests {
         // have — the shape a careless hand edit produces.
         let revs = revisions();
         let mut data = clean_data();
-        data.campaigns.push(campaign("cmp-bbbbbbbb"));
-        data.findings[0].last_observed = "cmp-bbbbbbbb".into();
+        data.campaigns.push(campaign("b"));
+        data.findings[0].last_observed = cid("b");
 
         let violations = check(&data, &view(&revs));
         assert!(
