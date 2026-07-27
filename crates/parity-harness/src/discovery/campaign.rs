@@ -8,8 +8,20 @@
 //! tier. Budgets are per-tier rather than shared, because sharing lets the slow tier
 //! starve the fast one — and the fast tier is where nearly all the exploration happens.
 //!
-//! The `metamorphic` tier (T096) and the `corpus` tier (T108) land with US6 and US7;
-//! minimization (T052) with US2. This module currently drives the two differential tiers.
+//! The `corpus` tier (T108) lands with US7 and minimization (T052) with US2. This module
+//! drives the two differential tiers and the `metamorphic` tier (T096).
+//!
+//! ## Two shapes of campaign, one record
+//!
+//! [`run`] dispatches on the tier **before** acquiring any prerequisite, because the
+//! metamorphic tier has none to acquire (research D12): it compares deacon against deacon
+//! over a declared transformation, so there is no oracle to verify, no Docker to probe, and
+//! no network to reach. Routing it through the differential's prerequisite step would make
+//! the one tier a contributor can run with nothing installed depend on everything.
+//!
+//! Both shapes produce the **same** [`Campaign`] / [`CampaignOutcomeReport`] record and
+//! admit through the same [`AdmissionQueue`], so a reader of `campaigns.json` does not need
+//! to know which driver wrote a row, and the admission cap means the same thing on both.
 //!
 //! ## What a campaign's exit status means
 //!
@@ -53,6 +65,7 @@ use deacon_conformance::discovery::queue::{
     ObservedValues, PinnedInputSet, Witness, upsert_finding, write_campaigns, write_findings,
 };
 use deacon_conformance::discovery::report::{CampaignOutcomeReport, build_campaign_outcome_report};
+use deacon_conformance::discovery::signature::Signature;
 use deacon_conformance::load::Registry;
 
 use crate::HarnessError;
@@ -61,6 +74,18 @@ use crate::oracle::{Oracle, OraclePin, VerifiedOracle};
 use crate::prereq;
 
 use super::differential::{self, Characterization, DifferentialInput};
+use super::metamorphic_run::{self, Sabotage};
+
+/// The channel a metamorphic residual is keyed under.
+///
+/// The evidence document a relation compares spans both declared channel families —
+/// `chan-exit-code` at `exitCode`, `chan-structured-output` under `structuredOutput` — but a
+/// [`Signature`] carries exactly one channel, and every residual a relation reports is a
+/// difference in the *resolved configuration document*. Keying them all here matches
+/// `discovery_metamorphic`'s own use of the same channel, so a metamorphic finding and a
+/// differential finding at the same path deduplicate against each other — which is correct:
+/// they are the same defect observed two ways.
+const METAMORPHIC_CHANNEL: &str = "chan-structured-output";
 
 /// Everything one campaign needs, resolved by the caller (the bin, or a test).
 ///
@@ -147,6 +172,14 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
         cause: format!("could not load the generation grammar: {e}"),
     })?;
 
+    // The metamorphic tier branches BEFORE any prerequisite is acquired: it has none
+    // (research D12). Verifying an oracle it never invokes would make the one tier a
+    // contributor can run with nothing installed fail for the absence of a reference that
+    // takes no part in its comparison.
+    if request.tier == CampaignTier::Metamorphic {
+        return run_metamorphic(request, &registry, &grammar).await;
+    }
+
     // Prerequisites first, so a campaign never produces a partial record against an
     // unverified reference.
     let oracle = if request.tier.requires_oracle() {
@@ -158,21 +191,7 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
         prereq::require_docker().await?;
     }
 
-    let pinned_input_set = PinnedInputSet {
-        schema_pin: deacon_conformance::CURRENT_SCHEMA_PIN.to_string(),
-        prose_pin: deacon_conformance::CURRENT_SPEC_PIN.to_string(),
-        oracle_version: match oracle.as_ref() {
-            Some(o) => o.version.clone(),
-            // The metamorphic tier never invokes the reference, but the pin it would have
-            // been compared against is still part of what makes its findings checkable —
-            // and the pinned input set has no optional elements (FR-002).
-            None => OraclePin::load()?.version,
-        },
-        normalizer_version: NORMALIZER_VERSION.to_string(),
-        grammar_version: grammar.revision().to_string(),
-        mutation_catalog_version: MUTATION_CATALOG_VERSION.to_string(),
-        generator_version: deacon_conformance::discovery::generate::generator_identity(),
-    };
+    let pinned_input_set = pinned_input_set(&grammar, oracle.as_ref())?;
     let campaign_id = Campaign::derive_id(
         &request.seed_hex,
         &pinned_input_set,
@@ -198,16 +217,14 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
                 request.discovery_dir.display()
             ),
         })?;
-    let mut findings = existing.findings.clone();
-    let known_before: BTreeSet<String> = findings.iter().map(|f| f.id.clone()).collect();
+    let mut queue = AdmissionQueue::new(
+        &existing.findings,
+        &campaign_id,
+        request.budget.admission_cap,
+    );
 
     let mut generator = Generator::new(&grammar, request.seed);
     let mut counters = Counters::new();
-    let mut admitted: Vec<String> = Vec::new();
-    // Signatures this campaign admitted that the standing queue did NOT already carry —
-    // what the admission cap is measured against (FR-034b).
-    let mut newly_admitted: BTreeSet<String> = BTreeSet::new();
-    let mut suppressed: BTreeSet<String> = BTreeSet::new();
     let mut observed: BTreeSet<String> = BTreeSet::new();
 
     let wall_clock = Duration::from_secs(request.budget.wall_clock_seconds);
@@ -247,10 +264,10 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
         }
 
         let Some(oracle) = oracle.as_ref() else {
-            // Only the metamorphic tier has no oracle, and its deacon-only evaluation does
-            // not reach this loop (US6, T096). Arriving here would mean a tier was routed
-            // into the differential without its prerequisite — which must fail rather than
-            // compare against nothing.
+            // Only the metamorphic tier has no oracle, and [`run`] now routes it to
+            // [`run_metamorphic`] before this loop is reached (T096). Arriving here would
+            // mean a tier was routed into the differential without its prerequisite — which
+            // must fail rather than compare against nothing.
             return Err(HarnessError::OracleUnverified {
                 cause: format!(
                     "tier `{}` reached the differential with no verified oracle",
@@ -319,26 +336,6 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
         }
 
         for observation in result.new_observations() {
-            let finding_id = observation.signature.finding_id();
-            let already_known =
-                known_before.contains(&finding_id) || admitted.contains(&finding_id);
-            // The cap counts **newly distinct** signatures (FR-034b), not every finding
-            // this campaign touched. Measuring it against `admitted` — which also holds
-            // findings the standing queue already carried and this run merely re-witnessed
-            // — would let a queue that has grown past the cap freeze: every campaign would
-            // reach it on re-witnesses alone and suppress every genuinely new signature,
-            // forever. The cap exists to bound a review backlog, and re-observing something
-            // already in the queue adds nothing to that backlog.
-            if !already_known && newly_admitted.len() as u64 >= request.budget.admission_cap {
-                // FR-034b: never a silent truncation. The excess is reported, so a campaign
-                // that keeps hitting the cap is itself a visible signal that something
-                // systemic is diverging.
-                suppressed.insert(finding_id);
-                continue;
-            }
-            if !already_known {
-                newly_admitted.insert(finding_id.clone());
-            }
             let witness = Witness {
                 id: Witness::derived_id(&campaign_id, &candidate.id),
                 campaign_id: campaign_id.clone(),
@@ -355,33 +352,298 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
                 },
                 mutation_operators: candidate.operator_ids(),
             };
-            upsert_finding(
-                &mut findings,
-                observation.signature.clone(),
-                witness,
-                &campaign_id,
-            );
-            if !admitted.contains(&finding_id) {
-                admitted.push(finding_id);
-            }
+            queue.offer(observation.signature.clone(), witness);
         }
 
         drop(workspace);
     }
 
+    complete(
+        request,
+        &existing.campaigns,
+        Completion {
+            campaign_id,
+            pinned_input_set,
+            counters,
+            observed,
+            queue,
+            planned: request.planned_candidates,
+        },
+    )
+}
+
+/// The `metamorphic` tier: deacon against deacon over the declared relation catalogue
+/// (T096, FR-044 – FR-048, research D12).
+///
+/// # No prerequisite, by construction
+///
+/// No oracle, no Docker, no network. That is not an optimization — it is what makes this
+/// the one complete vertical slice a contributor with nothing installed can run, and it is
+/// why [`run`] dispatches here *before* the prerequisite step rather than inside it.
+///
+/// # The plan IS the catalogue
+///
+/// There is nothing to generate for this tier: the relations are hand-authored registry
+/// records, so [`CampaignRequest::planned_candidates`] — a *generator* denominator — has
+/// nothing to denominate. The plan is therefore the catalogue's own size, which makes
+/// `spaceCoveredFraction` read `1.0` when every relation was reached and less **only** when
+/// the wall clock cut the run short. Using the request's figure would report a seven-relation
+/// tier as having covered 3.5% of a two-hundred-candidate plan it never had.
+///
+/// `mutationApplications` is all-zero for the same reason (no mutation occurs here, and
+/// FR-010 requires every category to be present as an explicit zero rather than absent), and
+/// `parseStageFailures` is zero because there is no document-syntax stage to fail: the
+/// fixtures are authored, not drawn.
+///
+/// # What is deliberately NOT wired in
+///
+/// [`Characterization`] — the FR-017 already-characterized suppression the differential
+/// applies — is **not** consulted here. That index is keyed to differential-style observable
+/// paths drawn from `cases/<area>.json` and the waivers, both of which describe a
+/// deacon-vs-reference difference. A metamorphic residual is a deacon-vs-deacon difference
+/// at a path the index says nothing about, so consulting it would either suppress nothing
+/// (harmless but dishonest bookkeeping) or suppress by path collision (silently dropping a
+/// real finding). Wiring it correctly needs a tolerance model this tier does not yet have.
+/// Left out visibly rather than approximated.
+async fn run_metamorphic(
+    request: &CampaignRequest,
+    registry: &Registry,
+    grammar: &Grammar,
+) -> Result<CampaignRun, HarnessError> {
+    let catalogue = &registry.metamorphic;
+    if catalogue.is_empty() {
+        // Not a zero-relation campaign: V32 already forbids a mandated family with no
+        // record, so an empty catalogue here means the registry did not load what it should
+        // have. Reporting it as a clean run of nothing would be byte-identical to a run in
+        // which every relation held — the exact indistinguishability SC-011 exists to
+        // prevent.
+        return Err(HarnessError::Report {
+            cause: format!(
+                "the metamorphic relation catalogue at {} is empty. A campaign over zero \
+                 relations reports the same thing as one in which every relation held, so \
+                 it is refused rather than run.",
+                request.registry_dir.join("metamorphic.json").display()
+            ),
+        });
+    }
+
+    let pinned_input_set = pinned_input_set(grammar, None)?;
+    let campaign_id = Campaign::derive_id(
+        &request.seed_hex,
+        &pinned_input_set,
+        request.lane,
+        &request.profile,
+        request.tier,
+    );
+
+    // The standing queue, so deduplication spans campaigns AND tiers (FR-030/FR-034): a
+    // metamorphic residual and a differential divergence at the same path derive the same
+    // signature, and they are the same defect observed two ways.
+    let existing =
+        DiscoveryData::load(&request.discovery_dir).map_err(|e| HarnessError::Report {
+            cause: format!(
+                "could not load the discovery data root at {}: {e}",
+                request.discovery_dir.display()
+            ),
+        })?;
+    let mut queue = AdmissionQueue::new(
+        &existing.findings,
+        &campaign_id,
+        request.budget.admission_cap,
+    );
+
+    let mut counters = Counters::new();
+    let mut observed: BTreeSet<String> = BTreeSet::new();
+
+    let root = request.report_root.join("metamorphic").join(&campaign_id);
+    let wall_clock = Duration::from_secs(request.budget.wall_clock_seconds);
+    let per_candidate = Duration::from_secs(request.budget.per_candidate_seconds);
+    let started = Instant::now();
+
+    for (index, relation) in catalogue.iter().enumerate() {
+        if started.elapsed() >= wall_clock {
+            break;
+        }
+        counters.generated += 1;
+
+        // An index prefix so the layout is stable and readable after a failure — the same
+        // scheme `evaluate_catalogue` uses, kept identical so a reviewer following a
+        // campaign's artifacts finds the tree they expect.
+        let relation_root = root.join(format!("{index:02}-{}", relation.id));
+        let evaluation = metamorphic_run::evaluate(
+            &request.deacon_binary,
+            &relation_root,
+            relation,
+            // The honest evaluation. `Sabotage::Break` is the SC-011 anti-inert probe, and
+            // a live campaign that ran it would manufacture findings out of its own
+            // deliberate breakage.
+            Sabotage::None,
+        );
+        let outcome = match tokio::time::timeout(per_candidate, evaluation).await {
+            Ok(Ok(outcome)) => outcome,
+            // A relation the harness cannot apply is fail-loud, never a skip: reporting
+            // nothing for it is byte-identical to it holding.
+            Ok(Err(e)) => return Err(e),
+            Err(_elapsed) => {
+                // One pathological relation must not consume the tier's whole budget. It is
+                // discarded and COUNTED, so a rising rate is visible rather than silent.
+                counters.timed_out += 1;
+                tracing::debug!(
+                    relation = %relation.id,
+                    "relation exceeded its per-candidate bound"
+                );
+                continue;
+            }
+        };
+        counters.executed += 1;
+
+        let Some(candidate) = outcome.candidate() else {
+            continue;
+        };
+        let signatures = candidate.signatures(METAMORPHIC_CHANNEL);
+        if signatures.is_empty() {
+            // A SENSITIVITY failure is the absence of a difference, so there is nothing to
+            // key a signature on, and the catalogue deliberately refuses to invent one (it
+            // would collide with a genuine value difference at the touched site and merge
+            // two unrelated defects). The violation is still REPORTED here rather than
+            // dropped in silence.
+            tracing::warn!(
+                relation = %relation.id,
+                effect = %outcome.effect.as_str(),
+                transformation = %outcome.transformation,
+                "relation was VIOLATED but carries no deduplication key, so it cannot enter \
+                 the findings queue; it is identified by its relation id"
+            );
+            continue;
+        }
+
+        // The reviewable candidate — both inputs and both normalized outputs — is the
+        // witness's input. Recording only one side would name an input that does not
+        // reproduce the observation: a metamorphic input is a PAIR.
+        let evidence = serde_json::to_value(&candidate).map_err(|e| HarnessError::Report {
+            cause: format!(
+                "could not record the metamorphic candidate for `{}`: {e}",
+                relation.id
+            ),
+        })?;
+
+        for signature in signatures {
+            observed.insert(signature.id.clone());
+            // Paired by observable path rather than by position: `signatures()` filters,
+            // so an index-aligned zip would silently mis-attribute values the moment one
+            // residual failed to classify.
+            let residual = candidate.residual.iter().find(|r| r.path == signature.path);
+            let witness = Witness {
+                id: Witness::derived_id(&campaign_id, &relation.id),
+                campaign_id: campaign_id.clone(),
+                // The relation id IS the candidate id for this tier: the input is not drawn
+                // from a stream, it is the relation's declared base fixture plus its
+                // declared transformation, and naming it anything else would lose the one
+                // thing that reproduces the observation.
+                candidate_id: relation.id.clone(),
+                minimal_input: evidence.clone(),
+                // No reduction is performed, so the input is NOT minimal and says so
+                // (FR-022). A relation's fixture is already small by construction; that is
+                // not the same claim as having been reduced.
+                is_minimal: false,
+                reduction_steps: Vec::new(),
+                observed_values: ObservedValues {
+                    // `reference` is the original run and `deacon` the transformed one —
+                    // the mapping `MetamorphicCandidate::signatures` fixes, restated here
+                    // so the two views cannot drift apart.
+                    deacon: residual.and_then(|r| r.transformed.clone()),
+                    reference: residual.and_then(|r| r.original.clone()),
+                },
+                // No mutation operator produced this input; the transformation did, and it
+                // is named in the candidate the witness carries.
+                mutation_operators: Vec::new(),
+            };
+            queue.offer(signature, witness);
+        }
+    }
+
+    complete(
+        request,
+        &existing.campaigns,
+        Completion {
+            campaign_id,
+            pinned_input_set,
+            counters,
+            observed,
+            queue,
+            // The plan is the catalogue — see this function's docs.
+            planned: catalogue.len() as u64,
+        },
+    )
+}
+
+/// The seven pinned inputs (FR-002), built identically for every tier.
+///
+/// `oracle` is `None` for the metamorphic tier, which never invokes the reference — but the
+/// pin it *would* have been compared against is still part of what makes its findings
+/// checkable, and the pinned input set has no optional elements. One function rather than
+/// one per driver, so a tier cannot quietly record a different set of pins than another.
+fn pinned_input_set(
+    grammar: &Grammar,
+    oracle: Option<&VerifiedOracle>,
+) -> Result<PinnedInputSet, HarnessError> {
+    Ok(PinnedInputSet {
+        schema_pin: deacon_conformance::CURRENT_SCHEMA_PIN.to_string(),
+        prose_pin: deacon_conformance::CURRENT_SPEC_PIN.to_string(),
+        oracle_version: match oracle {
+            Some(o) => o.version.clone(),
+            None => OraclePin::load()?.version,
+        },
+        normalizer_version: NORMALIZER_VERSION.to_string(),
+        grammar_version: grammar.revision().to_string(),
+        mutation_catalog_version: MUTATION_CATALOG_VERSION.to_string(),
+        generator_version: deacon_conformance::discovery::generate::generator_identity(),
+    })
+}
+
+/// What a finished driver hands to [`complete`].
+struct Completion {
+    campaign_id: String,
+    pinned_input_set: PinnedInputSet,
+    counters: Counters,
+    observed: BTreeSet<String>,
+    queue: AdmissionQueue,
+    /// The denominator of `spaceCoveredFraction` — what the run *planned* to reach.
+    planned: u64,
+}
+
+/// Turn a finished run into its record, persist it if asked, and build its report.
+///
+/// Shared by both drivers so the exhaustion semantics, the append-only campaign history,
+/// and the report shape are one implementation. A second copy would be the one that starts
+/// presenting a truncated run as complete.
+fn complete(
+    request: &CampaignRequest,
+    existing_campaigns: &[Campaign],
+    completion: Completion,
+) -> Result<CampaignRun, HarnessError> {
+    let Completion {
+        campaign_id,
+        pinned_input_set,
+        mut counters,
+        observed,
+        queue,
+        planned,
+    } = completion;
+
     // Exhaustion is "we stopped short of the plan", whatever stopped us. Reporting it only
     // for the clock would let a run that ended early for any other reason present itself
     // as complete — the presentation FR-005 forbids.
-    counters.budget_exhausted = counters.generated < request.planned_candidates;
+    counters.budget_exhausted = counters.generated < planned;
 
-    let space_covered_fraction = if request.planned_candidates == 0 {
+    let space_covered_fraction = if planned == 0 {
         0.0
     } else {
-        (counters.generated as f64 / request.planned_candidates as f64).clamp(0.0, 1.0)
+        (counters.generated as f64 / planned as f64).clamp(0.0, 1.0)
     };
 
     let campaign = Campaign {
-        id: campaign_id.clone(),
+        id: campaign_id,
         seed: request.seed_hex.clone(),
         lane: request.lane,
         tier: request.tier,
@@ -397,13 +659,13 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
             space_covered_fraction,
             mutation_applications: counters.mutations.clone(),
             signatures_observed: observed.len() as u64,
-            signatures_admitted: admitted.len() as u64,
-            signatures_suppressed: suppressed.len() as u64,
+            signatures_admitted: queue.admitted.len() as u64,
+            signatures_suppressed: queue.suppressed.len() as u64,
         },
     };
 
     if request.persist {
-        let mut campaigns = existing.campaigns.clone();
+        let mut campaigns = existing_campaigns.to_vec();
         // Append-only: a campaign record is never rewritten, because a finding names the
         // campaign that observed it and a rewritten campaign would retroactively change
         // what that finding claims.
@@ -413,19 +675,97 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
         write_campaigns(&request.discovery_dir, &campaigns).map_err(|e| HarnessError::Report {
             cause: format!("could not write the campaign history: {e}"),
         })?;
-        write_findings(&request.discovery_dir, &findings).map_err(|e| HarnessError::Report {
-            cause: format!("could not write the findings queue: {e}"),
+        write_findings(&request.discovery_dir, &queue.findings).map_err(|e| {
+            HarnessError::Report {
+                cause: format!("could not write the findings queue: {e}"),
+            }
         })?;
     }
 
-    let report = build_campaign_outcome_report(&campaign, &admitted);
+    let report = build_campaign_outcome_report(&campaign, &queue.admitted);
     Ok(CampaignRun {
         campaign,
-        findings,
-        admitted,
+        findings: queue.findings,
+        admitted: queue.admitted,
         report,
         characterized_observations: counters.characterized,
     })
+}
+
+/// The findings queue plus one campaign's admission bookkeeping (FR-030/FR-034/FR-034b).
+///
+/// Shared by both drivers rather than reimplemented per tier. The deduplication rule (a
+/// signature already in the standing queue is a re-witness, not an admission), the cap, and
+/// the "suppression is counted, never silent" rule are one behavior; the copy that drifts is
+/// the one that starts truncating quietly.
+struct AdmissionQueue {
+    /// The queue after this campaign's upserts.
+    findings: Vec<Finding>,
+    /// The finding ids present before the campaign started, so deduplication spans
+    /// campaigns (FR-030/FR-034).
+    known_before: BTreeSet<String>,
+    /// The ids this campaign admitted or re-witnessed, in admission order.
+    admitted: Vec<String>,
+    /// The ids the cap turned away (FR-034b).
+    suppressed: BTreeSet<String>,
+    /// Signatures THIS campaign admitted that the standing queue did NOT already carry —
+    /// what the cap is measured against (FR-034b). Re-witnessing a finding the queue
+    /// already knows about must not consume this budget: `DEFAULT_ADMISSION_CAP`'s own
+    /// docs describe it as a per-campaign limit on *newly distinct* signatures, and a
+    /// queue that has grown past the cap would otherwise reach it on re-witnesses alone
+    /// and permanently suppress every genuinely new signature from then on.
+    newly_admitted: BTreeSet<String>,
+    admission_cap: u64,
+    campaign_id: String,
+}
+
+impl AdmissionQueue {
+    fn new(existing: &[Finding], campaign_id: &str, admission_cap: u64) -> AdmissionQueue {
+        AdmissionQueue {
+            findings: existing.to_vec(),
+            known_before: existing.iter().map(|f| f.id.clone()).collect(),
+            admitted: Vec::new(),
+            suppressed: BTreeSet::new(),
+            newly_admitted: BTreeSet::new(),
+            admission_cap,
+            campaign_id: campaign_id.to_string(),
+        }
+    }
+
+    /// Offer one observation to the queue.
+    ///
+    /// Two rules, both preserved verbatim by the extraction:
+    ///
+    /// - **A signature the standing queue already knows is never suppressed**, whatever the
+    ///   cap. Refusing to re-witness something a reviewer has already seen would let the cap
+    ///   quietly stop `lastObserved` from advancing, and a finding that stopped being
+    ///   re-witnessed for that reason is indistinguishable from one that stopped
+    ///   reproducing.
+    /// - **Only a genuinely new signature can be suppressed**, and every suppression is
+    ///   recorded (FR-034b) — never a silent truncation, so a campaign that keeps hitting
+    ///   the cap is itself a visible signal that something systemic is diverging.
+    ///
+    /// The cap is measured against `newly_admitted`, not `admitted`: `admitted` holds every
+    /// id this campaign *touched*, re-witnesses included, and measuring the cap against
+    /// that would mean a campaign against a standing queue larger than the cap could never
+    /// admit anything new — every campaign would exhaust its budget on re-witnesses before
+    /// reaching its first genuinely new signature.
+    fn offer(&mut self, signature: Signature, witness: Witness) {
+        let finding_id = signature.finding_id();
+        let already_known =
+            self.known_before.contains(&finding_id) || self.admitted.contains(&finding_id);
+        if !already_known && self.newly_admitted.len() as u64 >= self.admission_cap {
+            self.suppressed.insert(finding_id);
+            return;
+        }
+        upsert_finding(&mut self.findings, signature, witness, &self.campaign_id);
+        if !self.admitted.contains(&finding_id) {
+            self.admitted.push(finding_id);
+        }
+        if !already_known {
+            self.newly_admitted.insert(finding_id);
+        }
+    }
 }
 
 /// Resolve and verify the oracle, mapping every failure onto
@@ -584,6 +924,117 @@ mod tests {
             "a campaign generates thousands of workspaces; one that outlives its candidate \
              fills the disk"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // The shared admission queue (T096 extraction)
+    // -----------------------------------------------------------------------
+
+    fn signature(path: &str) -> Signature {
+        Signature::derive(
+            METAMORPHIC_CHANNEL,
+            &deacon_conformance::discovery::signature::Divergence {
+                kind: deacon_conformance::discovery::signature::DivergenceKind::Value,
+                path,
+                deacon: None,
+                reference: None,
+            },
+        )
+    }
+
+    fn witness(campaign_id: &str, candidate_id: &str) -> Witness {
+        Witness {
+            id: Witness::derived_id(campaign_id, candidate_id),
+            campaign_id: campaign_id.to_string(),
+            candidate_id: candidate_id.to_string(),
+            minimal_input: json!({}),
+            is_minimal: false,
+            reduction_steps: Vec::new(),
+            observed_values: ObservedValues::default(),
+            mutation_operators: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_new_signature_is_admitted_once_however_often_it_is_offered() {
+        let mut queue = AdmissionQueue::new(&[], "cmp-11111111", 25);
+        let sig = signature("structuredOutput.configuration.name");
+
+        queue.offer(sig.clone(), witness("cmp-11111111", "cnd-a"));
+        queue.offer(sig.clone(), witness("cmp-11111111", "cnd-b"));
+
+        assert_eq!(
+            queue.admitted,
+            vec![sig.finding_id()],
+            "one signature is one finding however many witnesses it collects"
+        );
+        assert_eq!(queue.findings.len(), 1);
+        assert_eq!(queue.findings[0].witnesses.len(), 2);
+        assert!(queue.suppressed.is_empty());
+    }
+
+    #[test]
+    fn the_cap_turns_away_new_signatures_and_reports_every_one_it_did() {
+        let mut queue = AdmissionQueue::new(&[], "cmp-22222222", 2);
+        let first = signature("structuredOutput.configuration.name");
+        let second = signature("structuredOutput.configuration.image");
+        let third = signature("structuredOutput.configuration.remoteUser");
+        queue.offer(first.clone(), witness("cmp-22222222", "cnd-1"));
+        queue.offer(second.clone(), witness("cmp-22222222", "cnd-2"));
+        queue.offer(third.clone(), witness("cmp-22222222", "cnd-3"));
+
+        assert_eq!(
+            queue.admitted,
+            vec![first.finding_id(), second.finding_id()],
+            "the cap bounds admissions in offer order"
+        );
+        assert_eq!(
+            queue.suppressed.iter().cloned().collect::<Vec<String>>(),
+            vec![third.finding_id()],
+            "the excess is REPORTED (FR-034b), never a silent truncation: a campaign that \
+             keeps hitting the cap is itself a visible signal that something systemic is \
+             diverging"
+        );
+        assert!(
+            !queue.findings.iter().any(|f| f.id == third.finding_id()),
+            "a suppressed signature must not reach the queue"
+        );
+    }
+
+    #[test]
+    fn a_signature_the_standing_queue_already_knows_is_never_suppressed() {
+        let known = signature("structuredOutput.configuration.image");
+        let mut seed = Vec::new();
+        upsert_finding(
+            &mut seed,
+            known.clone(),
+            witness("cmp-00000000", "cnd-old"),
+            "cmp-00000000",
+        );
+
+        // A cap of ZERO, so nothing new can enter at all — and the standing finding still
+        // collects its witness. Refusing to re-witness what a reviewer has already seen
+        // would let the cap quietly stop `lastObserved` from advancing, and a finding that
+        // stopped being re-witnessed for THAT reason is indistinguishable from one that
+        // stopped reproducing.
+        let mut queue = AdmissionQueue::new(&seed, "cmp-33333333", 0);
+        queue.offer(known.clone(), witness("cmp-33333333", "cnd-new"));
+        let fresh = signature("structuredOutput.configuration.name");
+        queue.offer(fresh.clone(), witness("cmp-33333333", "cnd-other"));
+
+        assert_eq!(queue.admitted, vec![known.finding_id()]);
+        assert_eq!(
+            queue.suppressed.iter().cloned().collect::<Vec<String>>(),
+            vec![fresh.finding_id()],
+            "a zero cap admits nothing NEW, which is exactly what it should mean"
+        );
+        let record = queue
+            .findings
+            .iter()
+            .find(|f| f.id == known.finding_id())
+            .expect("the standing finding survives");
+        assert_eq!(record.witnesses.len(), 2, "it collected the new witness");
+        assert_eq!(record.last_observed, "cmp-33333333");
     }
 
     #[test]

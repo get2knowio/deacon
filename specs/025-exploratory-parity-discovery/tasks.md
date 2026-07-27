@@ -163,9 +163,19 @@ selects no discovery program, and performs no fetch.
 - [X] T056 [US3] Extend `crates/deacon/tests/parity_registry_check.rs` with discovery-lane wiring assertions: registry ↔ `crates/deacon/tests/*.rs` ↔ `.config/nextest.toml` agreement
 - [X] T057 [US3] Extend `crates/deacon/tests/parity_registry_check.rs` asserting `deacon --help` gains no discovery surface (FR-059)
 - [X] T058 [US3] Create `.github/workflows/discovery.yml` with a nightly `schedule` lane and a `workflow_dispatch` lane accepting `seed` and `budget` inputs, provisioning the pinned oracle
-- [ ] T059 [US3] Enforce the exit-status contract in `crates/parity-harness/src/bin/discovery-campaign.rs`: status reflects whether the campaign ran, never what it found (FR-058)
-  - **Blocked on US1 (T038)**, which creates that bin. The `.github/workflows/discovery.yml`
-    invocation it needs is already in place, so this is a one-file follow-up once US1 lands.
+- [X] T059 [US3] Enforce the exit-status contract in `crates/parity-harness/src/bin/discovery-campaign.rs`: status reflects whether the campaign ran, never what it found (FR-058)
+  - US1's `main()` already implemented the contract correctly; what was missing was
+    **evidence**. `crates/deacon/tests/discovery_campaign.rs` now drives the COMPILED bin as
+    a subprocess and asserts all three statuses: `0` for a `--tier metamorphic --dry-run`
+    run that reached the whole catalogue (no oracle, no Docker, no network — research D12),
+    `2` for six malformed invocations, `1` for an unverifiable oracle
+    (`DEACON_PARITY_DEVCONTAINER` pointed at a path that cannot exist). T055 covers the
+    library level; only a subprocess can observe `main`'s `Result` → `ExitCode` translation,
+    which is where the contract is actually enforced.
+  - `env!("CARGO_BIN_EXE_discovery-campaign")` does not exist here (the bin belongs to
+    `parity-harness`, the test to `deacon`), so the test reuses `prereq::cargo_bin`, a
+    generalization of `prereq::deacon_binary`'s build-and-read-the-artifact rule. Guessing a
+    `target/{debug,release}` path is the 023 T115 defect and is not repeated.
 - [X] T060 [US3] Register the discovery binaries in `fixtures/parity-corpus/registry.json` so `parity_registry_check` can enforce their wiring
   - Registered: `discovery_campaign`, `discovery_metamorphic` (role `live`),
     `discovery_hermetic`, `discovery_cli` (role `guard`). The `parity-harness` **bins**
@@ -267,7 +277,31 @@ without the devcontainer CLI installed can develop and test it locally.
 - [X] T093 [US6] Extend the registry loader in `crates/conformance/src/load.rs` to read `metamorphic.json`
 - [X] T094 [US6] Implement violation classes **V31** and **V32** in `crates/conformance/src/validate.rs`
 - [X] T095 [US6] Implement deacon-only relation evaluation in `crates/parity-harness/src/discovery/metamorphic_run.rs`
-- [ ] T096 [US6] Add the `metamorphic` tier to the campaign driver in `crates/parity-harness/src/discovery/campaign.rs`, requiring no external prerequisite
+- [X] T096 [US6] Add the `metamorphic` tier to the campaign driver in `crates/parity-harness/src/discovery/campaign.rs`, requiring no external prerequisite
+  - `campaign::run` dispatches to a dedicated `run_metamorphic` **before** the prerequisite
+    step, so the tier never consults an oracle it does not use. It evaluates the committed
+    `registry.metamorphic` catalogue with `Sabotage::None` under the same wall-clock and
+    per-candidate bounds the differential uses (a relation that exceeds its bound is
+    discarded **and counted**), and admits each violated relation's residual signatures
+    through the shared `AdmissionQueue`.
+  - **The plan IS the catalogue**: `spaceCoveredFraction` is denominated by
+    `registry.metamorphic.len()`, not `planned_candidates` — there is nothing to generate
+    for this tier, so honoring the request's figure would report a seven-relation tier as
+    3.5% of a plan it never had. `mutationApplications` is all-zero with all eleven keys
+    present (FR-010) and `parseStageFailures` is 0 (no document-syntax stage: the fixtures
+    are authored, not drawn). An **empty** catalogue is an error, not a zero-relation run —
+    V32 already forbids a mandated family with no record, and a run over nothing reports
+    exactly what a run in which everything held reports.
+  - **Deliberate scope limit**: `Characterization` (the FR-017 already-characterized
+    suppression) is NOT wired into this tier, and says so in the code. That index is keyed
+    to differential-style observable paths from `cases/<area>.json` and the waivers, all of
+    which describe a deacon-vs-reference difference; a metamorphic residual is a
+    deacon-vs-deacon difference, so consulting it would either suppress nothing or suppress
+    by path collision. Left out visibly rather than approximated.
+  - **Known limitation, reported not silent**: a violated *sensitivity* relation yields no
+    signature by construction (its failure is the ABSENCE of a difference, and the catalogue
+    deliberately refuses to key one on the touched site), so it cannot enter the queue. It is
+    logged at `warn` naming the relation rather than dropped.
 - [X] T097 [US6] Create the live test binary `crates/deacon/tests/discovery_metamorphic.rs` and verify it is selected by `[profile.discovery]` and excluded from all six other profiles (the allow-list entry itself lands in T006)
 - [X] T127 [US6] Implement metamorphic failure-candidate emission in `crates/parity-harness/src/discovery/metamorphic_run.rs` and test in `crates/deacon/tests/discovery_metamorphic.rs` that the candidate names the relation, the transformation applied, both inputs, and both normalized outputs (FR-047)
 - [X] T098 [US6] Add the **V31** and **V32** rows to the violation-class index in `conformance/RULES.md`, keeping `validate.rs`/`RULES.md` lockstep
