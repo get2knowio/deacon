@@ -45,7 +45,8 @@ use parity_harness::discovery::campaign::{self, CampaignRequest, CampaignRun};
 use parity_harness::discovery::differential::{
     self, Characterization, DifferentialInput, OutcomeClass,
 };
-use parity_harness::oracle::{Oracle, VerifiedOracle};
+use parity_harness::oracle::{ORACLE_OVERRIDE_ENV, Oracle, VerifiedOracle};
+use parity_harness::prereq;
 
 /// The environment variable nextest sets to the profile it selected the run under.
 const NEXTEST_PROFILE: &str = "NEXTEST_PROFILE";
@@ -117,6 +118,20 @@ impl Scratch {
 /// never a path guessed from `target/`.
 fn deacon_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_deacon"))
+}
+
+/// The compiled `discovery-campaign` bin, built and taken from cargo's own artifact report.
+///
+/// `env!("CARGO_BIN_EXE_discovery-campaign")` is **not** available here: that macro is
+/// defined only for bins of the package the test belongs to, and this bin belongs to
+/// `parity-harness` while this test belongs to `deacon`. The alternative — looking under
+/// `target/{debug,release}` for whichever file exists — is the guess that 023 T115 caught
+/// judging a three-day-old artifact, so the shared [`prereq::cargo_bin`] rule is reused
+/// rather than re-derived here.
+fn discovery_campaign_binary() -> PathBuf {
+    runtime()
+        .block_on(prereq::cargo_bin("parity-harness", "discovery-campaign"))
+        .expect("the discovery-campaign bin must build; its exit status is the contract")
 }
 
 /// A campaign request over an isolated data root.
@@ -692,4 +707,342 @@ fn a_campaign_that_finds_nothing_still_reports_what_it_covered() {
         "the human report must say what the absence does not mean"
     );
     assert!(markdown.contains(&run.report.candidates_generated.to_string()));
+}
+
+// ---------------------------------------------------------------------------
+// T096 — the metamorphic tier, through the real campaign driver (US6)
+// ---------------------------------------------------------------------------
+
+/// The committed relation catalogue — the metamorphic tier's whole plan.
+fn metamorphic_catalogue() -> Vec<deacon_conformance::discovery::metamorphic::MetamorphicRelation> {
+    let path = default_registry_dir().join("metamorphic.json");
+    let records = deacon_conformance::discovery::metamorphic::load_metamorphic(&path)
+        .unwrap_or_else(|e| panic!("the committed catalogue at {path:?} must load: {e}"));
+    assert!(
+        !records.is_empty(),
+        "an empty catalogue would make every assertion below vacuous"
+    );
+    records
+}
+
+/// A path that is guaranteed not to be an oracle.
+///
+/// `DEACON_PARITY_DEVCONTAINER` (and `CampaignRequest::oracle_override`) pointing at a
+/// non-existent file is a hard `HarnessError::OracleMissing` with **no** `PATH` fallback, so
+/// it is a deterministic, instant prerequisite failure rather than a slow one.
+const ABSENT_ORACLE: &str = "/definitely/not/here/devcontainer";
+
+/// The `metamorphic` tier runs through the real driver with **no oracle**, evaluates the
+/// whole catalogue, and records itself like any other campaign.
+///
+/// The no-prerequisite claim is made non-vacuously: the same request is pointed at an oracle
+/// that cannot exist, which any differential tier refuses outright (asserted below). The
+/// metamorphic tier must not so much as consult it — research D12's point, and what makes
+/// this the one complete vertical slice a contributor with nothing installed can run.
+#[test]
+fn the_metamorphic_tier_runs_with_no_oracle_and_evaluates_the_whole_catalogue() {
+    let catalogue = metamorphic_catalogue();
+    let scratch = Scratch::new();
+
+    // `planned_candidates` is deliberately 1 and deliberately wrong: there is nothing to
+    // generate for this tier, so the plan IS the catalogue. A driver that honored the
+    // request's figure would stop after one relation and report full coverage of a plan it
+    // never had.
+    let mut request = campaign_request("0x5eed0096", 0x5EED_0096, 1, &scratch);
+    request.tier = CampaignTier::Metamorphic;
+    request.oracle_override = Some(PathBuf::from(ABSENT_ORACLE));
+
+    let run = runtime()
+        .block_on(campaign::run(&request))
+        .unwrap_or_else(|e| {
+            panic!(
+                "the metamorphic tier must run with no oracle, no Docker, and no network \
+                 (research D12), but it failed: {e}"
+            )
+        });
+
+    assert_eq!(run.campaign.tier, CampaignTier::Metamorphic);
+    assert_eq!(
+        run.report.candidates_generated as usize,
+        catalogue.len(),
+        "every declared relation must be reached — a skipped relation reports nothing, and \
+         reporting nothing is indistinguishable from holding"
+    );
+    assert_eq!(
+        run.report.candidates_executed as usize,
+        catalogue.len(),
+        "every reached relation must be evaluated"
+    );
+    assert!(
+        catalogue.len() > 1,
+        "the assertions above would be satisfied by the request's planned_candidates of 1 \
+         if the catalogue held a single relation, and would prove nothing"
+    );
+
+    // The plan is the catalogue, so a complete run covers all of it and is NOT exhausted.
+    assert!(
+        !run.report.budget_exhausted,
+        "a run that reached every relation stopped short of nothing"
+    );
+    assert!(
+        (run.report.space_covered_fraction - 1.0).abs() < 1e-9,
+        "the whole catalogue was evaluated, so the covered fraction is 1.0, got {}",
+        run.report.space_covered_fraction
+    );
+
+    // No mutation occurs in this tier — and FR-010 still requires every category to be
+    // present as an explicit zero rather than absent, so an unapplied category is reported
+    // rather than inferred from a map a reader would have to cross-check.
+    assert_eq!(
+        run.report.mutation_applications.len(),
+        mutate::CATEGORY_COUNT
+    );
+    assert!(run.report.mutation_applications.values().all(|&n| n == 0));
+    assert_eq!(
+        run.report.unapplied_categories.len(),
+        mutate::CATEGORY_COUNT,
+        "no mutation occurs here, so every category is an explicit zero"
+    );
+    // There is no document-syntax stage: the fixtures are authored, not drawn.
+    assert_eq!(run.report.parse_stage_failures, 0);
+
+    // The pinned input set has no optional elements (FR-002): the tier never invokes the
+    // reference, but the pin it WOULD have been compared against is still recorded.
+    assert!(
+        !run.report.pinned_input_set.oracle_version.trim().is_empty(),
+        "the oracle pin is part of what makes a metamorphic finding checkable, even though \
+         the tier never invokes the reference"
+    );
+
+    // Admission bookkeeping and the queue agree. Asserted structurally rather than as a
+    // finding count: the tier's status must not depend on what it found (FR-058), and the
+    // relations' own verdicts are `discovery_metamorphic`'s subject, not this test's.
+    assert_eq!(run.report.signatures_admitted as usize, run.admitted.len());
+    assert_eq!(
+        run.findings.len(),
+        run.admitted.len(),
+        "the scratch queue started empty, so every finding in it is one this run admitted"
+    );
+
+    // It really was persisted, so the write path is exercised rather than assumed.
+    let data = deacon_conformance::discovery::queue::DiscoveryData::load(scratch.path())
+        .expect("the scratch root loads");
+    assert_eq!(data.campaigns.len(), 1);
+    assert_eq!(data.campaigns[0].id, run.campaign.id);
+    assert_eq!(data.campaigns[0].tier, CampaignTier::Metamorphic);
+    assert_eq!(data.findings.len(), run.findings.len());
+
+    // The no-oracle claim is not vacuous: the SAME override fails a differential tier
+    // outright, so the metamorphic run above genuinely never consulted it.
+    let differential_scratch = Scratch::new();
+    let mut differential = campaign_request("0x5eed0096", 0x5EED_0096, 1, &differential_scratch);
+    differential.oracle_override = Some(PathBuf::from(ABSENT_ORACLE));
+    let err = runtime()
+        .block_on(campaign::run(&differential))
+        .expect_err("a differential tier must refuse an oracle that cannot exist");
+    assert!(
+        matches!(err, HarnessError::OracleUnverified { .. }),
+        "expected OracleUnverified, got {err:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// T059 — the bin's exit-status contract, observed from OUTSIDE the process
+// ---------------------------------------------------------------------------
+
+/// Run the compiled `discovery-campaign` bin.
+///
+/// The child is pointed at this test binary's own deacon through the documented
+/// `prereq::DEACON_BIN_ENV` seam, so the bin under test judges the same artifact every other
+/// test here does — and does not spend a nested cargo build discovering it.
+fn run_discovery_campaign(
+    bin: &Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> std::process::Output {
+    let mut command = std::process::Command::new(bin);
+    command
+        .args(args)
+        .env(prereq::DEACON_BIN_ENV, deacon_binary())
+        .stdin(std::process::Stdio::null());
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    command
+        .output()
+        .unwrap_or_else(|e| panic!("could not run {bin:?}: {e}"))
+}
+
+fn exit_code(output: &std::process::Output) -> i32 {
+    output
+        .status
+        .code()
+        .unwrap_or_else(|| panic!("the bin was killed by a signal: {:?}", output.status))
+}
+
+/// A campaign that **ran** exits `0`, whatever it found.
+///
+/// Driven through the compiled binary rather than through `campaign::run`, on purpose. The
+/// library-level half of this contract is already covered (`discovery_hermetic`'s T055, and
+/// `discovery_cli`'s process-level guard for the hermetic commands); what is unproven
+/// without this is that `main`'s own translation from a `Result` into an `ExitCode` matches
+/// the contract. That translation is where the contract is actually enforced, and a doc
+/// comment describing it is not evidence.
+///
+/// The `metamorphic` tier is used because it needs no oracle, no Docker, and no network
+/// (research D12), so the test states a property of the *status* rather than of the
+/// environment. `--dry-run` keeps the committed `conformance/discovery/` tree untouched.
+#[test]
+fn the_bin_exits_zero_when_the_campaign_ran_whatever_it_found() {
+    let bin = discovery_campaign_binary();
+    let output = run_discovery_campaign(
+        &bin,
+        &["--seed", "0x5eed0059", "--tier", "metamorphic", "--dry-run"],
+        &[],
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert_eq!(
+        exit_code(&output),
+        0,
+        "a campaign that ran must exit 0 regardless of what it found (FR-058). Any command \
+         whose status depends on its findings becomes a gate the moment someone wires it \
+         into CI, and a stochastic gate makes green non-reproducible.\nstderr:\n{stderr}"
+    );
+
+    // stdout carries the single JSON outcome and nothing else, so a caller can pipe it into
+    // `jq` without the diagnostics landing in it.
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let document: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout must be a single JSON document ({e}): {stdout}"));
+    assert_eq!(document["tier"], "metamorphic");
+    assert_eq!(document["seed"], "0x5eed0059");
+    assert!(
+        document["candidatesGenerated"].as_u64().unwrap_or(0) > 0,
+        "the outcome must report the volume it covered, or \"nothing found\" and \"nothing \
+         ran\" are indistinguishable (FR-062): {document}"
+    );
+    assert!(
+        document["findings"].is_array(),
+        "the finding list is reported in the document, never in the exit status: {document}"
+    );
+    assert!(
+        !stderr.trim().is_empty(),
+        "diagnostics belong on stderr; an empty stderr means the run said nothing about \
+         itself"
+    );
+}
+
+/// A malformed invocation exits `2` — never `1`, which is reserved for machinery failure,
+/// and never `0`.
+///
+/// The three statuses are three different facts, and collapsing any two of them leaves a
+/// scheduled lane unable to tell "the campaign could not run" from "the invocation was
+/// wrong", which are fixed in entirely different places.
+#[test]
+fn a_malformed_invocation_exits_two() {
+    let bin = discovery_campaign_binary();
+
+    // `--seed` is required and never defaulted (FR-001).
+    let missing_seed = run_discovery_campaign(&bin, &["--tier", "metamorphic", "--dry-run"], &[]);
+    assert_eq!(
+        exit_code(&missing_seed),
+        2,
+        "a missing `--seed` is a usage error, not a machinery failure"
+    );
+    let stderr = String::from_utf8_lossy(&missing_seed.stderr).into_owned();
+    assert!(
+        stderr.contains("--seed"),
+        "the diagnosis must name the missing flag: {stderr}"
+    );
+    assert!(
+        stderr.contains("usage:"),
+        "a usage error must print the usage line: {stderr}"
+    );
+    assert!(
+        missing_seed.stdout.is_empty(),
+        "a run that never happened must not emit a campaign outcome document"
+    );
+
+    // Every other malformed form takes the same status, so a caller can branch on it.
+    for (label, args) in [
+        ("a missing --tier", vec!["--seed", "0x1"]),
+        (
+            "an unknown tier",
+            vec!["--seed", "0x1", "--tier", "not-a-tier"],
+        ),
+        (
+            "a non-hex seed",
+            vec!["--seed", "zzz", "--tier", "metamorphic"],
+        ),
+        (
+            "a zero candidate plan",
+            vec![
+                "--seed",
+                "0x1",
+                "--tier",
+                "config-differential",
+                "--candidates",
+                "0",
+            ],
+        ),
+        (
+            "an unknown argument",
+            vec!["--seed", "0x1", "--tier", "metamorphic", "--nope"],
+        ),
+        (
+            "a flag with no value",
+            vec!["--tier", "metamorphic", "--seed"],
+        ),
+    ] {
+        let output = run_discovery_campaign(&bin, &args, &[]);
+        assert_eq!(
+            exit_code(&output),
+            2,
+            "{label} must exit 2: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "{label} produced a campaign outcome on stdout for a run that never happened"
+        );
+    }
+}
+
+/// An unverifiable prerequisite exits `1` — a machinery failure, distinct from both a usage
+/// error and a clean run.
+///
+/// The failure mode this guards is the comfortable one: a campaign that could not verify the
+/// reference and exited `0` would look exactly like a campaign that found the two
+/// implementations in perfect agreement.
+#[test]
+fn an_unverifiable_oracle_exits_one() {
+    let bin = discovery_campaign_binary();
+    let output = run_discovery_campaign(
+        &bin,
+        &[
+            "--seed",
+            "0x5eed0059",
+            "--tier",
+            "config-differential",
+            "--dry-run",
+        ],
+        &[(ORACLE_OVERRIDE_ENV, ABSENT_ORACLE)],
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert_eq!(
+        exit_code(&output),
+        1,
+        "an unverifiable oracle is a prerequisite failure, not a finding and not a usage \
+         error.\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(ABSENT_ORACLE),
+        "the diagnosis must name the path it could not use: {stderr}"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "a campaign that never compared anything must not emit an outcome document"
+    );
 }
