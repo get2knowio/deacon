@@ -124,7 +124,28 @@ fn main() -> ExitCode {
                 run.report.signatures_suppressed,
                 run.characterized_observations,
             );
-            if !run.report.unapplied_categories.is_empty() {
+            // The corpus tier's per-entry outcomes, named one by one (FR-051/FR-052). The
+            // aggregate counters cannot carry this: "33 generated, 31 executed" says two
+            // entries did not run, and an ecological canary whose whole job is to notice
+            // the ecosystem moving must say WHICH two and whether the reason was an
+            // unreachable snapshot or content that stopped matching its recorded digest.
+            if !run.corpus_statuses.is_empty() {
+                eprintln!("corpus entries ({}):", run.corpus_statuses.len());
+                for status in &run.corpus_statuses {
+                    eprintln!("  {}", status.summary());
+                }
+            }
+            // Only the *generating* tiers can have a generation deficiency. The metamorphic
+            // and corpus tiers draw nothing and mutate nothing — their inputs are
+            // hand-authored relations and pinned third-party snapshots — so all eleven
+            // categories are legitimately zero, and reporting that as a deficiency would
+            // teach a reader to ignore the one line that matters when a real generator
+            // regression makes a category stop firing.
+            let generates = matches!(
+                parsed.tier,
+                CampaignTier::ConfigDifferential | CampaignTier::ContainerDifferential
+            );
+            if generates && !run.report.unapplied_categories.is_empty() {
                 eprintln!(
                     "generation deficiency: {} mutation categor(y|ies) never applied — {}",
                     run.report.unapplied_categories.len(),

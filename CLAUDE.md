@@ -399,8 +399,11 @@ nothing. Each is gone, not merely quiescent:
 - `parity_read_configuration` — deleted; its 2 units became 2 `case-readconfig-decl-*`
 - `corpus_runner` — deleted (the shared module all four called)
 
-Their in-repo fixture trees went with them; `fetch_realworld_corpus.py` survives
-(research D8).
+Their in-repo fixture trees went with them. `fetch_realworld_corpus.py` was **deleted** in
+025 US7 (T109), having outlived 023: its 33 pinned entries are now the Rust-owned strict-JSON
+`conformance/discovery/corpus.json`, where the immutable-reference rule (**D4**) runs
+hermetically on every PR, and the fetch — with content-digest verification — lives in
+`parity_harness::discovery::corpus_fetch`.
 
 Every other profile (`default`/`full`/`ci`/`dev-fast`/`mvp-integration`) excludes
 the live set, so those lanes are truthful by **non-selection**: a green fast/CI

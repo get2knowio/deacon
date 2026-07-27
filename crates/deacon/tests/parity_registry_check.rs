@@ -810,6 +810,13 @@ fn no_surface_references_a_removed_binary() {
         // hermetic retirements belong here alongside the live carriers.
         "baseline_drift",
         "baseline_enumeration",
+        // Retired by 025 US7 (T109). The 33 pinned entries moved into the Rust-owned
+        // `conformance/discovery/corpus.json`, where the immutable-reference rule (D4) can
+        // run hermetically on every pull request instead of nowhere. Registered here for
+        // the same reason the hermetic retirements above are: a doc that still tells a
+        // reader to run a deleted script is a lie with a long half-life, and this file's
+        // own baseline enumeration reads the manifest path.
+        "fetch_realworld_corpus",
     ];
     /// Words that mark a mention as historical rather than current-state.
     const RETIREMENT_MARKERS: &[&str] = &[
@@ -916,6 +923,10 @@ fn no_surface_globs_a_removed_path() {
         "fixtures/parity-corpus/errors/*",
         "fixtures/config/basic/devcontainer",
         "fixtures/config/with-variables/devcontainer",
+        // 025 US7 (T109): the Python fetcher is gone; the manifest is
+        // `conformance/discovery/corpus.json` and the fetch lives in
+        // `parity_harness::discovery::corpus_fetch`.
+        "fixtures/parity-corpus/fetch_realworld_corpus.py",
     ];
 
     let mut problems: Vec<String> = Vec::new();

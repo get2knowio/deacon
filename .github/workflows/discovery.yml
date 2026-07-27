@@ -23,20 +23,35 @@
 # and that `deacon --help` gains no discovery surface) and by `discovery_hermetic`, both
 # of which run in the fast lane and need no oracle, Docker, or network.
 #
-# ## Cadence
+# ## Cadence — two schedules, two jobs, two budgets
 #
-# Nightly, offset from the parity lane's 05:00 so the two do not contend for runners.
-# The hermetic configuration-resolution tier gets the whole scheduled budget: at the
-# clarified per-candidate ceilings a single container-backed candidate can consume a sixth
-# of the 30-minute window, so sharing one budget lets the slow tier starve the fast one —
-# and the fast tier is where nearly all the exploration happens (research D10). The
-# container-backed and corpus tiers are selected explicitly via `workflow_dispatch`.
+# **Nightly (`0 7 * * *`)**, offset from the parity lane's 05:00 so the two do not contend
+# for runners. The hermetic configuration-resolution tier gets the whole nightly budget: at
+# the clarified per-candidate ceilings a single container-backed candidate can consume a
+# sixth of the 30-minute window, so sharing one budget lets the slow tier starve the fast
+# one — and the fast tier is where nearly all the exploration happens (research D10).
+#
+# **Weekly (`0 9 * * 0`)**, the network-backed **corpus** canary, on a schedule of its own
+# (T128, FR-056). It is separate from the nightly campaign rather than folded into it for
+# two reasons. It must exist at all: US7 calls the corpus an *ecological canary*, and a
+# canary that runs only when someone remembers to invoke it cannot warn anyone. And it must
+# be weekly rather than nightly: the corpus changes only when someone re-pins it, so nightly
+# runs would mostly re-confirm the previous night at network cost, while the signal being
+# watched for — the ecosystem drifting away from what deacon handles — moves on the order of
+# weeks (research D10).
+#
+# The container-backed tier remains explicitly invoked only, via `workflow_dispatch`.
 name: discovery
 
 on:
-  # Nightly exploratory campaign on the default branch.
   schedule:
+    # Nightly exploratory campaign on the default branch (hermetic tier).
     - cron: '0 7 * * *'
+    # Weekly real-world corpus canary. Sunday, offset from the nightly hour so the two
+    # never overlap even when a nightly run is slow: the `concurrency` group below serializes
+    # them, and a corpus run queued behind a 60-minute nightly would report its own budget
+    # as exhausted for a reason that has nothing to do with the corpus.
+    - cron: '0 9 * * 0'
 
   # Explicit invocation. FR-056 requires the invoked lane to ACCEPT a seed and a budget
   # and to RECORD both; the campaign records them in `conformance/discovery/campaigns.json`
@@ -87,6 +102,12 @@ concurrency:
 jobs:
   campaign:
     name: campaign
+    # Everything EXCEPT the weekly corpus cron. Written as an exclusion rather than as
+    # "run on the nightly cron or a dispatch" so that adding a third schedule later cannot
+    # silently stop this job from running: a new cron would fall through to the nightly
+    # campaign, which is the harmless direction. The corpus job below is the one that must
+    # be opted into explicitly, because it is the one that reaches the network.
+    if: github.event_name != 'schedule' || github.event.schedule != '0 9 * * 0'
     runs-on: ubuntu-latest
     # Above SC-015's 30-minute campaign budget. The budget is enforced by the campaign
     # driver itself, which reports the elapsed number; this is only the backstop for a
@@ -211,5 +232,109 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: discovery-data-root
+          path: conformance/discovery/
+          if-no-files-found: warn
+
+  # The weekly real-world corpus canary (T128, FR-056, research D10).
+  #
+  # A separate job rather than a fifth step of `campaign`, because it has a different
+  # cadence, a different prerequisite (the network), and a different budget. Sharing a job
+  # would mean sharing a schedule, and the whole point of this one is that the corpus does
+  # NOT belong on the nightly clock.
+  #
+  # It gates nothing, exactly like the campaign job: forty differences against the
+  # ecosystem exit 0. Only a machinery failure — an unverifiable oracle, no network, an
+  # invalid data root — is non-zero (FR-058). A red run here blocks no pull request and no
+  # release.
+  #
+  # No Docker setup: the corpus tier is a configuration-resolution differential, so it
+  # brings nothing up. Establishing a precondition this tier does not have would only turn
+  # a missing builder into a confusing failure.
+  corpus:
+    name: corpus canary
+    if: github.event_name == 'schedule' && github.event.schedule == '0 9 * * 0'
+    runs-on: ubuntu-latest
+    # The corpus tier's cost is 33 network round trips plus 33 oracle invocations, not a
+    # 30-minute exploration. This is the backstop for a run that stops making progress,
+    # never the thing that ends a healthy one.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-discovery-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-discovery-
+            ${{ runner.os }}-cargo-
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Provision the pinned oracle
+        # The corpus tier is a differential: it compares deacon against the reference over
+        # inputs nobody here wrote. A missing or mismatched oracle FAILS the run — there is
+        # no skip, because "the ecosystem agrees with us" and "we never compared anything"
+        # must never look alike.
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r .version fixtures/parity-corpus/oracle.json)"
+          echo "Installing @devcontainers/cli@${VERSION} from fixtures/parity-corpus/oracle.json"
+          npm install -g "@devcontainers/cli@${VERSION}"
+
+      - name: Verify oracle version
+        run: devcontainer --version
+
+      - name: Build deacon
+        run: cargo build -p deacon
+
+      - name: Run the weekly corpus canary
+        # The seed is fixed rather than random: this tier draws nothing, so the seed
+        # contributes only to the campaign's derived id, and a fixed one makes consecutive
+        # weekly runs over an unchanged manifest and unchanged pins the SAME campaign —
+        # which is correct, and is what lets the queue's deduplication tell "still
+        # diverging" from "diverged again".
+        run: |
+          cargo run -p parity-harness --bin discovery-campaign -- \
+            --seed 0x0000c0f5 \
+            --tier corpus \
+            --budget-seconds 1800 \
+            --lane scheduled
+
+      - name: Render the findings queue
+        run: cargo run -p deacon-conformance -- discovery report
+
+      - name: Validate the discovery data root
+        # D1–D5 over the record the canary just wrote, including **D4** over any content
+        # digest it recorded at first materialization. A machinery failure, not a finding.
+        run: cargo run -p deacon-conformance -- discovery check
+
+      - name: Upload the corpus canary artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: discovery-corpus-queue
+          path: target/discovery/
+          if-no-files-found: warn
+
+      - name: Upload the written discovery data root
+        # Includes `corpus.json` with any digest recorded at first materialization. Every
+        # later run VERIFIES that digest, so this artifact is the diff a reviewer commits
+        # from — uploaded, never pushed: review is a human act (FR-036).
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: discovery-corpus-data-root
           path: conformance/discovery/
           if-no-files-found: warn

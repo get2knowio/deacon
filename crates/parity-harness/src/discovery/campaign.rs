@@ -8,20 +8,28 @@
 //! tier. Budgets are per-tier rather than shared, because sharing lets the slow tier
 //! starve the fast one — and the fast tier is where nearly all the exploration happens.
 //!
-//! The `corpus` tier (T108) lands with US7 and minimization (T052) with US2. This module
-//! drives the two differential tiers and the `metamorphic` tier (T096).
+//! Minimization (T052) lands with US2. This module drives all four tiers: the two
+//! differential tiers, the `metamorphic` tier (T096), and the network-backed `corpus` tier
+//! (T108).
 //!
-//! ## Two shapes of campaign, one record
+//! ## Three shapes of campaign, one record
 //!
-//! [`run`] dispatches on the tier **before** acquiring any prerequisite, because the
-//! metamorphic tier has none to acquire (research D12): it compares deacon against deacon
-//! over a declared transformation, so there is no oracle to verify, no Docker to probe, and
-//! no network to reach. Routing it through the differential's prerequisite step would make
-//! the one tier a contributor can run with nothing installed depend on everything.
+//! [`run`] dispatches the metamorphic tier **before** acquiring any prerequisite, because
+//! it has none to acquire (research D12): it compares deacon against deacon over a declared
+//! transformation, so there is no oracle to verify, no Docker to probe, and no network to
+//! reach. Routing it through the differential's prerequisite step would make the one tier a
+//! contributor can run with nothing installed depend on everything.
 //!
-//! Both shapes produce the **same** [`Campaign`] / [`CampaignOutcomeReport`] record and
+//! The `corpus` tier dispatches **after** prerequisites, because it needs both the verified
+//! oracle and the network — it is the same deacon-vs-reference comparison the differential
+//! runs, over inputs nobody in this repository wrote. Its inputs are pinned third-party
+//! snapshots rather than generated documents, so it draws no candidates and applies no
+//! mutations; everything downstream of the comparison is shared.
+//!
+//! All three shapes produce the **same** [`Campaign`] / [`CampaignOutcomeReport`] record and
 //! admit through the same [`AdmissionQueue`], so a reader of `campaigns.json` does not need
-//! to know which driver wrote a row, and the admission cap means the same thing on both.
+//! to know which driver wrote a row, and the admission cap means the same thing on all of
+//! them.
 //!
 //! ## What a campaign's exit status means
 //!
@@ -73,6 +81,7 @@ use crate::normalize::NORMALIZER_VERSION;
 use crate::oracle::{Oracle, OraclePin, VerifiedOracle};
 use crate::prereq;
 
+use super::corpus_fetch::{self, EntryStatus};
 use super::differential::{self, Characterization, DifferentialInput};
 use super::metamorphic_run::{self, Sabotage};
 
@@ -153,6 +162,14 @@ pub struct CampaignRun {
     /// Not part of the record — the record's counters are the declared ones — but reported
     /// so a reader can tell "we saw nothing" from "we saw only what we already knew".
     pub characterized_observations: u64,
+    /// Per-entry outcomes of the `corpus` tier, empty for every other tier (FR-051/FR-052).
+    ///
+    /// Reported alongside the counters rather than folded into them because the two
+    /// non-comparing outcomes are *different facts*: an unreachable entry says nothing was
+    /// compared, a digest mismatch says the upstream snapshot is not what was recorded.
+    /// A single "did not run" tally would let content drift at a pinned commit read as a
+    /// flaky network, which is the one confusion an ecological canary cannot afford.
+    pub corpus_statuses: Vec<EntryStatus>,
 }
 
 /// Run one campaign.
@@ -189,6 +206,18 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
     };
     if request.container_backed() {
         prereq::require_docker().await?;
+    }
+    if request.tier == CampaignTier::Corpus {
+        // The network is this tier's prerequisite, and it fails as loudly as a missing
+        // oracle: a corpus campaign with no network reports zero entries, which is
+        // byte-identical to one in which the whole ecosystem agreed with deacon.
+        corpus_fetch::require_git().await?;
+        let Some(oracle) = oracle.as_ref() else {
+            return Err(HarnessError::OracleUnverified {
+                cause: "the corpus tier reached its driver with no verified oracle".to_string(),
+            });
+        };
+        return run_corpus(request, &registry, &grammar, oracle).await;
     }
 
     let pinned_input_set = pinned_input_set(&grammar, oracle.as_ref())?;
@@ -577,6 +606,270 @@ async fn run_metamorphic(
     )
 }
 
+/// The `corpus` tier: deacon against the verified pinned oracle over the pinned real-world
+/// workspace corpus (T108, FR-049 – FR-054a, research D8/D10).
+///
+/// # An ecological canary, not a generator
+///
+/// The inputs are 33 third-party workspace snapshots nobody in this repository wrote, so
+/// nothing is drawn and nothing is mutated: `mutationApplications` is all-zero (present as
+/// explicit zeroes, FR-010) and the plan is the manifest's own size, exactly as the
+/// metamorphic tier's plan is its catalogue's. Using the request's `planned_candidates`
+/// would report a 33-entry tier as having covered 16% of a plan it never had.
+///
+/// # The corpus is never a mutation seed (FR-008a / FR-054a)
+///
+/// It is consumed **here**, as a direct comparison input, and nowhere else. The generator's
+/// seed corpus is five committed fixtures embedded with `include_str!`
+/// (`deacon_conformance::discovery::generate`), so a corpus entry cannot reach it even by
+/// accident: there is no code path from a fetched workspace into the generator, and the
+/// seeds are fixed at compile time rather than discovered at run time.
+///
+/// # Two ways an entry does not get compared, and they are never merged
+///
+/// - **Unreachable** (FR-052) — the snapshot could not be retrieved, or the pinned path
+///   carries no devcontainer configuration at that commit. Nothing was compared.
+/// - **Digest mismatch** (FR-051) — the snapshot was retrieved and is not what the
+///   manifest recorded. It is deliberately *not* compared: attributing a change in the
+///   upstream workspace to a difference between the implementations is exactly the wrong
+///   conclusion, and it is the one a tolerant fetch would invite.
+///
+/// Both are counted into `candidatesDiscardedUnsafe` — the record's "generated but
+/// deliberately not executed" tally, which already carries the differential's timeouts —
+/// and both are named individually on [`CampaignRun::corpus_statuses`], because the
+/// aggregate number cannot tell a reviewer *which* fact occurred.
+///
+/// # Everything after the comparison is shared
+///
+/// FR-054 requires a corpus finding to enter the same pipeline as a generated one, and it
+/// does so by construction rather than by parallel implementation: the same
+/// [`differential::compare`], the same [`Characterization`] tolerance index, the same
+/// [`AdmissionQueue`] deduplication and cap, and the same [`complete`]. The only
+/// corpus-specific thing about a corpus finding is that its witness's `minimalInput` names
+/// the upstream provenance — repository, commit, path, and the verified digest — because a
+/// witness whose input nobody can retrieve names nothing.
+async fn run_corpus(
+    request: &CampaignRequest,
+    registry: &Registry,
+    grammar: &Grammar,
+    oracle: &VerifiedOracle,
+) -> Result<CampaignRun, HarnessError> {
+    let pinned_input_set = pinned_input_set(grammar, Some(oracle))?;
+    let campaign_id = Campaign::derive_id(
+        &request.seed_hex,
+        &pinned_input_set,
+        request.lane,
+        &request.profile,
+        request.tier,
+    );
+
+    let existing =
+        DiscoveryData::load(&request.discovery_dir).map_err(|e| HarnessError::Report {
+            cause: format!(
+                "could not load the discovery data root at {}: {e}",
+                request.discovery_dir.display()
+            ),
+        })?;
+
+    if existing.corpus.is_empty() {
+        // Not a zero-entry campaign. An empty manifest here means the data root did not
+        // load what it should have, and reporting it as a clean run of nothing would be
+        // byte-identical to a run in which every pinned workspace agreed — the exact
+        // indistinguishability this tier exists to prevent.
+        return Err(HarnessError::Report {
+            cause: format!(
+                "the corpus manifest at {} is empty. A campaign over zero entries reports \
+                 the same thing as one in which every entry agreed, so it is refused \
+                 rather than run.",
+                deacon_conformance::discovery::queue::corpus_path(&request.discovery_dir).display()
+            ),
+        });
+    }
+
+    let characterization = Characterization::from_registry(registry);
+    if characterization.is_empty() {
+        tracing::warn!(
+            campaign = %campaign_id,
+            "the tolerance index is empty: every already-characterized divergence will be \
+             reported as new"
+        );
+    }
+
+    let mut queue = AdmissionQueue::new(
+        &existing.findings,
+        &campaign_id,
+        request.budget.admission_cap,
+    );
+    let mut counters = Counters::new();
+    let mut observed: BTreeSet<String> = BTreeSet::new();
+    let mut statuses: Vec<EntryStatus> = Vec::new();
+
+    // An external temp root, reclaimed on both success and unwind. Corpus content is never
+    // vendored (FR-053) and never lands in the repository: materializing under the
+    // workspace would make `git status` the review surface for third-party bytes nobody
+    // reviewed.
+    let fetch_root = tempfile::Builder::new()
+        .prefix("deacon-discovery-corpus-")
+        .tempdir()
+        .map_err(|e| HarnessError::Report {
+            cause: format!("could not create the corpus fetch root: {e}"),
+        })?;
+
+    let wall_clock = Duration::from_secs(request.budget.wall_clock_seconds);
+    let per_candidate = Duration::from_secs(request.budget.per_candidate_seconds);
+    let fetch_bound = per_candidate.max(corpus_fetch::DEFAULT_ENTRY_BOUND);
+    let started = Instant::now();
+
+    for entry in &existing.corpus {
+        if started.elapsed() >= wall_clock {
+            break;
+        }
+        counters.generated += 1;
+
+        let status = corpus_fetch::materialize(entry, fetch_root.path(), fetch_bound).await?;
+        let materialized = match &status {
+            EntryStatus::Materialized(m) => m.clone(),
+            EntryStatus::Unreachable { cause, .. } => {
+                counters.discarded_unsafe += 1;
+                tracing::warn!(
+                    entry = %entry.id,
+                    name = %entry.name,
+                    %cause,
+                    "corpus entry is UNREACHABLE — nothing was compared for it"
+                );
+                statuses.push(status);
+                continue;
+            }
+            EntryStatus::DigestMismatch {
+                expected, actual, ..
+            } => {
+                counters.discarded_unsafe += 1;
+                tracing::warn!(
+                    entry = %entry.id,
+                    name = %entry.name,
+                    %expected,
+                    %actual,
+                    "corpus entry DIGEST MISMATCH — the pinned snapshot is not what was \
+                     recorded, so it is not compared"
+                );
+                statuses.push(status);
+                continue;
+            }
+        };
+
+        let result = differential::compare(
+            DifferentialInput {
+                candidate_id: &entry.id,
+                workspace: &materialized.workspace,
+                deacon: &request.deacon_binary,
+                oracle,
+                bound: per_candidate,
+                report_root: &request.report_root,
+                // A real-world workspace is not deliberately malformed. deacon refusing
+                // one is precisely the news this tier exists to surface, so it must never
+                // be swallowed by the strictness characterization that covers deliberately
+                // invalid candidates (FR-017 read narrowly, on purpose).
+                deliberately_invalid: false,
+            },
+            &characterization,
+        )
+        .await;
+
+        let result = match result {
+            Ok(r) => r,
+            Err(HarnessError::OracleTimeout { .. }) => {
+                counters.timed_out += 1;
+                tracing::debug!(
+                    entry = %entry.id,
+                    "corpus entry exceeded its per-candidate bound"
+                );
+                statuses.push(status);
+                continue;
+            }
+            Err(other) => return Err(other),
+        };
+
+        counters.executed += 1;
+        if result.parse_stage_failure {
+            counters.parse_stage_failures += 1;
+        }
+        counters.characterized += result.characterized_count() as u64;
+        for observation in &result.observations {
+            observed.insert(observation.signature.id.clone());
+        }
+
+        // The witness's input NAMES the upstream provenance rather than embedding the
+        // workspace (FR-054, FR-053): the content is not vendored, so the reproducible
+        // thing is the pin plus the digest that says which bytes were compared.
+        let provenance = serde_json::json!({
+            "corpusEntry": entry.id,
+            "name": entry.name,
+            "repository": entry.repository,
+            "commit": entry.commit,
+            "path": entry.path,
+            "contentDigest": materialized.digest,
+        });
+        for observation in result.new_observations() {
+            let witness = Witness {
+                id: Witness::derived_id(&campaign_id, &entry.id),
+                campaign_id: campaign_id.clone(),
+                // The corpus entry id IS the candidate id for this tier: the input was not
+                // drawn from a stream, it is a pinned third-party snapshot, and naming it
+                // anything else would lose the one thing that reproduces the observation.
+                candidate_id: entry.id.clone(),
+                minimal_input: provenance.clone(),
+                // No reduction is performed, so the input is NOT minimal and says so
+                // (FR-022). A real-world workspace is the least minimal input this feature
+                // has; claiming otherwise would be the exact overstatement FR-022 forbids.
+                is_minimal: false,
+                reduction_steps: Vec::new(),
+                observed_values: ObservedValues {
+                    deacon: observation.observed.deacon.clone(),
+                    reference: observation.observed.reference.clone(),
+                },
+                // No mutation operator produced this input; a third party did.
+                mutation_operators: Vec::new(),
+            };
+            queue.offer(observation.signature.clone(), witness);
+        }
+
+        statuses.push(status);
+    }
+
+    // Record the digests this run settled, but only when the campaign is persisting at all
+    // — an acceptance test running against an isolated root must not rewrite the committed
+    // manifest, for the same reason it must not append to the committed queue.
+    if request.persist {
+        let written =
+            corpus_fetch::record_digests(&request.discovery_dir, &existing.corpus, &statuses)?;
+        if !written.is_empty() {
+            tracing::info!(
+                campaign = %campaign_id,
+                entries = ?written,
+                "recorded a content digest at first materialization; every later fetch \
+                 verifies it"
+            );
+        }
+    }
+
+    let planned = existing.corpus.len() as u64;
+    let mut run = complete(
+        request,
+        &existing.campaigns,
+        Completion {
+            campaign_id,
+            pinned_input_set,
+            counters,
+            observed,
+            queue,
+            // The plan is the manifest — see this function's docs.
+            planned,
+        },
+    )?;
+    run.corpus_statuses = statuses;
+    Ok(run)
+}
+
 /// The seven pinned inputs (FR-002), built identically for every tier.
 ///
 /// `oracle` is `None` for the metamorphic tier, which never invokes the reference — but the
@@ -689,6 +982,8 @@ fn complete(
         admitted: queue.admitted,
         report,
         characterized_observations: counters.characterized,
+        // Filled in by the corpus driver after this returns; every other tier has none.
+        corpus_statuses: Vec::new(),
     })
 }
 

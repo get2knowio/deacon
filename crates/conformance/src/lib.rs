@@ -228,9 +228,9 @@ pub fn discovery_dir_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
 /// imply the registry validator can see the queue, which is exactly what the discovery
 /// root's placement exists to prevent (research D6/D11).
 ///
-/// Variants for **D3** (`promotedTo` resolution) and **D4** (corpus immutability) land
-/// with the user stories that own those rules (T080 / T105);
-/// [`DiscoveryError::class`] already reserves their codes.
+/// The variant for **D3** (`promotedTo` resolution) lands with the user story that owns
+/// that rule (T080); [`DiscoveryError::class`] already reserves its code. **D4** landed
+/// with US7 as [`DiscoveryError::CorpusIntegrity`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DiscoveryError {
     /// **D1** — a record that does not parse, or that parses but is structurally
@@ -288,6 +288,24 @@ pub enum DiscoveryError {
     )]
     ClassificationArity { record: String, cause: String },
 
+    /// **D4** — a corpus entry that does not name a retrievable, verifiable snapshot: a
+    /// `commit` that is not a 40-hex object name (a branch, a tag, `HEAD`, `latest`, an
+    /// abbreviated SHA), a malformed `contentDigest`, an id that does not derive from the
+    /// entry's own substance, a duplicate id or name, or a digest that was recorded and
+    /// then removed.
+    ///
+    /// The first four are answerable from the manifest alone and are checked
+    /// hermetically on every pull request — which is the entire reason the manifest is
+    /// Rust-owned strict JSON rather than a Python tuple (research D8). A validation that
+    /// only runs when the network is up is a validation that does not run.
+    #[error(
+        "corpus entry `{record}`: {cause}. Remedy: pin the entry to a 40-hex commit and \
+         leave `contentDigest` to the fetch — the manifest records provenance, and a \
+         provenance record that names moving content proves nothing about what was \
+         compared."
+    )]
+    CorpusIntegrity { record: String, cause: String },
+
     /// **D5** — a pinned-input-set element naming a revision absent from
     /// `revisions.json`. A finding is a claim about a specific pinned pair of
     /// implementations; a pin nothing records is a claim nothing can be checked against.
@@ -312,6 +330,7 @@ impl DiscoveryError {
             | DiscoveryError::UnresolvableReference { .. }
             | DiscoveryError::UnknownChannel { .. } => "D1",
             DiscoveryError::ClassificationArity { .. } => "D2",
+            DiscoveryError::CorpusIntegrity { .. } => "D4",
             DiscoveryError::StalePin { .. } => "D5",
         }
     }
@@ -324,6 +343,7 @@ impl DiscoveryError {
             | DiscoveryError::UnresolvableReference { record, .. }
             | DiscoveryError::UnknownChannel { record, .. }
             | DiscoveryError::ClassificationArity { record, .. }
+            | DiscoveryError::CorpusIntegrity { record, .. }
             | DiscoveryError::StalePin { record, .. } => record,
         }
     }

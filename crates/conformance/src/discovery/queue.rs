@@ -871,20 +871,21 @@ where
     Ok(value)
 }
 
-/// The loaded discovery data root.
+/// The loaded discovery data root — all **three** collection files.
 ///
-/// `corpus.json` is deliberately **not** loaded here: its [`CorpusEntry`] model and the
-/// **D4** immutable-reference class land with US7 (`corpus.rs`, T105/T106). The file
-/// exists in the data root from T003 so the layout is complete, and wiring it into this
-/// aggregate is a one-line addition once the model exists.
-///
-/// [`CorpusEntry`]: super::corpus
+/// `corpus.json` is loaded here alongside the queue and the campaign history (US7,
+/// T105/T106) precisely so the **D4** immutable-reference class runs wherever [`check`]
+/// runs: hermetically, in the fast lane, on every pull request. A manifest validated only
+/// by the network-backed lane would be validated on the one run per week that can least
+/// afford to discover a mutable pin.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DiscoveryData {
     /// The findings queue, in file order.
     pub findings: Vec<Finding>,
     /// The campaign history, in file order.
     pub campaigns: Vec<Campaign>,
+    /// The pinned real-world corpus manifest, in file order.
+    pub corpus: Vec<super::corpus::CorpusEntry>,
 }
 
 /// Paths of the three discovery data files under `dir`.
@@ -916,10 +917,14 @@ impl DiscoveryData {
 
         let findings_file = findings_path(dir);
         let campaigns_file = campaigns_path(dir);
+        let corpus_file = corpus_path(dir);
         let findings = load_file::<FindingsFile>(&findings_file, &mut errors)
             .map(|f| f.records)
             .unwrap_or_default();
         let campaigns = load_file::<CampaignsFile>(&campaigns_file, &mut errors)
+            .map(|f| f.records)
+            .unwrap_or_default();
+        let corpus = load_file::<super::corpus::CorpusFile>(&corpus_file, &mut errors)
             .map(|f| f.records)
             .unwrap_or_default();
 
@@ -938,6 +943,11 @@ impl DiscoveryData {
             "campaign",
             campaigns.iter().map(|c| c.id.as_str()),
         ));
+        errors.extend(duplicate_id_errors(
+            &corpus_file,
+            "corpus entry",
+            corpus.iter().map(|e| e.id.as_str()),
+        ));
 
         if !errors.is_empty() {
             return Err(LoadError::Schema(errors));
@@ -945,6 +955,7 @@ impl DiscoveryData {
         Ok(DiscoveryData {
             findings,
             campaigns,
+            corpus,
         })
     }
 
@@ -966,6 +977,11 @@ impl DiscoveryData {
     /// Find a campaign by id.
     pub fn campaign(&self, id: &str) -> Option<&Campaign> {
         self.campaigns.iter().find(|c| c.id == id)
+    }
+
+    /// Find a corpus entry by id.
+    pub fn corpus_entry(&self, id: &str) -> Option<&super::corpus::CorpusEntry> {
+        self.corpus.iter().find(|e| e.id == id)
     }
 }
 
@@ -1352,17 +1368,20 @@ impl<'a> RegistryView<'a> {
 /// Reports **all** violations in one pass, matching `validate` — a checker that stops at
 /// the first problem makes fixing a batch an iterative guessing game.
 ///
-/// Currently emits **D1**, **D2**, and **D5**:
+/// Currently emits **D1**, **D2**, **D4**, and **D5**:
 ///
 /// | Class | Checked here |
 /// |---|---|
 /// | **D1** | derived-id mismatch (signature, finding, **split child**, witness, **campaign**); duplicate id; empty `witnesses`; a signature naming an undeclared channel; a `firstObserved`/`lastObserved` that does not resolve **or is not backed by a witness**; a witness naming an unresolvable campaign; a `splitFrom` that is self-referential or unresolvable; a `split` ancestor with fewer than two children; a campaign `profile` absent from `profiles.json`; a non-finite `spaceCoveredFraction`; an empty seed; an empty repo-owned pinned-input element |
 /// | **D2** | a `triaged`/`promoted`/`no-longer-reproducing` finding with no classification; an `untriaged` or `split` finding carrying one; a `promoted` finding classified `normalizer-defect` / `fixture-defect` |
+/// | **D4** | a corpus entry whose `commit` is not a 40-hex object name; a malformed `contentDigest`; a corpus id that does not derive from its own substance; a duplicate corpus id or name |
 /// | **D5** | a `schemaPin` / `prosePin` / `oracleVersion` naming a revision absent from `revisions.json` |
 ///
-/// **D3** (`promotedTo` resolution) and **D4** (corpus immutability) are added by the user
-/// stories that own those rules (T080 / T105); each is an independent pass over the same
-/// loaded data, so adding one changes no existing call site.
+/// **D3** (`promotedTo` resolution) is added by the user story that owns that rule (T080);
+/// it is an independent pass over the same loaded data, so adding it changes no existing
+/// call site. **D4**'s second clause — a digest recorded and then removed — is a property
+/// of a *change* rather than of a file, so it lives in
+/// [`corpus::check_drift`](super::corpus::check_drift), which takes a baseline explicitly.
 ///
 /// D2 is checked here *and* refused by [`Finding::promote`], deliberately: `check` runs
 /// over committed data, so a promotion that only failed here would already have been
@@ -1378,6 +1397,7 @@ pub fn check(data: &DiscoveryData, registry: &RegistryView<'_>) -> Vec<Discovery
     check_findings(data, registry, &mut violations);
     check_classifications(data, &mut violations);
     check_campaigns(data, registry, &mut violations);
+    violations.extend(super::corpus::check(&data.corpus));
     violations
 }
 
@@ -1896,6 +1916,7 @@ mod tests {
         DiscoveryData {
             findings: vec![Finding::newly_admitted(sig, w, &cid("a"))],
             campaigns: vec![campaign("a")],
+            corpus: Vec::new(),
         }
     }
 
@@ -2144,7 +2165,7 @@ mod tests {
         // byte-for-byte, so the first campaign's write is a content diff and not a
         // whole-file reformat.
         let rendered = render_findings(&FindingsFile::default());
-        for name in ["findings.json", "campaigns.json", "corpus.json"] {
+        for name in ["findings.json", "campaigns.json"] {
             let committed =
                 std::fs::read_to_string(crate::default_discovery_dir().join(name)).expect(name);
             assert_eq!(
@@ -2152,6 +2173,27 @@ mod tests {
                 "{name} must match the canonical rendering"
             );
         }
+
+        // `corpus.json` is no longer empty (US7 T106 populated it with the 33 pinned
+        // entries), so the claim is the same one in the form it can still take: the
+        // committed file IS the canonical rendering of its own records. That is what makes
+        // a digest recorded at first materialization a one-line diff rather than a
+        // whole-file reformat — the property this test exists for, restated over content
+        // rather than over emptiness.
+        let corpus_path = crate::default_discovery_dir().join("corpus.json");
+        let committed = std::fs::read_to_string(&corpus_path).expect("corpus.json");
+        let parsed: crate::discovery::corpus::CorpusFile =
+            serde_json::from_str(&committed).expect("corpus.json parses");
+        assert!(
+            !parsed.records.is_empty(),
+            "the corpus manifest is populated; an empty one would make this assertion \
+             vacuous rather than satisfied"
+        );
+        assert_eq!(
+            committed,
+            crate::discovery::corpus::render(&parsed),
+            "corpus.json must match the canonical rendering"
+        );
     }
 
     // --- T020 upsert -------------------------------------------------------

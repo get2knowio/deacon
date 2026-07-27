@@ -528,8 +528,10 @@ non-string coercion, and the invalid-JSON error. (`crates/core/src/secrets.rs`.)
 
 ## Round 7 — real-world corpus sweep (pinned upstream repos)
 
-First sweep using the pinned real-world fetcher
-(`fixtures/parity-corpus/fetch_realworld_corpus.py`), comparing deacon against
+First sweep using the pinned real-world fetcher (then
+`fixtures/parity-corpus/fetch_realworld_corpus.py`, deleted in 025 US7 — the manifest is
+now `conformance/discovery/corpus.json` and the fetch is
+`parity_harness::discovery::corpus_fetch`), comparing deacon against
 `@devcontainers/cli` v0.87.0 on actual `devcontainers/images`,
 `devcontainers/templates`, and `microsoft/*` devcontainers. Four real bugs
 fixed; three diff clusters classified as non-bugs (cold-image caveat /

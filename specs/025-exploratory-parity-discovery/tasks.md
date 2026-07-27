@@ -321,21 +321,21 @@ resolves to an immutable commit, provenance is recorded, and a mutable reference
 
 ### Tests for User Story 7
 
-- [ ] T099 [P] [US7] Immutable-reference test in `crates/deacon/tests/discovery_hermetic.rs`: a branch, tag, `HEAD`, or `latest` is **D4** and rejected hermetically, with no network (SC-012)
-- [ ] T100 [P] [US7] Provenance test in `crates/deacon/tests/discovery_hermetic.rs`: every entry records repository, commit, path, and content digest
-- [ ] T101 [P] [US7] Digest-mismatch test in `crates/deacon/tests/discovery_campaign.rs`: a fetched entry whose digest disagrees fails loudly for that entry (FR-051)
-- [ ] T102 [P] [US7] Unreachable-entry test in `crates/deacon/tests/discovery_campaign.rs`: an unreachable entry is distinguished from one that ran and found nothing (FR-052)
-- [ ] T103 [P] [US7] Pipeline-parity test in `crates/deacon/tests/discovery_campaign.rs`: a corpus finding enters the same minimization, classification, deduplication, and promotion pipeline, naming its upstream provenance
-- [ ] T104 [P] [US7] Not-a-seed test in `crates/deacon/tests/discovery_hermetic.rs`: no corpus entry appears among the generator's mutation seeds (FR-008a/FR-054a)
+- [X] T099 [P] [US7] Immutable-reference test in `crates/deacon/tests/discovery_hermetic.rs`: a branch, tag, `HEAD`, or `latest` is **D4** and rejected hermetically, with no network (SC-012)
+- [X] T100 [P] [US7] Provenance test in `crates/deacon/tests/discovery_hermetic.rs`: every entry records repository, commit, path, and content digest
+- [X] T101 [P] [US7] Digest-mismatch test in `crates/deacon/tests/discovery_campaign.rs`: a fetched entry whose digest disagrees fails loudly for that entry (FR-051)
+- [X] T102 [P] [US7] Unreachable-entry test in `crates/deacon/tests/discovery_campaign.rs`: an unreachable entry is distinguished from one that ran and found nothing (FR-052)
+- [X] T103 [P] [US7] Pipeline-parity test in `crates/deacon/tests/discovery_campaign.rs`: a corpus finding enters the same minimization, classification, deduplication, and promotion pipeline, naming its upstream provenance
+- [X] T104 [P] [US7] Not-a-seed test in `crates/deacon/tests/discovery_hermetic.rs`: no corpus entry appears among the generator's mutation seeds (FR-008a/FR-054a)
 
 ### Implementation for User Story 7
 
-- [ ] T105 [US7] Implement the `CorpusEntry` model and violation class **D4** in `crates/conformance/src/discovery/corpus.rs`, requiring a 40-hex commit
-- [ ] T106 [US7] Port the 33 pinned entries from `fixtures/parity-corpus/fetch_realworld_corpus.py` into `conformance/discovery/corpus.json` with `contentDigest: null`
-- [ ] T107 [US7] Implement fetch with digest verification in `crates/parity-harness/src/discovery/corpus_fetch.rs`: record the digest on first materialization, verify it thereafter
-- [ ] T108 [US7] Add the `corpus` tier to the campaign driver in `crates/parity-harness/src/discovery/campaign.rs`, gated to the network-backed lane
-- [ ] T128 [US7] Add a **weekly** `schedule` trigger for the corpus tier to `.github/workflows/discovery.yml`, separate from the nightly hermetic campaign — an ecological canary that runs only on request cannot warn anyone (FR-056, research D10)
-- [ ] T109 [US7] Resolve the fate of `fixtures/parity-corpus/fetch_realworld_corpus.py` — retire it now that the manifest is Rust-owned, or keep it as an exploratory aid — and update `fixtures/parity-corpus/README.md` and the `res-realworld-corpus-not-vendored` residual accordingly (research D8 left this open deliberately)
+- [X] T105 [US7] Implement the `CorpusEntry` model and violation class **D4** in `crates/conformance/src/discovery/corpus.rs`, requiring a 40-hex commit
+- [X] T106 [US7] Port the 33 pinned entries from `fixtures/parity-corpus/fetch_realworld_corpus.py` into `conformance/discovery/corpus.json` with `contentDigest: null`
+- [X] T107 [US7] Implement fetch with digest verification in `crates/parity-harness/src/discovery/corpus_fetch.rs`: record the digest on first materialization, verify it thereafter
+- [X] T108 [US7] Add the `corpus` tier to the campaign driver in `crates/parity-harness/src/discovery/campaign.rs`, gated to the network-backed lane
+- [X] T128 [US7] Add a **weekly** `schedule` trigger for the corpus tier to `.github/workflows/discovery.yml`, separate from the nightly hermetic campaign — an ecological canary that runs only on request cannot warn anyone (FR-056, research D10)
+- [X] T109 [US7] Resolve the fate of `fixtures/parity-corpus/fetch_realworld_corpus.py` — retire it now that the manifest is Rust-owned, or keep it as an exploratory aid — and update `fixtures/parity-corpus/README.md` and the `res-realworld-corpus-not-vendored` residual accordingly (research D8 left this open deliberately)
 
 **Checkpoint**: All seven stories are independently functional.
 
