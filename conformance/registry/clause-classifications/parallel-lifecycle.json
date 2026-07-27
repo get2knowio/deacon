@@ -4,14 +4,18 @@
     {
       "id": "clc-parallel-lifecycle-db-mysql-u-root-p-my-database-io-380cf840",
       "clause": "clu-parallel-lifecycle-db-mysql-u-root-p-my-database-io-380cf840",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-lifecycle-command-forms"
+      ]
     },
     {
       "id": "clc-parallel-lifecycle-each-command-must-exit-successfully-for-the-stag-desc-3dfa4a54",
       "clause": "clu-parallel-lifecycle-each-command-must-exit-successfully-for-the-stag-desc-3dfa4a54",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ]
     },
     {
       "id": "clc-parallel-lifecycle-each-entry-in-the-object-will-be-run-in-parallel-algo-9fe15a2e",
@@ -24,8 +28,10 @@
     {
       "id": "clc-parallel-lifecycle-the-key-of-the-object-will-be-a-unique-name-for-io-e2509dfa",
       "clause": "clu-parallel-lifecycle-the-key-of-the-object-will-be-a-unique-name-for-io-e2509dfa",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-up-lifecycle-command-forms"
+      ]
     }
   ]
 }

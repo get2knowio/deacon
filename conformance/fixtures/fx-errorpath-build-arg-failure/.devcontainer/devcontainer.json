@@ -1,0 +1,4 @@
+{
+	"name": "ConformanceErrorPathBuildArgFailure",
+	"build": { "dockerfile": "Dockerfile", "args": { "CONF_FAIL": "1" } }
+}

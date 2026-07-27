@@ -1,0 +1,13 @@
+{
+	"name": "extends-compose-features-child",
+	"extends": "./compose-base.json",
+	"features": {
+		"./features/first": {},
+		"./features/second": {}
+	},
+	"overrideFeatureInstallOrder": [
+		"./features/second",
+		"./features/first"
+	],
+	"containerEnv": { "LAYER": "child" }
+}

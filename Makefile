@@ -49,7 +49,7 @@ help: ## Show this help
 	@grep -E '^(test-nextest-fast|test-nextest-unit|test-nextest-docker|test-nextest-long-running|test-nextest-smoke|test-nextest|test-nextest-ci|test-nextest-bg|test-nextest-audit):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
 	@echo "Testing - Other:"
-	@grep -E '^(test-non-smoke|test-smoke|test-parity|test-parity-all|parity):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@grep -E '^(test-non-smoke|test-smoke|test-parity|test-parity-all|test-parity-regressions|parity):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
 	@echo "Code Quality:"
 	@grep -E '^(fmt|clippy|coverage):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
@@ -319,6 +319,20 @@ test-parity-equivalence: ## Produce the equivalent-or-stricter ledger that gates
 	# something, not on every parity run. Needs the pinned oracle; fails loud without it. \
 	cargo run -p parity-harness --bin equivalence-report; \
 	cargo run -p deacon-conformance -- migration check --ledger target/parity/equivalence.json
+
+.PHONY: test-parity-regressions
+test-parity-regressions: ## Prove every observable channel can fail (injected-regression harness)
+	@set -euo pipefail; \
+	# 024-deterministic-conformance-coverage (US6, T137/T139): runs one declarative, \
+	# reversible perturbation per observable channel and writes \
+	# target/conformance/regressions.json. Exits NONZERO on any inert channel (FR-067) — \
+	# a channel no regression can make fail proves nothing, and every green result that \
+	# rests on it is unearned. \
+	# Separate from `test-parity` because it answers a different question: `test-parity` \
+	# asks whether deacon matches the reference, this asks whether the suite that says so \
+	# is capable of noticing that it does not. Needs the pinned oracle + Docker; fails \
+	# loud without either, never skips. \
+	cargo run -p parity-harness --bin coverage-regressions
 
 .PHONY: test-parity-all
 test-parity-all: ## Alias for test-parity (live parity certification)

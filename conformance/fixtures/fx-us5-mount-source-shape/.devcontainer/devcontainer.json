@@ -1,0 +1,11 @@
+{
+	"name": "ConformanceUs5MountSourceShape",
+	"image": "alpine:3.19",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"mounts": [
+		"source=${localWorkspaceFolder}/ro,target=/mnt/ro,type=bind,readonly",
+		"source=${localWorkspaceFolder}/rw,target=/mnt/rw,type=bind",
+		"source=conf-us5-mount-vol,target=/mnt/vol,type=volume"
+	]
+}

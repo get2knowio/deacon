@@ -58,6 +58,24 @@ pub enum RecordType {
     Classification,
     ClauseUnit,
     ClauseClassification,
+    /// A scenario dimension (`sdim-`) — 024-deterministic-conformance-coverage. A
+    /// SEPARATE namespace from [`RecordType::Dimension`] (`dim-`), which stays
+    /// environment-only (research Decision 1).
+    ScenarioDimension,
+    /// An applicability exclusion rule (`rule-`).
+    ApplicabilityRule,
+    /// A hand-selected high-risk triple (`hrt-`).
+    HighRiskTriple,
+    /// A generated coverage obligation (`obl-`); machine-owned inventory, like `cst-`
+    /// and `clu-`.
+    Obligation,
+    /// A hand-authored obligation disposition (`odp-`) — the judgement attached to an
+    /// `obl-` unit. A registry record like any other, so it obeys the same V2 grammar,
+    /// prefix↔type agreement, and cross-namespace uniqueness.
+    ObligationDisposition,
+    /// A hand-authored injected-regression record (`reg-`) — the declarative perturbation
+    /// that proves one observable channel can actually fail (024 US6).
+    Regression,
 }
 
 impl RecordType {
@@ -78,6 +96,12 @@ impl RecordType {
             RecordType::Classification => "cls",
             RecordType::ClauseUnit => "clu",
             RecordType::ClauseClassification => "clc",
+            RecordType::ScenarioDimension => "sdim",
+            RecordType::ApplicabilityRule => "rule",
+            RecordType::HighRiskTriple => "hrt",
+            RecordType::Obligation => "obl",
+            RecordType::ObligationDisposition => "odp",
+            RecordType::Regression => "reg",
         }
     }
 
@@ -98,6 +122,12 @@ impl RecordType {
             "cls" => RecordType::Classification,
             "clu" => RecordType::ClauseUnit,
             "clc" => RecordType::ClauseClassification,
+            "sdim" => RecordType::ScenarioDimension,
+            "rule" => RecordType::ApplicabilityRule,
+            "hrt" => RecordType::HighRiskTriple,
+            "obl" => RecordType::Obligation,
+            "odp" => RecordType::ObligationDisposition,
+            "reg" => RecordType::Regression,
             _ => return None,
         })
     }
@@ -111,7 +141,8 @@ pub enum IdError {
     /// uppercase, or disallowed characters.
     #[error(
         "id {id:?} is malformed: expected \
-         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls|clu|clc)-[a-z0-9]+(-[a-z0-9]+)*$`"
+         `^(rev|src|dim|chan|prof|bhv|case|gap|wvr|ext|cst|cls|clu|clc|sdim|rule|hrt|obl|odp\
+          |reg)-[a-z0-9]+(-[a-z0-9]+)*$`"
     )]
     Format { id: String },
     /// The id is well-formed but its leading segment is not a known record prefix.
@@ -364,7 +395,7 @@ pub struct ExpectedOutcome {
     pub expectation: String,
 }
 
-/// A conformance case record (`case-`) — `cases.json`.
+/// A conformance case record (`case-`) — `cases/<area>.json`.
 ///
 /// A record is either **legacy** (binary-backed, with [`executable`](Self::executable)
 /// and [`outcomes`](Self::outcomes), pointing at a hand-written Rust test) or
@@ -380,9 +411,71 @@ pub struct TestCase {
     /// Linked behaviors; ≥1 required (empty = orphan, violation V3).
     #[serde(default)]
     pub behaviors: Vec<String>,
-    /// Declared context; must intersect every linked behavior's applicability (V10).
+    /// Declared **environment** context; must intersect every linked behavior's
+    /// applicability (V10). Unchanged by 024 — it answers "where can this evidence be
+    /// gathered?", not "what does this case exercise?".
     #[serde(default)]
     pub context: Vec<Condition>,
+    /// Declared **scenario** context (024, data-model.md §3): which value of each
+    /// `sdim-` scenario dimension this case exercises, in declaration order.
+    ///
+    /// Deliberately a separate field from [`context`](Self::context) and a separate
+    /// namespace from `dimensions.json` (research Decision 1): `applies_in_profile`
+    /// treats a condition on an unassigned environment dimension as UNSATISFIED, so
+    /// folding scenario dimensions into the environment model would silently drop
+    /// behaviors out of profile and shrink the very denominator this feature exists to
+    /// expose.
+    ///
+    /// A legacy case may omit it, covering no combination obligation. Well-formedness
+    /// of the assignment — every key a declared `sdim-`, every value one of its declared
+    /// values, the assignment total and not rule-excluded — is V26/V16 (US1), not a
+    /// load-time concern; this field only has to round-trip.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub scenario_context: IndexMap<String, String>,
+    /// The **input class** this case exercises (024 US3, FR-040): which of the five
+    /// kinds of input the operation is fed.
+    ///
+    /// Declared rather than derived. Until US3 the per-operation report *inferred* the
+    /// class from what a record happened to carry, which could only ever distinguish
+    /// three of the five — `boundary` and `unsupported` have no derivable signal at all,
+    /// so they were reported permanently missing however many such cases existed. An
+    /// author who writes a boundary case has made a judgement, and the record is where a
+    /// judgement belongs; inference cannot represent it and a report built on inference
+    /// cannot measure FR-040.
+    ///
+    /// Absent means "infer as before" — the 88 pre-US3 records keep their derived class
+    /// rather than being retro-labelled by a tool.
+    ///
+    /// **Excluded from `caseHash`**: it classifies the input, it does not change what the
+    /// runner feeds the CLI, so labelling a case must never re-record its snapshot (the
+    /// same reasoning that excludes `notes` and `allowedDifferences`, research D3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_class: Option<InputClass>,
+    /// Membership in the **container-backed error-path tier** (024 US4, FR-041).
+    ///
+    /// The tier's cases start from an input configuration read ACCEPTS on both sides and
+    /// then fail — or diverge — at a LATER stage: build, container creation, Feature
+    /// installation, lifecycle execution, or teardown. It exists because parity testing
+    /// historically stopped comparing once both sides accepted a document, which is
+    /// precisely where the reference is most lenient and therefore where a difference is
+    /// most likely to survive unobserved.
+    ///
+    /// **An explicit marker rather than a predicate over
+    /// [`Operation::expect_failure_phase`].** The stage itself is *not* re-declared here —
+    /// V16 requires an error-path case to carry a later-stage `expectFailurePhase` on at
+    /// least one operation, so the phase remains the single record of WHERE (FR-042). What
+    /// the boolean adds is the author's claim of MEMBERSHIP, which a predicate cannot
+    /// express: `case-down-removes-container` declares `expectFailurePhase: exec` on a
+    /// verification step and is not an error-path case, while an error-path case whose
+    /// declared phase was mistakenly left off would silently leave the tier. Deriving
+    /// membership from the phase would make both of those invisible; declaring it makes
+    /// each a validation failure.
+    ///
+    /// **Excluded from `caseHash`** (`case_hash.rs`), for the same reason as
+    /// [`input_class`](Self::input_class): it classifies the case, it does not change what
+    /// the runner feeds the CLI, so joining the tier must never re-record a snapshot.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub error_path_tier: bool,
 
     // ---- Legacy (binary-backed) fields — present iff this is a legacy case ----
     /// The Rust test binary that exercises this case (legacy path only).
@@ -419,6 +512,59 @@ pub struct TestCase {
     /// Human prose; **excluded from `caseHash`** so annotating never re-records (D3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+}
+
+/// The five input classes a case may exercise (FR-040, 024 US3).
+///
+/// A closed set, so "which classes is this operation missing?" is answerable. The names
+/// are the ones the spec uses; the distinctions that matter in practice:
+///
+/// | Class | The input is | The operation |
+/// |---|---|---|
+/// | `valid` | well-formed and supported | succeeds |
+/// | `boundary` | at the edge of the accepted domain (empty collections, extreme values) | still accepts |
+/// | `malformed` | structurally or syntactically wrong | rejects |
+/// | `unsupported` | well-formed but naming something that cannot be provided | rejects, later |
+/// | `reference-lenient` | one the reference accepts and deacon rejects (or the reverse) | differs, with a pinned direction |
+///
+/// `reference-lenient` is the only class that is a statement about **two** implementations,
+/// which is why V16 requires such a case to be a `live-differential`: there is no way to
+/// observe the reference's leniency without running the reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InputClass {
+    /// Well-formed, supported input; the operation succeeds.
+    Valid,
+    /// At the edge of the accepted domain, still accepted.
+    Boundary,
+    /// Structurally or syntactically invalid; rejected.
+    Malformed,
+    /// Well-formed but naming something the implementation cannot provide.
+    Unsupported,
+    /// An input the two implementations judge differently.
+    ReferenceLenient,
+}
+
+impl InputClass {
+    /// Every class, in the order the reports render them.
+    pub const ALL: &'static [InputClass] = &[
+        InputClass::Valid,
+        InputClass::Boundary,
+        InputClass::Malformed,
+        InputClass::Unsupported,
+        InputClass::ReferenceLenient,
+    ];
+
+    /// The wire spelling used in records and reports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            InputClass::Valid => "valid",
+            InputClass::Boundary => "boundary",
+            InputClass::Malformed => "malformed",
+            InputClass::Unsupported => "unsupported",
+            InputClass::ReferenceLenient => "reference-lenient",
+        }
+    }
 }
 
 /// The shape of a [`TestCase`] record: legacy (binary-backed) or declarative
@@ -470,6 +616,28 @@ impl TestCase {
             (false, true) => Ok(CaseKind::Declarative),
         }
     }
+
+    /// Every failure phase this case's operations declare, in operation order, paired with
+    /// the operation that declares it (024 US4).
+    pub fn declared_failure_phases(&self) -> Vec<(&str, FailurePhase)> {
+        self.operations
+            .iter()
+            .filter_map(|op| op.expect_failure_phase.map(|p| (op.id.as_str(), p)))
+            .collect()
+    }
+
+    /// The declared phases that are reached **after** configuration read (FR-041/SC-007).
+    ///
+    /// Non-empty exactly when this case can produce a verdict past the point at which both
+    /// implementations have accepted the document — which is what membership in the
+    /// error-path tier claims and what V16 checks against
+    /// [`error_path_tier`](Self::error_path_tier).
+    pub fn later_stage_failure_phases(&self) -> Vec<(&str, FailurePhase)> {
+        self.declared_failure_phases()
+            .into_iter()
+            .filter(|(_, phase)| !phase.is_configuration_read())
+            .collect()
+    }
 }
 
 /// The consumer subcommand surface an [`Operation`] may invoke (Principle II).
@@ -478,6 +646,12 @@ impl TestCase {
 /// and the validator (`validate.rs`) can emit a located, human-readable message for a
 /// non-consumer subcommand rather than a cryptic enum-variant error (contract
 /// case-schema.md: "each `operations[].subcommand` ∈ consumer surface | new V-series").
+/// `outdated` and `upgrade` joined the list in 024 US3: both are shipped consumer
+/// subcommands (`deacon outdated`, `deacon upgrade`) that resolve and rewrite the
+/// devcontainer **lockfile**, and `sdim-operation` already enumerates them as in-scope
+/// operations (FR-005). They were absent only because no case had exercised them, which
+/// is the hole this story exists to fill. Feature *authoring* (`features test|publish|…`)
+/// stays out, permanently.
 pub const CONSUMER_SUBCOMMANDS: &[&str] = &[
     "up",
     "down",
@@ -485,9 +659,63 @@ pub const CONSUMER_SUBCOMMANDS: &[&str] = &[
     "build",
     "read-configuration",
     "run-user-commands",
+    "outdated",
+    "upgrade",
     "templates-apply",
     "doctor",
 ];
+
+/// The operations for which **no differential against the pinned reference can be run**,
+/// each with the substitution the report must state (spec Assumption 5 / US3 scenario 4).
+///
+/// A differential oracle needs two sides invoked the same way. Two distinct things remove
+/// that possibility, and the note says which applies:
+///
+/// - the reference implements **no such command at all** (`down`, `doctor`); or
+/// - it implements one that **cannot be invoked with the same argv** (`templates apply`,
+///   whose required `--template-id` accepts only an OCI registry reference, while deacon
+///   takes a template path or reference positionally). The runner sends one argv to both
+///   sides by construction, so there is no shared invocation to compare.
+///
+/// Either way the cases are evaluated against the declared **specification expectation**,
+/// and the per-operation report says so — a reader who sees `up` compared against a
+/// reference and `down` not compared at all is owed the reason rather than left to infer
+/// that `down` is simply under-tested.
+///
+/// Hand-listed and checked against the pinned oracle's `--help`, not probed at report
+/// time: the report is hermetic (no ambient inputs, FR-062), and a report whose content
+/// depended on whether a CLI happened to be installed would not be byte-stable.
+pub const OPERATIONS_WITHOUT_RUNNABLE_DIFFERENTIAL: &[(&str, &str)] = &[
+    (
+        "down",
+        "the pinned reference exposes no `down` command — it has no teardown surface at \
+         all — so there is no second side to run and these cases are evaluated against the \
+         declared specification expectation instead of a differential",
+    ),
+    (
+        "doctor",
+        "the pinned reference exposes no `doctor` command — host and runtime diagnostics \
+         are a deacon surface with no reference analogue — so these cases are evaluated \
+         against the declared specification expectation instead of a differential",
+    ),
+    (
+        "templates-apply",
+        "the pinned reference implements `templates apply`, but its required \
+         `--template-id` accepts only an OCI registry reference while deacon takes the \
+         template positionally, so the two cannot be invoked with the one argv the runner \
+         sends to both sides; these cases are evaluated against the declared specification \
+         expectation instead of a differential",
+    ),
+];
+
+/// The substitution note for `operation`, or `None` when a differential against the pinned
+/// reference can be run for it.
+pub fn differential_substitution(operation: &str) -> Option<&'static str> {
+    OPERATIONS_WITHOUT_RUNNABLE_DIFFERENTIAL
+        .iter()
+        .find(|(op, _)| *op == operation)
+        .map(|(_, note)| *note)
+}
 
 /// The subset of [`CONSUMER_SUBCOMMANDS`] that makes the runner TOUCH the container
 /// runtime.
@@ -804,6 +1032,116 @@ pub enum FailurePhase {
     LifecyclePostAttach,
     /// Executing a command in the container.
     Exec,
+}
+
+impl FailurePhase {
+    /// Every phase, in the order the run progresses through them.
+    pub const ALL: &'static [FailurePhase] = &[
+        FailurePhase::ConfigResolution,
+        FailurePhase::Build,
+        FailurePhase::ContainerCreate,
+        FailurePhase::LifecycleOnCreate,
+        FailurePhase::LifecycleUpdateContent,
+        FailurePhase::LifecyclePostCreate,
+        FailurePhase::LifecyclePostStart,
+        FailurePhase::LifecyclePostAttach,
+        FailurePhase::Exec,
+    ];
+
+    /// The wire spelling used in records and diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FailurePhase::ConfigResolution => "config-resolution",
+            FailurePhase::Build => "build",
+            FailurePhase::ContainerCreate => "container-create",
+            FailurePhase::LifecycleOnCreate => "lifecycle:onCreate",
+            FailurePhase::LifecycleUpdateContent => "lifecycle:updateContent",
+            FailurePhase::LifecyclePostCreate => "lifecycle:postCreate",
+            FailurePhase::LifecyclePostStart => "lifecycle:postStart",
+            FailurePhase::LifecyclePostAttach => "lifecycle:postAttach",
+            FailurePhase::Exec => "exec",
+        }
+    }
+
+    /// Whether this phase is reached while the configuration is still being **read**
+    /// (024 US4, SC-007).
+    ///
+    /// Exactly one phase is: [`ConfigResolution`](Self::ConfigResolution). Everything else
+    /// happens after both implementations have accepted the document, which is the entire
+    /// premise of the error-path tier — a case whose verdict is reached here proves nothing
+    /// about the stages where the reference is most lenient.
+    pub fn is_configuration_read(self) -> bool {
+        matches!(self, FailurePhase::ConfigResolution)
+    }
+
+    /// Whether this phase is a lifecycle hook (`onCreate` … `postAttach`).
+    pub fn is_lifecycle(self) -> bool {
+        matches!(
+            self,
+            FailurePhase::LifecycleOnCreate
+                | FailurePhase::LifecycleUpdateContent
+                | FailurePhase::LifecyclePostCreate
+                | FailurePhase::LifecyclePostStart
+                | FailurePhase::LifecyclePostAttach
+        )
+    }
+}
+
+/// The phases a consumer `subcommand` can actually fail in (024 US4, FR-042).
+///
+/// A closed, hand-reviewed mapping rather than an inference, because it answers a question
+/// no output can: `read-configuration` reaches exactly one phase, so an error-path case
+/// built on it is not merely untested — it is *unreachable*, and V16 says so at validation
+/// time instead of letting the case run and report a green nothing. Every subcommand can
+/// fail at `config-resolution`; what differs is how much further it gets.
+///
+/// `down` deliberately stops at `config-resolution`. Teardown has no phase of its own in
+/// the closed set (data-model §8 of 022-conformance-runner, which this feature reuses
+/// rather than extends), so a teardown error-path case declares its failure on the
+/// operation that OBSERVES the teardown — an `exec` into the container that must no longer
+/// exist — which is the shape `case-down-removes-container` already uses.
+pub fn phases_reachable_by(subcommand: &str) -> &'static [FailurePhase] {
+    use FailurePhase::*;
+    match subcommand {
+        // Resolve/merge a configuration (or probe the host) and print. Nothing else runs.
+        "read-configuration" | "doctor" => &[ConfigResolution],
+        // Resolve Feature versions against a registry and rewrite the lockfile; no image
+        // is built and no container is created.
+        "outdated" | "upgrade" => &[ConfigResolution],
+        // Scaffold files into a workspace: resolution, then the apply itself.
+        "templates-apply" => &[ConfigResolution, Exec],
+        // Resolve, then build (Features are layered INTO the image, so a failing
+        // `install.sh` surfaces as a build failure on both sides).
+        "build" => &[ConfigResolution, Build],
+        // The full creation path.
+        "up" => &[
+            ConfigResolution,
+            Build,
+            ContainerCreate,
+            LifecycleOnCreate,
+            LifecycleUpdateContent,
+            LifecyclePostCreate,
+            LifecyclePostStart,
+            LifecyclePostAttach,
+        ],
+        // Hooks in an existing container; the invocation itself can also fail (no container).
+        "run-user-commands" => &[
+            ConfigResolution,
+            LifecycleOnCreate,
+            LifecycleUpdateContent,
+            LifecyclePostCreate,
+            LifecyclePostStart,
+            LifecyclePostAttach,
+            Exec,
+        ],
+        // Attach to a container another operation created and run a command in it.
+        "exec" => &[ConfigResolution, Exec],
+        // See the note above: teardown owns no phase in the closed set.
+        "down" => &[ConfigResolution],
+        // An unknown subcommand is already a V16 failure via `CONSUMER_SUBCOMMANDS`; the
+        // conservative answer keeps this function total without inventing reachability.
+        _ => &[ConfigResolution],
+    }
 }
 
 /// A known gap (`gap-`) — `gaps.json`. Gaps satisfy structural coverage (V5) but
@@ -1904,6 +2242,139 @@ mod tests {
                 r#"{ "id": "clc-x", "clause": "clu-x", "disposition": "UNREVIEWED" }"#
             )
             .is_err()
+        );
+    }
+
+    // -- Error-path tier + failure phases (024 US4, T101) ---------------------------
+
+    /// Exactly one phase is reached while the configuration is still being read. Written
+    /// over `FailurePhase::ALL` so a phase added later must state its side explicitly
+    /// rather than inherit "later stage" by default.
+    #[test]
+    fn only_config_resolution_is_configuration_read() {
+        let read: Vec<&str> = FailurePhase::ALL
+            .iter()
+            .filter(|p| p.is_configuration_read())
+            .map(|p| p.as_str())
+            .collect();
+        assert_eq!(read, vec!["config-resolution"]);
+        assert_eq!(FailurePhase::ALL.len(), 9, "the closed set is nine phases");
+    }
+
+    /// Every phase round-trips through its wire spelling, so `as_str` and the `serde`
+    /// renaming cannot drift apart — the diagnostics V16 emits quote `as_str`, and a
+    /// mismatch would name a phase no record can contain.
+    #[test]
+    fn phase_wire_spellings_match_serde() {
+        for phase in FailurePhase::ALL {
+            let json = serde_json::to_string(phase).expect("phase serializes");
+            assert_eq!(json, format!("\"{}\"", phase.as_str()));
+            let back: FailurePhase =
+                serde_json::from_str(&json).expect("phase round-trips from its own spelling");
+            assert_eq!(back, *phase);
+        }
+    }
+
+    /// Reachability is a real restriction, not a formality: the operations that only read
+    /// configuration reach exactly one phase, so an error-path case cannot be built on
+    /// them, while `up` reaches every stage the tier covers.
+    #[test]
+    fn phase_reachability_restricts_the_read_only_operations() {
+        for subcommand in [
+            "read-configuration",
+            "doctor",
+            "outdated",
+            "upgrade",
+            "down",
+        ] {
+            assert_eq!(
+                phases_reachable_by(subcommand),
+                &[FailurePhase::ConfigResolution],
+                "{subcommand} reaches only configuration resolution"
+            );
+        }
+        let up = phases_reachable_by("up");
+        assert!(up.contains(&FailurePhase::Build));
+        assert!(up.contains(&FailurePhase::ContainerCreate));
+        assert!(up.iter().any(|p| p.is_lifecycle()));
+        assert!(
+            !up.contains(&FailurePhase::Exec),
+            "`up` runs no user command of its own; an exec failure belongs to `exec`"
+        );
+        // Every consumer subcommand can fail at configuration read — nothing runs before it.
+        for subcommand in CONSUMER_SUBCOMMANDS {
+            assert!(
+                phases_reachable_by(subcommand).contains(&FailurePhase::ConfigResolution),
+                "{subcommand} must be able to fail at configuration read"
+            );
+        }
+    }
+
+    /// `errorPathTier` defaults to false and is omitted when false, so the 88 pre-024
+    /// records round-trip byte-identically; setting it round-trips as `errorPathTier`.
+    #[test]
+    fn error_path_tier_defaults_off_and_is_omitted() {
+        let plain = TestCase {
+            id: "case-x".to_string(),
+            operations: vec![Operation {
+                id: "op-1".to_string(),
+                subcommand: "up".to_string(),
+                ..Operation::default()
+            }],
+            ..TestCase::default()
+        };
+        assert!(!plain.error_path_tier);
+        let json = serde_json::to_string(&plain).expect("serializes");
+        assert!(
+            !json.contains("errorPathTier"),
+            "a case that is not in the tier must not carry the key: {json}"
+        );
+
+        let mut tiered = plain.clone();
+        tiered.error_path_tier = true;
+        let json = serde_json::to_string(&tiered).expect("serializes");
+        assert!(json.contains("\"errorPathTier\":true"), "{json}");
+        let back: TestCase = serde_json::from_str(&json).expect("round-trips");
+        assert!(back.error_path_tier);
+    }
+
+    /// The two phase accessors report per-operation, and the later-stage filter drops
+    /// exactly the configuration-read declarations.
+    #[test]
+    fn later_stage_phases_exclude_configuration_read() {
+        let case = TestCase {
+            id: "case-x".to_string(),
+            operations: vec![
+                Operation {
+                    id: "op-read".to_string(),
+                    subcommand: "read-configuration".to_string(),
+                    expect_failure_phase: Some(FailurePhase::ConfigResolution),
+                    ..Operation::default()
+                },
+                Operation {
+                    id: "op-up".to_string(),
+                    subcommand: "up".to_string(),
+                    expect_failure_phase: Some(FailurePhase::LifecyclePostCreate),
+                    ..Operation::default()
+                },
+                Operation {
+                    id: "op-quiet".to_string(),
+                    subcommand: "up".to_string(),
+                    ..Operation::default()
+                },
+            ],
+            ..TestCase::default()
+        };
+        assert_eq!(
+            case.declared_failure_phases(),
+            vec![
+                ("op-read", FailurePhase::ConfigResolution),
+                ("op-up", FailurePhase::LifecyclePostCreate),
+            ]
+        );
+        assert_eq!(
+            case.later_stage_failure_phases(),
+            vec![("op-up", FailurePhase::LifecyclePostCreate)]
         );
     }
 }

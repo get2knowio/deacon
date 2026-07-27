@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-ports-forward",
+      "behaviors": [
+        "bhv-ports-forward-declared"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "integration_auto_forward"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-exit-code",
+          "expectation": "exits 0 with the declared port forwarded"
+        }
+      ]
+    },
+    {
+      "id": "case-readconfig-surface",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "integration_read_configuration"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-exit-code",
+          "expectation": "exits 0 for a well-formed configuration"
+        },
+        {
+          "channel": "chan-stdout",
+          "expectation": "emits the resolved configuration as a single JSON document"
+        }
+      ]
+    }
+  ]
+}

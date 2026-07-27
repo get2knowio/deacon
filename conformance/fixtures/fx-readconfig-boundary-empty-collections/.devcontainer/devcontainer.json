@@ -1,0 +1,11 @@
+{
+	"name": "boundary-empty-collections",
+	"image": "alpine:3.19",
+	"features": {},
+	"forwardPorts": [],
+	"containerEnv": {},
+	"remoteEnv": {},
+	"mounts": [],
+	"runArgs": [],
+	"customizations": {}
+}

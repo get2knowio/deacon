@@ -44,6 +44,7 @@ use serde_json::{Map, Value};
 
 use crate::HarnessError;
 use crate::evidence::{NormalizedChannelEvidence, RawChannelEvidence};
+use crate::exec::Side;
 
 // ===========================================================================
 // Declarative conformance runner: THE single channel-normalization entry point
@@ -310,6 +311,44 @@ pub fn path_env_segmented(path_value: &Value, tokens: &TokenMap) -> Value {
     Value::Array(segments)
 }
 
+/// **Rule `user_default_root`, declarative half** (024 US5, action `canonicalize`, scope
+/// `channel:chan-container-state` `field:/user` + `field:/userSpec/name`): an EMPTY
+/// container user is spelled `root`.
+///
+/// Docker records "the image's default user" as the empty string, and both CLIs mean the
+/// same thing by it — but they do not always write the same one. Measured at oracle 0.87.0
+/// over a Feature-extended image: deacon leaves `Config.User` empty, the reference's
+/// generated Dockerfile sets `USER root`, and the two containers run as the same user.
+/// Comparing the raw spelling reports a difference with no observable consequence, which
+/// RULES.md places out of scope entirely.
+///
+/// The same equivalence the legacy [`diff_states`] has always applied ([`norm_user`]);
+/// this is the declarative channel's half of it, so one rule covers both comparison paths
+/// instead of one path quietly comparing something the other does not. It CANONICALIZES —
+/// nothing is removed, a genuinely non-root user still compares, and the rewrite is
+/// confined to the exact value `""` on two named fields.
+fn default_user_root(value: &Value) -> Value {
+    let Value::Object(map) = value else {
+        return value.clone();
+    };
+    let mut out = map.clone();
+    if let Some(Value::String(user)) = map.get("user") {
+        if user.is_empty() {
+            out.insert("user".to_string(), Value::String("root".to_string()));
+        }
+    }
+    if let Some(Value::Object(spec)) = map.get("userSpec") {
+        let mut spec = spec.clone();
+        if matches!(spec.get("name"), None | Some(Value::Null))
+            && spec.get("uid") == Some(&Value::Null)
+        {
+            spec.insert("name".to_string(), Value::String("root".to_string()));
+        }
+        out.insert("userSpec".to_string(), Value::Object(spec));
+    }
+    Value::Object(out)
+}
+
 /// THE single channel-normalization entry point for the declarative runner
 /// (Constitution VIII — one normalizer). Applies the per-channel named rules
 /// (contract observer-channel.md) to a channel's [`RawChannelEvidence`], yielding
@@ -320,6 +359,7 @@ pub fn normalize_channel(
     channel: &str,
     raw: &RawChannelEvidence,
     tokens: &TokenMap,
+    side: Side,
 ) -> NormalizedChannelEvidence {
     debug_assert_eq!(
         channel, raw.channel,
@@ -329,7 +369,7 @@ pub fn normalize_channel(
         channel: raw.channel.clone(),
         operation: raw.operation.clone(),
         present: raw.present,
-        value: apply_channel_rules(channel, &raw.value, tokens),
+        value: apply_channel_rules(channel, &raw.value, tokens, side),
     }
 }
 
@@ -351,7 +391,7 @@ pub fn tokens_for_channel(channel: &str, workspace: &Path) -> TokenMap {
 
 /// Apply the named rules the contract lists for `channel` (observer-channel.md). An
 /// unknown channel is identity (never blanket-removed).
-fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap) -> Value {
+fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap, side: Side) -> Value {
     use deacon_conformance::model::{
         CHAN_CONTAINER_STATE, CHAN_EXIT_CODE, CHAN_FILE_CONTENT, CHAN_FILESYSTEM, CHAN_IMAGE,
         CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_STDERR, CHAN_STDOUT,
@@ -364,7 +404,9 @@ fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap) -> Value
         // The resolved-configuration document: the SAME named rule chain the legacy
         // `config`/`merged_config` entry points apply, so the two comparison paths
         // share ONE definition of equivalence (constitution VIII, 023 T062).
-        CHAN_STRUCTURED_OUTPUT => config_document_rules(&path_token(value, tokens)),
+        CHAN_STRUCTURED_OUTPUT => {
+            config_document_rules(&path_token(value, tokens), side, DocumentBlock::Wrapper)
+        }
         CHAN_FILE_CONTENT => null_preserving(&path_token(value, tokens)),
         CHAN_FILESYSTEM => path_token(value, tokens),
         CHAN_IMAGE => normalize_image(value, tokens),
@@ -374,10 +416,14 @@ fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap) -> Value
         // `chan-container-state`: `workspace_basename_token` (carried by the token map
         // from `tokens_for_channel`) + `path_token` over the whole snapshot — object KEYS
         // included, so mount destinations keyed by the container-side workspace path
-        // normalize on both sides — then `null_preserving`. NOTHING is removed: labels,
-        // entrypoint, cmd and networks are emitted verbatim and any characterized
-        // difference is covered by a scoped, backed `allowedDifference` (024 Phase 4).
-        CHAN_CONTAINER_STATE => null_preserving(&path_token(value, tokens)),
+        // normalize on both sides — then `container_hostname_token` (024 US5: the one
+        // variable two containers can never agree on, REWRITTEN rather than deleted with
+        // `PATH` and `HOME` alongside it) and `null_preserving`. NOTHING is removed:
+        // env, labels, entrypoint, cmd and networks are emitted verbatim and any
+        // characterized difference is covered by a scoped, backed `allowedDifference`.
+        CHAN_CONTAINER_STATE => null_preserving(&default_user_root(&container_hostname_token(
+            &path_token(value, tokens),
+        ))),
         _ => value.clone(),
     }
 }
@@ -433,7 +479,7 @@ fn normalize_injected_process(value: &Value, tokens: &TokenMap) -> Value {
 /// being empty, and hid `configFilePath` outright. What replaces it is
 /// [`drop_absent_optional`]: a finite, enumerated key list, dropped only when the value
 /// carries no information. A field NOT on that list now surfaces, which is the point.
-pub fn config(case: &str, raw: &str) -> Result<Value, HarnessError> {
+pub fn config(case: &str, raw: &str, side: Side) -> Result<Value, HarnessError> {
     let v = parse(case, raw)?;
     let inner = match &v {
         Value::Object(o) => match o.get("configuration") {
@@ -442,12 +488,16 @@ pub fn config(case: &str, raw: &str) -> Result<Value, HarnessError> {
         },
         _ => v.clone(),
     };
-    Ok(config_document_rules(&inner))
+    Ok(config_document_rules(
+        &inner,
+        side,
+        DocumentBlock::Configuration,
+    ))
 }
 
 /// Normalize the `mergedConfiguration` block (Tier 1b): the same named rule chain
 /// applied to that block. A non-object top-level is a normalization failure.
-pub fn merged_config(case: &str, raw: &str) -> Result<Value, HarnessError> {
+pub fn merged_config(case: &str, raw: &str, side: Side) -> Result<Value, HarnessError> {
     let v = parse(case, raw)?;
     let block = match &v {
         Value::Object(o) => o
@@ -461,7 +511,26 @@ pub fn merged_config(case: &str, raw: &str) -> Result<Value, HarnessError> {
             });
         }
     };
-    Ok(config_document_rules(&block))
+    Ok(config_document_rules(&block, side, DocumentBlock::Merged))
+}
+
+/// Which resolved-configuration block a normalization is being applied to.
+///
+/// The two blocks are NOT interchangeable for [`drop_absent_optional`] (024 US5, T123):
+/// `configuration` is an echo of what the author wrote, so an empty value there is
+/// authorship information; `mergedConfiguration` is synthesized by both CLIs, so an empty
+/// value there is a computed default on both sides.
+///
+/// [`DocumentBlock::Wrapper`] is the whole CLI document, where each block is resolved by
+/// its own key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentBlock {
+    /// The `configuration` block (or a document already unwrapped to it).
+    Configuration,
+    /// The `mergedConfiguration` block (or a document already unwrapped to it).
+    Merged,
+    /// The whole CLI document, carrying `configuration` and/or `mergedConfiguration`.
+    Wrapper,
 }
 
 /// THE named rule chain for a resolved-configuration document — the SINGLE definition
@@ -469,10 +538,15 @@ pub fn merged_config(case: &str, raw: &str) -> Result<Value, HarnessError> {
 /// `chan-structured-output` channel (constitution VIII: one normalizer, not two).
 ///
 /// In order: [`devcontainer_id_token`] (rewrite), [`drop_absent_optional`] (drop, finite
-/// enumerated key set), then [`null_preserving`] — which is identity and exists to state,
-/// at the end of the chain, that NOTHING else is removed.
-pub fn config_document_rules(value: &Value) -> Value {
-    null_preserving(&drop_absent_optional(&devcontainer_id_token(value)))
+/// enumerated key set, narrowed to deacon's `configuration` block), then
+/// [`null_preserving`] — which is identity and exists to state, at the end of the chain,
+/// that NOTHING else is removed.
+pub fn config_document_rules(value: &Value, side: Side, block: DocumentBlock) -> Value {
+    null_preserving(&drop_absent_optional(
+        &devcontainer_id_token(value),
+        side,
+        block,
+    ))
 }
 
 /// **Rule `drop_absent_optional`** (023 T062, action `drop`, scope
@@ -496,7 +570,29 @@ pub fn config_document_rules(value: &Value) -> Value {
 /// **It compensates for a deacon defect and is deleted when that defect is fixed** —
 /// deacon should apply `skip_serializing_if` so absent optionals are omitted, matching
 /// the reference. Tracked in `specs/023-migrate-parity-to-conformance/tasks.md#T111`.
-pub fn drop_absent_optional(value: &Value) -> Value {
+///
+/// # NARROWED in 024 US5 (T123): deacon's `configuration` block only
+///
+/// The rule used to run on BOTH sides of every differential. That is what made the
+/// three FR-055 states indistinguishable: an authored `"forwardPorts": null`, an authored
+/// `"forwardPorts": []`, and an omitted `forwardPorts` all ended as "the key is absent on
+/// both sides", so the comparison could not tell them apart and neither could a reader of
+/// the evidence. The rule was, in effect, deleting the reference's answer to the question.
+///
+/// It now applies only where its own justification holds:
+/// - **`configuration`, deacon's side** — the block deacon serializes unconditionally.
+///   The reference's `configuration` is an ECHO of the authored document, so an empty
+///   value there is the author's, and eliding it destroys information the reference took
+///   care to preserve.
+/// - **`mergedConfiguration`, both sides** — both CLIs synthesize this block and both
+///   emit computed empties in it (the pinned reference emits `containerEnv: {}`,
+///   `remoteEnv: {}`, `portsAttributes: {}` for a configuration that authors none), so an
+///   empty value there is a default on either side rather than an authorship signal.
+///
+/// The consequence is deliberate and is the point of the narrowing: a configuration that
+/// AUTHORS an empty or null property now surfaces a divergence, because deacon cannot
+/// distinguish it from an omission and the reference can.
+pub fn drop_absent_optional(value: &Value, side: Side, block: DocumentBlock) -> Value {
     // ANCHOR the rule at its declared scope — `field:/configuration` and
     // `field:/mergedConfiguration` — not at whatever object it happens to be handed.
     //
@@ -515,6 +611,13 @@ pub fn drop_absent_optional(value: &Value) -> Value {
         if !wrapped.is_empty() {
             let mut out = map.clone();
             for field in wrapped {
+                let field_block = match field {
+                    "configuration" => DocumentBlock::Configuration,
+                    _ => DocumentBlock::Merged,
+                };
+                if !applies_to(side, field_block) {
+                    continue;
+                }
                 if let Some(inner) = map.get(field) {
                     out.insert(
                         field.to_string(),
@@ -525,7 +628,21 @@ pub fn drop_absent_optional(value: &Value) -> Value {
             return Value::Object(out);
         }
     }
+    if !applies_to(side, block) {
+        return value.clone();
+    }
     drop_absent_optional_scoped(value, DropScope::Root)
+}
+
+/// Whether [`drop_absent_optional`] applies to `block` on `side` — the whole of the 024
+/// US5 narrowing, in one place a reviewer can read.
+fn applies_to(side: Side, block: DocumentBlock) -> bool {
+    match block {
+        DocumentBlock::Configuration => side == Side::Deacon,
+        DocumentBlock::Merged => true,
+        // A wrapper reaching here has neither block key, so there is nothing to elide.
+        DocumentBlock::Wrapper => false,
+    }
 }
 
 /// The document fields this rule is registered against (`field:/configuration`,
@@ -823,20 +940,86 @@ pub fn summarize(divs: &[ConfigDivergence]) -> String {
 // ported — divergence classification moves to the waiver system (US2).
 // ===========================================================================
 
-/// Env keys present in every container / runtime-injected; not meaningful for
-/// cross-CLI outcome parity. Subtracted before diffing env.
+/// Env keys the LEGACY `diff_states` comparison subtracts before diffing env.
+///
+/// They are NOT removed at capture (024 US5, T123) — see [`is_noise_env_key`].
 pub const NOISE_ENV_KEYS: &[&str] = &["PATH", "HOME", "HOSTNAME", "TERM", "container"];
 
-/// **NAMED, SCOPED legacy rule `drop_noise_env` — chan-container-state ONLY** (research
-/// D6, FR-029). Whether `key` is a runtime-injected env var present in every container
-/// with no cross-CLI outcome meaning ([`NOISE_ENV_KEYS`]). This is the ONLY sanctioned
-/// env subtraction, scoped to the legacy observable-state channel and carrying the
-/// rationale above. The NEW per-channel `chan-injected-process` normalization
-/// ([`path_env_segmented`] + [`null_preserving`]) NEVER blanket-removes env — it
-/// preserves every var and characterizes intentional differences via scoped
-/// allowed-differences (US4), never a blanket ignore list.
+/// **NAMED, SCOPED legacy rule `drop_noise_env` — the legacy [`diff_states`] COMPARISON
+/// only** (research D6, FR-029). Whether `key` is one of [`NOISE_ENV_KEYS`].
+///
+/// # NARROWED in 024 US5 (T123): comparison-time, not capture-time
+///
+/// This rule used to run inside [`container_state`], i.e. at CAPTURE. That made its
+/// registered scope (`channel:chan-container-state`) a false statement about its reach:
+/// the declarative `chan-container-state` observer DELEGATES to [`container_state`], so
+/// the five variables were removed from the declarative channel's evidence too — and one
+/// of them is `PATH`, which FR-050 requires be compared, including the segments a Feature
+/// contributes. A field a case cannot see is a field no case can compare, and the
+/// removal was invisible in the case record.
+///
+/// The subtraction now happens where its justification actually holds: inside
+/// [`diff_states`], the legacy observable-state comparison the two surviving live
+/// binaries drive. Their verdicts are unchanged. The declarative channel captures every
+/// variable, and the one variable that genuinely cannot agree across two containers —
+/// `HOSTNAME`, which Docker sets to the container's short id — is REWRITTEN by the named
+/// [`container_hostname_token`] rule rather than removed.
 pub fn is_noise_env_key(key: &str) -> bool {
     NOISE_ENV_KEYS.contains(&key)
+}
+
+/// **Rule `container_hostname_token`** (024 US5, T123, action `rewrite`, scope
+/// `channel:chan-container-state`): rewrite a container-id-shaped `HOSTNAME` value to
+/// `<CONTAINER_HOSTNAME>`.
+///
+/// Docker defaults a container's hostname to its own 12-character short id, so two
+/// containers created by two CLIs from the same configuration ALWAYS disagree here, for a
+/// reason that says nothing about either CLI. The retired capture-time `drop_noise_env`
+/// handled this by deleting the variable outright — along with `PATH` and `HOME`, which
+/// carry real information.
+///
+/// Rewrite, never delete, and only when the value LOOKS like a container id: a hostname
+/// the configuration actually set (`runArgs: ["--hostname", "dev"]`) is not 12 hex
+/// characters, so it is left alone and compared. Applied to the `env` array entry and the
+/// derived `envMap` value, which are two encodings of the same observation.
+fn container_hostname_token(value: &Value) -> Value {
+    fn is_container_id(v: &str) -> bool {
+        v.len() == 12 && v.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
+    }
+    const TOKEN: &str = "<CONTAINER_HOSTNAME>";
+
+    let Value::Object(map) = value else {
+        return value.clone();
+    };
+    let mut out = map.clone();
+    if let Some(Value::Array(items)) = map.get("env") {
+        out.insert(
+            "env".to_string(),
+            Value::Array(
+                items
+                    .iter()
+                    .map(
+                        |item| match item.as_str().and_then(|s| s.strip_prefix("HOSTNAME=")) {
+                            Some(v) if is_container_id(v) => {
+                                Value::String(format!("HOSTNAME={TOKEN}"))
+                            }
+                            _ => item.clone(),
+                        },
+                    )
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(Value::Object(env_map)) = map.get("envMap") {
+        let mut env_map = env_map.clone();
+        if let Some(Value::String(v)) = env_map.get("HOSTNAME") {
+            if is_container_id(v) {
+                env_map.insert("HOSTNAME".to_string(), Value::String(TOKEN.to_string()));
+            }
+        }
+        out.insert("envMap".to_string(), Value::Object(env_map));
+    }
+    Value::Object(out)
 }
 
 /// Normalized single-mount state.
@@ -964,15 +1147,12 @@ pub fn container_state(case: &str, raw: &Value) -> Result<StateSnapshot, Harness
         }
     }
 
-    // Legacy chan-container-state env subtraction via the NAMED, SCOPED rule
-    // `drop_noise_env` ([`is_noise_env_key`]) — the only sanctioned env removal (D6).
-    let env = str_array(&raw["Config"]["Env"])
-        .into_iter()
-        .filter(|e| {
-            let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e.as_str());
-            !is_noise_env_key(key)
-        })
-        .collect();
+    // Env VERBATIM (024 US5, T123). `drop_noise_env` used to subtract five variables
+    // HERE, at capture, which also stripped them from the declarative
+    // `chan-container-state` evidence (this function is what that observer delegates to)
+    // — including `PATH`, the field FR-050 exists to compare. The subtraction now happens
+    // in [`diff_states`], the legacy comparison whose justification it was written for.
+    let env = str_array(&raw["Config"]["Env"]).into_iter().collect();
 
     // Labels VERBATIM (024 Phase 4): the `strip_intentional_labels` prefix-drop is
     // retired. Capture removes nothing; a characterized identity-label difference is
@@ -1037,6 +1217,16 @@ fn str_array(v: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// **Rule `compose_project_prefix`** (registered in 024 US5, T123, action `rewrite`,
+/// scope `channel:chan-container-state`): strip a Compose project's `<project>_` prefix
+/// from a network or volume name so two CLIs that derive different project names still
+/// compare on the resource.
+///
+/// It was applied here since the observable-state port and was NOT in the rule registry —
+/// an unregistered rewrite is exactly what V24 exists to make impossible to miss, and its
+/// effect (discarding the project identity with no trace in the evidence) was invisible.
+/// It is registered now, and the derived `composeProjectResources` field records the
+/// project name it stripped, so the rewrite is auditable from the snapshot alone.
 fn strip_project_prefix(name: &str, project: &str) -> String {
     if !project.is_empty() {
         if let Some(rest) = name.strip_prefix(&format!("{project}_")) {
@@ -1046,11 +1236,29 @@ fn strip_project_prefix(name: &str, project: &str) -> String {
     name.to_string()
 }
 
-/// An empty `Config.User` means "image default" (root for the Linux bases used
-/// here); treat "" and "root" as equivalent so a cosmetic difference is not
+/// **Rule `user_default_root`** (registered in 024 US5, T123, action `canonicalize`,
+/// scope `field:/user`): an empty `Config.User` means "image default" (root for the Linux
+/// bases used here); treat "" and "root" as equivalent so a cosmetic difference is not
 /// flagged, while a real non-root `remoteUser`/`containerUser` still diverges.
+///
+/// This is the LEGACY [`diff_states`] half of the rule; [`default_user_root`] is the
+/// declarative channel's half, so one registered rule covers both comparison paths rather
+/// than one path quietly comparing something the other does not. Registered in 024 US5
+/// because it was an unregistered equivalence — a comparison-time collapse no reviewer
+/// could find from the rule list.
 fn norm_user(u: &str) -> &str {
     if u.is_empty() { "root" } else { u }
+}
+
+/// The legacy `drop_noise_env` subtraction over a captured env set (024 US5, T123).
+fn without_noise_env(env: &BTreeSet<String>) -> BTreeSet<String> {
+    env.iter()
+        .filter(|e| {
+            let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e.as_str());
+            !is_noise_env_key(key)
+        })
+        .cloned()
+        .collect()
 }
 
 fn env_map(set: &BTreeSet<String>) -> BTreeMap<String, String> {
@@ -1101,10 +1309,13 @@ pub fn diff_states(deacon: &StateSnapshot, upstream: &StateSnapshot) -> Vec<Dive
         }
     }
 
+    // The legacy `drop_noise_env` subtraction, applied HERE (024 US5, T123) rather than
+    // at capture: the five runtime-injected variables are removed from this comparison
+    // only, so the declarative channel still sees every variable.
     diff_kv(
         "env",
-        &env_map(&deacon.env),
-        &env_map(&upstream.env),
+        &env_map(&without_noise_env(&deacon.env)),
+        &env_map(&without_noise_env(&upstream.env)),
         &mut out,
     );
     diff_kv("label", &deacon.labels, &upstream.labels, &mut out);
@@ -1238,7 +1449,12 @@ mod tests {
             present: false,
             value: Value::Null,
         };
-        let out = normalize_channel(CHAN_STRUCTURED_OUTPUT, &not_captured, &TokenMap::new());
+        let out = normalize_channel(
+            CHAN_STRUCTURED_OUTPUT,
+            &not_captured,
+            &TokenMap::new(),
+            Side::Deacon,
+        );
         assert!(
             !out.present,
             "present:false (not captured) is preserved (FR-018)"
@@ -1253,7 +1469,7 @@ mod tests {
             CHAN_IMAGE,
             json!({ "labels": {"a":"1"}, "env": ["A=1"], "entrypoint": ["/bin/sh"] }),
         );
-        let n = normalize_channel(CHAN_IMAGE, &img, &tokens);
+        let n = normalize_channel(CHAN_IMAGE, &img, &tokens, Side::Deacon);
         assert!(n.value.get("labels").is_some() && n.value.get("env").is_some());
         assert!(
             n.value.get("entrypoint").is_some(),
@@ -1264,7 +1480,7 @@ mod tests {
             CHAN_PROCESS_GRAPH,
             json!({ "mounts": [{"source":"/s","target":"/t"}], "networks": ["n"], "volumes": ["v"] }),
         );
-        let g = normalize_channel(CHAN_PROCESS_GRAPH, &graph, &tokens);
+        let g = normalize_channel(CHAN_PROCESS_GRAPH, &graph, &tokens, Side::Deacon);
         assert_eq!(g.value["mounts"].as_array().unwrap().len(), 1);
         assert!(g.value.get("networks").is_some() && g.value.get("volumes").is_some());
         // Injected process: env + command survive.
@@ -1272,7 +1488,7 @@ mod tests {
             CHAN_INJECTED_PROCESS,
             json!({ "env": {"A":"1"}, "command": ["run"], "path": "/usr/bin:/bin" }),
         );
-        let i = normalize_channel(CHAN_INJECTED_PROCESS, &inj, &tokens);
+        let i = normalize_channel(CHAN_INJECTED_PROCESS, &inj, &tokens, Side::Deacon);
         assert!(i.value.get("env").is_some() && i.value.get("command").is_some());
     }
 
@@ -1332,17 +1548,24 @@ mod tests {
                 json!({ "root": "/tmp/ws", "keep": null }),
             ),
             &tokens,
+            Side::Deacon,
         );
         assert_eq!(s.value["root"], json!("<WORKSPACE>"));
         assert_eq!(s.value["keep"], Value::Null, "null preserved");
         // exit-code: no rule (a number is untouched).
-        let e = normalize_channel(CHAN_EXIT_CODE, &raw(CHAN_EXIT_CODE, json!(0)), &tokens);
+        let e = normalize_channel(
+            CHAN_EXIT_CODE,
+            &raw(CHAN_EXIT_CODE, json!(0)),
+            &tokens,
+            Side::Deacon,
+        );
         assert_eq!(e.value, json!(0));
         // stdout: path_token on the string.
         let o = normalize_channel(
             CHAN_STDOUT,
             &raw(CHAN_STDOUT, json!("at /tmp/ws/x")),
             &tokens,
+            Side::Deacon,
         );
         assert_eq!(o.value, json!("at <WORKSPACE>/x"));
     }
@@ -1350,11 +1573,13 @@ mod tests {
     #[test]
     fn normalizer_version_is_bumped_for_named_rules() {
         assert_eq!(
-            NORMALIZER_VERSION, "5",
-            "the 024 review bounded `drop_absent_optional` to the document root plus \
-             `hostRequirements`/`portsAttributes`; it previously elided an enumerated key \
-             name at ANY depth, including inside `customizations` — a change to what \
-             \"equal\" means, so every recorded snapshot must go stale and be re-reviewed"
+            NORMALIZER_VERSION, "6",
+            "024 US5 (T123) narrowed `drop_noise_env` from capture to the legacy \
+             comparison, added `container_hostname_token`, narrowed \
+             `drop_absent_optional` to deacon's `configuration` block, and registered the \
+             previously unregistered `compose_project_prefix` / `user_default_root` — a \
+             change to what \"equal\" means, so every recorded snapshot must go stale and \
+             be re-reviewed"
         );
     }
 
@@ -1420,11 +1645,13 @@ mod tests {
             CHAN_CONTAINER_STATE,
             &state("deacon-conf-aaa"),
             &tokens_for_channel(CHAN_CONTAINER_STATE, Path::new("/tmp/deacon-conf-aaa")),
+            Side::Deacon,
         );
         let b = apply_channel_rules(
             CHAN_CONTAINER_STATE,
             &state("deacon-conf-bbb"),
             &tokens_for_channel(CHAN_CONTAINER_STATE, Path::new("/tmp/deacon-conf-bbb")),
+            Side::Deacon,
         );
         assert_eq!(a, b, "two temp workspaces must normalize equal");
         assert_eq!(
@@ -1456,7 +1683,7 @@ mod tests {
             "hostRequirements": { "gpu": null, "cpus": 4 },
             "list_keeps_nulls": [1, null, ""]
         }"#;
-        let normalized = config("drop", raw).expect("normalize");
+        let normalized = config("drop", raw, Side::Deacon).expect("normalize");
         let obj = normalized.as_object().expect("object");
 
         // Enumerated + absent → removed.
@@ -1495,7 +1722,7 @@ mod tests {
             "hostRequirements": { "gpu": null, "cpus": 4 },
             "portsAttributes": { "3000": { "label": "", "protocol": "https" } }
         }"#;
-        let obj = config("bounded", raw).expect("normalize");
+        let obj = config("bounded", raw, Side::Deacon).expect("normalize");
 
         // Root: enumerated + absent → elided.
         assert!(!obj.as_object().expect("object").contains_key("image"));
@@ -1531,8 +1758,8 @@ mod tests {
         let wrapped = r#"{ "configuration": { "name": "x" }, "configFilePath": "/p" }"#;
         let bare = r#"{ "name": "x" }"#;
         assert_eq!(
-            config("w", wrapped).unwrap(),
-            config("b", bare).unwrap(),
+            config("w", wrapped, Side::Deacon).unwrap(),
+            config("b", bare, Side::Deacon).unwrap(),
             "the reference's {{configuration}} wrapper must be unwrapped to match deacon's bare output"
         );
     }
@@ -1542,7 +1769,7 @@ mod tests {
         // The literal `${devcontainerId}` is an EXACT string match, never a pattern, so
         // it is safe to rewrite anywhere.
         let raw = r#"{ "a": "id-${devcontainerId}-x", "name": "n-${devcontainerId}" }"#;
-        let n = config("dyn", raw).unwrap();
+        let n = config("dyn", raw, Side::Deacon).unwrap();
         assert_eq!(n["a"], json!("id-<ID>-x"));
         assert_eq!(n["name"], json!("n-<ID>"));
     }
@@ -1556,7 +1783,7 @@ mod tests {
             "mounts": [ "source=vol_0123456789ab_tail,target=/d,type=volume" ],
             "customizations": { "vscode": { "digest": "0123456789ab" } }
         }"#;
-        let n = config("dyn", raw).unwrap();
+        let n = config("dyn", raw, Side::Deacon).unwrap();
         assert_eq!(
             n["mounts"][0],
             json!("source=vol_<ID>_tail,target=/d,type=volume"),
@@ -1571,18 +1798,28 @@ mod tests {
 
         // The masking the narrow rule prevents: two DIFFERENT digests outside the id
         // fields must still diverge.
-        let a = config("a", r#"{ "customizations": { "d": "0123456789ab" } }"#).unwrap();
-        let b = config("b", r#"{ "customizations": { "d": "ffffffffffff" } }"#).unwrap();
+        let a = config(
+            "a",
+            r#"{ "customizations": { "d": "0123456789ab" } }"#,
+            Side::Deacon,
+        )
+        .unwrap();
+        let b = config(
+            "b",
+            r#"{ "customizations": { "d": "ffffffffffff" } }"#,
+            Side::Deacon,
+        )
+        .unwrap();
         assert_eq!(diff(&a, &b).len(), 1, "distinct digests must not collapse");
     }
 
     #[test]
     fn normalization_failure_on_invalid_json() {
-        let err = config("bad", "{ not json").expect_err("must fail");
+        let err = config("bad", "{ not json", Side::Deacon).expect_err("must fail");
         assert!(matches!(err, HarnessError::Normalization { .. }));
         // merged_config on a non-object also fails, not falls back.
         assert!(matches!(
-            merged_config("arr", "[1,2,3]"),
+            merged_config("arr", "[1,2,3]", Side::Deacon),
             Err(HarnessError::Normalization { .. })
         ));
     }
@@ -1592,7 +1829,7 @@ mod tests {
         // `empty` is NOT on the enumerated list, so it survives — only listed keys with
         // an absent value are elided (023 T062).
         let raw = r#"{ "configuration": {"name":"x"}, "mergedConfiguration": { "onCreateCommand": "echo hi", "empty": {}, "image": null } }"#;
-        let n = merged_config("m", raw).unwrap();
+        let n = merged_config("m", raw, Side::Deacon).unwrap();
         assert_eq!(n, json!({ "onCreateCommand": "echo hi", "empty": {} }));
     }
 
@@ -1622,8 +1859,8 @@ mod tests {
     fn an_absent_enumerated_optional_no_longer_diverges() {
         // `image` IS on the enumerated list: absent on one side, omitted on the other →
         // the same resolved configuration, so no divergence.
-        let a = config("a", r#"{ "name": "x", "image": null }"#).unwrap();
-        let b = config("b", r#"{ "name": "x" }"#).unwrap();
+        let a = config("a", r#"{ "name": "x", "image": null }"#, Side::Deacon).unwrap();
+        let b = config("b", r#"{ "name": "x" }"#, Side::Deacon).unwrap();
         assert!(diff(&a, &b).is_empty());
     }
 
@@ -1631,8 +1868,13 @@ mod tests {
     fn an_absent_key_not_on_the_enumerated_list_still_diverges() {
         // The whole safety property of retiring `prune` (023 T062): an unlisted key is
         // COMPARED even when empty, so a newly added property cannot vanish silently.
-        let a = config("a", r#"{ "name": "x", "someNewProperty": null }"#).unwrap();
-        let b = config("b", r#"{ "name": "x" }"#).unwrap();
+        let a = config(
+            "a",
+            r#"{ "name": "x", "someNewProperty": null }"#,
+            Side::Deacon,
+        )
+        .unwrap();
+        let b = config("b", r#"{ "name": "x" }"#, Side::Deacon).unwrap();
         let divs = diff(&a, &b);
         assert_eq!(divs.len(), 1, "{divs:?}");
         assert_eq!(divs[0].kind, DiffKind::DeaconOnly);
@@ -1642,8 +1884,8 @@ mod tests {
     #[test]
     fn a_populated_enumerated_optional_is_always_compared() {
         // The value guard: the rule elides an ABSENT `appPort`, never a populated one.
-        let a = config("a", r#"{ "appPort": [3000] }"#).unwrap();
-        let b = config("b", r#"{ }"#).unwrap();
+        let a = config("a", r#"{ "appPort": [3000] }"#, Side::Deacon).unwrap();
+        let b = config("b", r#"{ }"#, Side::Deacon).unwrap();
         let divs = diff(&a, &b);
         assert_eq!(divs.len(), 1);
         assert_eq!(divs[0].path, "appPort");
@@ -1653,10 +1895,11 @@ mod tests {
     fn config_file_path_is_no_longer_dropped() {
         // `prune` removed `configFilePath` unconditionally; it is now a compared value,
         // so the reference emitting it and deacon not is REPORTED (research D3).
-        let deacon = config("a", r#"{ "name": "x" }"#).unwrap();
+        let deacon = config("a", r#"{ "name": "x" }"#, Side::Deacon).unwrap();
         let reference = config(
             "b",
             r#"{ "name": "x", "configFilePath": "/w/.devcontainer/devcontainer.json" }"#,
+            Side::Deacon,
         )
         .unwrap();
         let divs = diff(&deacon, &reference);
@@ -1672,7 +1915,7 @@ mod tests {
     }
 
     #[test]
-    fn container_state_subtracts_only_the_enumerated_noise_env() {
+    fn container_state_captures_every_env_var_verbatim() {
         let inspect = json!({
             "Config": {
                 "Env": ["PATH=/bin", "FOO=bar", "HOME=/root"],
@@ -1689,10 +1932,14 @@ mod tests {
             ]
         });
         let snap = container_state("state", &inspect).expect("snapshot");
-        // Noise env keys removed; meaningful ones kept.
+        // 024 US5 (T123): CAPTURE removes NOTHING. `drop_noise_env` used to subtract five
+        // variables here, which also removed them from the declarative
+        // `chan-container-state` evidence — `PATH` among them, the field FR-050 exists to
+        // compare. The subtraction now happens in `diff_states` (see
+        // `diff_states_subtracts_the_noise_env_keys`).
         assert!(snap.env.contains("FOO=bar"));
-        assert!(!snap.env.iter().any(|e| e.starts_with("PATH=")));
-        assert!(!snap.env.iter().any(|e| e.starts_with("HOME=")));
+        assert!(snap.env.contains("PATH=/bin"));
+        assert!(snap.env.contains("HOME=/root"));
         // EVERY label is kept — the app label AND the CLI-namespaced ones (024 Phase 4;
         // see `container_state_captures_every_label_verbatim`).
         assert_eq!(
@@ -1718,6 +1965,63 @@ mod tests {
         assert!(!divs.iter().any(|d| d.field == "user"));
         // Env value differs → flagged.
         assert!(divs.iter().any(|d| d.field == "env:A"));
+    }
+
+    /// 024 US5 (T123): the `drop_noise_env` subtraction moved from CAPTURE to HERE, so the
+    /// legacy comparison's verdicts are unchanged while the declarative channel keeps
+    /// every variable.
+    #[test]
+    fn diff_states_subtracts_the_noise_env_keys() {
+        let mut deacon = StateSnapshot::default();
+        let mut upstream = StateSnapshot::default();
+        for key in NOISE_ENV_KEYS {
+            deacon.env.insert(format!("{key}=deacon"));
+            upstream.env.insert(format!("{key}=upstream"));
+        }
+        deacon.env.insert("REAL=one".to_string());
+        upstream.env.insert("REAL=two".to_string());
+
+        let divs = diff_states(&deacon, &upstream);
+        assert_eq!(
+            divs.iter()
+                .filter(|d| d.field.starts_with("env:"))
+                .map(|d| d.field.as_str())
+                .collect::<Vec<_>>(),
+            vec!["env:REAL"],
+            "every noise key differs on both sides and none is reported; only the real \
+             variable is"
+        );
+    }
+
+    /// The `container_hostname_token` rewrite (024 US5, T123): a container-id-shaped
+    /// hostname is TOKENIZED, a configured one is compared.
+    #[test]
+    fn container_hostname_is_tokenized_only_when_it_looks_like_a_container_id() {
+        let state = |host: &str| {
+            json!({
+                "env": [format!("HOSTNAME={host}"), "FOO=bar".to_string()],
+                "envMap": { "HOSTNAME": host, "FOO": "bar" },
+            })
+        };
+        let a = container_hostname_token(&state("0123456789ab"));
+        let b = container_hostname_token(&state("fedcba987654"));
+        assert_eq!(
+            a, b,
+            "two container short ids compare equal after the rewrite"
+        );
+        assert_eq!(a["envMap"]["HOSTNAME"], json!("<CONTAINER_HOSTNAME>"));
+        assert_eq!(
+            a["env"],
+            json!(["HOSTNAME=<CONTAINER_HOSTNAME>", "FOO=bar"]),
+            "the array encoding is rewritten too, and no entry is removed"
+        );
+
+        let configured = container_hostname_token(&state("my-dev-box"));
+        assert_eq!(
+            configured["envMap"]["HOSTNAME"],
+            json!("my-dev-box"),
+            "a hostname the configuration set is not 12 hex characters and is compared"
+        );
     }
 
     // The following four cases preserve the pure-differ coverage that previously

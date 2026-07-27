@@ -268,8 +268,10 @@ mod tests {
         let reg = ParityRegistry::load().expect("embedded registry must parse");
         assert_eq!(
             reg.live_binaries.len(),
-            6,
-            "5 Docker scenario binaries + the declarative runner"
+            7,
+            "5 Docker scenario binaries + the two declarative runners (024 T015/T020 split \
+             `parity_conformance_runner` into a config-only driver and the Docker-backed \
+             `parity_conformance_docker`)"
         );
         assert!(
             reg.live_binaries

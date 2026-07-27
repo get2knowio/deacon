@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "sdim-config-source",
+      "kind": "scenario",
+      "description": "How the configuration defines the container image or service: a prebuilt image reference, a Dockerfile build, or a Compose project.",
+      "values": ["image", "dockerfile", "compose"]
+    },
+    {
+      "id": "sdim-container-state",
+      "kind": "scenario",
+      "description": "The state of the target container when the operation begins: absent, stopped, running, or running against a configuration that has since changed.",
+      "values": ["none", "stopped", "running", "running-stale-config"]
+    },
+    {
+      "id": "sdim-features",
+      "kind": "scenario",
+      "description": "The Feature composition the scenario exercises, including how install order is decided.",
+      "values": [
+        "none",
+        "single",
+        "multiple-declared-order",
+        "multiple-dependency-order",
+        "lockfile"
+      ]
+    },
+    {
+      "id": "sdim-layering",
+      "kind": "scenario",
+      "description": "How the effective configuration is assembled: a single document, an extends chain, a command-line overlay, or a layer derived from image metadata.",
+      "values": ["single", "extends-chain", "cli-overlay", "image-metadata"]
+    },
+    {
+      "id": "sdim-operation",
+      "kind": "scenario",
+      "description": "The consumer operation under test. This dimension partitions the combination space; it is never itself a pair member.",
+      "values": [
+        "read-configuration",
+        "build",
+        "up",
+        "exec",
+        "run-user-commands",
+        "down",
+        "outdated",
+        "upgrade",
+        "templates-apply",
+        "doctor"
+      ]
+    },
+    {
+      "id": "sdim-output-mode",
+      "kind": "scenario",
+      "description": "Whether the operation's result is observed as a structured document or as human-readable output.",
+      "values": ["structured", "human"]
+    }
+  ]
+}

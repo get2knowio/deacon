@@ -17,7 +17,9 @@
 //!    idiom (`gated(`, `upstream_available(`, the retired `DEACON_PARITY` opt-in
 //!    plumbing) (FR-023).
 
-use parity_harness::registry::{self, META_TEST_BINARIES, ParityRegistry, parse_nextest_profiles};
+use parity_harness::registry::{
+    self, META_TEST_BINARIES, ParityRegistry, filter_selects, parse_nextest_profiles,
+};
 use parity_harness::workspace_root;
 
 /// 1. Registry ↔ test-file bidirectional match.
@@ -317,6 +319,185 @@ fn waivers_live_in_conformance_registry_not_legacy_locations() {
     );
 }
 
+/// T022 (024, Block B): the Docker-backed conformance driver is wired in all three places
+/// — the parity registry, the test tree, and every nextest profile.
+///
+/// `check_nextest_profiles` above already enforces this generically, so why name one binary?
+/// Because this binary is the one whose absence is *plausible*. It was split out of
+/// `parity_conformance_runner` specifically so the Docker-backed resource groups could be
+/// scheduled and budgeted separately (FR-077/077a), and a half-landed split — source file
+/// present, registry entry or profile filter missing — reads as "the Docker cases are
+/// covered" while nothing selects them under `--profile parity`, or while a hermetic lane
+/// silently picks up a binary that needs a daemon. The generic check reports that as one
+/// line in a list of profile problems; this reports it as what it is.
+#[test]
+fn the_docker_conformance_driver_is_registered_selected_and_excluded() {
+    const DOCKER_DRIVER: &str = "parity_conformance_docker";
+
+    let root = workspace_root();
+    let reg = ParityRegistry::load().unwrap_or_else(|e| panic!("registry.json: {e}"));
+
+    // 1. Registered as a live binary, and declared Docker-requiring.
+    let entry = reg
+        .live_binaries
+        .iter()
+        .find(|b| b.name == DOCKER_DRIVER)
+        .unwrap_or_else(|| {
+            panic!(
+                "`{DOCKER_DRIVER}` must be registered in fixtures/parity-corpus/registry.json \
+                 live_binaries; found {:?}",
+                reg.live_names()
+            )
+        });
+    assert!(
+        entry.docker_required,
+        "`{DOCKER_DRIVER}` drives the docker-shared / docker-exclusive resource groups, so \
+         its registry entry must declare docker_required = true"
+    );
+
+    // 2. Its sibling's claim must be true too. The split exists so that
+    //    `parity_conformance_runner` keeps only the config-only groups — if it were still
+    //    Docker-requiring, the split bought nothing and the registry would be lying again
+    //    in the same way it did before 024 T020.
+    let runner = reg
+        .live_binaries
+        .iter()
+        .find(|b| b.name == "parity_conformance_runner")
+        .expect("`parity_conformance_runner` must stay registered");
+    assert!(
+        !runner.docker_required,
+        "`parity_conformance_runner` drives only the config-only resource groups (`none`, \
+         `fs-heavy`); docker_required must be false"
+    );
+
+    // 3. A source file exists.
+    let source = root
+        .join("crates/deacon/tests")
+        .join(format!("{DOCKER_DRIVER}.rs"));
+    assert!(
+        source.is_file(),
+        "`{DOCKER_DRIVER}` is registered but has no source file: {}",
+        source.display()
+    );
+
+    // 4. `[profile.parity]` selects it, and NO other profile does.
+    let toml_path = root.join(".config/nextest.toml");
+    let toml_text =
+        std::fs::read_to_string(&toml_path).unwrap_or_else(|e| panic!("read {toml_path:?}: {e}"));
+    let profiles =
+        parse_nextest_profiles(&toml_text).unwrap_or_else(|e| panic!("parse nextest.toml: {e}"));
+
+    for (profile, filter) in &profiles.default_filters {
+        let Some(filter) = filter else {
+            // A profile with no default-filter selects everything — which for a live binary
+            // is exactly the untruthful state the exclusions exist to prevent.
+            assert_eq!(
+                profile, "parity",
+                "[profile.{profile}] declares no default-filter, so it would select the live \
+                 binary `{DOCKER_DRIVER}`"
+            );
+            continue;
+        };
+        let selected = filter_selects(filter, DOCKER_DRIVER)
+            .unwrap_or_else(|e| panic!("evaluate [profile.{profile}] default-filter: {e}"));
+        if profile == "parity" {
+            assert!(
+                selected,
+                "[profile.parity] must select `{DOCKER_DRIVER}` — it is the only sanctioned \
+                 entry point for the live Docker conformance tier"
+            );
+        } else {
+            assert!(
+                !selected,
+                "[profile.{profile}] selects the live binary `{DOCKER_DRIVER}`; every non-parity \
+                 lane must be truthful by NON-SELECTION (FR-014) — a green fast/CI run must \
+                 never imply the Docker conformance tier ran"
+            );
+        }
+    }
+}
+
+/// T022 (024, Constitution II): this feature's dev-only commands never reach the shipped
+/// `deacon` CLI — at ANY depth of the command tree.
+///
+/// `coverage` / `coverage-regressions` are `deacon-conformance` bin surfaces: they generate
+/// the obligation denominator and the injected-regression report, which are contributor
+/// tooling about how deacon is *tested*, not consumer functionality described by the
+/// containers.dev spec. A conformance-tracking command that ships is a scope violation
+/// users can then depend on, which makes it expensive to withdraw.
+///
+/// The existing `the_shipped_cli_gained_no_subcommand_from_this_feature` checks the
+/// top-level column only. That was sufficient when every dev-only tool was a top-level
+/// group, but `coverage` has SUBCOMMANDS (`generate`/`check`/`report`/`scaffold`), and the
+/// cheapest way to leak one is to hang it off an existing consumer command rather than add
+/// a new top-level entry. So this walks one level deeper.
+#[test]
+fn no_coverage_or_regression_command_reaches_the_shipped_cli() {
+    /// The 024 command surfaces, plus the nouns they would most plausibly leak as.
+    const DEV_ONLY: &[&str] = &[
+        "coverage",
+        "coverage-regressions",
+        "regressions",
+        "obligations",
+        "obligation",
+        "scenario",
+        "applicability",
+    ];
+
+    fn subcommands_of(args: &[&str]) -> Vec<String> {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_deacon"))
+            .args(args)
+            .arg("--help")
+            .output()
+            .unwrap_or_else(|e| panic!("`deacon {} --help` runs: {e}", args.join(" ")));
+        assert!(
+            output.status.success(),
+            "`deacon {} --help` must succeed",
+            args.join(" ")
+        );
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .skip_while(|l| !l.trim_start().starts_with("Commands:"))
+            .skip(1)
+            .take_while(|l| !l.trim().is_empty())
+            .filter_map(|l| l.split_whitespace().next())
+            .map(str::to_string)
+            .collect()
+    }
+
+    let top = subcommands_of(&[]);
+    // Positive control: a parse that silently found nothing would pass vacuously.
+    assert!(
+        top.iter().any(|c| c == "up"),
+        "expected to parse the real subcommand list from `deacon --help`; got {top:?}"
+    );
+
+    let mut leaked: Vec<String> = Vec::new();
+    for dev_only in DEV_ONLY {
+        if top.iter().any(|c| c == dev_only) {
+            leaked.push((*dev_only).to_string());
+        }
+    }
+    // One level deeper: a dev-only command hung off a consumer command leaks just as far.
+    for parent in &top {
+        if parent == "help" {
+            continue;
+        }
+        for nested in subcommands_of(&[parent.as_str()]) {
+            if DEV_ONLY.contains(&nested.as_str()) {
+                leaked.push(format!("{parent} {nested}"));
+            }
+        }
+    }
+
+    assert!(
+        leaked.is_empty(),
+        "dev-only conformance command(s) reached the shipped consumer CLI: {leaked:?}. \
+         `coverage` and the regression tooling belong to `deacon-conformance` \
+         (constitution II)."
+    );
+}
+
 /// Guard: the tests dir this file audits is the real one (fail loud if the anchor
 /// ever drifts, rather than silently auditing nothing).
 #[test]
@@ -592,9 +773,9 @@ fn the_surviving_set_is_mutually_consistent() {
 
     assert_eq!(
         reg.live_names().len(),
-        6,
-        "the surviving live set is 5 Docker scenario binaries + the declarative runner; \
-         found {:?}",
+        7,
+        "the surviving live set is 5 Docker scenario binaries + the declarative runner's \
+         two halves (config-only + Docker-backed, 024 T015/T016); found {:?}",
         reg.live_names()
     );
     assert!(

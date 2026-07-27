@@ -1,0 +1,4 @@
+{
+	"name": "discovery-named-subfolder",
+	"image": "alpine:3.19"
+}

@@ -327,6 +327,7 @@ fn certify_fixture(
     let reg = Registry::load(registry_dir).expect("fixture registry loads");
     certify(
         &reg,
+        TODAY,
         &fx.inputs(),
         &no_clause_inputs(),
         Path::new("/nonexistent-conformance/snapshots"),
@@ -481,11 +482,21 @@ fn well_formed_not_applicable_and_non_testable_never_block_certify() {
 }
 
 #[test]
-fn real_registry_certifies_clean_now_that_the_gate_is_wired() {
-    // SC-008: the real, fully-classified committed registry certifies with exit 0 even
-    // though `certify` now enforces V11–V14. Drives the actual binary with NO
-    // `--registry` override, so it uses the real `conformance/registry` + its sibling
-    // committed inventory + vendored schemas (the true release-gate configuration).
+fn the_real_registry_blocks_only_on_declared_coverage_gaps() {
+    // SC-008, restated for 024 US2. Until this feature, the real registry certified with
+    // exit 0 and an EMPTY blocking set, and that was the assertion here.
+    //
+    // 024 US2 changed what the registry claims, not what the gate does. Dispositioning
+    // every generated obligation (T071) recorded, as data, that no case yet enters any
+    // operation's pairwise scenario space — ten `gap-pairwise-*` records. A gap always
+    // blocks, so the real registry now legitimately does NOT certify. That is the
+    // feature's whole point ("the hole blocks the release"), and weakening it back to
+    // green would be the one move the model exists to prevent.
+    //
+    // What still MUST hold is that nothing *else* blocks: every V11–V15 constraint/clause
+    // join, every in-profile behavior, and every obligation disposition is clean, so the
+    // blocking set is exactly the declared coverage gaps and nothing has quietly broken
+    // behind them. That is the invariant this test now pins.
     let bin = env!("CARGO_BIN_EXE_conformance");
     let output = Command::new(bin)
         .arg("--today")
@@ -498,20 +509,30 @@ fn real_registry_certifies_clean_now_that_the_gate_is_wired() {
     let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
     assert_eq!(
         code,
-        0,
-        "the real registry must certify clean now that V11-V14 gate certify; stdout: {stdout}\nstderr: {}",
+        1,
+        "the real registry carries declared coverage gaps, so it must not certify; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
     let doc: serde_json::Value = serde_json::from_str(&stdout).expect("certify --json on stdout");
-    assert_eq!(doc["certified"], true, "real registry must be certified");
+    assert_eq!(doc["certified"], false);
+    let blocking = doc["blocking"].as_array().expect("blocking array");
+    assert!(!blocking.is_empty(), "the declared gaps must be listed");
+    let non_gap: Vec<&serde_json::Value> = blocking.iter().filter(|b| b["kind"] != "gap").collect();
     assert!(
-        doc["blocking"]
-            .as_array()
-            .expect("blocking array")
-            .is_empty(),
-        "the real registry has zero blocking items, got: {:?}",
-        doc["blocking"]
+        non_gap.is_empty(),
+        "nothing but a declared gap may block the real registry — an uncovered behavior, \
+         a constraint/clause join violation, or an undispositioned obligation would mean \
+         something broke behind the gaps: {non_gap:#?}"
     );
+    for entry in blocking {
+        let id = entry["id"].as_str().unwrap_or_default();
+        assert!(
+            id.starts_with("gap-pairwise-"),
+            "the only declared gaps are the per-operation pairwise ones; {id} is new and \
+             needs its own justification"
+        );
+    }
 }
 
 // ===========================================================================
@@ -562,6 +583,7 @@ fn certify_clauses(registry: &Registry) -> deacon_conformance::certify::Certific
     // No constraint inventory here — scope that join out; exercise ONLY the clause gate.
     certify(
         registry,
+        TODAY,
         &InventoryInputs {
             schemas_dir: Path::new("/nonexistent-conformance/schemas"),
             inventory_file: Path::new("/nonexistent-conformance/inventory/constraints.json"),

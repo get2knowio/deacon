@@ -1,0 +1,34 @@
+{
+  "id": "wvr-container-metadata-label-content",
+  "behaviors": [
+    "bhv-container-metadata-label-content"
+  ],
+  "scope": {
+    "kind": "corpus_case",
+    "corpus": "us5",
+    "case": "container-metadata-label-content"
+  },
+  "expect": {
+    "kind": "field-divergence",
+    "ours": [
+      {
+        "mounts": [
+          "source=/abs/host/path/ro,target=/mnt/ro,type=bind,readonly"
+        ]
+      }
+    ],
+    "reference": [
+      {
+        "id": "./features/conf-env"
+      },
+      {
+        "mounts": [
+          "source=${localWorkspaceFolder}/ro,target=/mnt/ro,type=bind,readonly"
+        ]
+      }
+    ]
+  },
+  "rationale": "Two measured differences in the `devcontainer.metadata` label, both deacon defects, both needing a `parity-drift` GitHub issue. (1) FEATURE ENTRIES: over a configuration installing one local Feature, oracle 0.87.0 writes `[{\"id\":\"./features/conf-env\"},{\"containerEnv\":{…}}]` and deacon writes `[{\"containerEnv\":{…}}]` — deacon's metadata does not record which Features the image carries, which is what the label exists to carry forward. (2) SUBSTITUTED PATHS: for `mounts` declared with `${localWorkspaceFolder}`, the reference records the unsubstituted template and deacon records the substituted absolute host path, so the label pins the building machine's filesystem layout into the image. Waived rather than fixed here because both are metadata-emission changes in `up`'s image-metadata writer with their own test surface, and this story's scope is making the difference VISIBLE — before 024 US5 the label was compared only on the cases that happened to reach it, and the second difference was invisible because the mount source was collapsed to its leaf component. Scoped to the one label path; every other label, and the whole rest of the container state, stays compared. Self-invalidating: the moment deacon's metadata matches, this waiver reports stale.",
+  "added": "2026-07-26",
+  "expires": "2027-01-26"
+}

@@ -65,11 +65,17 @@ use crate::model::{
     BehaviorUnit, CONSUMER_SUBCOMMANDS, CONTAINER_SUBCOMMANDS, CaseKind, CertificationProfile,
     Classification, ClauseClassification, ClauseInventory, ClauseUnit, Condition,
     ConstraintInventory, ConstraintUnit, Decision, Disposition, DocumentScope, FILESYSTEM_CHANNELS,
-    OBSERVED_CHANNELS, OracleType, RecordType, ReferenceStatus, RevisionKind, SpecManifest,
-    SpecStatus, Strength, Testability, parse_id,
+    OBSERVED_CHANNELS, OracleType, RecordType, ReferenceStatus, RevisionKind, Scope, SpecManifest,
+    SpecStatus, Strength, Testability, Waiver, parse_id,
+};
+use crate::obligation::{
+    DispositionKind, ObligationInventory, audit_dispositions, compare as compare_obligations,
+    describe as describe_obligation, generate_obligations, render as render_obligations,
 };
 use crate::prose::Document;
 use crate::prose::strength::{has_family, hides_mandatory_keyword};
+use crate::regression::RegressionRecord;
+use crate::scenario::{OPERATION_DIMENSION, ScenarioModel, excluding_rule, is_invalid};
 
 /// A single structural violation. `code` is the stable class (`"V1"`..`"V10"` or
 /// `"SCHEMA"`); `record` names the offending registry record (or, for SCHEMA, the
@@ -196,6 +202,13 @@ pub fn validate_path_with_inventory(
                 .map(|p| p.join("snapshots"))
                 .unwrap_or_else(|| root.join("snapshots"));
             violations.extend(check_snapshots(&registry, &snapshots_dir));
+            // V27: obligation provenance — the committed machine-owned inventory is a
+            // sibling of the registry dir (the same resolution V14/V17 use), so a fixture
+            // registry naturally validates without one (024, US1).
+            violations.extend(check_obligations(
+                &registry,
+                &crate::obligations_file_for(root),
+            ));
             // V25: baseline provenance — the committed frozen inventory must still match
             // a fresh enumeration of the repository tree (023, US1).
             // **V25 (baseline provenance) is RETIRED** — 023 T099, FR-053. The frozen
@@ -1627,6 +1640,18 @@ pub fn run(registry: &Registry, today: &str, repo_root: &Path) -> Vec<Violation>
     checker.check_metamorphic_arity(); // V20 (022-conformance-runner US6)
 
     let mut out = checker.violations;
+    // V26: scenario-model integrity (024, US1). A free function rather than another
+    // `Checker` method — the scenario model is a self-contained sub-record and
+    // `validate.rs` is already 3,300 lines (Principle V, modular boundaries).
+    out.extend(check_scenario_model(registry));
+    // V28/V29: obligation dispositions (024, US2). Registry-only — unlike V27 it needs no
+    // committed file, because the obligations it joins against are regenerated from the
+    // same records (and V27 is what guarantees the commit matches). Living in `run` means
+    // `report` and `certify` see it too, not only the `validate` command.
+    out.extend(check_obligation_dispositions(registry));
+    // V30: injected-regression coverage (024, US6). Same scoping as V27–V29 — a registry
+    // that has not opted into the scenario model has not opted into this regime either.
+    out.extend(check_regressions(registry));
     sort_violations(&mut out);
     out
 }
@@ -1818,6 +1843,40 @@ impl<'a> Checker<'a> {
             r.classifications
                 .iter()
                 .map(|x| (x.id.as_str(), RecordType::Classification)),
+        );
+        // The 024 scenario model is registry data too, so its ids obey the same grammar,
+        // the same prefix↔type agreement, and the same cross-registry uniqueness — which
+        // is what data-model.md §1 means by "unique across ALL id namespaces". Generated
+        // obligations are deliberately absent: like `cst-`/`clu-` they live in a
+        // machine-owned inventory outside the registry, and V27 owns their integrity.
+        out.extend(
+            r.scenario
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::ScenarioDimension)),
+        );
+        out.extend(
+            r.applicability
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::ApplicabilityRule)),
+        );
+        out.extend(
+            r.triples
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::HighRiskTriple)),
+        );
+        // Obligation dispositions are hand-authored registry records (unlike the `obl-`
+        // units they judge), so they obey the same grammar, prefix↔type agreement, and
+        // cross-namespace uniqueness as everything else here.
+        out.extend(
+            r.obligation_dispositions
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::ObligationDisposition)),
+        );
+        // Injected-regression records are hand-authored registry records too (024 US6).
+        out.extend(
+            r.regressions
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::Regression)),
         );
         out
     }
@@ -2296,7 +2355,22 @@ impl<'a> Checker<'a> {
         for case in &self.reg.cases {
             match case.classify() {
                 Err(shape) => self.push("V16", &case.id, shape.message().to_string()),
-                Ok(CaseKind::Legacy) => {} // legacy cases: existing V-series apply.
+                Ok(CaseKind::Legacy) => {
+                    // Legacy cases: existing V-series apply. The one 024 addition is that
+                    // a binary-backed record cannot join the error-path tier — the tier is
+                    // defined by the declared failure STAGE of a declarative operation, and
+                    // a legacy record has no operations to declare one on.
+                    if case.error_path_tier {
+                        self.push(
+                            "V16",
+                            &case.id,
+                            "legacy (binary-backed) case declares `errorPathTier`; tier \
+                             membership is defined by a declared later-stage \
+                             `expectFailurePhase` on an operation, which a legacy record \
+                             has no operations to carry",
+                        );
+                    }
+                }
                 Ok(CaseKind::Declarative) => self.check_one_declarative_case(case),
             }
         }
@@ -2323,6 +2397,7 @@ impl<'a> Checker<'a> {
             self.check_case_fs_allowlist(case);
             self.check_case_observable_channels(case);
             self.check_case_resource_group(case);
+            self.check_case_error_path_tier(case);
             return;
         };
 
@@ -2349,6 +2424,156 @@ impl<'a> Checker<'a> {
         self.check_case_fs_allowlist(case);
         self.check_case_observable_channels(case);
         self.check_case_resource_group(case);
+        self.check_case_oracle_availability(case, oracle_type);
+        self.check_case_error_path_tier(case);
+    }
+
+    /// **The container-backed error-path tier** (024 US4, FR-041/FR-042, SC-007).
+    ///
+    /// The tier exists because parity testing used to stop comparing the moment both
+    /// implementations accepted a configuration document — which is exactly where the
+    /// reference is most lenient, and therefore where a difference is most likely to
+    /// survive unobserved. A case that claims membership must therefore be *capable* of
+    /// reaching a verdict past that point, and this is where that capability is checked;
+    /// nothing at run time can distinguish "the later stage agreed" from "the later stage
+    /// was never reached".
+    ///
+    /// Four rules:
+    ///
+    /// 1. **Some operation declares a later-stage `expectFailurePhase`.** Without one the
+    ///    record makes no claim about WHERE the failure occurs, which FR-042 requires it
+    ///    to record.
+    /// 2. **No operation declares `config-resolution`.** This is the rule that gives the
+    ///    tier its meaning: a verdict reachable at configuration read is a verdict about
+    ///    the stage the tier was created to look past.
+    /// 3. **The case is Docker-backed.** Every later stage — build, container creation,
+    ///    Feature installation, lifecycle execution, teardown — needs a container runtime.
+    ///    A tier case without a Docker `resourceGroup` also gets no isolated workspace and
+    ///    no cleanup guard (see [`check_case_resource_group`](Self::check_case_resource_group)).
+    /// 4. **Every declared phase is reachable by the operation that declares it** — checked
+    ///    for *all* declarative cases, not only tier members. `read-configuration` reaches
+    ///    exactly one phase, so a case declaring `lifecycle:postCreate` on it describes a
+    ///    run that cannot happen; left unchecked it would validate cleanly, run, and report
+    ///    a green nothing.
+    fn check_case_error_path_tier(&mut self, case: &crate::model::TestCase) {
+        // Rule 4 — applies to every declarative case.
+        for op in &case.operations {
+            let Some(phase) = op.expect_failure_phase else {
+                continue;
+            };
+            let reachable = crate::model::phases_reachable_by(&op.subcommand);
+            if !reachable.contains(&phase) {
+                let names: Vec<&str> = reachable.iter().map(|p| p.as_str()).collect();
+                self.push(
+                    "V16",
+                    &case.id,
+                    format!(
+                        "operation {:?} declares `expectFailurePhase: {}`, which {:?} never \
+                         reaches; it can fail only at {}",
+                        op.id,
+                        phase.as_str(),
+                        op.subcommand,
+                        names.join(" | ")
+                    ),
+                );
+            }
+        }
+
+        if !case.error_path_tier {
+            return;
+        }
+
+        // Rule 2 — a verdict reachable at configuration read.
+        for (op_id, phase) in case.declared_failure_phases() {
+            if phase.is_configuration_read() {
+                self.push(
+                    "V16",
+                    &case.id,
+                    format!(
+                        "is in the error-path tier but operation {op_id:?} declares \
+                         `expectFailurePhase: {}`; the tier's premise is that configuration \
+                         read ACCEPTS the input on both sides, so a verdict reached there is \
+                         a verdict about the stage the tier exists to look past (FR-041)",
+                        phase.as_str()
+                    ),
+                );
+            }
+        }
+
+        // Rule 1 — the stage must be recorded somewhere.
+        if case.later_stage_failure_phases().is_empty() {
+            self.push(
+                "V16",
+                &case.id,
+                "is in the error-path tier but no operation declares an \
+                 `expectFailurePhase` later than `config-resolution`; FR-042 requires the \
+                 case to record the STAGE at which the failure occurs, and without one the \
+                 record claims a later-stage comparison it does not describe",
+            );
+        }
+
+        // Rule 3 — the tier is container-backed.
+        if !is_docker_case(case) {
+            self.push(
+                "V16",
+                &case.id,
+                "is in the error-path tier but declares no Docker `resourceGroup`; every \
+                 stage the tier covers (build, container creation, Feature installation, \
+                 lifecycle execution, teardown) needs the container runtime, and without \
+                 the group the case also gets no isolated workspace and no cleanup guard",
+            );
+        }
+    }
+
+    /// The oracle a case declares must be one that can actually be run for its operation
+    /// (024 US3, spec Assumption 5 / scenario 4).
+    ///
+    /// Two rules, both about the same missing second side:
+    ///
+    /// 1. An operation with no runnable differential
+    ///    ([`OPERATIONS_WITHOUT_RUNNABLE_DIFFERENTIAL`](crate::model::OPERATIONS_WITHOUT_RUNNABLE_DIFFERENTIAL))
+    ///    cannot be a `live-differential`. There is no reference command to invoke — or
+    ///    none invocable with the same argv — so the "differential" would compare deacon
+    ///    against a usage error, which can only ever produce a difference nobody learns
+    ///    anything from.
+    /// 2. An `input-class: reference-lenient` case MUST be a `live-differential`,
+    ///    whichever operation it names. Leniency is a claim about what the *reference*
+    ///    accepts; asserting it without running the reference records an opinion, not
+    ///    evidence — and FR-043 asks these cases to pin a direction, which needs both
+    ///    directions observed.
+    fn check_case_oracle_availability(
+        &mut self,
+        case: &crate::model::TestCase,
+        oracle_type: OracleType,
+    ) {
+        let operation = case
+            .scenario_context
+            .get(crate::scenario::OPERATION_DIMENSION);
+        if oracle_type == OracleType::LiveDifferential
+            && let Some(operation) = operation
+            && let Some(substitution) = crate::model::differential_substitution(operation)
+        {
+            self.push(
+                "V16",
+                &case.id,
+                format!(
+                    "declares `oracleType: live-differential` under operation \
+                     {operation:?}, but {substitution}. Use `spec-expectation`."
+                ),
+            );
+        }
+        if case.input_class == Some(crate::model::InputClass::ReferenceLenient)
+            && oracle_type != OracleType::LiveDifferential
+        {
+            self.push(
+                "V16",
+                &case.id,
+                "declares `inputClass: reference-lenient` but is not a \
+                 `live-differential`; leniency is a claim about what the REFERENCE \
+                 accepts, and a case that never runs the reference records an opinion \
+                 rather than evidence (FR-040/FR-043)",
+            );
+        }
     }
 
     /// Every declared `expected[].channel` must be a channel the runner can actually
@@ -2671,6 +2896,975 @@ fn image_is_pinned(image: &str) -> bool {
     }
 }
 
+// ---------------------------------------------------------------------------
+// V26 — scenario-model integrity (024-deterministic-conformance-coverage, US1)
+// ---------------------------------------------------------------------------
+
+/// The scenario dimensions FR-003 requires the model to declare. Named here rather than
+/// derived so that *removing* one is a visible failure instead of a quietly smaller
+/// denominator — the failure mode this whole feature exists to prevent.
+pub const REQUIRED_SCENARIO_DIMENSIONS: &[&str] = &[
+    "sdim-operation",
+    "sdim-config-source",
+    "sdim-container-state",
+    "sdim-features",
+    "sdim-layering",
+    "sdim-output-mode",
+];
+
+/// **V26 — scenario-model integrity** (024, US1; data-model.md §9).
+///
+/// Flags: a dead dimension value (one appearing in no valid combination, FR-010); a
+/// dimension with an empty or duplicated value set; a missing required dimension
+/// (FR-003); an applicability rule naming an unknown dimension or value, carrying fewer
+/// than two conditions, or carrying no real ground; a high-risk triple whose assignment
+/// is malformed; and a case `scenarioContext` that is partial, undeclared, or itself an
+/// invalid combination.
+///
+/// A registry that declares **no** scenario dimensions opts out entirely (fixture
+/// registries predating this feature): there is no model to be broken, so the check is
+/// silent rather than reporting six missing dimensions for every legacy fixture.
+///
+/// Deliberately a free function over the loaded registry rather than another method on
+/// the 3,300-line `Checker`: the scenario model is a self-contained sub-record with its
+/// own vocabulary, and Principle V's modular-boundaries rule says new logic goes in a new
+/// boundary rather than growing the monolith.
+pub fn check_scenario_model(registry: &Registry) -> Vec<Violation> {
+    let mut out = Vec::new();
+    if registry.scenario.is_empty() {
+        return out;
+    }
+
+    let model = ScenarioModel::new(&registry.scenario, &registry.applicability);
+
+    // --- Dimensions -------------------------------------------------------
+    for dimension in &registry.scenario {
+        if dimension.values.is_empty() {
+            out.push(Violation::new(
+                "V26",
+                &dimension.id,
+                "declares an empty value set; a dimension with no values can never be assigned \
+                 and silently removes itself from every combination",
+            ));
+        }
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
+        for value in &dimension.values {
+            if !seen.insert(value.as_str()) {
+                out.push(Violation::new(
+                    "V26",
+                    &dimension.id,
+                    format!(
+                        "declares value {value:?} more than once; a duplicated value would be \
+                         enumerated twice and double-count its own coverage"
+                    ),
+                ));
+            }
+        }
+    }
+    for required in REQUIRED_SCENARIO_DIMENSIONS {
+        if model.dimension(required).is_none() {
+            out.push(Violation::new(
+                "V26",
+                *required,
+                "required scenario dimension is not declared (FR-003); the combination space \
+                 would silently shrink to the dimensions that remain",
+            ));
+        }
+    }
+
+    let declared: BTreeMap<&str, BTreeSet<&str>> = registry
+        .scenario
+        .iter()
+        .map(|d| {
+            (
+                d.id.as_str(),
+                d.values.iter().map(|v| v.as_str()).collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect();
+
+    // --- Applicability rules ---------------------------------------------
+    for rule in &registry.applicability {
+        if rule.excludes.len() < 2 {
+            out.push(Violation::new(
+                "V26",
+                &rule.id,
+                format!(
+                    "declares {} exclusion condition(s); a rule needs at least two, because a \
+                     single-condition rule bans a value outright rather than banning a \
+                     combination (remove the value from the dimension instead)",
+                    rule.excludes.len()
+                ),
+            ));
+        }
+        if is_filler_ground(&rule.ground) {
+            out.push(Violation::new(
+                "V26",
+                &rule.id,
+                format!(
+                    "`ground` {:?} does not state WHY the combination cannot exist — name the \
+                     mechanism (e.g. \"this operation never creates a container, so a container \
+                     state is not a property it can exercise\"). A rule that only asserts its own \
+                     exclusion removes combinations from the denominator without argument",
+                    rule.ground
+                ),
+            ));
+        }
+        for condition in &rule.excludes {
+            out.extend(check_scenario_condition(
+                &declared,
+                &rule.id,
+                &condition.dimension,
+                &condition.values,
+            ));
+        }
+    }
+
+    // --- High-risk triples ------------------------------------------------
+    for triple in &registry.triples {
+        if !triple.assignment.contains_key(OPERATION_DIMENSION) {
+            out.push(Violation::new(
+                "V26",
+                &triple.id,
+                format!(
+                    "assignment does not pin `{OPERATION_DIMENSION}`; a triple without an \
+                     operation has no partition to belong to and could not be generated"
+                ),
+            ));
+        }
+        let other = triple
+            .assignment
+            .keys()
+            .filter(|k| k.as_str() != OPERATION_DIMENSION)
+            .count();
+        if other != 3 {
+            out.push(Violation::new(
+                "V26",
+                &triple.id,
+                format!(
+                    "assignment pins {other} dimension(s) beyond the operation; a high-risk \
+                     triple names exactly three (data-model.md §5)"
+                ),
+            ));
+        }
+        if is_filler_ground(&triple.reason) {
+            out.push(Violation::new(
+                "V26",
+                &triple.id,
+                format!(
+                    "`reason` {:?} does not state why this interaction was selected; the triple \
+                     set is reviewable only if the selection can be judged, not just the coverage",
+                    triple.reason
+                ),
+            ));
+        }
+        for (dimension, value) in &triple.assignment {
+            out.extend(check_scenario_condition(
+                &declared,
+                &triple.id,
+                dimension,
+                std::slice::from_ref(value),
+            ));
+        }
+        let combination: Vec<(&str, &str)> = triple
+            .assignment
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        if let Some(rule) = excluding_rule(&registry.applicability, &combination) {
+            out.push(Violation::new(
+                "V26",
+                &triple.id,
+                format!(
+                    "selects a combination that rule `{}` excludes; a triple must name a \
+                     combination the model says can exist",
+                    rule.id
+                ),
+            ));
+        }
+    }
+
+    // --- Dead values (FR-010) ---------------------------------------------
+    //
+    // A value is alive when it appears in at least one obligation the enumeration would
+    // emit: for a pairable dimension, in some valid pair; for the operation dimension, in
+    // some operation partition that yields at least one pair. Defining "reachable" as
+    // "reachable in the denominator we actually build" keeps the report and the model
+    // from disagreeing about what the model contains.
+    if let Some(operations) = model.operation_dimension() {
+        let mut alive: BTreeSet<(&str, &str)> = BTreeSet::new();
+        for operation in &operations.values {
+            let applicable = model.applicable_dimensions(operation);
+            let mut any_pair = false;
+            for (i, (first, first_values)) in applicable.iter().enumerate() {
+                for (second, second_values) in applicable.iter().skip(i + 1) {
+                    for a in first_values {
+                        for b in second_values {
+                            let combination = [
+                                (OPERATION_DIMENSION, operation.as_str()),
+                                (first.id.as_str(), *a),
+                                (second.id.as_str(), *b),
+                            ];
+                            if is_invalid(model.rules, &combination) {
+                                continue;
+                            }
+                            any_pair = true;
+                            alive.insert((first.id.as_str(), a));
+                            alive.insert((second.id.as_str(), b));
+                        }
+                    }
+                }
+            }
+            if any_pair {
+                alive.insert((OPERATION_DIMENSION, operation.as_str()));
+            }
+        }
+        for dimension in &registry.scenario {
+            for value in &dimension.values {
+                if !alive.contains(&(dimension.id.as_str(), value.as_str())) {
+                    out.push(Violation::new(
+                        "V26",
+                        &dimension.id,
+                        format!(
+                            "value {value:?} is DEAD — no applicability rule permits it in any \
+                             valid combination, so it can never be covered. Remove the value or \
+                             narrow the rule that strands it (FR-010)"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    // --- Case scenario contexts (V16 extended, data-model.md §3) -----------
+    let dimension_ids: Vec<&str> = registry.scenario.iter().map(|d| d.id.as_str()).collect();
+    for case in &registry.cases {
+        if case.scenario_context.is_empty() {
+            // A legacy (or not-yet-annotated) case declares nothing and covers no
+            // combination obligation. That is a coverage fact, not a malformation.
+            continue;
+        }
+        for (dimension, value) in &case.scenario_context {
+            out.extend(check_scenario_condition(
+                &declared,
+                &case.id,
+                dimension,
+                std::slice::from_ref(value),
+            ));
+        }
+        for dimension in &dimension_ids {
+            if !case.scenario_context.contains_key(*dimension) {
+                out.push(Violation::new(
+                    "V26",
+                    &case.id,
+                    format!(
+                        "`scenarioContext` assigns no value for `{dimension}`; a case must \
+                         assign EVERY scenario dimension or none at all, because a partial \
+                         assignment makes \"which pairs does this cover?\" ambiguous \
+                         (data-model.md §3)"
+                    ),
+                ));
+            }
+        }
+        // The declared operation must be one the case actually invokes. `sdim-operation`
+        // values are the consumer subcommand identifiers verbatim, so this is a direct
+        // comparison. Without it a case could be filed under an operation it never runs:
+        // `coverage-operations` treats `scenarioContext` as authoritative for attribution
+        // (it is the only thing that can be, once a case runs several subcommands), so a
+        // mislabelled case would credit coverage to an operation nothing exercised — the
+        // exact failure mode a coverage report exists to prevent.
+        if let Some(operation) = case.scenario_context.get(OPERATION_DIMENSION)
+            && !case.operations.is_empty()
+            && !case.operations.iter().any(|op| op.subcommand == *operation)
+        {
+            let invoked: Vec<&str> = case
+                .operations
+                .iter()
+                .map(|op| op.subcommand.as_str())
+                .collect();
+            out.push(Violation::new(
+                "V26",
+                &case.id,
+                format!(
+                    "`scenarioContext` declares operation {operation:?}, which the case \
+                     never invokes (it runs {}). The declared operation is what the \
+                     per-operation report attributes the case to, so it must name a \
+                     subcommand the case actually runs",
+                    invoked.join(", ")
+                ),
+            ));
+        }
+
+        let combination: Vec<(&str, &str)> = case
+            .scenario_context
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        if let Some(rule) = excluding_rule(&registry.applicability, &combination) {
+            out.push(Violation::new(
+                "V26",
+                &case.id,
+                format!(
+                    "`scenarioContext` is a combination rule `{}` excludes; a case cannot \
+                     exercise a combination the model says cannot exist",
+                    rule.id
+                ),
+            ));
+        }
+    }
+
+    out
+}
+
+/// Check one `(dimension, values)` reference against the declared scenario model,
+/// reporting an unknown dimension once and each unknown value individually.
+fn check_scenario_condition(
+    declared: &BTreeMap<&str, BTreeSet<&str>>,
+    record: &str,
+    dimension: &str,
+    values: &[String],
+) -> Vec<Violation> {
+    let mut out = Vec::new();
+    let Some(known) = declared.get(dimension) else {
+        out.push(Violation::new(
+            "V26",
+            record,
+            format!("names scenario dimension {dimension:?}, which is not declared"),
+        ));
+        return out;
+    };
+    for value in values {
+        if !known.contains(value.as_str()) {
+            out.push(Violation::new(
+                "V26",
+                record,
+                format!("names value {value:?}, which dimension `{dimension}` does not declare"),
+            ));
+        }
+    }
+    out
+}
+
+/// Whether a `ground` / `reason` is filler rather than an argument.
+///
+/// Reuses the V23 vocabulary (`VAGUE_CAPABILITY_MARKERS`) rather than forking a second
+/// filler test, and adds a prose floor: a ground must be long enough to have explained
+/// something. Deliberately NOT [`names_an_exclusion_ground`], whose marker list is tuned
+/// for permanent *out-of-scope* claims ("constitution", "principle", "authoring") — an
+/// applicability ground argues from a mechanism, not from a principle, so requiring those
+/// markers would reject every correct ground.
+fn is_filler_ground(ground: &str) -> bool {
+    let lowered = ground.trim().to_ascii_lowercase();
+    if lowered.split_whitespace().count() < 8 {
+        return true;
+    }
+    VAGUE_CAPABILITY_MARKERS
+        .iter()
+        .any(|marker| lowered.contains(marker))
+}
+
+// ---------------------------------------------------------------------------
+// V27 — obligation provenance (024-deterministic-conformance-coverage, US1)
+// ---------------------------------------------------------------------------
+
+/// **V27 — obligation provenance** (024, US1; data-model.md §9).
+///
+/// The committed `obligations.json` is machine-owned: it must byte-equal a fresh
+/// regeneration, pin the registry's `spec`-kind revision, and reference only declared
+/// dimension values. A hand edit is indistinguishable from staleness and is caught by the
+/// same comparison — which is the point: there is no way to edit the generated file that
+/// the check would treat as legitimate.
+///
+/// A registry that declares no scenario model and produces no obligations is silent (a
+/// fixture predating this feature). A registry that DOES declare a model but ships no
+/// committed inventory is a violation, not a skip: the absent file would otherwise read
+/// as "nothing to check".
+pub fn check_obligations(registry: &Registry, obligations_file: &Path) -> Vec<Violation> {
+    let mut out = Vec::new();
+
+    let regenerated = match generate_obligations(registry) {
+        Ok(inventory) => inventory,
+        Err(e) => {
+            out.push(Violation::new(
+                "V27",
+                obligations_file.display().to_string(),
+                format!("could not regenerate the obligation inventory: {e}"),
+            ));
+            return out;
+        }
+    };
+
+    let raw = match std::fs::read_to_string(obligations_file) {
+        Ok(raw) => raw,
+        Err(_) => {
+            if !registry.scenario.is_empty() && !regenerated.units.is_empty() {
+                out.push(Violation::new(
+                    "V27",
+                    obligations_file.display().to_string(),
+                    format!(
+                        "the registry declares a scenario model but no committed obligation \
+                         inventory exists; {} obligation(s) would be generated (run `coverage \
+                         generate`)",
+                        regenerated.units.len()
+                    ),
+                ));
+            }
+            return out;
+        }
+    };
+
+    let committed: ObligationInventory = match serde_json::from_str(&raw) {
+        Ok(inventory) => inventory,
+        Err(e) => {
+            out.push(Violation::new(
+                "V27",
+                obligations_file.display().to_string(),
+                format!("committed obligation inventory is malformed: {e}"),
+            ));
+            return out;
+        }
+    };
+
+    // Provenance pin: the inventory's revision must name a declared `spec`-kind revision.
+    let spec_revisions: Vec<&str> = registry
+        .revisions
+        .iter()
+        .filter(|r| r.kind == RevisionKind::Spec)
+        .map(|r| r.id.as_str())
+        .collect();
+    if !spec_revisions.contains(&committed.revision.as_str()) {
+        out.push(Violation::new(
+            "V27",
+            &committed.revision,
+            format!(
+                "obligation inventory revision {:?} names no `spec`-kind revision record \
+                 (declared: {})",
+                committed.revision,
+                if spec_revisions.is_empty() {
+                    "none".to_string()
+                } else {
+                    spec_revisions.join(", ")
+                }
+            ),
+        ));
+    }
+
+    // Dangling references: a value (or behavior) removed from the registry while the
+    // inventory still names it.
+    let declared: BTreeMap<&str, BTreeSet<&str>> = registry
+        .scenario
+        .iter()
+        .map(|d| {
+            (
+                d.id.as_str(),
+                d.values.iter().map(|v| v.as_str()).collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect();
+    let behaviors: BTreeSet<&str> = registry.behaviors.iter().map(|b| b.id.as_str()).collect();
+    let operations: BTreeSet<&str> = declared
+        .get(OPERATION_DIMENSION)
+        .cloned()
+        .unwrap_or_default();
+    for unit in &committed.units {
+        if let Some(operation) = unit.operation.as_deref()
+            && !operations.contains(operation)
+        {
+            out.push(Violation::new(
+                "V27",
+                &unit.id,
+                format!(
+                    "names operation {operation:?}, which `{OPERATION_DIMENSION}` no longer \
+                     declares"
+                ),
+            ));
+        }
+        if let Some(assignment) = unit.assignment.as_ref() {
+            for (dimension, value) in assignment {
+                match declared.get(dimension.as_str()) {
+                    None => out.push(Violation::new(
+                        "V27",
+                        &unit.id,
+                        format!("names scenario dimension {dimension:?}, which is not declared"),
+                    )),
+                    Some(known) if !known.contains(value.as_str()) => {
+                        out.push(Violation::new(
+                            "V27",
+                            &unit.id,
+                            format!(
+                                "names value {value:?}, which dimension `{dimension}` no longer \
+                                 declares"
+                            ),
+                        ));
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        if let Some(behavior) = unit.behavior.as_deref()
+            && !behaviors.contains(behavior)
+        {
+            out.push(Violation::new(
+                "V27",
+                &unit.id,
+                format!("names behavior {behavior:?}, which the registry no longer declares"),
+            ));
+        }
+    }
+
+    // Byte comparison is the contract; the unit-level drift is the diagnostic.
+    if raw != render_obligations(&regenerated) {
+        let drift = compare_obligations(&committed, &regenerated);
+        let detail = match drift.first_difference() {
+            Some((id, how)) => format!(
+                "run `coverage generate`; first difference: `{id}` was {how} \
+                 (+{} added, -{} removed, ~{} changed)",
+                drift.added.len(),
+                drift.removed.len(),
+                drift.changed.len()
+            ),
+            // Identical units, different bytes: not drift, an ENCODING difference. The
+            // usual cause is a checkout that translated line endings (JSON parses CRLF
+            // away, so the records still compare equal), and `coverage generate` cannot
+            // fix that — it writes LF and the checkout rewrites it back. Say so instead
+            // of sending the reader after drift that does not exist.
+            None if raw.contains('\r') => "the unit sets agree and the committed file \
+                 contains CR bytes — this is a line-ending difference, not drift; \
+                 `coverage generate` will not fix it, ensure `.gitattributes` marks \
+                 `conformance/obligations/**` as `-text`"
+                .to_string(),
+            None => "the unit sets agree, so the difference is in formatting or the revision pin"
+                .to_string(),
+        };
+        out.push(Violation::new(
+            "V27",
+            obligations_file.display().to_string(),
+            format!(
+                "committed obligation inventory does not byte-match a fresh regeneration; {detail}"
+            ),
+        ));
+    }
+
+    out
+}
+
+// ---------------------------------------------------------------------------
+// V28 / V29 — obligation dispositions (024-deterministic-conformance-coverage, US2)
+// ---------------------------------------------------------------------------
+
+/// **V28 — disposition arity** and **V29 — disposition semantics** (024 US2;
+/// data-model.md §6, contracts/obligation.md "Disposition resolution").
+///
+/// | Class | What it refuses |
+/// |---|---|
+/// | **V28** | an applicable obligation with **zero** dispositions, or one with **more than one** |
+/// | **V29** | a `non-testable` rationale that names no ground; a high-risk **triple** argued rather than tested; a **stale** record whose obligation no longer resolves; a payload naming a record that does not exist; a `waived` record backed by a blanket waiver scope |
+///
+/// Both are computed from ONE join ([`audit_dispositions`]) — the same one `certify`
+/// blocks on and `coverage scaffold` emits from, so the three can never disagree about
+/// what is undispositioned.
+///
+/// **Scoped to registries that declare a scenario model**, exactly as V27 is. A registry
+/// with no `scenario.json` has not opted into the obligation regime at all; without this
+/// scoping every pre-024 fixture would suddenly owe a decision on one behavior obligation
+/// per behavior, which would say nothing true about those fixtures.
+///
+/// The *arity within a single record* — exactly one of `cases`/`rationale`/`waiver`/`gap`
+/// — is deliberately NOT here: it is refused at deserialize time (see
+/// [`ObligationDisposition`](crate::obligation::ObligationDisposition)), so by the time
+/// this runs every record is internally coherent and the only open questions are the ones
+/// that need the rest of the registry.
+pub fn check_obligation_dispositions(registry: &Registry) -> Vec<Violation> {
+    let mut out = Vec::new();
+    if registry.scenario.is_empty() {
+        return out;
+    }
+    let inventory = match generate_obligations(registry) {
+        Ok(inventory) => inventory,
+        // Generation failure is V27's diagnosis (it names the modelling mistake); saying
+        // it twice in different words would send a reviewer looking for two problems.
+        Err(_) => return out,
+    };
+
+    let audit = audit_dispositions(registry, &inventory);
+
+    // -- V28: zero ----------------------------------------------------------
+    for unit in &audit.undispositioned {
+        out.push(Violation::new(
+            "V28",
+            &unit.id,
+            format!(
+                "obligation has no disposition — {}. Every applicable obligation needs \
+                 exactly one of `case` / `non-testable` / `waived` / `gap`; there is no \
+                 default, because \"nobody decided\" is not a decision. Run `coverage \
+                 scaffold` for a skeleton.",
+                describe_obligation(unit)
+            ),
+        ));
+    }
+
+    // -- V28: more than one -------------------------------------------------
+    for (unit, records) in &audit.conflicting {
+        let ids: Vec<&str> = records.iter().map(|r| r.id.as_str()).collect();
+        out.push(Violation::new(
+            "V28",
+            &unit.id,
+            format!(
+                "obligation carries {} dispositions ({}) — {}. Two records are two \
+                 judgements; resolution never picks a winner, because doing so would turn \
+                 a disagreement into a decision nobody made. Delete or merge until one \
+                 remains.",
+                records.len(),
+                ids.join(", "),
+                describe_obligation(unit)
+            ),
+        ));
+    }
+
+    // -- V29: stale ---------------------------------------------------------
+    for record in &audit.stale {
+        out.push(Violation::new(
+            "V29",
+            &record.id,
+            format!(
+                "disposition names obligation {:?}, which the generated inventory no \
+                 longer contains — the combination or behavior it judged changed \
+                 substance or was removed. Stale, not silently dropped: a regenerated \
+                 obligation that merely resembles the old one is a NEW obligation needing \
+                 its own decision (disposition is never inherited by name).",
+                record.obligation
+            ),
+        ));
+    }
+
+    // -- V29: semantics of each cleanly-resolved record ----------------------
+    let case_ids: HashSet<&str> = registry.cases.iter().map(|c| c.id.as_str()).collect();
+    let executable = crate::coverage::executable_case_ids(registry);
+    let waivers: HashMap<&str, &Waiver> = registry
+        .waivers
+        .iter()
+        .map(|w| (w.id.as_str(), w))
+        .collect();
+    let gap_ids: HashSet<&str> = registry.gaps.iter().map(|g| g.id.as_str()).collect();
+
+    for (unit, record) in &audit.resolved {
+        match record.disposition {
+            DispositionKind::Case => {
+                for case in &record.cases {
+                    if !case_ids.contains(case.as_str()) {
+                        out.push(Violation::new(
+                            "V29",
+                            &record.id,
+                            format!(
+                                "claims coverage by case {case:?}, which is not a declared case"
+                            ),
+                        ));
+                        continue;
+                    }
+                    // FR-015 asks for an EXECUTABLE case on a triple, not merely a
+                    // declared one. A legacy carrier whose residual has closed is a
+                    // record pointing at a deleted program: it satisfies nothing, and on
+                    // a triple — the one place an argument may not stand in for evidence
+                    // — a dead pointer is the quietest possible way to lose the evidence.
+                    if unit.is_triple() && !executable.contains(case.as_str()) {
+                        out.push(Violation::new(
+                            "V29",
+                            &record.id,
+                            format!(
+                                "is a high-risk triple dispositioned by case {case:?}, which \
+                                 is not executable (a legacy carrier with no open residual). \
+                                 FR-015 requires a triple to be satisfied by an EXECUTABLE \
+                                 case; a pointer at a retired program is not evidence that \
+                                 the interaction behaves."
+                            ),
+                        ));
+                    }
+                }
+            }
+            DispositionKind::NonTestable => {
+                if unit.is_triple() {
+                    out.push(Violation::new(
+                        "V29",
+                        &record.id,
+                        "a high-risk triple may be dispositioned only by `case` or `gap` \
+                         (FR-015). Triples are selected precisely because interaction \
+                         defects hide there, so an argument that one needs no test is the \
+                         one argument the model does not accept."
+                            .to_string(),
+                    ));
+                }
+                let rationale = record.rationale.as_deref().unwrap_or_default();
+                if !names_an_exclusion_ground(rationale) {
+                    out.push(Violation::new(
+                        "V29",
+                        &record.id,
+                        format!(
+                            "`rationale` {rationale:?} does not name a ground for calling \
+                             this obligation untestable — name the principle (e.g. \
+                             \"Constitution II forbids feature authoring\") or the specific \
+                             unobservable mechanism. A bare restatement that it is out of \
+                             scope is indistinguishable from unqueued debt, which is what a \
+                             gap is for."
+                        ),
+                    ));
+                }
+            }
+            DispositionKind::Waived => {
+                if unit.is_triple() {
+                    out.push(Violation::new(
+                        "V29",
+                        &record.id,
+                        "a high-risk triple may be dispositioned only by `case` or `gap` \
+                         (FR-015); a waiver is a characterized divergence, not evidence \
+                         that the interaction behaves."
+                            .to_string(),
+                    ));
+                }
+                let id = record.waiver.as_deref().unwrap_or_default();
+                match waivers.get(id) {
+                    None => out.push(Violation::new(
+                        "V29",
+                        &record.id,
+                        format!("names waiver {id:?}, which the registry does not declare"),
+                    )),
+                    Some(waiver) => {
+                        if let Some(reason) = blanket_waiver_scope(&waiver.scope) {
+                            out.push(Violation::new(
+                                "V29",
+                                &record.id,
+                                format!(
+                                    "is backed by waiver {id:?}, whose scope is blanket \
+                                     rather than specific: {reason}. A tolerance must name \
+                                     the observable content it tolerates — the same rule \
+                                     V19 enforces on an allowed difference, for the same \
+                                     reason: a scope that matches everything cannot \
+                                     self-invalidate when the difference stops reproducing."
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+            DispositionKind::Gap => {
+                let id = record.gap.as_deref().unwrap_or_default();
+                if !gap_ids.contains(id) {
+                    out.push(Violation::new(
+                        "V29",
+                        &record.id,
+                        format!(
+                            "names gap {id:?}, which the registry does not declare — an \
+                             admitted gap that no `gap-` record backs blocks nothing, so \
+                             the admission would be free"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Whether a waiver's scope is too broad to attach a disposition to, and why.
+///
+/// The FR-023 analogue of the FR-032 rule V19 already enforces on an allowed difference's
+/// `observablePath`. [`Scope`] is a closed union, and only one of its two variants can be
+/// widened: [`Scope::StateField`] matches `field` exactly OR as a trailing-`*` prefix, so
+/// a bare `"*"` (or an empty field) matches **every** field of the fixture — a global
+/// ignore wearing a waiver's clothes. [`Scope::CorpusCase`] names one case of one corpus
+/// and has no wildcard form at all, so it has no blanket shape to reject; inventing one
+/// for symmetry would reject correct records.
+fn blanket_waiver_scope(scope: &Scope) -> Option<String> {
+    match scope {
+        Scope::CorpusCase { .. } => None,
+        Scope::StateField { field, .. } => {
+            let trimmed = field.trim();
+            (trimmed.is_empty() || trimmed == "*").then(|| {
+                format!(
+                    "`field` {field:?} matches every observable field of the fixture rather \
+                     than a named one"
+                )
+            })
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// V30 — injected-regression coverage (024-deterministic-conformance-coverage, US6)
+// ---------------------------------------------------------------------------
+
+/// **V30 — injected-regression coverage** (024 US6; data-model.md §7,
+/// contracts/regression-harness.md).
+///
+/// | What it refuses | Why |
+/// |---|---|
+/// | a declared channel with **no** regression record | nothing would ever prove that channel can fail, and a green suite whose channels are inert is worse than no suite |
+/// | a record naming a channel that is **not declared** in `channels.json` | it proves nothing about the registry's channel set |
+/// | a record naming a channel with **no registered observer** | it could never be detected, so declaring it would manufacture a false `inert` (data-model.md §7, "Invariant") |
+/// | a record whose `expectedDetectingCases` names an **unknown case** | the candidate could never run |
+/// | a candidate case that does **not declare the record's channel** | it could not observe the perturbation, so listing it overstates the candidate set |
+/// | a **kind ↔ target** mismatch (a JSON-pointer kind on a byte stream, `remove-path` on a process result, …) | the perturbation would be inapplicable at run time — a fault reported far from its cause |
+///
+/// The "no registered observer" test is against [`OBSERVED_CHANNELS`], the same mirrored
+/// list V16 uses. `deacon-conformance` deliberately does not depend on `parity-harness`
+/// (the dependency runs the other way), so the list is mirrored rather than imported, and
+/// a `parity-harness` test (`observation_faults.rs`) keeps the mirror in lockstep with
+/// `observe::observer_for` in BOTH directions.
+///
+/// **Scoped to registries that declare a scenario model**, exactly as V27–V29 are. A
+/// pre-024 fixture registry has not opted into this regime at all, and reporting eleven
+/// uncovered channels for every such fixture would say nothing true about them.
+pub fn check_regressions(registry: &Registry) -> Vec<Violation> {
+    let mut out = Vec::new();
+    if registry.scenario.is_empty() {
+        return out;
+    }
+
+    let declared: BTreeSet<&str> = registry.channels.iter().map(|c| c.id.as_str()).collect();
+    let case_channels: HashMap<&str, BTreeSet<&str>> = registry
+        .cases
+        .iter()
+        .map(|c| {
+            (
+                c.id.as_str(),
+                c.expected.iter().map(|e| e.channel.as_str()).collect(),
+            )
+        })
+        .collect();
+
+    // -- every declared channel needs at least one record -------------------
+    let covered: BTreeSet<&str> = registry
+        .regressions
+        .iter()
+        .map(|r| r.channel.as_str())
+        .collect();
+    for channel in &declared {
+        if !covered.contains(channel) {
+            out.push(Violation::new(
+                "V30",
+                *channel,
+                "declared observable channel has no injected-regression record — nothing \
+                 proves a difference on this channel turns the suite red, so every green \
+                 result that rests on it is unearned (FR-065). Add a `reg-` record to \
+                 `regressions.json` naming a real case and a real perturbation.",
+            ));
+        }
+    }
+
+    // -- each record must be applicable ------------------------------------
+    for record in &registry.regressions {
+        if !declared.contains(record.channel.as_str()) {
+            out.push(Violation::new(
+                "V30",
+                &record.id,
+                format!(
+                    "names channel {:?}, which is not declared in `channels.json` — a \
+                     regression against an undeclared channel proves nothing about the \
+                     registry's channel set",
+                    record.channel
+                ),
+            ));
+        } else if !OBSERVED_CHANNELS.contains(&record.channel.as_str()) {
+            out.push(Violation::new(
+                "V30",
+                &record.id,
+                format!(
+                    "names channel {:?}, for which the harness registers NO observer — the \
+                     perturbation could never be detected, so the record would manufacture a \
+                     false `inert` verdict rather than reveal a dead channel. Wire the \
+                     observer, or drop the record.",
+                    record.channel
+                ),
+            ));
+        }
+
+        if let Some(mismatch) = kind_target_mismatch(record) {
+            out.push(Violation::new("V30", &record.id, mismatch));
+        }
+
+        for case_id in &record.expected_detecting_cases {
+            match case_channels.get(case_id.as_str()) {
+                None => out.push(Violation::new(
+                    "V30",
+                    &record.id,
+                    format!(
+                        "names candidate case {case_id:?}, which is not a case in the \
+                         registry — the candidate could never run"
+                    ),
+                )),
+                Some(channels) if !channels.contains(record.channel.as_str()) => {
+                    out.push(Violation::new(
+                        "V30",
+                        &record.id,
+                        format!(
+                            "names candidate case {case_id:?}, which does not declare channel \
+                             {:?} — that case observes nothing on this channel, so listing it \
+                             overstates what could detect the regression",
+                            record.channel
+                        ),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+
+    out
+}
+
+/// Why a record's perturbation KIND cannot be applied to its declared evidence TARGET, or
+/// `None` when the pair is coherent.
+///
+/// The pairing table is the one in contracts/regression-harness.md ("Perturbation kinds"),
+/// stated once here so an incoherent record is refused at validation rather than surfacing
+/// at run time as an "inapplicable perturbation" error — a fault reported far from the
+/// authoring mistake that caused it.
+fn kind_target_mismatch(record: &RegressionRecord) -> Option<String> {
+    use crate::regression::{EvidenceTarget as T, PerturbationKind as K};
+    let kind = record.perturbation.kind;
+    let target = record.target;
+    let ok = match kind {
+        K::SetJsonPointer | K::RemoveJsonPointer => target.is_json_document(),
+        K::SetExitCode => target == T::ProcessResult,
+        K::AppendBytes => matches!(
+            target,
+            T::ProcessStdout | T::ProcessStderr | T::WorkspaceFile
+        ),
+        K::RemovePath => target == T::WorkspaceFile,
+    };
+    if ok {
+        // `append-bytes` against a workspace file needs the path naming WHICH file.
+        if kind == K::AppendBytes
+            && target == T::WorkspaceFile
+            && record.perturbation.path.is_none()
+        {
+            return Some(
+                "`append-bytes` against `workspace-file` must carry `path` naming the file \
+                 to append to"
+                    .to_string(),
+            );
+        }
+        if kind == K::AppendBytes
+            && target != T::WorkspaceFile
+            && record.perturbation.path.is_some()
+        {
+            return Some(format!(
+                "`append-bytes` against `{}` must not carry `path` — a stream has no path, so \
+                 the field would be silently ignored",
+                target.as_str()
+            ));
+        }
+        return None;
+    }
+    Some(format!(
+        "perturbation kind `{}` cannot be applied to evidence target `{}` (see the \
+         kind→source table in contracts/regression-harness.md); the perturbation would be \
+         inapplicable at run time",
+        kind.as_str(),
+        target.as_str()
+    ))
+}
+
 /// Whether a behavior applies in a profile's context: every applicability condition
 /// must be satisfied by the profile's assignment (empty applicability = everywhere).
 /// A condition on a dimension the profile does not assign is treated as unsatisfied.
@@ -2776,6 +3970,12 @@ fn record_type_name(ty: RecordType) -> &'static str {
         RecordType::Classification => "classification",
         RecordType::ClauseUnit => "clause-unit",
         RecordType::ClauseClassification => "clause-classification",
+        RecordType::ScenarioDimension => "scenario-dimension",
+        RecordType::ApplicabilityRule => "applicability-rule",
+        RecordType::HighRiskTriple => "high-risk-triple",
+        RecordType::Obligation => "obligation",
+        RecordType::ObligationDisposition => "obligation disposition",
+        RecordType::Regression => "injected-regression",
     }
 }
 
@@ -3339,6 +4539,135 @@ mod tests {
             out.iter()
                 .any(|v| v.code == "V16" && v.record == "case-spec-no-assertion"),
             "spec-expectation without an assertion must be V16, got {out:?}"
+        );
+    }
+
+    // -- V16: the container-backed error-path tier (024 US4, T102) -------------------
+
+    /// A well-formed error-path case: Docker-backed, one `up` operation declaring a
+    /// later-stage failure phase.
+    fn error_path_case(id: &str) -> TestCase {
+        use crate::model::{FailurePhase, ResourceGroup};
+        let mut case = declarative_case(id);
+        case.error_path_tier = true;
+        case.resource_group = Some(ResourceGroup::DockerShared);
+        case.operations[0].subcommand = "up".to_string();
+        case.operations[0].expect_failure_phase = Some(FailurePhase::ContainerCreate);
+        case
+    }
+
+    #[test]
+    fn v16_accepts_a_well_formed_error_path_case() {
+        let mut reg = Registry::default();
+        reg.cases.push(error_path_case("case-errorpath-ok"));
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            !out.iter().any(|v| v.code == "V16"),
+            "a well-formed error-path case must not trip V16, got {out:?}"
+        );
+    }
+
+    /// The four ways a tier claim can be untrue, each its own record so the message names
+    /// the case rather than the batch.
+    #[test]
+    fn v16_flags_every_untrue_error_path_tier_claim() {
+        use crate::model::{FailurePhase, Operation};
+
+        // (1) No later-stage phase declared at all — the record says nothing about WHERE.
+        let mut no_phase = error_path_case("case-errorpath-no-phase");
+        no_phase.operations[0].expect_failure_phase = None;
+
+        // (2) A verdict reachable at configuration read — the stage the tier looks past.
+        let mut at_config_read = error_path_case("case-errorpath-at-config-read");
+        at_config_read.operations.push(Operation {
+            id: "op-2".to_string(),
+            subcommand: "up".to_string(),
+            expect_failure_phase: Some(FailurePhase::ConfigResolution),
+            ..Operation::default()
+        });
+
+        // (3) Not container-backed.
+        let mut no_group = error_path_case("case-errorpath-no-group");
+        no_group.resource_group = None;
+
+        // (4) A phase the declaring operation can never reach.
+        let mut unreachable = error_path_case("case-errorpath-unreachable-phase");
+        unreachable.operations[0].subcommand = "read-configuration".to_string();
+        unreachable.operations[0].expect_failure_phase = Some(FailurePhase::LifecyclePostCreate);
+
+        for case in [no_phase, at_config_read, no_group, unreachable] {
+            let id = case.id.clone();
+            let mut reg = Registry::default();
+            reg.cases.push(case);
+            let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+            assert!(
+                out.iter().any(|v| v.code == "V16" && v.record == id),
+                "{id} must trip V16, got {out:?}"
+            );
+        }
+    }
+
+    /// Rule 4 (reachability) governs EVERY declarative case, not only tier members — a
+    /// `read-configuration` case declaring a lifecycle phase describes a run that cannot
+    /// happen whether or not it claims the tier.
+    #[test]
+    fn v16_flags_an_unreachable_phase_on_a_non_tier_case() {
+        use crate::model::FailurePhase;
+        let mut case = declarative_case("case-plain-unreachable-phase");
+        case.operations[0].expect_failure_phase = Some(FailurePhase::Build);
+        let mut reg = Registry::default();
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V16" && v.record == "case-plain-unreachable-phase"),
+            "`read-configuration` never builds, so declaring `build` must be V16, got {out:?}"
+        );
+    }
+
+    /// A `config-resolution` phase on a case that does NOT claim the tier is ordinary and
+    /// must stay silent — 12 committed cases depend on it.
+    #[test]
+    fn v16_leaves_a_plain_config_resolution_phase_alone() {
+        use crate::model::FailurePhase;
+        let mut case = declarative_case("case-plain-config-rejection");
+        case.operations[0].expect_failure_phase = Some(FailurePhase::ConfigResolution);
+        let mut reg = Registry::default();
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            !out.iter().any(|v| v.code == "V16"),
+            "a non-tier case rejecting at configuration read is ordinary, got {out:?}"
+        );
+    }
+
+    /// A legacy (binary-backed) record has no operations to carry a phase, so it can never
+    /// substantiate a tier claim.
+    #[test]
+    fn v16_flags_a_legacy_case_claiming_the_error_path_tier() {
+        let mut case = TestCase {
+            id: "case-legacy-tier".to_string(),
+            behaviors: vec!["bhv-a".to_string()],
+            error_path_tier: true,
+            executable: Some(crate::model::Executable {
+                binary: "parity_build".to_string(),
+                test: None,
+                corpus: None,
+                case: None,
+            }),
+            ..TestCase::default()
+        };
+        case.outcomes.push(crate::model::ExpectedOutcome {
+            channel: "chan-exit-code".to_string(),
+            expectation: "exits 0".to_string(),
+        });
+        let mut reg = Registry::default();
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V16" && v.record == "case-legacy-tier"),
+            "a legacy case cannot join the error-path tier, got {out:?}"
         );
     }
 }

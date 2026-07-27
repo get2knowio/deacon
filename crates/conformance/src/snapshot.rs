@@ -33,7 +33,18 @@ use serde_json::Value;
 /// `portsAttributes`, where its key list was measured — it previously walked the whole
 /// document, eliding an enumerated key NAME at any depth (including inside
 /// `customizations`, arbitrary user data), which is the unbounded reach FR-029 forbids.
-pub const NORMALIZER_VERSION: &str = "5";
+/// 024 US5 (T123) set it to `"6"`, the de-suppression pass: `drop_noise_env` moved from
+/// CAPTURE to the legacy `diff_states` comparison (so `chan-container-state` now carries
+/// `PATH`, `HOME` and the rest, which FR-050 requires be compared); the irreconcilable
+/// `HOSTNAME` is rewritten by the new `container_hostname_token` instead of deleted;
+/// `drop_absent_optional` was narrowed to deacon's `configuration` block so an authored
+/// null, an authored empty and an omission stop being the same observation (FR-055); and
+/// the previously UNREGISTERED `compose_project_prefix` and `user_default_root` rules
+/// joined the registry. The observers also gained derived fields (`envMap`,
+/// `pathSegments`, `mountSources`, `labelNamespaces`, `userSpec`,
+/// `composeProjectResources`, `nullEmptyOmitted`), which change what a recorded snapshot
+/// contains.
+pub const NORMALIZER_VERSION: &str = "6";
 
 /// The `provenance.json` record — the FR-017 identity/environment elements (data-model
 /// §7, contract snapshot-provenance.md). Thirteen fields: twelve identity/environment

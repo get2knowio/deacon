@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "bhv-compose-project-file-set",
+      "area": "observable-state",
+      "statement": "The set of Compose files a CLI composes with, and the Compose labels derived from that set (`com.docker.compose.project.config_files`, `com.docker.compose.config-hash`).",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Measured at oracle 0.87.0: both CLIs layer an override on top of the workspace's Compose file, and each delivers it differently — deacon passes it on stdin (recorded as `-`), the reference writes a temporary `docker-compose.devcontainer.containerFeatures-*.yml` under its own cache directory and names that path. `config-hash` differs as a consequence, since Compose hashes the merged file set. The spec does not say how a consumer must deliver its override, and neither delivery is observable in the resulting container beyond these two bookkeeping labels — the SERVICE, the project-relative network and volume, and every mount are compared and agree. Distinct from `bhv-compose-project-name-robust`, which is about the project NAME: an implementation could adopt either CLI's naming and still deliver its override the other way. Characterized by `wvr-compose-project-file-set`."
+    },
+    {
       "id": "bhv-compose-project-name-robust",
       "area": "observable-state",
       "statement": "deacon derives a valid, deacon-namespaced compose project name (deacon_<workspaceHash>_<configHash>) that docker compose always accepts and that does not collide with the reference's <folder>_devcontainer project, where the reference can emit an invalid or colliding name.",
@@ -29,7 +39,17 @@
       "spec": "unspecified",
       "reference": "divergent",
       "decision": "intentional-divergence",
-      "notes": "Classified as intentional ONLY because the observable behavior was measured equal, not because the difference looks cosmetic. `docker stop`: deacon 245 ms (single-container) / 138 ms (compose), reference 215 ms; exit code 0 on both sides. deacon's form additionally keeps the BusyBox fallback (`sleep infinity` is rejected on Alpine) and a PATH prefix that survives a feature rewriting PATH. An EARLIER version of this same field was recorded as intentional on the assumption that a keep-alive cannot matter behaviorally \u2014 that assumption was false and hid a 10,258 ms `docker stop` stall with a SIGKILL exit (fixed in e243921, T114). The difference between then and now is that the equivalence is measured."
+      "notes": "Classified as intentional ONLY because the observable behavior was measured equal, not because the difference looks cosmetic. `docker stop`: deacon 245 ms (single-container) / 138 ms (compose), reference 215 ms; exit code 0 on both sides. deacon's form additionally keeps the BusyBox fallback (`sleep infinity` is rejected on Alpine) and a PATH prefix that survives a feature rewriting PATH. An EARLIER version of this same field was recorded as intentional on the assumption that a keep-alive cannot matter behaviorally — that assumption was false and hid a 10,258 ms `docker stop` stall with a SIGKILL exit (fixed in e243921, T114). The difference between then and now is that the equivalence is measured."
+    },
+    {
+      "id": "bhv-container-metadata-label-content",
+      "area": "observable-state",
+      "statement": "The `devcontainer.metadata` label records the image metadata the configuration and each installed Feature contribute, with configuration values kept in the form the author wrote them.",
+      "applicability": [],
+      "spec": "nonconformant",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Surfaced by 024 US5. Two measured differences at oracle 0.87.0, both in the same label: (1) the reference records a `{\"id\": \"<feature>\"}` entry for every installed Feature and deacon records none, so deacon's metadata does not say which Features an image carries; (2) for a mount declared as `source=${localWorkspaceFolder}/ro,…` the reference records the UNSUBSTITUTED template and deacon records the substituted absolute host path, which bakes the building machine's filesystem layout into an image label and makes the metadata non-portable. Both are deacon defects and BOTH NEED A `parity-drift` GITHUB ISSUE FILED. `spec: nonconformant` states that plainly; the decision enum has no 'known defect, fix queued' value and R5/R6 forbid `follow-spec`/`align-with-reference` while the reference is divergent, so `intentional-divergence` is the only valid decision and means, here, 'recorded and not yet fixed'. Characterized by `wvr-container-metadata-label-content`."
     },
     {
       "id": "bhv-state-container-parity",

@@ -1,0 +1,13 @@
+{
+  "id": "wvr-exec-image-path-dropped",
+  "behaviors": ["bhv-exec-image-path-preserved"],
+  "scope": { "kind": "corpus_case", "corpus": "conformance", "case": "exec-dockerfile-overlay" },
+  "expect": {
+    "kind": "field-divergence",
+    "ours": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "reference": "/opt/conformance/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  },
+  "rationale": "Surfaced by the 024 US3 exec/dockerfile/cli-overlay case (hrt-exec-dockerfile-running-cli-overlay). `deacon exec` runs the user's command with a PATH that has lost every entry the IMAGE contributed via `ENV PATH`, so a tool the image put on PATH does not resolve; the reference resolves it. Measured at oracle 0.87.0 against fx-exec-dockerfile-overlay, whose image sets `ENV PATH=/opt/conformance/bin:$PATH` — the values above are the two `echo $PATH` results. Three steps compose into it: (1) the probe runs `sh -lic 'env'` and a login shell sources `/etc/profile`, which on Alpine and Debian alike REPLACES rather than extends PATH, so the probe never reports the image's entries; (2) `container_env_probe::build_effective_env` rebuilds the environment from the probe alone and overlays only remoteEnv and `--remote-env` — the container's own `Config.Env` reaches `shared/env_user.rs` but is used solely as the `${containerEnv:VAR}` substitution source, never as a merge layer, while the sibling `merge_environments` in the same module does implement the documented `probed < containerEnv < remoteEnv` precedence and `exec` simply does not call it; (3) `docker::build_exec_args` then emits an explicit `-e PATH=<degraded>`, which overrides the image's value for that exec session. Lifecycle commands mask it because they are wrapped in `<shell> -l -i -c` and re-source `/etc/profile`; `exec` runs the argv directly, so the injected PATH is the final word. This is a DEFECT, waived only because the fix is not a small one: layering containerEnv over the probe is the documented precedence and gives the right answer here, but it would also let the image's PATH beat the probe's in general, and the probe's login/interactive PATH additions are exactly what `userEnvProbe` exists to capture (a Feature dropping a file into `/etc/profile.d/`). Choosing the per-variable precedence for PATH needs a deliberate decision about the Feature case on a hot path shared by up, exec and run-user-commands, not a reorder. Tracked at https://github.com/get2knowio/deacon/issues/370; this waiver self-invalidates as stale when the difference stops reproducing.",
+  "added": "2026-07-26",
+  "expires": "2027-01-26"
+}

@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceUpDockerfileFeature",
+	"build": { "dockerfile": "Dockerfile" },
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"containerUser": "dev",
+	"remoteUser": "dev",
+	"features": { "./features/marker": {} },
+	"containerEnv": { "CONF_CASE": "up-dockerfile-feature" }
+}

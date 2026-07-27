@@ -7,15 +7,104 @@
       "revision": "rev-spec-113500f4",
       "locator": "Container creation and metadata",
       "summary": "A created container's observable state (running status, labels, mounts, environment) reflects the resolved configuration.",
-      "behaviors": ["bhv-state-container-parity", "bhv-state-diff-parity"]
+      "behaviors": [
+        "bhv-state-container-parity",
+        "bhv-state-diff-parity",
+        "bhv-up-mount-source-and-shape"
+      ]
+    },
+    {
+      "id": "src-spec-container-lifecycle-reentry",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainer-reference.md § Development container lifecycle",
+      "summary": "Creating a development container versus reconnecting to one that already exists, and what re-entry does when the configuration has changed since the container was created.",
+      "behaviors": [
+        "bhv-up-restart-reuses-container",
+        "bhv-up-changed-config-recreates-container"
+      ]
+    },
+    {
+      "id": "src-spec-discovery-locations",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainer-reference.md § devcontainer.json",
+      "summary": "The three on-disk locations a product should expect to find devcontainer.json in, in order of precedence, including the one-level-deep sub-folder form.",
+      "behaviors": [
+        "bhv-readconfig-discovery-locations"
+      ]
     },
     {
       "id": "src-spec-exec-command",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
       "locator": "Command execution",
-      "summary": "A command is executed inside the container with its output streamed and its exit code propagated.",
-      "behaviors": ["bhv-exec-command-parity"]
+      "summary": "A command is executed inside the container with its output streamed and its exit code propagated, in the container's environment — including the PATH the image itself established.",
+      "behaviors": [
+        "bhv-exec-command-parity",
+        "bhv-exec-image-path-preserved"
+      ]
+    },
+    {
+      "id": "src-spec-feature-install-order",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainer-features.md § Installation order / feature-dependencies.md",
+      "summary": "How the install order of a Feature set is determined: declared order, overrideFeatureInstallOrder, and dependency resolution.",
+      "behaviors": [
+        "bhv-readconfig-feature-resolution-order",
+        "bhv-up-feature-install-order",
+        "bhv-up-feature-install-failure",
+        "bhv-build-features-extended-image",
+        "bhv-up-feature-entrypoint-chain"
+      ]
+    },
+    {
+      "id": "src-spec-image-build",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainerjson-reference.md § Image or Dockerfile specific properties",
+      "summary": "Building an image from build.dockerfile, including build arguments and the failure of a build step.",
+      "behaviors": [
+        "bhv-build-failure-reported"
+      ]
+    },
+    {
+      "id": "src-spec-lifecycle-scripts",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainer-reference.md § Lifecycle scripts / features-contribute-lifecycle-scripts.md",
+      "summary": "The lifecycle hook sequence and the hooks a Feature may contribute to it.",
+      "behaviors": [
+        "bhv-run-user-commands-hook-order",
+        "bhv-run-user-commands-hook-failure",
+        "bhv-up-lifecycle-command-forms",
+        "bhv-up-lifecycle-command-cwd"
+      ]
+    },
+    {
+      "id": "src-spec-lockfile",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainer-lockfile.md",
+      "summary": "The devcontainer lockfile: what it pins, when it is regenerated, and how a configured Feature's version relates to it.",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions",
+        "bhv-outdated-extends-chain-features",
+        "bhv-upgrade-regenerates-lockfile",
+        "bhv-upgrade-empty-feature-set"
+      ]
+    },
+    {
+      "id": "src-spec-metadata-merge",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainer-reference.md § Merge logic (image metadata and devcontainer.json)",
+      "summary": "Configuration contributed by image metadata and Features is layered beneath the devcontainer.json's own properties; for a map-valued property such as containerEnv the later layer wins, and the devcontainer.json is applied last.",
+      "behaviors": [
+        "bhv-up-container-env-merge-precedence",
+        "bhv-up-path-construction"
+      ]
     },
     {
       "id": "src-spec-readconfig-resolution",
@@ -27,6 +116,36 @@
         "bhv-readconfig-basic-parse",
         "bhv-readconfig-merged-configuration",
         "bhv-readconfig-tier1-corpus"
+      ]
+    },
+    {
+      "id": "src-spec-remote-user",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainerjson-reference.md § containerUser / remoteUser / updateRemoteUserUID",
+      "summary": "The user a container's process and remote commands run as, and the UID/GID that user resolves to inside the container.",
+      "behaviors": [
+        "bhv-up-effective-user-uid-gid"
+      ]
+    },
+    {
+      "id": "src-spec-templates-apply",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainer-templates.md § Option resolution",
+      "summary": "Template options and the substitution of ${templateOption:...} placeholders into the scaffolded files.",
+      "behaviors": [
+        "bhv-templates-apply-scaffolds-options"
+      ]
+    },
+    {
+      "id": "src-spec-variable-substitution",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainerjson-reference.md § Variables in devcontainer.json",
+      "summary": "The variable forms and the properties that support them, including the object-shaped fields that carry user templates.",
+      "behaviors": [
+        "bhv-readconfig-substitution-object-fields"
       ]
     }
   ]

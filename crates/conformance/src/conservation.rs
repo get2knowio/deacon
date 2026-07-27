@@ -86,6 +86,253 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      exit 0 vs 215 ms / exit 0); the same field's earlier 'cannot matter behaviorally' \
      assumption hid a 10s stall.",
     ),
+    (
+        "bhv-readconfig-discovery-locations",
+        "Which on-disk locations configuration discovery searches, including the negative half (a \
+     plain `devcontainer.json` at the workspace root is not one of them). No pre-migration \
+     behavior described discovery at all — every corpus fixture put its configuration at the \
+     one location every implementation searches — so this is a newly RECORDED fact, not a re- \
+     description. It also carries a measured divergence: the pinned oracle does not search \
+     the spec's one-level-deep sub-folder form.",
+    ),
+    (
+        "bhv-readconfig-unsupported-enum-rejected",
+        "A value outside a CLOSED schema enum. Distinct from the wrong-TYPE rejections already \
+     recorded: those are a JSON type mismatch caught by deserialization shape, this is a \
+     well-typed string outside a closed value set. An implementation can plausibly get one \
+     right and the other wrong, so they are two claims.",
+    ),
+    (
+        "bhv-readconfig-substitution-object-fields",
+        "Substitution reaching the OBJECT-shaped template-carrying fields. The pre-migration \
+     corpus exercised substitution in scalars only, and `customizations` was missed for \
+     exactly that reason (#312) — which is the evidence that this is a distinct claim rather \
+     than a variant of the scalar one.",
+    ),
+    (
+        "bhv-readconfig-feature-resolution-order",
+        "The RESOLVED Feature set and its order as `read-configuration` reports it, including a \
+     `--additional-features` overlay joining that resolution. Nothing pre-migration read the \
+     features-configuration document; the corpora compared the merged configuration only.",
+    ),
+    (
+        "bhv-up-feature-install-order",
+        "Features actually installed into the created container, in resolved order. The pre- \
+     migration `up` coverage is one behavior about a subsequent `exec` observing the \
+     environment; it says nothing about whether a Feature ran, which the marker file this \
+     behavior's case reads is the first evidence of.",
+    ),
+    (
+        "bhv-up-feature-install-failure",
+        "A Feature that cannot be installed failing `up`. Not a variant of the install-ORDER \
+     claim: an implementation that installs the right Features in the right order and \
+     swallows a failing install script satisfies that one and not this one, and hands back a \
+     container that looks complete. Newly recordable because the pre-migration corpora had no \
+     container-backed failure tier at all — 024 US4 is that tier.",
+    ),
+    (
+        "bhv-up-restart-reuses-container",
+        "Re-entry into an existing container versus first creation. Newly recordable because the \
+     metamorphic oracle that can express a RELATIONSHIP between two runs arrived in 022; \
+     before it there was no way to state this claim, only to state each run's output.",
+    ),
+    (
+        "bhv-up-changed-config-recreates-container",
+        "Re-entry whose CONFIGURATION has changed since the container was created. Not a variant \
+     of the reuse claim, and provably so: the two diverge in opposite directions on the same \
+     run. deacon reattaches when the document is unchanged and provisions a NEW container \
+     when it changed, because its identity includes a configHash; the pinned oracle reattaches \
+     in BOTH cases. An implementation satisfying the reuse claim can therefore fail this one, \
+     which is what makes it a second claim. Newly recordable in 024 US3: nothing pre-migration \
+     re-ran an operation against a mutated configuration at all.",
+    ),
+    (
+        "bhv-exec-image-path-preserved",
+        "Whether PATH entries the IMAGE contributed via `ENV PATH` survive into an `exec` \
+     session. Not a variant of the exec command-parity claim: every variable in the case \
+     resolves identically on both sides and only PATH differs, so an implementation \
+     satisfying command parity, argument passing and exit-code propagation still fails this. \
+     Newly recordable because the pre-migration exec coverage never ran a command that had to \
+     RESOLVE through PATH — it compared output of commands named by absolute path or already \
+     on the default PATH.",
+    ),
+    (
+        "bhv-down-missing-config-idempotent",
+        "Teardown over a workspace with NO configuration succeeding rather than failing, and \
+     still resolving a container recorded for the workspace path. Distinct from the removal \
+     claim: that one is about a teardown that has a configuration to scope itself with, this \
+     one is about the absence of one, and the two are served by different code paths \
+     (identity-from-config versus auto-discovery). Newly recordable for the same reason as \
+     the removal claim — `down` had zero cases and the pinned reference has no such command.",
+    ),
+    (
+        "bhv-build-features-extended-image",
+        "Which image `build` reports and tags when Features are layered. The one pre-migration \
+     `build` behavior is about the build OUTCOME; this is about the identity of the artifact \
+     — the distinction a shipped defect already turned on.",
+    ),
+    (
+        "bhv-build-failure-reported",
+        "A build-time failure and the STAGE it is attributed to. No pre-migration behavior \
+     described a failing build: the corpora's build coverage was entirely on the success \
+     path, which is the hole the container-backed error-path tier exists to close.",
+    ),
+    (
+        "bhv-run-user-commands-hook-order",
+        "Lifecycle hook ORDER, and a Feature-contributed hook running exactly once. The operation \
+     had zero cases before this story, so there is no pre-migration claim for this to be a \
+     variant of.",
+    ),
+    (
+        "bhv-run-user-commands-hook-failure",
+        "A lifecycle hook that exits non-zero failing the run. Separate from the ordering claim: \
+     an implementation that runs hooks in the right order and ignores their exit status \
+     satisfies one and not the other.",
+    ),
+    (
+        "bhv-down-removes-container",
+        "Teardown removing the workspace's container. `down` had zero cases and the pinned \
+     reference has no such command, so nothing pre-migration could have described it.",
+    ),
+    (
+        "bhv-down-compose-project-teardown",
+        "Teardown of a Compose PROJECT, identified by the project name and labels `up` derived. \
+     Distinct from the single-container claim: the identification path is different, and it \
+     is the one that fails silently.",
+    ),
+    (
+        "bhv-doctor-diagnostics-report",
+        "Host, platform and runtime diagnostics, and their independence from the workspace \
+     configuration. `doctor` had zero cases and the pinned reference has no such command.",
+    ),
+    (
+        "bhv-templates-apply-scaffolds-options",
+        "Template option substitution into the scaffolded files. `templates apply` had zero \
+     cases; its result is bytes on disk rather than a document, so no pre-migration \
+     structured-output claim could have covered it.",
+    ),
+    (
+        "bhv-outdated-reports-feature-versions",
+        "Current/wanted/latest version reporting for each configured Feature. `outdated` had \
+     ZERO cases before this story, so there is no pre-migration claim this could be a \
+     variant of: the pre-migration corpora never invoked the operation, and no behavior \
+     described what a version report contains. It is also not a variant of the lockfile \
+     behaviors — reporting what is available is a different claim from writing what is \
+     pinned, and an implementation can do either without the other.",
+    ),
+    (
+        "bhv-outdated-extends-chain-features",
+        "Version reporting over a RESOLVED extends chain, where the pinned oracle reports an \
+     empty table. Distinct from the plain reporting claim because it is the one that carries \
+     a measured divergence, and because an implementation reporting versions correctly for a \
+     single document can still miss an inherited Feature.",
+    ),
+    (
+        "bhv-upgrade-regenerates-lockfile",
+        "Lockfile regeneration from the effective configuration, including a Feature a parent \
+     link of an extends chain contributed. `upgrade` had ZERO cases before this story, so \
+     no pre-migration claim exists for this to re-describe. Not a variant of the `outdated` \
+     behaviors either: reporting available versions and WRITING the pinned set are separate \
+     operations with separate outputs, and the lockfile is the only one of the two that \
+     changes what a later run resolves.",
+    ),
+    (
+        "bhv-upgrade-empty-feature-set",
+        "Regenerating a lockfile for a configuration with NO Features. Separate from the general \
+     regeneration claim because it is the boundary the pinned oracle FAILS on, so the two \
+     have different reference axes and cannot be one record.",
+    ),
+    (
+        "bhv-up-lifecycle-command-forms",
+        "A lifecycle hook in the ARRAY (argv) form and in the OBJECT (named commands) form. \
+     Nothing pre-migration described either form: the corpora compared resolved \
+     CONFIGURATION documents, where a hook is a value to echo, and never ran one. Not a \
+     variant of `bhv-run-user-commands-hook-order`, which claims the ORDER hooks run in \
+     for a single form — an implementation can order hooks correctly and still drop the \
+     second command of an object-form hook.",
+    ),
+    (
+        "bhv-up-lifecycle-command-cwd",
+        "The working DIRECTORY a lifecycle hook runs in. Not a variant of \
+     `bhv-up-lifecycle-command-forms`, which claims each declared FORM of a hook is \
+     executed and says nothing about where it executes from: an implementation can run \
+     both forms of every hook out of the image's default directory, satisfying that claim \
+     and breaking this one for every hook that resolves a relative path. Newly recordable \
+     because the sentence carrying the rule — features-contribute-lifecycle-scripts' \"as \
+     with all lifecycle hooks\" clause, the clause inventory's ONLY carrier of it — has no \
+     observation until a hook can report its own `pwd` into a bind-mounted file, which \
+     needs the container-backed tier 024 built.",
+    ),
+    (
+        "bhv-up-feature-entrypoint-chain",
+        "Entrypoints contributed by MULTIPLE Features, chained. Newly recordable in the same \
+     way the labels and keep-alive behaviors were: `Config.Entrypoint` was captured and \
+     deliberately not compared, so no behavior described it, and the two CLIs build the \
+     chain by different mechanisms that only an effect-level observation can relate. Not a \
+     variant of `bhv-up-feature-install-order`: installing the right Features in the right \
+     order says nothing about whether their entrypoints then run.",
+    ),
+    (
+        "bhv-up-container-env-merge-precedence",
+        "Which layer wins when the configuration AND a Feature declare the same `containerEnv` \
+     variable. No pre-migration claim covers it — `bhv-readconfig-merged-configuration` \
+     compares the merged DOCUMENT, and deacon's document was correct here while the \
+     container it created was not, which is exactly the gap a document-only comparison \
+     leaves. Recorded after measuring both sides: the defect it found (deacon merged the \
+     Feature layer OVER the configuration's) is fixed in the same change.",
+    ),
+    (
+        "bhv-up-path-construction",
+        "PATH as CONSTRUCTED in the created container, including a segment a Feature \
+     contributes. Newly recordable because `drop_noise_env` removed `PATH` at capture until \
+     024 US5, so no case could see it. Not a variant of the containerEnv precedence claim: \
+     PATH is the one variable both layers legitimately WRITE TO rather than set, so \
+     last-writer-wins is the wrong rule for it and getting precedence right does not imply \
+     getting the prepend right.",
+    ),
+    (
+        "bhv-up-effective-user-uid-gid",
+        "The effective user of the container process and the UID/GID it resolves to, for a user \
+     the image creates and for one a FEATURE creates. `bhv-state-container-parity` compares \
+     whatever the observed fixtures happened to contain and none declared a non-root user; \
+     more importantly it compares the DECLARATION, while the ids are only observable by \
+     running something inside the container, which no pre-migration unit did.",
+    ),
+    (
+        "bhv-up-mount-source-and-shape",
+        "A mount's SOURCE as distinct from its SHAPE. Not recordable before 024 US5: the \
+     observable-state snapshot carried only `sourceTail`, the bind's leaf component, so two \
+     mounts rooted at different host directories compared equal and no claim about sources \
+     could be evidenced. `bhv-state-container-parity` covers the shape half only, for the \
+     same reason.",
+    ),
+    (
+        "bhv-container-metadata-label-content",
+        "What the `devcontainer.metadata` label actually CONTAINS. Newly recordable in 024 US5 \
+     for two independent reasons: the label was compared only where a case happened to reach \
+     it, and the second of its two differences (substituted absolute paths where the reference \
+     keeps the author\'s `${localWorkspaceFolder}` template) was unobservable while a mount \
+     source was collapsed to its leaf component. Not a variant of \
+     `bhv-container-identity-labels`, which is about labels the reference does not set at all — \
+     this one is a label BOTH set, with different contents.",
+    ),
+    (
+        "bhv-compose-project-file-set",
+        "How each CLI delivers its generated Compose override, and the two Compose labels \
+     derived from the resulting file set. No pre-migration unit compared Compose bookkeeping \
+     labels. Not a variant of `bhv-compose-project-name-robust`: an implementation could adopt \
+     either CLI\'s project naming and still deliver its override the other way, so the two are \
+     independent claims.",
+    ),
+    (
+        "bhv-readconfig-authored-empty-omitted-collapsed",
+        "Whether a resolved-configuration result distinguishes an authored `null`, an authored \
+     empty collection, and an OMITTED property. Structurally unrecordable before 024 US5: \
+     `drop_absent_optional` ran on both sides, so all three states normalized to the same \
+     observation and no pre-migration unit could have reported a difference. Not a variant \
+     of the readconfig strictness family — those are REJECTIONS of malformed input; this is \
+     a fidelity loss on input both sides accept.",
+    ),
 ];
 
 /// The observable-channel count at the branch point (research §1g).
@@ -192,13 +439,26 @@ pub fn denominator_counts(registry: &Registry) -> DenominatorCounts {
 /// the accounting by acquiring a post-branch behavior.
 pub fn post_branch_exceptions(registry: &Registry) -> BTreeSet<String> {
     let post_branch: BTreeSet<&str> = POST_BRANCH_BEHAVIORS.iter().map(|(id, _)| *id).collect();
+    let qualifies = |behaviors: &[String]| {
+        !behaviors.is_empty() && behaviors.iter().all(|b| post_branch.contains(b.as_str()))
+    };
+    // BOTH exception mechanisms, not only extensions. A `wvr-` authored after the branch
+    // point characterizes a difference the pre-migration system never observed, so it has
+    // no pre-migration form for `mapping.json` to preserve — exactly the ground on which
+    // an `ext-` is exempt. Covering only one of the two would make the exemption depend on
+    // which mechanism an author reached for rather than on when the fact was learned.
     registry
         .extensions
         .iter()
-        .filter(|e| {
-            !e.behaviors.is_empty() && e.behaviors.iter().all(|b| post_branch.contains(b.as_str()))
-        })
+        .filter(|e| qualifies(&e.behaviors))
         .map(|e| e.id.clone())
+        .chain(
+            registry
+                .waivers
+                .iter()
+                .filter(|w| qualifies(&w.behaviors))
+                .map(|w| w.id.clone()),
+        )
         .collect()
 }
 
@@ -566,6 +826,39 @@ pub struct NormalizationRule {
 /// is invisible to review, and a rule that is registered but blanket fails **V24**.
 pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
     NormalizationRule {
+        name: "compose_project_prefix",
+        scopes: &["channel:chan-container-state"],
+        action: RuleAction::Rewrite,
+        removes: &[],
+        justification: Some(
+            "Strips a Compose project's `<project>_` prefix from a network or volume name \
+             so two CLIs that derive different project names still compare on the resource \
+             itself (bhv-compose-project-name-robust). Rewrite, never delete. Registered \
+             in 024 US5 (T123): it had been applied inside the container-state capture \
+             since the observable-state port without ever appearing in this registry, and \
+             it discarded the project identity leaving no trace in the evidence. The \
+             derived `composeProjectResources.project` field now records the name that was \
+             stripped, so the rewrite is auditable from a snapshot alone.",
+        ),
+        known_non_compliant: None,
+    },
+    NormalizationRule {
+        name: "container_hostname_token",
+        scopes: &["channel:chan-container-state"],
+        action: RuleAction::Rewrite,
+        removes: &[],
+        justification: Some(
+            "Rewrites a container-id-shaped `HOSTNAME` env value (12 lowercase-hex \
+             characters, Docker's default) to `<CONTAINER_HOSTNAME>`, on the `env` entry \
+             and the derived `envMap` value. Two containers created by two CLIs always \
+             disagree here for a reason that says nothing about either CLI. A hostname the \
+             configuration actually set is not 12 hex characters and is left alone. Added \
+             in 024 US5 (T123) so `drop_noise_env` no longer has to delete `PATH` and \
+             `HOME` to get rid of `HOSTNAME`.",
+        ),
+        known_non_compliant: None,
+    },
+    NormalizationRule {
         name: "devcontainer_id_token",
         scopes: &["field:/configuration", "field:/mergedConfiguration"],
         action: RuleAction::Rewrite,
@@ -645,8 +938,15 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
              set (`hostRequirements`, `portsAttributes`). It does NOT descend into \
              arbitrary sub-documents — a `label` or `description` inside \
              `customizations.vscode.settings` is user data and is compared, not elided. \
-             This compensates for a deacon serializer defect (it should apply \
-             `skip_serializing_if`) and is deleted when that lands — tracked at \
+             NARROWED in 024 US5 (T123) to the SIDE whose defect it compensates: it \
+             applies to `/configuration` on deacon's side only, because the reference's \
+             `configuration` is an echo of the authored document and an empty value there \
+             is authorship information — eliding it on both sides is what made an \
+             authored null, an authored empty and an omission indistinguishable (FR-055). \
+             It still applies to `/mergedConfiguration` on BOTH sides, where each CLI \
+             synthesizes computed empties of its own. This compensates for a deacon \
+             serializer defect (it should apply `skip_serializing_if`) and is deleted when \
+             that lands — tracked at \
              specs/023-migrate-parity-to-conformance/tasks.md#T111. Replaces the retired \
              blanket `prune` (023 T062, research D3).",
         ),
@@ -654,14 +954,21 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
     },
     NormalizationRule {
         name: "drop_noise_env",
-        scopes: &["channel:chan-container-state"],
+        scopes: &["field:/env"],
         action: RuleAction::Drop,
         removes: &["PATH", "HOME", "HOSTNAME", "TERM", "container"],
         justification: Some(
             "These five environment variables are injected by the container runtime into \
              every container regardless of the CLI that created it, so they carry no \
              cross-CLI outcome meaning. The set is finite and enumerated; the newer \
-             `chan-injected-process` channel removes no env var at all.",
+             `chan-injected-process` channel removes no env var at all. NARROWED in 024 \
+             US5 (T123) from CAPTURE to the legacy `diff_states` COMPARISON: the \
+             declarative `chan-container-state` observer delegates to the same \
+             `container_state` capture, so removing these at capture also removed them \
+             from the declarative channel — including `PATH`, which FR-050 requires be \
+             compared. Its scope is now the `/env` field of that one legacy comparison; \
+             the declarative channel keeps every variable and rewrites the only \
+             irreconcilable one via `container_hostname_token`.",
         ),
         known_non_compliant: None,
     },
@@ -736,6 +1043,31 @@ pub const NORMALIZATION_RULES: &[NormalizationRule] = &[
         justification: Some(
             "Rewrites per-run temp workspace and project paths to stable tokens so two \
              runs in different temp directories compare equal. Rewrite, never delete.",
+        ),
+        known_non_compliant: None,
+    },
+    NormalizationRule {
+        name: "user_default_root",
+        scopes: &[
+            "field:/user",
+            "channel:chan-container-state",
+            "field:/userSpec/name",
+        ],
+        action: RuleAction::Canonicalize,
+        removes: &[],
+        justification: Some(
+            "An empty Docker `Config.User` means \"the image default\", which for every \
+             Linux base this suite pins is root; treating \"\" and \"root\" as the same \
+             effective identity keeps a cosmetic spelling difference out of the legacy \
+             `diff_states` comparison while a real non-root `remoteUser`/`containerUser` \
+             still diverges. Removes nothing, and applies to the legacy comparison only — \
+             the declarative `chan-container-state` channel emits `user` verbatim plus the \
+             derived `userSpec` — which is why the DECLARATIVE half of the rule is scoped \
+             to those two fields on `chan-container-state`: measured at oracle 0.87.0 over \
+             a Feature-extended image, deacon leaves `Config.User` empty while the \
+             reference\'s generated Dockerfile writes `USER root`, and the two containers \
+             run as the same user. Registered in 024 US5 (T123): it was an unregistered \
+             comparison-time equivalence, invisible to anyone reading the rule list.",
         ),
         known_non_compliant: None,
     },

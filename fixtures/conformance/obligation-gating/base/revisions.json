@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "rev-oracle-0-87-0",
+      "kind": "oracle",
+      "pin": "0.87.0",
+      "url": "https://www.npmjs.com/package/@devcontainers/cli/v/0.87.0"
+    },
+    {
+      "id": "rev-spec-113500f4",
+      "kind": "spec",
+      "pin": "113500f4",
+      "url": "https://github.com/devcontainers/spec/tree/113500f4"
+    }
+  ]
+}

@@ -28,10 +28,14 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use crate::coverage::Coverage;
+use crate::coverage::{Coverage, ObligationBucket, evaluate_obligations};
 use crate::load::Registry;
 use crate::model::{CaseKind, OracleType};
-use crate::validate::{ClauseInputs, InventoryInputs, check_clause_inventory, check_inventory};
+use crate::obligation::{DispositionKind, generate_obligations};
+use crate::validate::{
+    ClauseInputs, InventoryInputs, check_clause_inventory, check_inventory,
+    check_obligation_dispositions,
+};
 
 /// Why a certification is blocked: an unresolved gap record, an in-profile behavior
 /// with no structural coverage, or a schema-constraint-inventory join violation
@@ -54,6 +58,22 @@ pub enum BlockingKind {
     /// integrity). The [`Blocking::code`] carries the specific class
     /// (021-normative-clause-inventory; contracts/clause-classification-schema.md).
     Clause,
+    /// An obligation-disposition failure (024-deterministic-conformance-coverage, US2;
+    /// contracts/obligation.md "Certification integration"). The [`Blocking::code`]
+    /// carries the specific class — the same shape `Constraint` and `Clause` already use,
+    /// so the output format does not fork into a third:
+    ///
+    /// | `code` | Condition |
+    /// |---|---|
+    /// | `V28` | an applicable obligation with zero dispositions, or with more than one |
+    /// | `V29` | a malformed or stale disposition |
+    /// | `V6` | a `waived` disposition whose waiver has expired |
+    ///
+    /// A `gap` disposition is deliberately absent: it blocks through the `gap-` record it
+    /// names, which V29 already requires to resolve and which [`BlockingKind::Gap`]
+    /// already reports. Listing it twice would double-count one fact ("existing gap
+    /// semantics", contracts/obligation.md).
+    Obligation,
 }
 
 /// One blocking item: its `kind`, the offending record ID, and — for a `constraint`
@@ -62,10 +82,44 @@ pub enum BlockingKind {
 pub struct Blocking {
     pub kind: BlockingKind,
     pub id: String,
-    /// The violation class for a `constraint` blocker (`"V11"`..`"V14"`); absent for
-    /// `gap` / `uncovered` blockers, whose kind is already fully descriptive.
+    /// The violation class for a `constraint` / `clause` / `obligation` blocker
+    /// (`"V6"`, `"V11"`..`"V15"`, `"V28"`, `"V29"`); absent for `gap` / `uncovered`
+    /// blockers, whose kind is already fully descriptive.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
+}
+
+/// The five FR-026 coverage buckets over the generated obligation set, plus the
+/// undispositioned count — **never folded together** (024-deterministic-conformance-
+/// coverage, T068).
+///
+/// Reported ALONGSIDE the behavior-level numbers `certify` already carries, not instead
+/// of them: the two denominators answer different questions (which behaviors are
+/// evidenced, versus which modelled combinations are exercised), and collapsing them
+/// would let progress on one hide the absence of progress on the other.
+///
+/// `undispositioned` is not a sixth bucket in the FR-026 sense — it is the queue SC-001
+/// requires to reach zero, and every entry in it is simultaneously a `V28` blocker above.
+/// It is counted separately because folding it into `gap` would overstate what is known
+/// and folding it into `covered` would understate the hole.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObligationSummary {
+    /// Every generated obligation — the denominator.
+    pub total: usize,
+    /// Dispositioned `case`, or (absent a record) backed by matching evidence.
+    pub covered: usize,
+    /// Dispositioned `waived`. Non-blocking until the waiver expires.
+    pub waived: usize,
+    /// Dispositioned `non-testable`. Non-blocking.
+    pub non_testable: usize,
+    /// Dispositioned `gap`. Blocks through the `gap-` record it names.
+    pub gap: usize,
+    /// Modelled, but its environment is not the active profile: enumerated as visible
+    /// backlog, counted as neither covered nor gap, never blocking (spec Assumption 11).
+    pub inactive_environment: usize,
+    /// Carrying no explicit disposition — each one also a `V28` blocker.
+    pub undispositioned: usize,
 }
 
 /// Committed-snapshot coverage for one snapshot-oracle case (022-conformance-runner US2;
@@ -150,6 +204,10 @@ pub struct Certification {
     /// missing-coverage claim. An UNDECLARED blanket rule is V24 and blocks a PR.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub non_compliant_rules: Vec<NonCompliantRule>,
+    /// The five FR-026 obligation buckets plus the undispositioned queue (024 US2,
+    /// T068). Informational; what blocks is in `blocking`.
+    #[serde(default)]
+    pub obligations: ObligationSummary,
 }
 
 /// A normalization rule registered with a declared FR-021 deficiency (T061).
@@ -177,6 +235,7 @@ pub struct NonCompliantRule {
 /// certification then reduces to the gap/uncovered gate exactly as before this wiring.
 pub fn certify(
     registry: &Registry,
+    today: &str,
     inventory: &InventoryInputs,
     clauses: &ClauseInputs,
     snapshots_dir: &Path,
@@ -205,8 +264,20 @@ pub fn certify(
     // implementation `validate` runs.
     let clause_blockers = check_clause_inventory(registry, clauses);
 
+    // Obligation-disposition violations (V28/V29) block certification (024 US2,
+    // contracts/obligation.md). The SAME implementation `validate` runs — an obligation
+    // gate that disagreed with `validate` about what is undispositioned would make the
+    // release verdict depend on which command you happened to run.
+    let disposition_blockers = check_obligation_dispositions(registry);
+    // Plus the one condition `check_obligation_dispositions` cannot see, because it is
+    // date-dependent: a `waived` disposition whose waiver has expired (V6). The waiver
+    // itself is what expired, so the waiver is what the blocker names — the record V6
+    // names everywhere else in the codebase.
+    let expired = expired_waiver_dispositions(registry, today);
+
     // Blocking order: all gaps first, then all uncovered, then all constraint
-    // violations, then all clause violations (each group deterministically ordered).
+    // violations, then all clause violations, then all obligation violations (each group
+    // deterministically ordered).
     let mut blocking: Vec<Blocking> = Vec::with_capacity(
         gap_ids.len() + uncovered_ids.len() + inventory_blockers.len() + clause_blockers.len(),
     );
@@ -229,6 +300,16 @@ pub fn certify(
         kind: BlockingKind::Clause,
         id: v.record,
         code: Some(v.code),
+    }));
+    blocking.extend(disposition_blockers.into_iter().map(|v| Blocking {
+        kind: BlockingKind::Obligation,
+        id: v.record,
+        code: Some(v.code),
+    }));
+    blocking.extend(expired.into_iter().map(|id| Blocking {
+        kind: BlockingKind::Obligation,
+        id,
+        code: Some("V6".to_string()),
     }));
 
     let mut waived: Vec<String> = registry.waivers.iter().map(|w| w.id.clone()).collect();
@@ -258,7 +339,68 @@ pub fn certify(
         residual_queue,
         permanent_residuals,
         non_compliant_rules,
+        obligations: obligation_summary(registry),
     }
+}
+
+/// The waiver ids named by a `waived` disposition whose waiver has already expired,
+/// id-sorted and de-duplicated (T067; SC-009).
+///
+/// V6 already reports an expired waiver during `validate`, but `certify` has never
+/// blocked on one — a waiver is a decision that no further work is needed, and its
+/// expiry is a prompt to re-confirm, not evidence that something broke. An obligation
+/// dispositioned `waived` is different: the waiver is the ONLY thing standing between
+/// that obligation and "undispositioned". Once it expires, nothing does.
+///
+/// The boundary passes (`expires == today` is still valid), matching V6 exactly, so the
+/// two cannot disagree by a day about when a waiver dies.
+fn expired_waiver_dispositions(registry: &Registry, today: &str) -> Vec<String> {
+    let mut out: Vec<String> = registry
+        .obligation_dispositions
+        .iter()
+        .filter(|record| record.disposition == DispositionKind::Waived)
+        .filter_map(|record| record.waiver.as_deref())
+        .filter(|id| {
+            registry
+                .waivers
+                .iter()
+                .any(|w| w.id == *id && w.expires.as_str() < today)
+        })
+        .map(str::to_string)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Count the five FR-026 buckets plus the undispositioned queue over the generated
+/// obligation set (T068).
+///
+/// Regenerated rather than read from `conformance/obligations/obligations.json`: V27
+/// already guarantees the commit byte-matches a regeneration, so the two are the same
+/// numbers, and regenerating keeps this gate working for a fixture registry that ships no
+/// committed inventory. A registry with no scenario model has no obligation regime and
+/// reports zeros — not because it is covered, but because it declared nothing to cover.
+fn obligation_summary(registry: &Registry) -> ObligationSummary {
+    let Ok(inventory) = generate_obligations(registry) else {
+        return ObligationSummary::default();
+    };
+    let mut summary = ObligationSummary {
+        total: inventory.units.len(),
+        ..ObligationSummary::default()
+    };
+    for outcome in evaluate_obligations(registry, &inventory) {
+        let bucket = match outcome.bucket {
+            ObligationBucket::Covered => &mut summary.covered,
+            ObligationBucket::Waived => &mut summary.waived,
+            ObligationBucket::NonTestable => &mut summary.non_testable,
+            ObligationBucket::Gap => &mut summary.gap,
+            ObligationBucket::InactiveEnvironment => &mut summary.inactive_environment,
+            ObligationBucket::Undispositioned => &mut summary.undispositioned,
+        };
+        *bucket += 1;
+    }
+    summary
 }
 
 /// Partition the NON-BLOCKING residuals into `(queued, permanent)` (T035, FR-054; 024 P1),
@@ -390,12 +532,22 @@ mod tests {
         Path::new("/nonexistent-conformance/snapshots")
     }
 
+    /// A fixed injected "today" so the V6 expired-waiver-disposition gate never depends
+    /// on the wall clock (these fixtures' waivers expire in 2027).
+    const TODAY: &str = "2026-07-19";
+
     #[test]
     fn valid_fixture_with_a_gap_is_not_certified() {
         // The valid fixture carries `gap-readconfig-remote-user`, so it is structurally
         // valid yet NOT certified — a gap always blocks (FR-020, FR-025).
         let registry = valid_registry();
-        let result = certify(&registry, &no_inventory(), &no_clauses(), no_snapshots());
+        let result = certify(
+            &registry,
+            TODAY,
+            &no_inventory(),
+            &no_clauses(),
+            no_snapshots(),
+        );
         assert!(!result.certified, "a registry with a gap must not certify");
         assert!(
             result
@@ -418,7 +570,13 @@ mod tests {
     fn empty_registry_certifies_cleanly() {
         // Nothing in-profile, no gaps → certified (mirrors the real seed registry).
         let registry = Registry::default();
-        let result = certify(&registry, &no_inventory(), &no_clauses(), no_snapshots());
+        let result = certify(
+            &registry,
+            TODAY,
+            &no_inventory(),
+            &no_clauses(),
+            no_snapshots(),
+        );
         assert!(result.certified, "empty registry must certify");
         assert!(result.blocking.is_empty());
         assert!(result.waived.is_empty());
@@ -446,7 +604,7 @@ mod tests {
             });
         }
 
-        let result = certify(&registry, &no_inventory(), &no_clauses(), dir.path());
+        let result = certify(&registry, TODAY, &no_inventory(), &no_clauses(), dir.path());
         assert!(
             result.certified,
             "snapshot coverage must NOT block certification"

@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceUpStaleBefore",
+	"image": "alpine:3.19",
+	"features": { "./features/marker": {} },
+	"containerEnv": { "CONF_GENERATION": "first" }
+}

@@ -1,0 +1,8 @@
+{
+	"name": "extends-dockerfile-depends-child",
+	"extends": "./dockerfile-base.json",
+	"features": {
+		"./features/needs-base-tool": {}
+	},
+	"containerEnv": { "LAYER": "child" }
+}

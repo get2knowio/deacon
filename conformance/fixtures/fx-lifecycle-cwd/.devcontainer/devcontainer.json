@@ -1,0 +1,7 @@
+{
+	"name": "ConformanceLifecycleCwd",
+	"image": "alpine:3.19",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"postCreateCommand": ["sh", "-c", "pwd > /workspace/lifecycle-cwd.txt"]
+}

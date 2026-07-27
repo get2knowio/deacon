@@ -181,11 +181,13 @@ fn tolerance_scoped_to_unlinked_behavior_is_v19() {
     );
 }
 
-/// Write a temp registry with just a `cases.json` and load it — the load-time structural
-/// checks fire even with the rest of the registry empty.
+/// Write a temp registry with just a `cases/<area>.json` and load it — the load-time
+/// structural checks fire even with the rest of the registry empty.
 fn load_temp_cases(cases_json: &str) -> Result<Registry, LoadError> {
     let dir = tempfile::tempdir().expect("tempdir");
-    fs::write(dir.path().join("cases.json"), cases_json).expect("write cases.json");
+    let cases_dir = dir.path().join("cases");
+    fs::create_dir_all(&cases_dir).expect("create cases dir");
+    fs::write(cases_dir.join("area.json"), cases_json).expect("write cases/area.json");
     // Keep the tempdir alive for the load by leaking it into a thread-local is overkill;
     // load reads synchronously before this returns, so a local binding suffices.
     let result = Registry::load(dir.path());

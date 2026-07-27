@@ -448,7 +448,10 @@ it via the conformance loader; the legacy `fixtures/parity-corpus/waivers/` +
 
 **Data layout** (strict-JSON, version-controlled, hand-edited under `conformance/registry/`):
 - `revisions.json` (source pins, e.g. spec commit + oracle version), `dimensions.json`,
-  `channels.json`, `profiles.json`, `cases.json`, `gaps.json`, `extensions.json`
+  `channels.json` (11 observable channels), `profiles.json`, `cases/<area>.json`,
+  `gaps.json`, `extensions.json`, `residuals.json`
+- `scenario.json` / `applicability.json` / `obligation-dispositions/<area>.json` /
+  `regressions.json` — the 024 coverage model; see "Deterministic Coverage Model" below
 - `behaviors/*.json` — per-area behavior records, each with a **three-axis disposition**
   (`spec` × `reference` × `decision`); there is no "different but acceptable" state
 - `sources/*.json` — source-unit provenance (`spec`/`schema`/`cli`/`observed`)
@@ -517,6 +520,10 @@ LLM/network in any CI-facing command:
   `document`/`pointer`/`kind`; added/removed/changed/non-material) for drift review.
 - `inventory scaffold` — emit skeleton `cls-` records (sentinel `"UNREVIEWED"`, loader-
   rejected) to stdout for every unclassified unit; never writes the registry.
+- `coverage generate|check|report|scaffold` — the 024 obligation tooling (see
+  "Deterministic Coverage Model"). `generate` is the sole writer of
+  `conformance/obligations/obligations.json`; `report` is **read-only and never gates**
+  (its exit code reflects whether it could WRITE its artifacts, never what they say).
 
 **Inventory violation classes**: **V11** stale classification (`constraint` absent from the
 inventory); **V12** unclassified (zero) or duplicated (>1) unit — every unit of every kind
@@ -535,7 +542,7 @@ are **evidence-backed** claims — no test case or waiver yet means `reference: 
 `decision: unresolved-gap` → a `gap-*` record.
 
 **Declarative conformance runner** (022-conformance-runner) — cases are DATA a shared
-runner executes, not pointers to hand-written Rust tests. A `cases.json` record is either
+runner executes, not pointers to hand-written Rust tests. A `cases/<area>.json` record is either
 **legacy** (`executable.binary` → a `parity_*` Rust test) or **declarative**
 (`operations` + `oracleType` + `expected`); never both, never neither (exactly-one-of
 enforced fail-loud at load). Adding a case/assertion/fixture is a pure data edit — NO new
@@ -553,10 +560,12 @@ Rust function (SC-001). The hermetic data/validation/staleness logic lives in
   a committed provenance-checked snapshot), `invariant-metamorphic` (evaluate a declared
   RELATIONSHIP — idempotence / first-create-vs-restart / resume — across ≥2 operations,
   not a fixed output).
-- **Observable channels + observers** (`observe/`, one module per channel): CLI-process
+- **Observable channels + observers** (`observe/`, one module per channel; **11 total**,
+  each needing ≥3 covering cases and a `reg-` regression record): CLI-process
   (`chan-exit-code`/`chan-stdout`/`chan-stderr`/`chan-structured-output`), `chan-filesystem`/
-  `chan-file-content` (allowlist-scoped, NEVER full-tree), and the four Docker channels
-  `chan-image`/`chan-process-graph`/`chan-injected-process`/`chan-temporal`. Evidence is
+  `chan-file-content` (allowlist-scoped, NEVER full-tree), and the Docker channels
+  `chan-image`/`chan-process-graph`/`chan-injected-process`/`chan-temporal`/
+  `chan-container-state`. Evidence is
   captured RAW then normalized by the **single** `normalize.rs` — named, field-specific
   rules (`path_token`/`label_semantic`/`mount_source_canonical`/`path_env_segmented`/
   `null_preserving`); nothing blanket-removed (FR-029); raw + normalized persisted SEPARATELY.
@@ -661,6 +670,76 @@ replacement and relates the two **on outcome, never message text**. `equivalent`
 never blocks certification, but it does block deleting its `blockedCarrier`. A `gap-`
 record admits missing *coverage* and always blocks. Do not conflate them.
 
+## Deterministic Coverage Model (024-deterministic-conformance-coverage)
+
+The registry says whether each *behavior* is covered. This says whether the *scenario
+space* is — and, where it is not, makes the hole a counted, dispositioned number instead
+of an unknown. All commands are **dev-only** and hermetic (no network, no Docker, no
+oracle); `parity_registry_check` asserts `deacon --help` gains nothing from any of them.
+
+**The scenario model lives in its OWN namespace.** `conformance/registry/scenario.json`
+declares six `sdim-` dimensions — `operation` (10 values; it partitions the space and is
+never itself a pair member), `config-source`, `container-state`, `features`, `layering`,
+`output-mode`. They MUST NOT be added to `dimensions.json`: `applies_in_profile` treats a
+condition on an unassigned dimension as *unsatisfied*, so a scenario dim there would
+silently drop behaviors out of profile and shrink the very denominator this work exposes
+(research D1). `applicability.json` carries 8 `rule-` exclusions (each with a `ground`
+naming the mechanism, not "out of scope") and 14 hand-selected `hrt-` high-risk triples.
+
+**Two obligation kinds, never multiplied.** `conformance/obligations/obligations.json` is
+**machine-owned**, the sole output of `coverage generate`: `obl-bhv-*` (one per in-profile
+behavior) and `obl-cmb-*` (per-operation pairwise + the selected triples). A behavior is
+NOT crossed with the scenario space — that product is the combinatorial explosion the
+model exists to avoid. Ids are substance-anchored, so a reordered or renamed triple keeps
+its id and its disposition.
+
+**Every applicable obligation carries exactly one `odp-` disposition**, hand-authored in
+`conformance/registry/obligation-dispositions/<area>.json`: `case` (+ `cases`),
+`non-testable` (+ a `rationale` naming a ground), `waived` (+ a scoped `wvr-` with
+`expires`), or `gap` (+ a `gap-`). A high-risk triple accepts only `case` or `gap` —
+an argument may not stand in for evidence where interaction defects hide. Explicit
+records take **precedence over the evidence**, which is the point (a human can say the
+mechanical `scenarioContext` match is not real coverage) and also the trap: a commit that
+adds cases and only registers the new BEHAVIOR dispositions leaves the combination records
+reading `gap` while a case matches. Add a case ⇒ flip its `odp-cmb-*` in the same commit.
+
+**Five reporting buckets**, in `target/conformance/coverage-{pairwise,triples,operations,
+observables}.{json,md}` (git-ignored, byte-stable): `covered` / `waived` / `non-testable` /
+`gap` / `inactive-environment`, plus `undispositioned`, which must be **zero**.
+**Reporting never gates** — `coverage report`'s exit code never depends on what it
+reports; `certify` is the gate.
+
+**Violation classes** (`validate.rs`, all block a PR via `registry_valid`): **V26**
+scenario-model integrity (dead value; rule naming an unknown dimension/value; rule with no
+ground; a case `scenarioContext` that is partial, undeclared, or itself excluded — assign
+**every** dimension or none); **V27** obligation provenance (committed ≠ regenerated,
+`revision` mismatch, a unit referencing a removed value — a hand edit and a stale
+regeneration are indistinguishable and both fail); **V28** an applicable obligation with
+zero or more than one disposition; **V29** malformed disposition (filler rationale; a
+triple dispositioned by rationale/waiver; a stale disposition whose obligation no longer
+resolves; a `waived` naming a blanket-scope waiver); **V30** injected-regression integrity
+(a declared channel with no `reg-` record; a record naming a channel with no observer).
+
+**The injected-regression harness proves the channels are LIVE.**
+`cargo run -p parity-harness --bin coverage-regressions` (`make test-parity-regressions`,
+wired into the parity lane) applies each `reg-` record in `regressions.json` to the
+**evidence source** — a process result, an inspect document, file bytes — and requires the
+case to go from clean to failing on that channel. `inertCount` must be **zero**. Injecting
+into an observer's *return* value is forbidden and does not compile: every entry point is
+generic over a sealed `EvidenceSource` trait no observer output can implement. A
+perturbation that never landed is a fail-loud `InjectionInapplicable`, deliberately NOT
+`inert` — a mis-authored record must never masquerade as a dead channel.
+
+**Two findings this machinery produced, worth not re-learning.** A `jsonSubset: {}`
+assertion matches ANY value, so the channel was declared, observed, and incapable of
+failing; and a `contains` assertion cannot see APPENDED output by construction. Both were
+real, both were in committed cases, and only the injected run found them. **SC-005's
+floor** — no channel below three covering cases — exists for the same reason: a channel
+carried by one case is one authoring mistake from unobserved.
+
+See `specs/024-deterministic-conformance-coverage/quickstart.md` for the add-a-case,
+find-what-is-missing, disposition-the-queue, and drift workflows.
+
 ## Parity & Conformance: Vocabulary, Gates, and the Build-Out Loop
 
 This ties the two preceding sections together. The **harness** (`parity-harness`) *surfaces*
@@ -698,15 +777,20 @@ one. They are separate machinery — keep them distinct even though both say "pa
   pinned oracle, so it cannot run locally in this workspace — verify hermetic pieces locally,
   rely on this lane for the live comparison.
 - **Conformance `certify`** (wired into `release.yml`'s `verify` job) — the **only**
-  conformance gate **in** the release path. Blocks a release iff a `gap-*` record exists or an
-  in-profile behavior is uncovered; waivers are listed but non-blocking. Keep the registry
-  gap-free (or every open gap consciously accepted) so releases aren't surprise-blocked.
+  conformance gate **in** the release path. Blocks a release iff a `gap-*` record exists, an
+  in-profile behavior is uncovered, or an obligation is undispositioned / malformed / stale
+  (V28/V29); waivers, `non-testable`, and committed-snapshot coverage are listed but
+  non-blocking. Keep the registry gap-free (or every open gap consciously accepted) so
+  releases aren't surprise-blocked. **`coverage report` is NOT a gate** — its exit code
+  never reflects what it reports; it feeds `certify`, it does not duplicate it.
 
 **The build-out loop (apply these defaults).** When the harness surfaces a difference:
 
 1. **Classify** it: divergence (which flavor?), gap, or out-of-scope (→ record nowhere).
 2. **Record it in the registry** — the authoritative, durable home. Add/extend a behavior
-   (three axes) + its source unit + coverage (case / waiver / gap), then `validate`.
+   (three axes) + its source unit + coverage (case / waiver / gap), then `validate`. A new
+   case needs a full `scenarioContext` (V26) and its `odp-cmb-*` records flipped off `gap`
+   in the SAME commit, or the coverage report keeps reporting a hole that is filled.
 3. For a *fix-flavored* divergence, **also file/link a GitHub issue** (`parity-drift` label)
    for the fix work, and cross-link it from the behavior's `notes`. Issue = the fix task;
    registry = the characterization. **Both, cross-linked** — that is the default.
@@ -721,6 +805,9 @@ Defaults for the work itself:
   AND get nextest overrides in ALL profiles (parity selection + the exclusions), or
   `parity_registry_check` fails. Keep it **fail-loud** — no `#[ignore]`, no silent skip (the
   harness's whole value is truthful non-selection).
+- **A new observable channel** MUST get a `reg-` regression record (V30) and reach the
+  three-case floor (SC-005). A channel nothing can fail on is worse than an absent one: it
+  reports green forever.
 - **Never** make `certify` non-blocking or silently delete a real gap to go green; that is the
   one move the whole model exists to prevent.
 
@@ -1090,8 +1177,23 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - strict-JSON, version-controlled — extend `conformance/registry/cases.json` (declarative case shape) + `channels.json` (new channels); new committed evidence tree `conformance/snapshots/<os>-<arch>/<case-id>/{provenance,raw,normalized}.json` (atomic temp-file + `fs::rename` writes) (022-conformance-runner)
 - Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json` (strict-JSON records), `indexmap` (declaration order), `sha2` (unit/case/fixture hashing), `tokio` (bounded async exec in the harness), `thiserror` (domain errors), `tracing`, `toml` (nextest-profile drift check), `tempfile` (dev-dep, isolated workspaces). **No new crates, no new dependencies** (research D6). (023-migrate-parity-to-conformance)
 - strict-JSON, version-controlled. New: `conformance/migration/baseline.json` (frozen inventory), `conformance/migration/mapping.json` (unit → case/residual), `conformance/registry/residuals.json` (residual records). Extended: `conformance/registry/cases.json`. Generated (git-ignored): `target/conformance/migration-report.{json,md}`, `target/parity/equivalence.json`. All writes atomic (temp file + `fs::rename`). (023-migrate-parity-to-conformance)
+- strict-JSON, version-controlled. New hand-authored: `conformance/registry/scenario.json` (`sdim-` scenario dimensions), `conformance/registry/applicability.json` (`rule-` exclusions + `hrt-` high-risk triples), `conformance/registry/obligation-dispositions/<area>.json` (`odp-` records), `conformance/registry/regressions.json` (`reg-` records). New machine-owned: `conformance/obligations/obligations.json` (`obl-`, sole output of `coverage generate`). Migrated: `cases.json` → `cases/<area>.json`. Generated (git-ignored): `target/conformance/coverage-{pairwise,triples,operations,observables}.{json,md}`, `target/conformance/regressions.json`. All writes atomic. (024-deterministic-conformance-coverage)
 
 ## Recent Changes
+- 024-deterministic-conformance-coverage: Filled the coverage gaps the migration froze in
+  place, and made the remaining hole MEASURED rather than unknown. Added a constrained
+  **scenario** context model in its OWN namespace (`sdim-`) — scenario dimensions MUST NOT
+  join `dimensions.json`, because `applies_in_profile` treats a condition on an unassigned
+  dimension as unsatisfied, so a scenario dim there would silently drop behaviors out of
+  profile and shrink the very denominator this work exposes (research D1). Added 8
+  applicability rules and 14 hand-selected high-risk triples, two obligation kinds
+  (`obl-bhv`/`obl-cmb`, never multiplied), a mandatory disposition per obligation
+  (`odp-`), violation classes V26–V30, the `coverage generate|check|report|scaffold`
+  command group, a Docker-backed error-path tier, and 11 injected regressions proving
+  every declared channel can fail. Split `cases.json` into `cases/<area>.json`. The end
+  state is deliberate: `certify` reports NOT certified on 10 `gap-pairwise-<operation>`
+  records — the feature measures and exposes the residual combination hole, it does not
+  claim to close it. See the "Deterministic Coverage Model" section.
 - 023-migrate-parity-to-conformance: Migrated the hand-written parity corpora into declarative
   conformance cases under a conservation constraint. Froze `conformance/migration/baseline.json`,
   added the `baseline` / `migration` command groups and the `equivalence-report` bin, added

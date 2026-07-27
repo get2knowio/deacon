@@ -20,14 +20,18 @@
     {
       "id": "clc-image-metadata-id-string-init-boolean-privileged-boolean-capadd-io-8cf55d2d",
       "clause": "clu-image-metadata-id-string-init-boolean-privileged-boolean-capadd-io-8cf55d2d",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-container-metadata-label-content"
+      ]
     },
     {
       "id": "clc-image-metadata-init-boolean-true-if-at-least-one-is-true-false-io-68bfc594",
       "clause": "clu-image-metadata-init-boolean-true-if-at-least-one-is-true-false-io-68bfc594",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
     },
     {
       "id": "clc-image-metadata-mounts-string-type-src-dst-collected-list-of-all-io-a4d7d6d5",
@@ -41,7 +45,7 @@
       "id": "clc-image-metadata-record-dev-container-config-and-feature-metadata-desc-dac9ade3",
       "clause": "clu-image-metadata-record-dev-container-config-and-feature-metadata-desc-dac9ade3",
       "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "rationale": "The proposal's 'Goal' sentence: it states the outcome the document is trying to reach, not a rule any operation must satisfy. The obligations that realise the goal are the structure and merge-logic clauses of the same document, each inventoried and dispositioned separately."
     },
     {
       "id": "clc-image-metadata-the-metadata-is-added-to-the-image-as-a-devconta-io-721243cf",
@@ -54,32 +58,40 @@
     {
       "id": "clc-image-metadata-to-apply-the-metadata-together-with-a-user-s-dev-desc-4d54126e",
       "clause": "clu-image-metadata-to-apply-the-metadata-together-with-a-user-s-dev-desc-4d54126e",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
     },
     {
       "id": "clc-image-metadata-to-simplify-adding-this-metadata-for-other-tools-desc-8bade94f",
       "clause": "clu-image-metadata-to-simplify-adding-this-metadata-for-other-tools-desc-8bade94f",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-exec-container-id-metadata"
+      ]
     },
     {
       "id": "clc-image-metadata-variables-in-string-values-will-be-substituted-a-desc-31cd8289",
       "clause": "clu-image-metadata-variables-in-string-values-will-be-substituted-a-desc-31cd8289",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ]
     },
     {
       "id": "clc-image-metadata-we-are-adding-support-for-mounts-containerenv-co-desc-dbddd9df",
       "clause": "clu-image-metadata-we-are-adding-support-for-mounts-containerenv-co-desc-dbddd9df",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "behavior-mapped",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ]
     },
     {
       "id": "clc-image-metadata-we-propose-to-add-metadata-to-the-image-with-the-desc-b54f56f3",
       "clause": "clu-image-metadata-we-propose-to-add-metadata-to-the-image-with-the-desc-b54f56f3",
       "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "rationale": "A preamble that introduces the metadata structure printed immediately below it. The structure itself is a separate clause mapped to bhv-container-metadata-label-content; an introduction to a following block names no outcome of its own."
     }
   ]
 }

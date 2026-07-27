@@ -1,0 +1,449 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "odp-bhv-1766f639",
+      "obligation": "obl-bhv-1766f639",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
+    },
+    {
+      "id": "odp-bhv-18ed3890",
+      "obligation": "obl-bhv-18ed3890",
+      "disposition": "case",
+      "cases": [
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-bhv-be0a39ad",
+      "obligation": "obl-bhv-be0a39ad",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-dockerfile-workspace",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-cmb-00c00e24",
+      "obligation": "obl-cmb-00c00e24",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-cmb-1401bdc7",
+      "obligation": "obl-cmb-1401bdc7",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-15883d89",
+      "obligation": "obl-cmb-15883d89",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-18dff2e4",
+      "obligation": "obl-cmb-18dff2e4",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-20f3cb5a",
+      "obligation": "obl-cmb-20f3cb5a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-2321cf0e",
+      "obligation": "obl-cmb-2321cf0e",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-27e9e3c9",
+      "obligation": "obl-cmb-27e9e3c9",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-cmb-29ea3dcb",
+      "obligation": "obl-cmb-29ea3dcb",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-2ae655dc",
+      "obligation": "obl-cmb-2ae655dc",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-dockerfile-workspace",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-cmb-2b17b2b2",
+      "obligation": "obl-cmb-2b17b2b2",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-cmb-2f3b7c5b",
+      "obligation": "obl-cmb-2f3b7c5b",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
+    },
+    {
+      "id": "odp-cmb-3d2f26be",
+      "obligation": "obl-cmb-3d2f26be",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
+    },
+    {
+      "id": "odp-cmb-3dbf8b9d",
+      "obligation": "obl-cmb-3dbf8b9d",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-cmb-42d2c8d7",
+      "obligation": "obl-cmb-42d2c8d7",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-453726a1",
+      "obligation": "obl-cmb-453726a1",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-464d2825",
+      "obligation": "obl-cmb-464d2825",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-4a9e8c34",
+      "obligation": "obl-cmb-4a9e8c34",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-dockerfile-workspace",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-cmb-5a194c3f",
+      "obligation": "obl-cmb-5a194c3f",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-5af02545",
+      "obligation": "obl-cmb-5af02545",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-5d2bf1a4",
+      "obligation": "obl-cmb-5d2bf1a4",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
+    },
+    {
+      "id": "odp-cmb-61612ff7",
+      "obligation": "obl-cmb-61612ff7",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-compose-project-teardown",
+        "case-down-dockerfile-workspace",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-cmb-6c4bb555",
+      "obligation": "obl-cmb-6c4bb555",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown",
+        "case-down-dockerfile-workspace",
+        "case-down-removes-container"
+      ]
+    },
+    {
+      "id": "odp-cmb-6f789877",
+      "obligation": "obl-cmb-6f789877",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
+    },
+    {
+      "id": "odp-cmb-707f3d11",
+      "obligation": "obl-cmb-707f3d11",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-7a2171d2",
+      "obligation": "obl-cmb-7a2171d2",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-7d2b3a90",
+      "obligation": "obl-cmb-7d2b3a90",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-8e6c2115",
+      "obligation": "obl-cmb-8e6c2115",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown",
+        "case-down-dockerfile-workspace",
+        "case-down-removes-container"
+      ]
+    },
+    {
+      "id": "odp-cmb-8f68e39c",
+      "obligation": "obl-cmb-8f68e39c",
+      "disposition": "case",
+      "cases": [
+        "case-down-dockerfile-workspace"
+      ]
+    },
+    {
+      "id": "odp-cmb-933df3ba",
+      "obligation": "obl-cmb-933df3ba",
+      "disposition": "case",
+      "cases": [
+        "case-down-dockerfile-workspace"
+      ]
+    },
+    {
+      "id": "odp-cmb-94b3768a",
+      "obligation": "obl-cmb-94b3768a",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-cmb-953023da",
+      "obligation": "obl-cmb-953023da",
+      "disposition": "case",
+      "cases": [
+        "case-down-dockerfile-workspace"
+      ]
+    },
+    {
+      "id": "odp-cmb-962a21e0",
+      "obligation": "obl-cmb-962a21e0",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-96f377dd",
+      "obligation": "obl-cmb-96f377dd",
+      "disposition": "case",
+      "cases": [
+        "case-down-removes-container"
+      ]
+    },
+    {
+      "id": "odp-cmb-9b413dcc",
+      "obligation": "obl-cmb-9b413dcc",
+      "disposition": "case",
+      "cases": [
+        "case-down-dockerfile-workspace",
+        "case-down-removes-container"
+      ]
+    },
+    {
+      "id": "odp-cmb-9f76e5e3",
+      "obligation": "obl-cmb-9f76e5e3",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-a325bd52",
+      "obligation": "obl-cmb-a325bd52",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-aad48d84",
+      "obligation": "obl-cmb-aad48d84",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
+    },
+    {
+      "id": "odp-cmb-ad74c843",
+      "obligation": "obl-cmb-ad74c843",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-afd312fa",
+      "obligation": "obl-cmb-afd312fa",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-b8ef9f23",
+      "obligation": "obl-cmb-b8ef9f23",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-bd206bdd",
+      "obligation": "obl-cmb-bd206bdd",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-c6b98bd4",
+      "obligation": "obl-cmb-c6b98bd4",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-d2bc7db8",
+      "obligation": "obl-cmb-d2bc7db8",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
+    },
+    {
+      "id": "odp-cmb-d8447993",
+      "obligation": "obl-cmb-d8447993",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-da7a18c3",
+      "obligation": "obl-cmb-da7a18c3",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-da996d07",
+      "obligation": "obl-cmb-da996d07",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
+    },
+    {
+      "id": "odp-cmb-daf86b9a",
+      "obligation": "obl-cmb-daf86b9a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-dd7e5a79",
+      "obligation": "obl-cmb-dd7e5a79",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-df1d05bf",
+      "obligation": "obl-cmb-df1d05bf",
+      "disposition": "case",
+      "cases": [
+        "case-down-dockerfile-workspace"
+      ]
+    },
+    {
+      "id": "odp-cmb-e596eae9",
+      "obligation": "obl-cmb-e596eae9",
+      "disposition": "case",
+      "cases": [
+        "case-down-compose-project-teardown"
+      ]
+    },
+    {
+      "id": "odp-cmb-f08921f8",
+      "obligation": "obl-cmb-f08921f8",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-f35d4115",
+      "obligation": "obl-cmb-f35d4115",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-f5091758",
+      "obligation": "obl-cmb-f5091758",
+      "disposition": "gap",
+      "gap": "gap-pairwise-down"
+    },
+    {
+      "id": "odp-cmb-fbddb80e",
+      "obligation": "obl-cmb-fbddb80e",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    },
+    {
+      "id": "odp-cmb-fe1d0ffa",
+      "obligation": "obl-cmb-fe1d0ffa",
+      "disposition": "case",
+      "cases": [
+        "case-down-boundary-no-container",
+        "case-down-malformed-config-rejected",
+        "case-down-removes-container",
+        "case-down-unsupported-no-workspace-config"
+      ]
+    }
+  ]
+}

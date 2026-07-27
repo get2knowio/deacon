@@ -1,0 +1,6 @@
+services:
+  app:
+    image: alpine:3.19
+    volumes:
+      - ..:/workspace
+    command: sleep infinity

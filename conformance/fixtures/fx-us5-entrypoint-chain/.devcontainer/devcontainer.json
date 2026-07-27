@@ -1,0 +1,11 @@
+{
+	"name": "ConformanceUs5EntrypointChain",
+	"image": "alpine:3.19",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"features": {
+		"./features/conf-ep-a": {},
+		"./features/conf-ep-b": {}
+	},
+	"overrideFeatureInstallOrder": ["./features/conf-ep-a", "./features/conf-ep-b"]
+}

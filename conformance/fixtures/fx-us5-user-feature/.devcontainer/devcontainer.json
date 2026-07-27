@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceUs5UserFeature",
+	"image": "alpine:3.19",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"features": { "./features/conf-user": {} },
+	"containerUser": "featureuser",
+	"remoteUser": "featureuser",
+	"updateRemoteUserUID": false
+}

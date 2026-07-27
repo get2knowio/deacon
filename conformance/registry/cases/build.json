@@ -1,0 +1,481 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-build-boundary-empty-collections",
+      "behaviors": [
+        "bhv-build-image-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "boundary",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-boundary-empty-collections"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 boundary class for `build`: an image-reference configuration whose collection fields are all present and empty. An empty `features` map is the specific edge — it must produce the base image unchanged rather than an empty Feature layer or a failure."
+    },
+    {
+      "id": "case-build-compose-service-shape",
+      "behaviors": [
+        "bhv-build-image-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-compose"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success"
+            }
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-build",
+          "assertion": {
+            "matches": "\"imageName\"\\s*:\\s*\\[\\s*\"[^\"]*-app\""
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-build-compose-no-features-structured`. Building a Compose configuration has to resolve the SERVICE's build shape rather than the top-level one; the `-app` suffix on the reported image name is what shows which of the two was read, and `outcome` alone would not — a build of the wrong thing succeeds too. The image name's leading segment carries a workspace-derived hash and is deliberately left unpinned. Spec-expectation rather than differential because the structured rendering is reached by a flag the two CLIs spell differently, and the runner sends one argv to both sides."
+    },
+    {
+      "id": "case-build-dockerfile-feature-differential",
+      "behaviors": [
+        "bhv-build-features-extended-image"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-build-dockerfile-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The alignment half of the Dockerfile-plus-Feature build: both CLIs complete the build and report success. Kept separate from the `--image-name` case because the two CLIs do not share a tagging flag surface, so the overlay half cannot be a differential."
+    },
+    {
+      "id": "case-build-dockerfile-feature-image-name",
+      "behaviors": [
+        "bhv-build-features-extended-image"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "deacon-conformance-build:us3"
+          ],
+          "fixtures": [
+            "fx-build-dockerfile-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-build",
+          "assertion": {
+            "matches": "Image ID: deacon-devcontainer-features:[\\s\\S]*Tags:[^\\n]*deacon-conformance-build:us3"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-build-dockerfile-cli-overlay-single-feature`. A Dockerfile build, a Feature layered on top of it, and a user-supplied `--image-name` — the exact combination in which this project once shipped a tag pointing at the PRE-Feature base. The assertion pins both halves in one ordered match: the reported image is the FEATURE-EXTENDED one (`deacon-devcontainer-features:…`), and the user's tag is among the tags applied to it. The stronger observation — running the tag and reading the Feature's marker — needs a `docker run` the declarative runner does not model, so the ordering constraint stands in for it and this note records the difference."
+    },
+    {
+      "id": "case-build-failure-reported",
+      "behaviors": [
+        "bhv-build-failure-reported"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-build-failure"
+          ],
+          "expectFailurePhase": "build"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-034 build-time failure: the Dockerfile's `RUN` exits non-zero, so no image is produced. Both CLIs must fail, and the declared phase records WHERE — a build failure and a container-creation failure are the same exit code and different facts, which is the whole reason the phase is part of the record."
+    },
+    {
+      "id": "case-build-parity",
+      "behaviors": [
+        "bhv-build-image-parity"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "parity_build"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-exit-code",
+          "expectation": "exits 0 on a successful build"
+        },
+        {
+          "channel": "chan-stdout",
+          "expectation": "reports a build outcome matching the reference after normalization"
+        }
+      ]
+    },
+    {
+      "id": "case-build-reference-lenient-wrong-type",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-features-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "reference-lenient",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-wrong-type-features"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-wrong-type-features-rejected",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon refuses a `features` value that is a bare string rather than an object; the reference accepts it and builds.",
+          "waiverId": "wvr-wrong-type-features"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 reference-lenient class for `build`: `features` written as a bare string is refused by deacon and accepted by the reference, which goes on to build. The direction is pinned by the spec-expectation twin `case-errors-decl-wrong-type-features`."
+    },
+    {
+      "id": "case-build-unsupported-image-reference",
+      "behaviors": [
+        "bhv-build-image-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "unsupported",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-unsupported-image"
+          ],
+          "expectFailurePhase": "build"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class for `build`: a well-formed configuration naming an image reference no registry serves. Nothing about the document is wrong; the failure can only appear once something tries to obtain the image."
+    },
+    {
+      "id": "case-errorpath-build-arg-failure",
+      "behaviors": [
+        "bhv-build-failure-reported"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-build-arg-failure"
+          ],
+          "expectFailurePhase": "build"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, build stage, with the build ARGUMENT as the thing under test. The Dockerfile's `RUN` exits non-zero only when `CONF_FAIL=1` reaches it, and the configuration is the only place that value comes from — so a CLI that dropped `build.args` would SUCCEED here. The failure is therefore evidence that the argument was delivered, which the ordinary build-args case (`case-tier1-build-args-subst`, a configuration comparison) cannot supply: it observes the resolved document, not what the builder received. Both sides fail (verified against oracle 0.87.0)."
+    },
+    {
+      "id": "case-errorpath-build-missing-target",
+      "behaviors": [
+        "bhv-build-failure-reported"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "unsupported",
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-build-missing-target"
+          ],
+          "expectFailurePhase": "build"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, build stage: `build.target` names a stage the Dockerfile does not define. Nothing about the document is wrong and BOTH CLIs read it without complaint — the target is a free-form string, and no reader can know which stages exist until the builder resolves the Dockerfile graph. That is the point: the failure is unreachable until after the stage where the reference is most lenient, which is exactly where parity used to stop comparing. Both sides fail (verified against oracle 0.87.0 in an isolated workspace)."
+    }
+  ]
+}

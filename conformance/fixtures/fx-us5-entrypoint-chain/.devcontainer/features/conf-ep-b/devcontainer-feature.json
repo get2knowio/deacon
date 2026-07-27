@@ -1,0 +1,6 @@
+{
+	"id": "conf-ep-b",
+	"version": "1.0.0",
+	"name": "Conformance entrypoint b",
+	"entrypoint": "/usr/local/share/conf-ep-b.sh"
+}

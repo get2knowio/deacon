@@ -1,0 +1,7 @@
+{
+	"name": "ConformanceErrorPathPostStartFailure",
+	"image": "alpine:3.19",
+	"remoteUser": "root",
+	"postCreateCommand": "sh -c 'echo postCreate >> /tmp/conformance-late-hooks'",
+	"postStartCommand": "sh -c 'echo conformance: failing postStart >&2; exit 37'"
+}

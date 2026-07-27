@@ -1,0 +1,7 @@
+{
+	"name": "ConformanceUs5LifecycleArray",
+	"image": "alpine:3.19",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"postCreateCommand": ["sh", "-c", "echo array-form > /workspace/lifecycle-array.txt"]
+}

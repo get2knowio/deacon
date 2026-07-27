@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "odp-bhv-079ac919",
+      "obligation": "obl-bhv-079ac919",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-diff",
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container"
+      ]
+    },
+    {
+      "id": "odp-bhv-38d8218d",
+      "obligation": "obl-bhv-38d8218d",
+      "disposition": "case",
+      "cases": [
+        "case-observable-state"
+      ]
+    },
+    {
+      "id": "odp-bhv-7896e51a",
+      "obligation": "obl-bhv-7896e51a",
+      "disposition": "case",
+      "cases": [
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-env-merge-differential",
+        "case-up-mount-source-shape-differential"
+      ]
+    },
+    {
+      "id": "odp-bhv-a3f1f12f",
+      "obligation": "obl-bhv-a3f1f12f",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-project-resources-differential"
+      ]
+    },
+    {
+      "id": "odp-bhv-b8a717d5",
+      "obligation": "obl-bhv-b8a717d5",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-container-identity-labels"
+      ]
+    },
+    {
+      "id": "odp-bhv-c658c572",
+      "obligation": "obl-bhv-c658c572",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped"
+      ]
+    },
+    {
+      "id": "odp-bhv-eb4f3e6c",
+      "obligation": "obl-bhv-eb4f3e6c",
+      "disposition": "case",
+      "cases": [
+        "case-compose-project-name"
+      ]
+    }
+  ]
+}

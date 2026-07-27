@@ -15,7 +15,9 @@ deacon-conformance = { path = "../conformance" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+# `sync` is additive over the workspace feature set: the resource-group drivers bound
+# their concurrency with a `tokio::sync::Semaphore` over a `JoinSet` (024 T018).
+tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 # RFC3339 report timestamps. Not a [workspace.dependencies] entry (only used by
 # deacon-core today), so pinned directly here; `clock` (default) provides Utc::now.

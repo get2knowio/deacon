@@ -1,0 +1,20 @@
+{
+  "id": "wvr-outdated-extends-chain-features",
+  "behaviors": [
+    "bhv-outdated-extends-chain-features"
+  ],
+  "scope": {
+    "kind": "corpus_case",
+    "corpus": "outdated",
+    "case": "extends-chain-features"
+  },
+  "expect": {
+    "kind": "reference-stricter",
+    "signal": [
+      "extends"
+    ]
+  },
+  "rationale": "deacon resolves the full extends chain before reporting Feature versions, so a Feature declared by a parent link is reported; the reference does not implement `extends` at all and reports an empty table. Part of the ext-extends-resolution capability — the divergence is the reference's missing feature, not deacon's drift.",
+  "added": "2026-07-26",
+  "expires": "2027-07-26"
+}

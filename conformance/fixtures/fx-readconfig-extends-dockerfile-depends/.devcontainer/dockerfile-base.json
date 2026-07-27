@@ -1,0 +1,10 @@
+{
+	"build": {
+		"dockerfile": "Dockerfile",
+		"args": { "VARIANT": "3.19" }
+	},
+	"features": {
+		"./features/base-tool": {}
+	},
+	"containerEnv": { "LAYER": "base", "FROM_BASE": "yes" }
+}

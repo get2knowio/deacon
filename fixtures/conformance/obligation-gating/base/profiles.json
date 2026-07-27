@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "prof-linux-amd64-docker-0870",
+      "context": {
+        "dim-os": "linux",
+        "dim-arch": "amd64",
+        "dim-runtime": "docker",
+        "dim-oracle": "0.87.0"
+      },
+      "active": true
+    }
+  ]
+}

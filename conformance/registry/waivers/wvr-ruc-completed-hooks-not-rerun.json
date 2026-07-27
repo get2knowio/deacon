@@ -1,0 +1,9 @@
+{
+  "id": "wvr-ruc-completed-hooks-not-rerun",
+  "behaviors": ["bhv-run-user-commands-hook-failure"],
+  "scope": { "kind": "corpus_case", "corpus": "errorpath", "case": "ruc-completed-hooks-not-rerun" },
+  "expect": { "kind": "reference-stricter" },
+  "rationale": "Discovered by the 024 US4 error-path tier, which compares past the point where configuration read accepts on both sides. `run-user-commands` re-runs the configured lifecycle commands on EVERY invocation in deacon; the reference records each hook's completion inside the container and skips one that already completed, reporting `{\"outcome\":\"success\"}` without running anything. Verified directly at oracle 0.87.0: after `devcontainer up`, a plain `devcontainer run-user-commands` does not re-run `postCreateCommand`, while after `devcontainer up --skip-post-create` it does — so the skip is keyed on completion, not on the command being absent. The observable consequence is confined to a FAILING hook: deacon exits non-zero and names the hook, the reference exits 0 having executed nothing, so the same broken setup is invisible on its side. deacon's direction is the one that keeps `run-user-commands` usable as an explicit re-run (its `--skip-post-create` / `--skip-post-attach` / `--skip-non-blocking-commands` flags are the opt-out, so silence would leave no way to ask for the work), and it is the direction the spec's account of lifecycle-command failure supports. Pinned in that direction by the `-direction` spec-expectation twins rather than by this waiver alone: a differential shows only that the two disagree.",
+  "added": "2026-07-26",
+  "expires": "2027-01-26"
+}

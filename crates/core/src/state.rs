@@ -1268,6 +1268,55 @@ mod tests {
     }
 
     #[test]
+    fn test_concurrent_workspaces_keep_each_others_state() {
+        // Regression: the state index is host-global and shared by every `deacon`
+        // process. `up` for workspace A and `up` for workspace B each loaded the
+        // index, added their own entry and republished the WHOLE map, so the loser
+        // of the race silently erased the winner's entry — and the subsequent
+        // `deacon down` (which resolves the container through this index, unlike
+        // `down --remove --all`, which is label-driven) reported "no containers
+        // found" and removed nothing.
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().to_path_buf();
+        const WORKSPACES: usize = 16;
+
+        let handles: Vec<_> = (0..WORKSPACES)
+            .map(|i| {
+                let dir = dir.clone();
+                std::thread::spawn(move || {
+                    // A manager per workspace mirrors separate `deacon up` PROCESSES.
+                    let mut sm = StateManager::new_with_cache_dir(&dir).unwrap();
+                    sm.save_container_state(
+                        &format!("workspace-{i}"),
+                        ContainerState {
+                            container_id: format!("container-{i}"),
+                            container_name: None,
+                            image_id: "image".to_string(),
+                            shutdown_action: None,
+                        },
+                    )
+                    .unwrap();
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Every workspace must still resolve, exactly as its own `down` would do it.
+        let mut sm = StateManager::new_with_cache_dir(&dir).unwrap();
+        let lost: Vec<usize> = (0..WORKSPACES)
+            .filter(|i| sm.get_workspace_state(&format!("workspace-{i}")).is_none())
+            .collect();
+        assert!(
+            lost.is_empty(),
+            "{} of {WORKSPACES} workspaces lost their container state to the index race \
+             (a later `down` would report \"no containers found\"): {lost:?}",
+            lost.len()
+        );
+    }
+
+    #[test]
     fn test_nonexistent_workspace_state() {
         let temp_dir = TempDir::new().unwrap();
         let mut state_manager = StateManager::new_with_cache_dir(temp_dir.path()).unwrap();

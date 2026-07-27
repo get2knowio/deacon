@@ -1,0 +1,7 @@
+{
+	"name": "unsupported-values",
+	"image": "alpine:3.19",
+	"waitFor": "neverCommand",
+	"userEnvProbe": "telepathy",
+	"shutdownAction": "detonate"
+}

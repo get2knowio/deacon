@@ -1,0 +1,1071 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "odp-bhv-0b062cbf",
+      "obligation": "obl-bhv-0b062cbf",
+      "disposition": "case",
+      "cases": [
+        "case-up-lifecycle-cwd"
+      ]
+    },
+    {
+      "id": "odp-bhv-20718aca",
+      "obligation": "obl-bhv-20718aca",
+      "disposition": "case",
+      "cases": [
+        "case-up-lifecycle-array-form",
+        "case-up-lifecycle-object-differential",
+        "case-up-lifecycle-object-form"
+      ]
+    },
+    {
+      "id": "odp-bhv-497a7817",
+      "obligation": "obl-bhv-497a7817",
+      "disposition": "case",
+      "cases": [
+        "case-up-entrypoint-chain-differential",
+        "case-up-entrypoint-chained-features"
+      ]
+    },
+    {
+      "id": "odp-bhv-52023030",
+      "obligation": "obl-bhv-52023030",
+      "disposition": "case",
+      "cases": [
+        "case-up-boundary-empty-collections",
+        "case-up-docker-channels",
+        "case-up-exec-decl-traditional",
+        "case-up-exec-parity",
+        "case-up-idempotent",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-bhv-56c5f338",
+      "obligation": "obl-bhv-56c5f338",
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-up-feature-dependency-cycle",
+        "case-errorpath-up-feature-install-failure"
+      ]
+    },
+    {
+      "id": "odp-bhv-6a9a3165",
+      "obligation": "obl-bhv-6a9a3165",
+      "disposition": "case",
+      "cases": [
+        "case-up-mount-source-shape-differential",
+        "case-up-mount-source-vs-shape"
+      ]
+    },
+    {
+      "id": "odp-bhv-6be021c1",
+      "obligation": "obl-bhv-6be021c1",
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-path-construction"
+      ]
+    },
+    {
+      "id": "odp-bhv-6f3ac540",
+      "obligation": "obl-bhv-6f3ac540",
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-env-merge-precedence"
+      ]
+    },
+    {
+      "id": "odp-bhv-a08d7b2a",
+      "obligation": "obl-bhv-a08d7b2a",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart",
+        "case-up-dockerfile-extends-chain",
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed"
+      ]
+    },
+    {
+      "id": "odp-bhv-a67400a9",
+      "obligation": "obl-bhv-a67400a9",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart",
+        "case-up-stale-config-reentry"
+      ]
+    },
+    {
+      "id": "odp-bhv-c5668b84",
+      "obligation": "obl-bhv-c5668b84",
+      "disposition": "case",
+      "cases": [
+        "case-up-user-created-by-feature",
+        "case-up-user-uid-gid-nonroot"
+      ]
+    },
+    {
+      "id": "odp-bhv-e2a9480e",
+      "obligation": "obl-bhv-e2a9480e",
+      "disposition": "case",
+      "cases": [
+        "case-up-stale-config-reentry"
+      ]
+    },
+    {
+      "id": "odp-cmb-0194092a",
+      "obligation": "obl-cmb-0194092a",
+      "disposition": "case",
+      "cases": [
+        "case-up-entrypoint-chain-differential",
+        "case-up-entrypoint-chained-features"
+      ]
+    },
+    {
+      "id": "odp-cmb-04b42862",
+      "obligation": "obl-cmb-04b42862",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-0b98f392",
+      "obligation": "obl-cmb-0b98f392",
+      "disposition": "case",
+      "cases": [
+        "case-up-stale-config-reentry"
+      ]
+    },
+    {
+      "id": "odp-cmb-0d1248f0",
+      "obligation": "obl-cmb-0d1248f0",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart"
+      ]
+    },
+    {
+      "id": "odp-cmb-0e36a098",
+      "obligation": "obl-cmb-0e36a098",
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-up-feature-dependency-cycle"
+      ]
+    },
+    {
+      "id": "odp-cmb-0ef7fed5",
+      "obligation": "obl-cmb-0ef7fed5",
+      "disposition": "case",
+      "cases": [
+        "case-state-dockerfile-nonroot",
+        "case-up-dockerfile-extends-chain"
+      ]
+    },
+    {
+      "id": "odp-cmb-1064db69",
+      "obligation": "obl-cmb-1064db69",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-10b26123",
+      "obligation": "obl-cmb-10b26123",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-10edc175",
+      "obligation": "obl-cmb-10edc175",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-boundary-empty-collections",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped",
+        "case-up-docker-channels",
+        "case-up-dockerfile-extends-chain",
+        "case-up-exec-decl-traditional",
+        "case-up-idempotent",
+        "case-up-malformed-config-rejected",
+        "case-up-reference-lenient-wrong-type",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-cmb-18719fba",
+      "obligation": "obl-cmb-18719fba",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart"
+      ]
+    },
+    {
+      "id": "odp-cmb-1b0b98f8",
+      "obligation": "obl-cmb-1b0b98f8",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-1c3d03ea",
+      "obligation": "obl-cmb-1c3d03ea",
+      "disposition": "case",
+      "cases": [
+        "case-state-dockerfile-nonroot"
+      ]
+    },
+    {
+      "id": "odp-cmb-1c6c9384",
+      "obligation": "obl-cmb-1c6c9384",
+      "disposition": "case",
+      "cases": [
+        "case-up-stale-config-reentry"
+      ]
+    },
+    {
+      "id": "odp-cmb-1f67fc0a",
+      "obligation": "obl-cmb-1f67fc0a",
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-up-feature-dependency-cycle"
+      ]
+    },
+    {
+      "id": "odp-cmb-2606c98e",
+      "obligation": "obl-cmb-2606c98e",
+      "disposition": "case",
+      "cases": [
+        "case-up-entrypoint-chain-differential",
+        "case-up-entrypoint-chained-features"
+      ]
+    },
+    {
+      "id": "odp-cmb-2799eb8c",
+      "obligation": "obl-cmb-2799eb8c",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-project-resources",
+        "case-up-compose-project-resources-differential",
+        "case-up-compose-service-graph"
+      ]
+    },
+    {
+      "id": "odp-cmb-27a758af",
+      "obligation": "obl-cmb-27a758af",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-2a29f095",
+      "obligation": "obl-cmb-2a29f095",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-2a744af0",
+      "obligation": "obl-cmb-2a744af0",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-2b613864",
+      "obligation": "obl-cmb-2b613864",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-2c525e2f",
+      "obligation": "obl-cmb-2c525e2f",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-2ce20f22",
+      "obligation": "obl-cmb-2ce20f22",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-boundary-empty-collections",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped",
+        "case-up-docker-channels",
+        "case-up-exec-decl-traditional",
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed",
+        "case-up-idempotent",
+        "case-up-malformed-config-rejected",
+        "case-up-reference-lenient-wrong-type",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-cmb-2e7ce08b",
+      "obligation": "obl-cmb-2e7ce08b",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-3580c2a6",
+      "obligation": "obl-cmb-3580c2a6",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-boundary-empty-collections",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped",
+        "case-up-docker-channels",
+        "case-up-exec-decl-traditional",
+        "case-up-idempotent",
+        "case-up-malformed-config-rejected",
+        "case-up-reference-lenient-wrong-type",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-cmb-3aea7622",
+      "obligation": "obl-cmb-3aea7622",
+      "disposition": "case",
+      "cases": [
+        "case-up-stale-config-reentry"
+      ]
+    },
+    {
+      "id": "odp-cmb-3f664876",
+      "obligation": "obl-cmb-3f664876",
+      "disposition": "case",
+      "cases": [
+        "case-up-stale-config-reentry"
+      ]
+    },
+    {
+      "id": "odp-cmb-458c4221",
+      "obligation": "obl-cmb-458c4221",
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-env-merge-precedence",
+        "case-up-path-construction"
+      ]
+    },
+    {
+      "id": "odp-cmb-45c83746",
+      "obligation": "obl-cmb-45c83746",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-499d2883",
+      "obligation": "obl-cmb-499d2883",
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-up-feature-dependency-cycle"
+      ]
+    },
+    {
+      "id": "odp-cmb-4caaad6b",
+      "obligation": "obl-cmb-4caaad6b",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-50abbf8e",
+      "obligation": "obl-cmb-50abbf8e",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart"
+      ]
+    },
+    {
+      "id": "odp-cmb-524364a1",
+      "obligation": "obl-cmb-524364a1",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-55fd056a",
+      "obligation": "obl-cmb-55fd056a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-5a333610",
+      "obligation": "obl-cmb-5a333610",
+      "disposition": "case",
+      "cases": [
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed",
+        "case-up-stale-config-reentry"
+      ]
+    },
+    {
+      "id": "odp-cmb-5bdbe4ed",
+      "obligation": "obl-cmb-5bdbe4ed",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-5d4be36d",
+      "obligation": "obl-cmb-5d4be36d",
+      "disposition": "case",
+      "cases": [
+        "case-state-dockerfile-nonroot",
+        "case-up-dockerfile-extends-chain"
+      ]
+    },
+    {
+      "id": "odp-cmb-5d71ef34",
+      "obligation": "obl-cmb-5d71ef34",
+      "disposition": "case",
+      "cases": [
+        "case-up-dockerfile-extends-chain"
+      ]
+    },
+    {
+      "id": "odp-cmb-5db885c1",
+      "obligation": "obl-cmb-5db885c1",
+      "disposition": "case",
+      "cases": [
+        "case-up-dockerfile-extends-chain"
+      ]
+    },
+    {
+      "id": "odp-cmb-6451dea5",
+      "obligation": "obl-cmb-6451dea5",
+      "disposition": "case",
+      "cases": [
+        "case-state-dockerfile-nonroot",
+        "case-up-dockerfile-extends-chain"
+      ]
+    },
+    {
+      "id": "odp-cmb-687d5488",
+      "obligation": "obl-cmb-687d5488",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-691ddd91",
+      "obligation": "obl-cmb-691ddd91",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-696c73e7",
+      "obligation": "obl-cmb-696c73e7",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-6a51f1b3",
+      "obligation": "obl-cmb-6a51f1b3",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-6c0f3344",
+      "obligation": "obl-cmb-6c0f3344",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-6e313582",
+      "obligation": "obl-cmb-6e313582",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-6eb72106",
+      "obligation": "obl-cmb-6eb72106",
+      "disposition": "case",
+      "cases": [
+        "case-up-dockerfile-extends-chain"
+      ]
+    },
+    {
+      "id": "odp-cmb-74ea0ea7",
+      "obligation": "obl-cmb-74ea0ea7",
+      "disposition": "case",
+      "cases": [
+        "case-up-dockerfile-extends-chain"
+      ]
+    },
+    {
+      "id": "odp-cmb-751d5a0b",
+      "obligation": "obl-cmb-751d5a0b",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-boundary-empty-collections",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped",
+        "case-up-docker-channels",
+        "case-up-dockerfile-extends-chain",
+        "case-up-exec-decl-traditional",
+        "case-up-idempotent",
+        "case-up-malformed-config-rejected",
+        "case-up-reference-lenient-wrong-type",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-cmb-772e1c9b",
+      "obligation": "obl-cmb-772e1c9b",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-79df06c3",
+      "obligation": "obl-cmb-79df06c3",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-7ac147c2",
+      "obligation": "obl-cmb-7ac147c2",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-7b75c819",
+      "obligation": "obl-cmb-7b75c819",
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-env-merge-precedence",
+        "case-up-path-construction"
+      ]
+    },
+    {
+      "id": "odp-cmb-7d81afca",
+      "obligation": "obl-cmb-7d81afca",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-7db7bf89",
+      "obligation": "obl-cmb-7db7bf89",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-7f53de5d",
+      "obligation": "obl-cmb-7f53de5d",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart",
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed",
+        "case-up-stale-config-reentry"
+      ]
+    },
+    {
+      "id": "odp-cmb-7f5de1e5",
+      "obligation": "obl-cmb-7f5de1e5",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-81606542",
+      "obligation": "obl-cmb-81606542",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-83a58b7f",
+      "obligation": "obl-cmb-83a58b7f",
+      "disposition": "case",
+      "cases": [
+        "case-errorpath-up-feature-dependency-cycle"
+      ]
+    },
+    {
+      "id": "odp-cmb-8440a94d",
+      "obligation": "obl-cmb-8440a94d",
+      "disposition": "case",
+      "cases": [
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed"
+      ]
+    },
+    {
+      "id": "odp-cmb-875d182a",
+      "obligation": "obl-cmb-875d182a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-88a05b2c",
+      "obligation": "obl-cmb-88a05b2c",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-88df6a40",
+      "obligation": "obl-cmb-88df6a40",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-8948cf78",
+      "obligation": "obl-cmb-8948cf78",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-89b4e51f",
+      "obligation": "obl-cmb-89b4e51f",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-89e41616",
+      "obligation": "obl-cmb-89e41616",
+      "disposition": "case",
+      "cases": [
+        "case-up-dockerfile-extends-chain"
+      ]
+    },
+    {
+      "id": "odp-cmb-8a75922d",
+      "obligation": "obl-cmb-8a75922d",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-919f8ea6",
+      "obligation": "obl-cmb-919f8ea6",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-boundary-empty-collections",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped",
+        "case-up-docker-channels",
+        "case-up-exec-decl-traditional",
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed",
+        "case-up-idempotent",
+        "case-up-malformed-config-rejected",
+        "case-up-reference-lenient-wrong-type",
+        "case-up-stale-config-reentry",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-cmb-92b03cab",
+      "obligation": "obl-cmb-92b03cab",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-958c6aa0",
+      "obligation": "obl-cmb-958c6aa0",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-96bf1cf6",
+      "obligation": "obl-cmb-96bf1cf6",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-96f49c62",
+      "obligation": "obl-cmb-96f49c62",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-99575a20",
+      "obligation": "obl-cmb-99575a20",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart"
+      ]
+    },
+    {
+      "id": "odp-cmb-99d818b2",
+      "obligation": "obl-cmb-99d818b2",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart"
+      ]
+    },
+    {
+      "id": "odp-cmb-9c99febe",
+      "obligation": "obl-cmb-9c99febe",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-boundary-empty-collections",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped",
+        "case-up-docker-channels",
+        "case-up-dockerfile-extends-chain",
+        "case-up-exec-decl-traditional",
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed",
+        "case-up-idempotent",
+        "case-up-malformed-config-rejected",
+        "case-up-reference-lenient-wrong-type",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-cmb-9d2e958f",
+      "obligation": "obl-cmb-9d2e958f",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-9fc56603",
+      "obligation": "obl-cmb-9fc56603",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-a319607b",
+      "obligation": "obl-cmb-a319607b",
+      "disposition": "case",
+      "cases": [
+        "case-up-running-reattach-process-context"
+      ]
+    },
+    {
+      "id": "odp-cmb-a35bfb8f",
+      "obligation": "obl-cmb-a35bfb8f",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-a634c091",
+      "obligation": "obl-cmb-a634c091",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-ac2fa602",
+      "obligation": "obl-cmb-ac2fa602",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-af543338",
+      "obligation": "obl-cmb-af543338",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart"
+      ]
+    },
+    {
+      "id": "odp-cmb-b1e34478",
+      "obligation": "obl-cmb-b1e34478",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-b5537c6c",
+      "obligation": "obl-cmb-b5537c6c",
+      "disposition": "case",
+      "cases": [
+        "case-up-entrypoint-chain-differential",
+        "case-up-entrypoint-chained-features"
+      ]
+    },
+    {
+      "id": "odp-cmb-b651bcdc",
+      "obligation": "obl-cmb-b651bcdc",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-b73b7a40",
+      "obligation": "obl-cmb-b73b7a40",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart"
+      ]
+    },
+    {
+      "id": "odp-cmb-b914a795",
+      "obligation": "obl-cmb-b914a795",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-c15f9bb1",
+      "obligation": "obl-cmb-c15f9bb1",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-c1eda68a",
+      "obligation": "obl-cmb-c1eda68a",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-boundary-empty-collections",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped",
+        "case-up-docker-channels",
+        "case-up-exec-decl-traditional",
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed",
+        "case-up-idempotent",
+        "case-up-malformed-config-rejected",
+        "case-up-reference-lenient-wrong-type",
+        "case-up-stale-config-reentry",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-cmb-c23a19a1",
+      "obligation": "obl-cmb-c23a19a1",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart"
+      ]
+    },
+    {
+      "id": "odp-cmb-c5c4c350",
+      "obligation": "obl-cmb-c5c4c350",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-c66172dd",
+      "obligation": "obl-cmb-c66172dd",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-c6adecf0",
+      "obligation": "obl-cmb-c6adecf0",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-cf9650cb",
+      "obligation": "obl-cmb-cf9650cb",
+      "disposition": "case",
+      "cases": [
+        "case-up-running-reattach-process-context"
+      ]
+    },
+    {
+      "id": "odp-cmb-d5ce8295",
+      "obligation": "obl-cmb-d5ce8295",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-d62f8200",
+      "obligation": "obl-cmb-d62f8200",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-d957bebd",
+      "obligation": "obl-cmb-d957bebd",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-boundary-empty-collections",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped",
+        "case-up-docker-channels",
+        "case-up-exec-decl-traditional",
+        "case-up-idempotent",
+        "case-up-malformed-config-rejected",
+        "case-up-reference-lenient-wrong-type",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-cmb-da4a4c7e",
+      "obligation": "obl-cmb-da4a4c7e",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-dbbcdd73",
+      "obligation": "obl-cmb-dbbcdd73",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-dc346367",
+      "obligation": "obl-cmb-dc346367",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-feature-restart",
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed",
+        "case-up-stale-config-reentry"
+      ]
+    },
+    {
+      "id": "odp-cmb-dcf8d4b1",
+      "obligation": "obl-cmb-dcf8d4b1",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-dd7825da",
+      "obligation": "obl-cmb-dd7825da",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-ddf0b611",
+      "obligation": "obl-cmb-ddf0b611",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-dfeff6c8",
+      "obligation": "obl-cmb-dfeff6c8",
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-env-merge-precedence",
+        "case-up-path-construction"
+      ]
+    },
+    {
+      "id": "odp-cmb-e00775ad",
+      "obligation": "obl-cmb-e00775ad",
+      "disposition": "case",
+      "cases": [
+        "case-up-entrypoint-chain-differential",
+        "case-up-entrypoint-chained-features"
+      ]
+    },
+    {
+      "id": "odp-cmb-e08baf03",
+      "obligation": "obl-cmb-e08baf03",
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-project-resources",
+        "case-up-compose-project-resources-differential",
+        "case-up-compose-service-graph"
+      ]
+    },
+    {
+      "id": "odp-cmb-e41c1780",
+      "obligation": "obl-cmb-e41c1780",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-boundary-empty-collections",
+        "case-up-compose-feature-restart",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped",
+        "case-up-docker-channels",
+        "case-up-exec-decl-traditional",
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed",
+        "case-up-idempotent",
+        "case-up-malformed-config-rejected",
+        "case-up-reference-lenient-wrong-type",
+        "case-up-stale-config-reentry",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-cmb-e9f645d4",
+      "obligation": "obl-cmb-e9f645d4",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-ec3f88de",
+      "obligation": "obl-cmb-ec3f88de",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-f21b7c81",
+      "obligation": "obl-cmb-f21b7c81",
+      "disposition": "case",
+      "cases": [
+        "case-up-dockerfile-feature-image"
+      ]
+    },
+    {
+      "id": "odp-cmb-f6e05df6",
+      "obligation": "obl-cmb-f6e05df6",
+      "disposition": "case",
+      "cases": [
+        "case-state-appport",
+        "case-state-dockerfile-nonroot",
+        "case-state-mount-variety",
+        "case-state-single-container",
+        "case-up-boundary-empty-collections",
+        "case-up-container-identity-labels",
+        "case-up-container-labels-stamped",
+        "case-up-docker-channels",
+        "case-up-exec-decl-traditional",
+        "case-up-feature-single-differential",
+        "case-up-feature-single-installed",
+        "case-up-idempotent",
+        "case-up-malformed-config-rejected",
+        "case-up-reference-lenient-wrong-type",
+        "case-up-unsupported-image-reference"
+      ]
+    },
+    {
+      "id": "odp-cmb-f9e131ad",
+      "obligation": "obl-cmb-f9e131ad",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-fa8d7c4f",
+      "obligation": "obl-cmb-fa8d7c4f",
+      "disposition": "case",
+      "cases": [
+        "case-up-env-merge-differential",
+        "case-up-env-merge-precedence",
+        "case-up-path-construction"
+      ]
+    },
+    {
+      "id": "odp-cmb-fdad633a",
+      "obligation": "obl-cmb-fdad633a",
+      "disposition": "gap",
+      "gap": "gap-pairwise-up"
+    },
+    {
+      "id": "odp-cmb-fea69e25",
+      "obligation": "obl-cmb-fea69e25",
+      "disposition": "case",
+      "cases": [
+        "case-up-stale-config-reentry"
+      ]
+    }
+  ]
+}

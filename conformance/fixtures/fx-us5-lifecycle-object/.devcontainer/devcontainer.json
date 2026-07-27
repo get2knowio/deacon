@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceUs5LifecycleObject",
+	"image": "alpine:3.19",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"postCreateCommand": {
+		"first": "sh -c 'echo object-first > /workspace/lifecycle-object-first.txt'",
+		"second": ["sh", "-c", "echo object-second > /workspace/lifecycle-object-second.txt"]
+	}
+}

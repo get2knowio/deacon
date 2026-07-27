@@ -55,3 +55,13 @@ conformance/snapshots/** -text
 # identical on every platform or the claim is measured against a different artifact than
 # the one committed.
 conformance/migration/** -text
+
+# The deterministic coverage model (024-deterministic-conformance-coverage) applies the
+# same discipline to the obligation set: `coverage check` regenerates it in memory and
+# byte-compares against the committed file (V27, "committed != regenerated"). On a Windows
+# checkout autocrlf rewrote LF to CRLF, so the comparison failed with an EMPTY semantic
+# diff — `+0 added, -0 removed, ~0 changed` — which reads as a phantom drift and points
+# the reader at `coverage generate`, a command that cannot fix a line-ending difference.
+# V27 deliberately cannot distinguish a hand edit from a stale regeneration; it equally
+# cannot distinguish either from a re-encoded checkout, so the bytes must be pinned.
+conformance/obligations/** -text

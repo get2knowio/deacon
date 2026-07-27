@@ -1,0 +1,8 @@
+{
+	"name": "ConformanceErrorPathUpdateContentFailure",
+	"image": "alpine:3.19",
+	"remoteUser": "root",
+	"onCreateCommand": "sh -c 'echo onCreate >> /tmp/conformance-late-hooks'",
+	"updateContentCommand": "sh -c 'echo conformance: failing updateContent >&2; exit 31'",
+	"postCreateCommand": "sh -c 'echo postCreate >> /tmp/conformance-late-hooks'"
+}

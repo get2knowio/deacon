@@ -8,7 +8,7 @@
       "behaviors": [
         "bhv-exec-container-id-metadata"
       ],
-      "notes": "Prose\u2192behavior traceability now flows through this clause; supersedes retired src-spec-container-metadata-recovery (021 T036)."
+      "notes": "Prose→behavior traceability now flows through this clause; supersedes retired src-spec-container-metadata-recovery (021 T036)."
     },
     {
       "id": "clc-features-user-env-if-no-remoteuser-is-configured-remote-user-is-se-algo-d105730b",
@@ -30,7 +30,7 @@
       "id": "clc-features-user-env-the-container-user-can-be-set-with-containeruser-desc-b793399d",
       "clause": "clu-features-user-env-the-container-user-can-be-set-with-containeruser-desc-b793399d",
       "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "rationale": "A 'Notes' enumeration of the places a container user may be declared (`containerUser`, image metadata, Compose `user`, Dockerfile `USER`, inherited from the base image). Each entry names a configuration ingress rather than an outcome; the single observable consequence, the user the container process actually runs as, is claimed and observed by bhv-up-effective-user-uid-gid. The enumeration has no separately-observable form of its own."
     }
   ]
 }

@@ -90,16 +90,18 @@ pub async fn execute_down(
         }
     };
 
-    let config = match config_result {
-        Ok(config) => config,
-        Err(e) => {
-            warn!(
-                "Failed to load configuration: {}, attempting auto-discovery",
-                e
-            );
-            return execute_down_with_auto_discovery(workspace_folder, &args, runtime).await;
-        }
-    };
+    // A configuration was NAMED but could not be loaded — either discovery found a
+    // document that will not parse, or `--config-path` names a file that is missing or
+    // unreadable. Both are developer mistakes, not an absent configuration (that case
+    // took the `DiscoveryResult::None` branch above), so it fails here rather than
+    // falling through to auto-discovery (constitution IV, "strict on mistakes").
+    // Tolerating it was worse than merely quiet: auto-discovery re-derives the identity
+    // from a DEFAULT config, so a `down` over an unparseable document silently scoped
+    // the teardown differently from the `up` that created the container and then exited
+    // 0 having removed nothing. This matches `up`/`exec`, which pass an explicit
+    // `--config` straight to the loader and surface the same `NotFound`/parse errors
+    // (`commands/shared/config_loader.rs`); `down` was the one subcommand that did not.
+    let config = config_result?;
 
     debug!("Loaded configuration: {:?}", config.name);
 

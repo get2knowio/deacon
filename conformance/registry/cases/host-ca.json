@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-host-ca",
+      "behaviors": [
+        "bhv-host-ca-injection"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "integration_host_ca_runtime"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-container-state",
+          "expectation": "host CA certificates are present in the injected trust store used for registry/network access"
+        }
+      ]
+    }
+  ]
+}

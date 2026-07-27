@@ -1,0 +1,5 @@
+{
+	"name": "ConformanceUpDockerfileExtends",
+	"extends": "./dockerfile-base.json",
+	"containerEnv": { "CONF_CASE": "up-dockerfile-extends" }
+}

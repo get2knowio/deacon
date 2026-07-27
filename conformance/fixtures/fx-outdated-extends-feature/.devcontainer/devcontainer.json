@@ -1,0 +1,5 @@
+{
+	"name": "ConformanceOutdatedExtendsChild",
+	"extends": "./feature-base.json",
+	"containerEnv": { "LAYER": "child" }
+}

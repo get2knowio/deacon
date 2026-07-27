@@ -119,19 +119,39 @@ fn a_mapping_naming_a_nonexistent_baseline_unit_fails() {
     );
 }
 
+/// The reverse-orphan direction of V21 is **retired** (024 US3), for the reason V25 was:
+/// it was true only while the declarative case set WAS the migration's output. A case
+/// authored for coverage the migration never had maps from no baseline unit by
+/// construction, so a permanent gate there would forbid exactly the growth the migration
+/// exists to make room for — and could only be satisfied by inventing a baseline unit for
+/// a case that migrated from nothing.
+///
+/// The forward direction is untouched, and it is the one conservation rests on.
 #[test]
-fn a_declarative_case_no_unit_reaches_is_an_orphan_case() {
+fn a_declarative_case_no_unit_reaches_is_not_an_orphan() {
     let problems = run(
         &["p::a"],
         &[migrated("p::a", "case-a")],
-        &[good_case("case-a"), good_case("case-unreached")],
+        &[
+            good_case("case-a"),
+            good_case("case-authored-after-the-migration"),
+        ],
     );
-    let hits: Vec<_> = problems
-        .iter()
-        .filter(|p| p.record == "case-unreached")
-        .collect();
-    assert_eq!(hits.len(), 1, "{problems:#?}");
-    assert!(hits[0].message.contains("orphan case"));
+    assert!(
+        !problems
+            .iter()
+            .any(|p| p.record == "case-authored-after-the-migration"),
+        "a case authored after the migration maps from no baseline unit and must not be \
+         reported: {problems:#?}"
+    );
+    // The forward direction still holds: drop the only mapping and the unit is reported.
+    let forward = run(&["p::a"], &[], &[good_case("case-a")]);
+    assert!(
+        forward
+            .iter()
+            .any(|p| p.record == "p::a" && p.message.contains("no mapping entry")),
+        "the forward direction is what conservation rests on: {forward:#?}"
+    );
 }
 
 #[test]

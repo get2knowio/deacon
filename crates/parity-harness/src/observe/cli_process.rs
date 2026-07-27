@@ -13,7 +13,7 @@ use deacon_conformance::model::{
 
 use crate::HarnessError;
 use crate::evidence::RawChannelEvidence;
-use crate::observe::{ChannelObserver, ProcessOutcome, RunContext};
+use crate::observe::{ChannelObserver, ProcessOutcome, RunContext, derived};
 
 /// An observer for one of the four CLI-process channels. One instance per channel (the
 /// channel id it captures is fixed at construction), so the runner can invoke exactly
@@ -40,7 +40,18 @@ impl CliProcessObserver {
     /// Build this channel's evidence from an already-captured [`ProcessOutcome`]. Kept
     /// separate from the trait so the runner can also call it directly (and unit tests
     /// can exercise the mapping without a `RunContext`).
-    pub fn evidence_from(&self, op_id: &str, outcome: &ProcessOutcome) -> RawChannelEvidence {
+    ///
+    /// `authored` is the run's AUTHORED configuration property names — snapshotted once
+    /// by [`RunContext::for_side`] before any operation ran — needed only by
+    /// `chan-structured-output` to derive the FR-055 `nullEmptyOmitted` classification.
+    /// `None` skips the derivation (the field is then absent on BOTH sides, never
+    /// one-sided).
+    pub fn evidence_from(
+        &self,
+        op_id: &str,
+        outcome: &ProcessOutcome,
+        authored: Option<&std::collections::BTreeSet<String>>,
+    ) -> RawChannelEvidence {
         match self.channel {
             CHAN_EXIT_CODE => RawChannelEvidence {
                 channel: CHAN_EXIT_CODE.to_string(),
@@ -65,7 +76,7 @@ impl CliProcessObserver {
                 present: true,
                 value: serde_json::Value::String(String::from_utf8_lossy(&outcome.stderr).into()),
             },
-            CHAN_STRUCTURED_OUTPUT => structured_output_evidence(op_id, outcome),
+            CHAN_STRUCTURED_OUTPUT => structured_output_evidence(op_id, outcome, authored),
             // `for_channel` only ever constructs one of the four above.
             other => RawChannelEvidence {
                 channel: other.to_string(),
@@ -88,7 +99,9 @@ impl ChannelObserver for CliProcessObserver {
         op: &Operation,
     ) -> Result<RawChannelEvidence, HarnessError> {
         match ctx.outcome(&op.id) {
-            Some(outcome) => Ok(self.evidence_from(&op.id, outcome)),
+            Some(outcome) => {
+                Ok(self.evidence_from(&op.id, outcome, Some(&ctx.authored_properties)))
+            }
             // The operation did not run (or its outcome was not recorded): the channel
             // was not captured for this op (FR-018), NOT a captured-empty value.
             None => Ok(RawChannelEvidence {
@@ -108,15 +121,34 @@ impl ChannelObserver for CliProcessObserver {
 /// document (FR-018). There is no fallback to comparing raw bytes here — a case that
 /// declares `chan-structured-output` against non-JSON stdout verdicts as a divergence
 /// in `compare`, not a silent pass.
-fn structured_output_evidence(op_id: &str, outcome: &ProcessOutcome) -> RawChannelEvidence {
+///
+/// A resolved-configuration document additionally carries the DERIVED
+/// [`derived::null_empty_omitted`] field (024 US5, FR-055): the `null`/`empty`/`omitted`/
+/// `present` state each AUTHORED property was reported in. It is added only to a
+/// configuration document — `upgrade`'s lockfile result is also structured output, and a
+/// configuration-shaped key there would mean nothing and would change what an exact
+/// `jsonEquals` on that document compares.
+fn structured_output_evidence(
+    op_id: &str,
+    outcome: &ProcessOutcome,
+    authored: Option<&std::collections::BTreeSet<String>>,
+) -> RawChannelEvidence {
     let text = String::from_utf8_lossy(&outcome.stdout);
     match serde_json::from_str::<serde_json::Value>(text.trim()) {
-        Ok(value) => RawChannelEvidence {
-            channel: CHAN_STRUCTURED_OUTPUT.to_string(),
-            operation: op_id.to_string(),
-            present: true,
-            value,
-        },
+        Ok(mut value) => {
+            if let (Some(authored), true) = (authored, derived::is_configuration_document(&value)) {
+                let classified = derived::null_empty_omitted(&value, authored);
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("nullEmptyOmitted".to_string(), classified);
+                }
+            }
+            RawChannelEvidence {
+                channel: CHAN_STRUCTURED_OUTPUT.to_string(),
+                operation: op_id.to_string(),
+                present: true,
+                value,
+            }
+        }
         Err(_) => RawChannelEvidence {
             channel: CHAN_STRUCTURED_OUTPUT.to_string(),
             operation: op_id.to_string(),
@@ -162,11 +194,13 @@ mod tests {
     fn exit_code_evidence_preserves_null_for_signal() {
         let obs = CliProcessObserver::for_channel(CHAN_EXIT_CODE).unwrap();
         assert_eq!(
-            obs.evidence_from("op", &outcome(Some(0), "", None)).value,
+            obs.evidence_from("op", &outcome(Some(0), "", None), None)
+                .value,
             serde_json::json!(0)
         );
         assert_eq!(
-            obs.evidence_from("op", &outcome(None, "", None)).value,
+            obs.evidence_from("op", &outcome(None, "", None), None)
+                .value,
             serde_json::Value::Null,
             "signal termination → null exit code, distinct from 0"
         );
@@ -175,11 +209,11 @@ mod tests {
     #[test]
     fn structured_output_present_only_when_json() {
         let obs = CliProcessObserver::for_channel(CHAN_STRUCTURED_OUTPUT).unwrap();
-        let json = obs.evidence_from("op", &outcome(Some(0), r#"{"a":1}"#, None));
+        let json = obs.evidence_from("op", &outcome(Some(0), r#"{"a":1}"#, None), None);
         assert!(json.present);
         assert_eq!(json.value, serde_json::json!({"a":1}));
 
-        let not_json = obs.evidence_from("op", &outcome(Some(0), "not json", None));
+        let not_json = obs.evidence_from("op", &outcome(Some(0), "not json", None), None);
         assert!(
             !not_json.present,
             "non-JSON stdout → structured channel not captured (present:false)"
@@ -190,7 +224,7 @@ mod tests {
     fn stdout_is_a_string() {
         let obs = CliProcessObserver::for_channel(CHAN_STDOUT).unwrap();
         assert_eq!(
-            obs.evidence_from("op", &outcome(Some(0), "hello", None))
+            obs.evidence_from("op", &outcome(Some(0), "hello", None), None)
                 .value,
             serde_json::json!("hello")
         );

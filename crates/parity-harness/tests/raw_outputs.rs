@@ -291,7 +291,8 @@ fn raw_and_normalized_evidence_are_both_preserved_and_separately_locatable() {
         present: true,
         value: raw_value.clone(),
     };
-    let normalized = normalize::normalize_channel("chan-structured-output", &raw, &tokens);
+    let normalized =
+        normalize::normalize_channel("chan-structured-output", &raw, &tokens, Side::Deacon);
 
     let mut evidence = CaseEvidence::new();
     evidence.push(raw.clone(), normalized.clone());
@@ -375,8 +376,12 @@ fn not_captured_evidence_stays_not_captured_through_normalization() {
         present: false,
         value: serde_json::Value::Null,
     };
-    let normalized =
-        normalize::normalize_channel("chan-image", &raw, &TokenMap::workspace(Path::new("/w")));
+    let normalized = normalize::normalize_channel(
+        "chan-image",
+        &raw,
+        &TokenMap::workspace(Path::new("/w")),
+        Side::Deacon,
+    );
     assert!(
         !normalized.present,
         "a channel that could not be observed must stay distinguishable from one \

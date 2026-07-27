@@ -24,10 +24,22 @@ fn seed_registry_loads_cleanly() {
         11,
         "six original observable channels + five added by 022-conformance-runner"
     );
-    assert_eq!(registry.profiles.len(), 1, "one active profile");
-    assert!(
-        registry.profiles[0].active,
-        "the seeded profile is the active one"
+    // Two environment profiles are MODELLED — Linux/amd64 against each runtime — and
+    // exactly one is ACTIVE (FR-004a). This assertion used to read `len() == 1` under the
+    // label "one active profile", conflating the record count with the active count; the
+    // two stopped being the same number when 024 T149 modelled the podman environment
+    // without activating it (FR-004b keeps activation a one-field data change).
+    assert_eq!(registry.profiles.len(), 2, "docker and podman are modelled");
+    let active: Vec<&str> = registry
+        .profiles
+        .iter()
+        .filter(|p| p.active)
+        .map(|p| p.id.as_str())
+        .collect();
+    assert_eq!(
+        active,
+        vec!["prof-linux-amd64-docker-0870"],
+        "exactly one profile is active, and it is the one evidence is gathered under"
     );
     // Behaviors/sources/cases/waivers/extensions are seeded from the documented
     // divergence inventory in US4 (T027–T030); the closed collections above are

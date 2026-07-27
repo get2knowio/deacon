@@ -28,6 +28,7 @@ use crate::evidence::RawChannelEvidence;
 pub mod cli_process;
 pub mod container_graph;
 pub mod container_state;
+pub mod derived;
 pub mod filesystem;
 pub mod image;
 pub mod injected_process;
@@ -66,6 +67,14 @@ pub struct RunContext {
     /// The workspace the case's operations ran against (US5 makes this an isolated
     /// external temp dir; US1 config-only cases run against the committed fixture dir).
     pub workspace: PathBuf,
+    /// Which implementation produced this evidence.
+    ///
+    /// Carried so the normalizer can apply a rule to the SIDE whose behavior it
+    /// compensates rather than to both (024 US5, T123): `drop_absent_optional` exists for
+    /// deacon's unconditional serialization of modeled optionals, and applying it to the
+    /// reference as well erased the reference's faithful null/empty/omitted distinction —
+    /// the one FR-055 requires be preserved.
+    pub side: crate::exec::Side,
     /// The container id, once the case has brought one up. `None` for pure CLI-process
     /// cases that never create a container.
     pub container_id: Option<String>,
@@ -79,6 +88,17 @@ pub struct RunContext {
     /// scoped to (clarify Q1: allowlist-scoped, never a full-tree diff). Empty for cases
     /// with no filesystem expectation.
     pub fs_allowlist: Vec<String>,
+    /// The AUTHORED configuration property names, read from the workspace ONCE at context
+    /// construction — i.e. before any operation runs.
+    ///
+    /// Same rationale as [`RunContext::container_inspect`]: an observer must not perform
+    /// its own filesystem reads on every capture. Beyond the repeated I/O (up to three
+    /// file opens per operation, per side, per case), reading at OBSERVE time reads the
+    /// workspace at the wrong moment — an operation that rewrites the configuration
+    /// (`templates apply`, or a `workspace-file` injected regression) would change the
+    /// authored set out from under the document being classified, and deacon's and the
+    /// reference's temp workspaces would be read at different instants.
+    pub authored_properties: std::collections::BTreeSet<String>,
     /// Per-operation process outcomes, keyed by `Operation::id`, populated by the runner
     /// before observers run.
     outcomes: HashMap<String, ProcessOutcome>,
@@ -105,13 +125,26 @@ pub struct OpSnapshot {
 }
 
 impl RunContext {
-    /// A context for a container-less run rooted at `workspace`.
+    /// A context for a container-less run rooted at `workspace`, attributed to
+    /// [`crate::exec::Side::Deacon`] (the side every unit test and every
+    /// spec-expectation run observes). Use [`RunContext::for_side`] for the reference.
     pub fn new(workspace: PathBuf) -> RunContext {
+        RunContext::for_side(workspace, crate::exec::Side::Deacon)
+    }
+
+    /// A context for a run rooted at `workspace` and produced by `side`.
+    ///
+    /// Snapshots the authored configuration property names HERE, before any operation
+    /// runs — see [`RunContext::authored_properties`].
+    pub fn for_side(workspace: PathBuf, side: crate::exec::Side) -> RunContext {
+        let authored_properties = crate::observe::derived::authored_properties(&workspace);
         RunContext {
             workspace,
+            side,
             container_id: None,
             container_inspect: None,
             fs_allowlist: Vec::new(),
+            authored_properties,
             outcomes: HashMap::new(),
             op_snapshots: HashMap::new(),
         }
@@ -125,6 +158,26 @@ impl RunContext {
     /// The process outcome captured for `op_id`, if the operation ran.
     pub fn outcome(&self, op_id: &str) -> Option<&ProcessOutcome> {
         self.outcomes.get(op_id)
+    }
+
+    /// Every captured process outcome, mutably, in a DETERMINISTIC (op-id-sorted) order.
+    ///
+    /// Exists for one caller: the injected-regression harness
+    /// ([`crate::inject`]), which perturbs the RAW captured artifact in the gap between
+    /// capture and observation (024 US6). Nothing on the ordinary path mutates a captured
+    /// outcome — evidence is recorded once and read, never rewritten — and the injector
+    /// itself is gated on a process-level capability the ordinary drivers never take out.
+    ///
+    /// The sort is not cosmetic: a `HashMap` iteration order would make a perturbation's
+    /// application order vary run to run, and FR-069 requires the same inputs to produce
+    /// the same classification.
+    pub fn outcomes_mut(&mut self) -> impl Iterator<Item = &mut ProcessOutcome> {
+        // Collect the `(key, &mut value)` pairs and sort them, rather than sorting the keys
+        // and indexing back into the map — the borrow checker will not let a key list index
+        // a map it is also lending out mutably, and this form needs no second lookup.
+        let mut pairs: Vec<(&String, &mut ProcessOutcome)> = self.outcomes.iter_mut().collect();
+        pairs.sort_by(|a, b| a.0.cmp(b.0));
+        pairs.into_iter().map(|(_, outcome)| outcome)
     }
 
     /// Record the container snapshot at an operation's boundary (runner-side, US6).

@@ -1,0 +1,19 @@
+{
+  "id": "wvr-compose-project-file-set",
+  "behaviors": [
+    "bhv-compose-project-file-set"
+  ],
+  "scope": {
+    "kind": "corpus_case",
+    "corpus": "us5",
+    "case": "compose-project-file-set"
+  },
+  "expect": {
+    "kind": "field-divergence",
+    "ours": "<workspace>/.devcontainer/docker-compose.yml,-",
+    "reference": "<workspace>/.devcontainer/docker-compose.yml,/tmp/devcontainercli-vscode/docker-compose/docker-compose.devcontainer.containerFeatures-<id>.yml"
+  },
+  "rationale": "Both CLIs layer a generated override on the workspace's Compose file and deliver it differently: deacon writes it to Compose's stdin, which Compose records as `-` in `com.docker.compose.project.config_files`; oracle 0.87.0 writes `/tmp/devcontainercli-vscode/docker-compose/docker-compose.devcontainer.containerFeatures-<id>.yml` and records that path. `com.docker.compose.config-hash` differs as a direct consequence, because Compose hashes the merged file set. Neither delivery mechanism is spec-defined and neither is observable in the container beyond these two bookkeeping labels: the service, the project-relative network and volume, the mounts and the environment are all compared and all agree. Scoped to the two derived labels by name — the project NAME difference alongside them is a separate, separately backed tolerance (`bhv-compose-project-name-robust`), because an implementation could adopt either CLI's project naming and still deliver its override the other way.",
+  "added": "2026-07-26",
+  "expires": "2027-01-26"
+}

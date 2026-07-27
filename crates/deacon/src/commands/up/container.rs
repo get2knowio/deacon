@@ -295,10 +295,18 @@ pub(crate) async fn execute_container_up(
             .with_context(|| "Failed to build feature-extended image")?
         };
 
-        if !feature_build.combined_env.is_empty() {
-            config
-                .container_env
-                .extend(feature_build.combined_env.into_iter());
+        // Feature-contributed `containerEnv` merges in BELOW the configuration's own.
+        //
+        // `extend` was overwriting, so a variable declared in BOTH the devcontainer.json
+        // and a Feature took the FEATURE's value. Per the spec's merge logic the
+        // devcontainer.json is applied last and wins over Feature/image metadata, and the
+        // pinned reference does exactly that: for a configuration setting
+        // `containerEnv.CONF_LAYER` and a Feature setting the same key, oracle 0.87.0
+        // produces the configuration's value and deacon produced the Feature's (measured,
+        // 024 US5). Ordering AMONG features is unaffected — `combined_env` is already
+        // built in install order so a later Feature wins there.
+        for (key, value) in feature_build.combined_env {
+            config.container_env.entry(key).or_insert(value);
         }
 
         config.image = Some(feature_build.image_tag.clone());

@@ -1,0 +1,4 @@
+# Properties this fixture wants classified beyond the ones it authors.
+# `mounts` is deliberately OMITTED from the configuration: it is the third FR-055
+# state, and nothing in the document can name a property that is not in it.
+mounts

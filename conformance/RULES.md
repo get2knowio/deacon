@@ -59,16 +59,21 @@ checkable at a glance rather than by reading every section.
 | **V9** | an expected outcome referencing an undeclared observable channel | `validate.rs` |
 | **V10** | a case whose context has an empty intersection with a linked behavior's applicability | `validate.rs` |
 | **V11 – V15** | inventory join: stale / unclassified / malformed / provenance / clause↔source integrity | [Inventory join](#inventory-join-v11--v15--constraints-and-clauses) |
-| **V16** | declarative-case well-formedness (shape, `oracleType`, consumer subcommand, assertions, `fsAllowlist`, observable channel, Docker `resourceGroup`) | `validate.rs` |
+| **V16** | declarative-case well-formedness (shape, `oracleType`, consumer subcommand, assertions, `fsAllowlist`, observable channel, Docker `resourceGroup`, [error-path tier](#the-container-backed-error-path-tier-v16-024)) | `validate.rs` |
 | **V17** | committed-snapshot integrity (orphan or malformed provenance) | `validate.rs` |
 | **V18** | a Docker case referencing a fixture with an unpinned image | `validate.rs` |
 | **V19** | an allowed-difference whose backing waiver/divergence id does not resolve | `validate.rs` |
 | **V20** | invariant-metamorphic arity (≥2 operations + a relationship naming a sibling) | `validate.rs` |
-| **V21** | migration mapping integrity, both directions, incl. exception correspondence | [Migration mapping](#migration-mapping-v21--v23--transitional) |
+| **V21** | migration mapping integrity (forward direction) incl. exception correspondence; the reverse orphan-case direction is **retired** | [Migration mapping](#migration-mapping-v21--v23--transitional) |
 | **V22** | fixture correspondence and unreferenced migrated fixtures | [Migration mapping](#migration-mapping-v21--v23--transitional) |
 | **V23** | malformed residual | [Migration mapping](#migration-mapping-v21--v23--transitional) |
 | **V24** | unscoped or unjustified normalization rule | [Normalization rules](#normalization-rules-v24--transitional) |
 | ~~**V25**~~ | baseline provenance — **RETIRED** (FR-053); the artifact is retained, the gate is gone | [Baseline provenance](#migration-baseline-provenance-v25--retired) |
+| **V26** | scenario-model integrity: dead dimension value; rule naming an unknown dimension/value; rule with no ground; case `scenarioContext` that is partial, undeclared, or invalid | [Scenario model and obligation provenance](#scenario-model-and-obligation-provenance-v26--v27) |
+| **V27** | obligation provenance: committed obligations ≠ regenerated; `revision` mismatch; obligation referencing a removed dimension value | [Scenario model and obligation provenance](#scenario-model-and-obligation-provenance-v26--v27) |
+| **V28** | an applicable obligation with zero dispositions, or with more than one | [Obligation dispositions](#obligation-dispositions-v28--v29) |
+| **V29** | malformed disposition: filler rationale; a high-risk triple dispositioned by rationale/waiver rather than a case; a disposition whose obligation no longer resolves (stale) | [Obligation dispositions](#obligation-dispositions-v28--v29) |
+| **V30** | injected-regression integrity: a declared channel with no regression record; a regression targeting a channel with no observer | [Injected-regression harness](#injected-regression-harness-v30) |
 
 **Three distinctions this file keeps apart**, because conflating any pair makes a status
 unfalsifiable:
@@ -206,6 +211,39 @@ identical `devcontainer.local_folder` label — deacon's container and the oracl
 indistinguishable, as do two cases running in parallel), no RAII cleanup guard is created
 (container, network and volume leak), and V18 skips the case's image inputs because it is
 `is_docker_case`-gated too. The case still runs, and may well pass.
+
+### The container-backed error-path tier (V16, 024)
+
+Parity testing used to stop comparing the moment **both** implementations accepted a
+configuration document. That is precisely where the reference is most lenient, so it is
+where a difference is most likely to survive unobserved — and every later stage (build,
+container creation, Feature installation, lifecycle execution, teardown) went uncompared
+for any input that read cleanly.
+
+A case joins the tier by declaring `errorPathTier: true`. Membership is **declared, not
+derived**, because a predicate over `expectFailurePhase` gets it wrong in both directions:
+`case-down-removes-container` declares `expectFailurePhase: exec` on a *verification* step
+and is not an error-path case, while a genuine tier case whose phase was left off would
+silently leave the tier with nothing to notice. Declaring it makes each of those a
+validation failure instead.
+
+| Rule | A tier case must … | Because |
+|---|---|---|
+| 1 | declare an `expectFailurePhase` later than `config-resolution` on ≥1 operation | FR-042 requires the record to say **where** the failure occurs |
+| 2 | declare `config-resolution` on **no** operation | a verdict reachable at configuration read is a verdict about the stage the tier exists to look past (FR-041) |
+| 3 | declare a Docker `resourceGroup` | every later stage needs the container runtime — and without the group there is no isolated workspace and no cleanup guard |
+| 4 | *(all declarative cases)* declare only phases its subcommand can **reach** | `read-configuration` reaches exactly one phase; a case declaring `lifecycle:postCreate` on it describes a run that cannot happen and would otherwise validate, run, and report a green nothing |
+
+Reachability is the closed, hand-reviewed `model::phases_reachable_by` mapping. **`down`
+stops at `config-resolution`**: teardown owns no phase in the closed failure-phase set
+(022-conformance-runner data-model §8, which this feature reuses rather than extends), so a
+teardown error-path case declares its failure on the operation that *observes* the teardown
+— an `exec` into the container that must no longer exist — which is the shape
+`case-down-removes-container` already uses.
+
+`errorPathTier` is **excluded from `caseHash`** (with `inputClass`, `notes` and
+`allowedDifferences`): it classifies a case, it does not change a byte the runner feeds the
+CLI, so joining the tier must never re-record a snapshot.
 
 ## Inventory join (V11 – V15) — constraints AND clauses
 
@@ -400,13 +438,33 @@ destination is reachable from a unit.
 
 | Class | Statement | Remedy |
 |-------|-----------|--------|
-| **V21** | **mapping integrity, both directions**: a baseline unit with no mapping entry (an orphan *test*); a mapping naming a unit or case that does not exist; a **declarative** case no mapping entry reaches (an orphan *case*); a disposition whose arity is wrong (`migrated`/`deduplicated` without `caseIds`, `residual`/`retired` with them, `residual` without a resolvable `residualId`, `deduplicated`/`retired` without a `rationale`); a destination case that resolves to no behavior or declares no observable channel, or names a dangling behavior/channel id; and, for a characterized **exception**, a mapping to zero or to more than one mechanism, a missing mapping entry, or a mechanism whose current direction/scope is BROADER than the recorded pre-migration form. **Also: a registry that carries mapping or residual records with NO committed `baseline.json`** | Give the unit a destination, the case a reachable mapping, the exception exactly one mechanism. A tolerance may be narrowed, never widened. Restore the baseline (or, if the records are genuinely obsolete, delete them too). |
+| **V21** | **mapping integrity (forward)**: a baseline unit with no mapping entry (an orphan *test*); a mapping naming a unit or case that does not exist; a disposition whose arity is wrong (`migrated`/`deduplicated` without `caseIds`, `residual`/`retired` with them, `residual` without a resolvable `residualId`, `deduplicated`/`retired` without a `rationale`); a destination case that resolves to no behavior or declares no observable channel, or names a dangling behavior/channel id; and, for a characterized **exception**, a mapping to zero or to more than one mechanism, a missing mapping entry, or a mechanism whose current direction/scope is BROADER than the recorded pre-migration form. **Also: a registry that carries mapping or residual records with NO committed `baseline.json`** | Give the unit a destination, the case a reachable mapping, the exception exactly one mechanism. A tolerance may be narrowed, never widened. Restore the baseline (or, if the records are genuinely obsolete, delete them too). |
 | **V22** | **fixture correspondence**: a `from` split across two `to`s; a `to` fed by two `from`s (a silent merge); a `from` that is not one of the unit's baseline fixtures; a baseline fixture of a migrated unit with no `fixtureMapping` entry (a silent drop); and a migrated fixture no case references (an unreferenced orphan) | Make the correspondence one-to-one and account for every fixture the unit consumed. Declaring the SAME `(from, to)` pair from two units is fine — two modes of one workspace legitimately share one fixture. |
 | **V23** | **malformed residual**: a vague `missingCapability` (a filler phrase, or too short to name a mechanism); a `followUp` that is not a tracked reference; an `outOfScopeRationale` that names no ground for permanent exclusion (024 — see [Queued vs permanent](#queued-vs-permanent-residuals-024)); a `blockedCarrier` that is absent on a residual whose units are not ALL `external-corpus-entry`, that names no baseline program, or that is present on an `external-corpus-entry` residual; a `units`/`behaviors` entry that does not resolve; and a unit claimed by a residual while its mapping says it was migrated | Name the specific missing capability, and either a tracked follow-up (`queued`) or the principle that forbids expression (`permanent`); name the carrier the residual pins. A residual never blocks certification, which is exactly why its shape must be strict. |
 
-**Legacy pointer cases are exempt from V21's orphan-case direction.** They are the
-pre-migration *carriers*, not destinations; they are retired in US7/US6 once the
-equivalence gate clears them, not mapped into.
+### The orphan-*case* direction is retired (024 US3)
+
+V21 originally also ran in reverse: every **declarative** case had to be reached by some
+mapping entry, on the reasoning that a declarative case IS a migration destination. That
+was true exactly while the declarative case set *was* the migration's output. The moment a
+case is authored for coverage the migration never had — which is what 024 US3 does, 81
+times — the rule reports a correct record as an orphan, and the only way to satisfy it
+would be to invent a baseline unit for a case that migrated from nothing.
+
+So it is retired, for the same reason V25 was: a permanent gate here would forbid exactly
+the growth the migration exists to make room for. The **forward** direction is untouched,
+and it is the one conservation rests on — every baseline unit still needs exactly one
+destination, which is what proves nothing was lost.
+
+Legacy pointer cases were exempt from the reverse direction while it existed, and remain
+irrelevant to it: they are the pre-migration *carriers*, not destinations; they are retired
+once the equivalence gate clears them, not mapped into.
+
+**A characterized exception authored after the branch point is likewise out of scope.** A
+`wvr-` or `ext-` whose behaviors are all in `POST_BRANCH_BEHAVIORS` describes something the
+pre-migration system never observed, so it has no pre-migration form for `mapping.json` to
+preserve. The exemption covers **both** mechanisms — scoping it to extensions alone would
+make it depend on which one an author reached for rather than on when the fact was learned.
 
 **Direction and scope breadth are structural orders, not string comparisons** (FR-027).
 Direction: `none` < agreement (`both-reject`/`both-accept`) < one-directional
@@ -552,3 +610,385 @@ corpus entries (research D8), the 17 harness fault-injection and 6 registry-stru
 (they observe the comparison machinery and the repository, not consumer behavior, so they have
 no oracle and no observable channel), the 4 intra-deacon consistency units (no reference side,
 hence `behaviors: []`), and the lockfile interop unit (Constitution II).
+
+## Scenario model and obligation provenance (V26 – V27)
+
+024-deterministic-conformance-coverage adds a **constrained scenario model** and a
+generated **obligation** denominator on top of the behavior denominator. Two classes keep
+that denominator honest: **V26** guards the hand-authored model, **V27** guards the
+machine-generated inventory built from it.
+
+### Two namespaces, deliberately never merged
+
+| Namespace | File | Means | Evaluated against |
+|---|---|---|---|
+| `dim-*` (environment) | `dimensions.json` + `profiles.json` | **where** evidence can be gathered | the single active profile's assignment |
+| `sdim-*` (scenario) | `scenario.json` | **what** a case exercises | a case's `scenarioContext` |
+
+Scenario dimensions MUST NOT be added to `dimensions.json`. `applies_in_profile` treats a
+condition on a dimension the profile does not assign as **unsatisfied**, so a scenario
+dimension living in the environment model would silently drop every behavior constraining
+it *out of profile* — removing it from the coverage denominator entirely. A feature built
+to stop the denominator hiding things must not begin by hiding things, and the failure
+would be invisible: `certify` counts only in-profile behaviors, so the number would go
+*down* and still be green. `Condition` is reused verbatim for scenario applicability; only
+the evaluator is new.
+
+### Applicability is pure exclusion, and exclusion is attributable
+
+```text
+invalid(combination) ⇔ ∃ rule : ∀ condition ∈ rule.excludes :
+                         combination[condition.dimension] ∈ condition.values
+```
+
+There is no "include" form, no precedence, and no ordering dependence — the predicate is a
+disjunction, so evaluation order cannot change the answer. A rule constrains **only** the
+dimensions it names. A **partial** combination that does not assign a dimension the rule
+names is *inconclusive*, never excluded: excluding speculatively would drop pairs no rule
+actually forbids.
+
+An invalid combination leaves the denominator entirely, and **the excluding rule id travels
+with it** into `coverage-pairwise.json`'s `excluded` list. This is the one place where
+"silently absent" and "explicitly excluded" must not be confused: collapse the two and any
+missing combination can be explained away as impossible, which makes the denominator
+unfalsifiable.
+
+A dimension **every** value of which is excluded under an operation is *inapplicable* there
+and contributes no pairs. Pruning happens before enumeration, which is what keeps the space
+tractable without a covering-array minimizer.
+
+> **Note on the illustrative rule in data-model.md §2.** It excludes only the three
+> container-ful states for the operations that create no container, leaving `none`. That is
+> deliberate and the committed rule follows it, even though contracts/scenario-model.md
+> describes the dimension as *inapplicable* to those operations. Excluding `none` as well
+> would leave `read-configuration`, `build`, and `doctor` with **no valid total assignment
+> at all**, and a case must assign every scenario dimension (data-model.md §3) — the
+> operation would become unrepresentable. The dimension therefore survives with one value
+> rather than being pruned outright.
+
+### Obligations are generated, never authored
+
+| File | Owner | Written by | Hand edits |
+|---|---|---|---|
+| `registry/scenario.json` | hand | never generated | expected |
+| `registry/applicability.json` | hand | never generated | expected |
+| `obligations/obligations.json` | **machine** | `coverage generate` ONLY | **V27** |
+
+`coverage generate` writes **exactly one file** and never a disposition, case, behavior,
+waiver, gap, or report. This is the 020/021 boundary restated, because it is the invariant
+most easily lost: a generator that could edit a disposition would convert human review into
+a build artifact.
+
+Two obligation kinds, **never multiplied together** (FR-019):
+
+- `obl-bhv-<hash8>` — a behavior paired with the context its own applicability requires.
+  **Exactly one per behavior.** An empty applicability is one universal context (zero
+  obligations would erase the behavior from the denominator); a non-empty one *is* the
+  context, because a condition pins a value **subset** meaning "any of these". Expanding a
+  subset into one obligation per value would multiply the two kinds against the environment
+  model and produce the unreviewable thousands research Decision 2 rejected.
+- `obl-cmb-<hash8>` — a valid pair (`arity: 2`) or a hand-selected high-risk triple
+  (`arity: 3`), partitioned by operation.
+
+The **operation is a partition key, never a pair member**: a pair covered under `up` does
+not cover that pair under `down`, because the same pair means different things per
+operation and pooling would let one operation's coverage mask another's.
+
+Ids are **substance-anchored**, following the `clu-` precedent: reordering records,
+renaming a file, or writing the same pair's keys in a different order leaves the id alone,
+so a cosmetic edit never orphans a hand-authored disposition. Changing what a combination
+*is* does change the id — and that is a new obligation needing its own decision.
+
+### The classes
+
+| Class | Fires on | Remedy |
+|---|---|---|
+| **V26** | a **dead value** (declared but permitted in no valid combination — FR-010); an empty or duplicated value set; a missing required dimension (FR-003); a rule naming an unknown dimension or value; a rule with fewer than two conditions; a rule whose `ground` is filler rather than an argument; a high-risk triple that pins no operation, pins other than three dimensions, carries a filler `reason`, or selects an excluded combination; a case `scenarioContext` that is partial, names something undeclared, or is itself an excluded combination | Remove the value or narrow the rule that strands it; declare the dimension; name the mechanism in the ground; assign **every** scenario dimension on a case, or none |
+| **V27** | the committed inventory does not byte-match a fresh regeneration; its `revision` names no `spec`-kind revision record; a unit references an operation, dimension, value, or behavior the registry no longer declares; **or** the registry declares a scenario model but ships no inventory at all | `cargo run -p deacon-conformance -- coverage generate` |
+
+**A hand edit and a stale regeneration are indistinguishable to V27, and both fail.** That
+is the point: there is no way to edit the generated file that the check would treat as
+legitimate. A missing inventory is likewise a violation and not a skip — an absent file
+would otherwise read as "nothing to check".
+
+A registry that declares **no** scenario dimensions opts out of both classes: there is no
+model to be broken, so the fixture registries predating this feature stay silent rather
+than reporting six missing dimensions each.
+
+### A rule's `ground` must argue, not assert
+
+V26 rejects filler with the same vocabulary V23 applies to `missingCapability`, plus a
+prose floor. It deliberately does **not** reuse `names_an_exclusion_ground`, whose markers
+("constitution", "principle", "authoring") are tuned for permanent *out-of-scope* claims: an
+applicability ground argues from a **mechanism** ("this operation never creates a container,
+so a container state is not a property it can exercise"), so requiring those markers would
+reject every correct ground.
+
+### Drift workflow (pin bump, dimension edit, or rule edit)
+
+1. `coverage generate` — regenerate the inventory.
+2. `coverage check` — confirms the commit matches; a mismatch is V27 and names the first
+   differing unit id and whether it was added, removed, or changed.
+3. `validate` — V26 lists dead values; V28 enumerates the new undispositioned queue.
+4. `coverage scaffold` — skeletons to stdout with `UNREVIEWED` sentinels the loader rejects.
+5. Disposition until `certify` unblocks.
+
+**Disposition is never inherited by name.** A regenerated obligation that happens to
+resemble a removed one is a **new** obligation and needs its own decision — the same rule
+020 states for classifications, for the same reason: a name is not evidence.
+
+### Drift workflow (adding a case)
+
+The obligation set does not change, so nothing is regenerated. The *dispositions* do.
+
+1. Author the case with a **full** `scenarioContext` — every dimension or none (V26).
+2. `validate` — the case must load and be well-formed (V16/V18/V20).
+3. `coverage report` — read `coverage-pairwise.md` for the combinations the new
+   `scenarioContext` now satisfies, and `coverage-observables.md` for the channels it now
+   covers.
+4. **Flip every `odp-cmb-*` the case now covers from `gap` to `case`, in the SAME commit.**
+
+Step 4 is the one that gets skipped, and skipping it is silent. An explicit disposition
+takes **precedence over the evidence** (see "Explicit only" below) — deliberately, so a
+reviewer can rule that a mechanical `scenarioContext` match is not real coverage. The cost
+is that a commit which adds cases and registers only the new `obl-bhv-` dispositions leaves
+the combination records reading `gap` while a case matches them, and nothing fires:
+`validate` sees a well-formed record, `certify` sees a gap that is genuinely blocking-shaped,
+and the report under-counts coverage. It happened on this branch — 22 records across three
+areas, added by User Story 4, User Story 5 and T150 — and it was found by hand, not by a
+check. The direction is the safe one (over-reporting gaps, never claiming absent coverage),
+which is exactly why nothing catches it.
+
+### The five reporting buckets
+
+Every applicable obligation lands in exactly one of five buckets (FR-026), and the sixth
+row is the queue that must be empty:
+
+| Bucket | Means | Blocks `certify`? |
+|---|---|---|
+| `covered` | a `case` disposition naming ≥1 executable case | no |
+| `waived` | a `waived` disposition naming an unexpired, scoped `wvr-` | no (an EXPIRED waiver blocks as V6) |
+| `non-testable` | a `non-testable` disposition whose `rationale` names a ground | no |
+| `gap` | a `gap` disposition naming a `gap-` record | **yes**, through that record |
+| `inactive-environment` | derived, not authored: the behavior is out of profile for the active environment | no, counted separately |
+| *undispositioned* | zero records, or more than one | **yes**, V28 |
+
+The buckets are reported **alongside** the behavior-level coverage numbers and never folded
+into them: the two denominators answer different questions — which behaviors are evidenced,
+versus which modelled combinations are exercised — and collapsing them would let progress on
+one hide the absence of progress on the other.
+
+### Reporting never gates, and gating never reports
+
+`coverage report` is read-only with respect to the record and its **exit code never
+reflects what the report says**. Its exit code reflects only whether it could write its
+artifacts. A command that both measured coverage and decided the build's fate would make
+widening the report the cheapest way to go green. The gates are `validate` (V26, V27) and
+`certify` (V28, V29). The same rule holds in the other direction: `certify` names what
+blocks and why, and does not attempt to reproduce the reports' numbers.
+
+---
+
+## Obligation dispositions (V28 – V29)
+
+V26/V27 make the obligation set *honest*. V28/V29 make sure someone **decided** about each
+one. The split matters: an inventory that is provably complete and provably regenerated
+still says nothing about whether the work is covered, waived, argued away, or simply
+untouched. That question has exactly one home — a hand-authored `odp-` record under
+`registry/obligation-dispositions/<area>.json`.
+
+### Four words, one payload each
+
+| `disposition` | Requires | Blocks `certify`? |
+|---|---|---|
+| `case` | `cases` — ≥1, each resolving to a declared case | no |
+| `non-testable` | `rationale` naming a ground | no |
+| `waived` | `waiver` — a resolvable `wvr-` | only once it has **expired** (V6) |
+| `gap` | `gap` — a resolvable `gap-` | **always**, through that gap record |
+
+The arity *within* a record — exactly one of the four payloads, and the one its word
+requires — is refused at **load** time, not by V28/V29. A record whose payload disagrees
+with its word is not a nuance for a validation pass to interpret; it is a half-stated
+judgement, and the only honest reading is to refuse it at the door. The same loader rejects
+the `UNREVIEWED` scaffold sentinel, so `coverage scaffold` output can never be committed
+unedited.
+
+### Explicit only: no inheritance, no default, no winner
+
+An obligation with **no** record is undispositioned — **V28**, not "implicitly fine". There
+is no document-scope fallback of the kind `clc-` clause classifications use for authoring
+documents, because a scenario combination has no document to inherit from and an obligation
+nobody looked at is not a decision anyone made.
+
+An obligation with **more than one** record is also **V28**. Resolution never picks a
+winner: two records are two judgements, and silently preferring the one that sorts first
+would turn a disagreement between reviewers into a decision neither of them made. The
+coverage report buckets such an obligation `undispositioned` for the same reason — it does
+*not* fall through to the evidence, because the evidence answers "nobody has looked at this
+yet" and someone plainly has, twice.
+
+`inactive-environment` is a **reporting bucket, not a disposition.** It is derived from the
+active profile and outranks even an explicit record. If an author could out-vote it,
+"the environment is inactive" would become a way to retire an obligation rather than a
+statement about the profile. An inactive obligation owes nobody a decision, stays in the
+denominator, and never counts as covered.
+
+### Gap vs. waiver vs. rationale, restated for obligations
+
+[Gap vs. waiver](#gap-vs-waiver) draws the line for behaviors; obligations add a third
+option, and the three are not interchangeable:
+
+| | `gap` | `waived` | `non-testable` |
+|---|---|---|---|
+| The claim | "we owe coverage here and do not have it" | "we know exactly how this differs, and accept it" | "there is nothing here that could be tested" |
+| Backed by | a `gap-` record | a `wvr-` record with an `expires` | an argument, and nothing else |
+| Blocks a release | **always** | only once expired | never |
+| Ends by | someone writing a case | someone re-confirming, or fixing | never — it is a permanent claim |
+
+`non-testable` is the only one of the three that admits **no** follow-up, which is why V29
+holds its `rationale` to the same ground-naming test V23 applies to `outOfScopeRationale`.
+A bare "out of scope" is indistinguishable from unqueued debt — and unqueued debt is what a
+gap is for. Name the principle ("Constitution II forbids feature authoring") or the specific
+unobservable mechanism, or use `gap` and be honest that it is work.
+
+The reverse mistake is just as bad: reaching for `gap` when the difference is already
+characterized inflates the release blocker list with things nobody intends to change, and a
+blocker list that is mostly noise stops being read.
+
+### A high-risk triple accepts only `case` or `gap`
+
+**V29** rejects a triple dispositioned `non-testable` or `waived` (FR-015). Triples are not
+generated — they are hand-selected, precisely because interaction defects hide where
+individually-covered dimensions meet. An argument that such an interaction needs no test is
+the one argument the model does not accept: either exercise it, or admit the gap.
+
+**And the case it names must be EXECUTABLE** (024 US3). FR-015 asks for an executable case,
+not merely a declared one, so a triple dispositioned `case` against a legacy carrier whose
+residual has closed names a program that no longer exists. On any other obligation that is
+a coverage question; on a triple — the one place an argument may not stand in for evidence
+— a dead pointer is the quietest possible way to lose the evidence entirely.
+
+Note that `gap` remains available on a triple and remains blocking. It is honest, and it is
+not sufficient: **SC-003 requires 100% of selected triples to be covered by executable
+cases**, which is asserted per triple in `crates/conformance/tests/workflow_coverage.rs`.
+
+### Stale dispositions, and why they are reported rather than dropped
+
+An obligation's id is substance-anchored. Renaming a dimension value or editing a rule
+re-hashes every obligation that pins it, and the records that judged the old ones are left
+pointing at nothing. **V29** reports each as stale — the same self-invalidating pattern
+`waiver.rs` uses for a waiver whose difference stopped reproducing.
+
+Dropping them quietly would be worse than useless: the regenerated obligations come back
+**undispositioned** (V28) at the same moment, so a silent drop would delete the record of
+what was decided about the old shape exactly when a reviewer needs it to decide about the
+new one. **Disposition is never inherited by name** — a regenerated obligation that
+resembles a removed one is a new obligation.
+
+### A waiver backing a disposition must be specific
+
+**V29** rejects a `waived` disposition whose waiver carries a **blanket** scope — a
+`state_field` scope whose `field` is `*` or empty, matching every observable field of the
+fixture. This is the FR-023 analogue of the FR-032 rule V19 already enforces on an allowed
+difference's `observablePath`, and it exists for the same reason: a tolerance that matches
+everything can never self-invalidate when the difference stops reproducing, so it is a
+global ignore wearing a waiver's clothes. A `corpus_case` scope names one case of one
+corpus and has no wildcard form, so there is nothing there to reject.
+
+### What `certify` does with all of this
+
+| Condition | Result |
+|---|---|
+| Any undispositioned or multiply-dispositioned applicable obligation | **blocks**, `BlockingKind::Obligation`, code `V28` |
+| Any malformed or stale disposition | **blocks**, code `V29` |
+| Any `gap` disposition | **blocks** — through the `gap-` record it names, as `BlockingKind::Gap` |
+| Any `waived` disposition whose waiver has expired | **blocks**, code `V6`, naming the **waiver** |
+| `non-testable`, unexpired `waived` | listed in their own buckets, non-blocking |
+| `inactive-environment` | listed, non-blocking, counted separately |
+
+A `gap` disposition gets no blocker of its own because it already has one: V29 requires the
+`gap-` it names to resolve, and every gap record blocks. Listing it twice would double-count
+a single fact.
+
+An expired waiver has never blocked certification by itself, and still does not — a waiver
+is a decision that no further work is needed, and its expiry is a prompt to re-confirm. An
+obligation dispositioned `waived` is different: that waiver is the only thing standing
+between it and *undispositioned*, so when the waiver dies, nothing stands there.
+
+The five FR-026 buckets (`covered` / `waived` / `non-testable` / `gap` /
+`inactive-environment`) plus the undispositioned queue are defined in "The five reporting
+buckets" above; `certify` consumes them, it does not restate their counts.
+
+---
+
+## Injected-regression harness (V30)
+
+Every other rule in this document polices whether a claim of coverage is *honestly
+recorded*. V30 polices whether the machinery that produces those claims is *capable of
+saying no*.
+
+A conformance channel is a claim: "if deacon and the reference differed here, we would see
+it." Nothing in the registry tests that claim. A channel whose observer stopped looking, or
+whose cases assert something no plausible defect could violate, reports `agree` forever —
+and reports it in exactly the same words as a channel that is genuinely watching. A green
+suite whose channels are inert is worse than no suite, because it is trusted.
+
+### The record, and what it may perturb
+
+A `reg-` record under `registry/regressions.json` declares one **reversible perturbation of
+one raw evidence source**, and the case(s) that ought to notice it:
+
+| Field | Rule |
+|---|---|
+| `channel` | a declared `chan-` that the harness has an **observer** for |
+| `target` | the RAW artifact — a process result, a stdout/stderr stream, a structured or `docker inspect` document, or file bytes. **Never** an observer's return value |
+| `perturbation` | one of five closed kinds, coherent with `target` |
+| `expectedDetectingCases` | ≥1 real case that declares the channel |
+
+**Why the target may never be an observer's output.** Perturbing what an observer *returns*
+would make a **dead** observer — one that ignores its input and always returns the same
+thing — report `detected`: the return value differs, so the difference is "seen", while
+nothing was observed at all. Injecting into the source instead means a dead observer
+returns its usual value, no difference appears, and the channel is correctly reported
+`inert`. This is enforced three ways and stated once: the `EvidenceTarget` vocabulary
+contains no such variant, the harness's injection functions are generic over a *sealed*
+trait no observer output can implement, and V30 refuses a record naming a channel with no
+observer at all (which could never be detected, and so would manufacture a false `inert`).
+
+### Detected vs. inert vs. inapplicable — three different claims
+
+| Verdict | The claim | Consequence |
+|---|---|---|
+| `detected` | a case that was **clean** on this channel is **red** on this channel after the perturbation | the channel is live |
+| `inert` | every record for the channel went undetected | the run **fails** (FR-067) |
+| *inapplicable* | the perturbation never landed (a `HarnessError`, not a verdict) | the run fails, naming the **record** |
+
+The third row exists because collapsing it into `inert` would be the worst possible
+confusion: `inert` is a claim about the **channel**, and a mis-authored record says nothing
+about the channel. It would let a broken record masquerade as a dead channel — and, far
+worse, let a dead channel hide behind a broken record.
+
+Attribution is equally load-bearing. A case that was **already failing** on the channel
+cannot detect anything: its post-injection failure is not evidence the injection caused
+anything. The harness reports such a candidate as a note and does not count it.
+
+### An inert channel is a failure, not a warning
+
+A warning is a thing a green pipeline scrolls past. The state it would describe here —
+a channel nobody can make fail — retroactively empties every result that rested on that
+channel. So `coverage-regressions` exits non-zero, and the `parity / live-certification`
+lane runs it without `continue-on-error`.
+
+The remedy is never to delete the record. Either the perturbation is wrong (fix it), or the
+cases that observe the channel assert something no defect could violate (strengthen them).
+The second is the common one, and it is a real finding: an empty `jsonSubset: {}` matches
+any graph, and a `contains` assertion cannot see appended output at all — both were found
+this way, and both were channels the registry believed it was covering.
+
+### Isolation and reversibility
+
+| Requirement | Mechanism |
+|---|---|
+| An ordinary run can never inject (FR-070) | injection needs a process-level capability only the `coverage-regressions` bin takes out; the one hook the runner calls is inert without it |
+| A perturbation is never left applied (FR-066) | an RAII guard reverts on success **and** on unwind, mirroring the Docker workspace guard; the tree is verified unmodified afterwards |
+| The classification is reproducible (FR-069) | perturbations are data, applied in a deterministic order, and the report is byte-stable |

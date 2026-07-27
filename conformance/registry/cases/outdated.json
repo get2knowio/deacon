@@ -1,0 +1,371 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-outdated-compose-workspace",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "boundary",
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-compose-array"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. The Compose counterpart, with no Features declared: the empty report again, reached through a different configuration shape."
+    },
+    {
+      "id": "case-outdated-dockerfile-workspace",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-dockerfile-build"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. A Dockerfile-based workspace with one Feature. Version resolution reads the Feature set, not the image, so the configuration source must not change what is reported — and both CLIs must agree that it does not."
+    },
+    {
+      "id": "case-outdated-extends-chain-differential",
+      "behaviors": [
+        "bhv-outdated-extends-chain-features"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "reference-lenient",
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-outdated-extends-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-stdout",
+          "operation": "op-outdated"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-outdated-extends-chain-features",
+          "context": [],
+          "observablePath": "chan-stdout.table",
+          "rationale": "deacon resolves the extends chain before reporting Feature versions, so it lists the Feature the base link declares; the reference does not resolve `extends` and reports an empty table.",
+          "waiverId": "wvr-outdated-extends-chain-features"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The differential half: the pinned reference does not resolve `extends`, so it reports an EMPTY table for a workspace whose Feature is declared one link up, while deacon reports the Feature. Both exit 0 — the difference is only visible on stdout, which is why that is the compared channel here and the exit code is not."
+    },
+    {
+      "id": "case-outdated-extends-chain-features",
+      "behaviors": [
+        "bhv-outdated-extends-chain-features"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-outdated-extends-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-outdated",
+          "assertion": {
+            "matches": "ghcr\\.io/devcontainers/features/git\\s*\\|\\s*1\\.3\\.2\\s*\\|\\s*1\\.3\\.2\\s*\\|"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-outdated-extends-chain-image-single-feature`. The chain's BASE link contributes the only Feature, so an implementation that reads the top document alone reports an empty table and exits 0 — a silent miss, not an error. The regex pins the row's identifier and both pinned columns while leaving `latest` free."
+    },
+    {
+      "id": "case-outdated-malformed-config-rejected",
+      "behaviors": [
+        "bhv-readconfig-malformed-jsonc-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-malformed-json"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 malformed class: the Feature set to report on comes from the configuration, so an unparseable document leaves nothing to resolve versions for."
+    },
+    {
+      "id": "case-outdated-no-features-empty-report",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "boundary",
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-039 / FR-033: a configuration with no Features produces an empty version report and a successful exit on both sides. The human output mode is what a differential can compare here — deacon spells the structured flag `--output json` and the reference `--output-format json`, so only the default rendering is invocable with one argv."
+    },
+    {
+      "id": "case-outdated-structured-report",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--output",
+            "json"
+          ],
+          "fixtures": [
+            "fx-upgrade-overlay-lockfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-outdated",
+          "assertion": {
+            "jsonSubset": {
+              "features": {
+                "ghcr.io/devcontainers/features/git": {
+                  "current": "1.3.2",
+                  "wanted": "1.3.2"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-033 in the structured output mode. `current` and `wanted` are both pinned by the configuration's exact `:1.3.2` reference, so they are stable over time; `latest` is deliberately NOT asserted, because it is whatever the registry publishes next and an assertion on it would decay into a false failure."
+    },
+    {
+      "id": "case-outdated-unsupported-values-rejected",
+      "behaviors": [
+        "bhv-readconfig-unsupported-enum-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "unsupported",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-unsupported-values"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class: the same closed-enum violation that `read-configuration` rejects is rejected here too. The point of repeating it under a second operation is that validation must not be a property of one command's code path."
+    }
+  ]
+}

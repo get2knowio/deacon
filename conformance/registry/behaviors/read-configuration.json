@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "bhv-readconfig-authored-empty-omitted-collapsed",
+      "area": "read-configuration",
+      "statement": "deacon's resolved-configuration output reports the same value for a property the author left OUT as for one the author wrote as empty, while the reference reports the author's document faithfully and omits what was not written.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Surfaced by the 024 US5 de-suppression. deacon models the configuration as a typed struct and serializes every modeled optional unconditionally, so an unauthored `mounts` and an authored `\"mounts\": []` are the same bytes on the way out; the reference echoes the authored document, so the two are distinguishable there. `spec: unspecified` because the spec does not define this CLI's result document at all. The decision enum has no 'known defect, fix queued' value and R5/R6 forbid `follow-spec`/`align-with-reference` for a divergent behavior, so this is recorded as `intentional-divergence` — but it is NOT a design preference: it is the tracked fidelity defect at specs/023-migrate-parity-to-conformance/tasks.md#T111 (deacon should apply `skip_serializing_if`), and it NEEDS A `parity-drift` GITHUB ISSUE FILED. Characterized by `wvr-readconfig-authored-empty-omitted`. Note the fix is only partial even then: an authored `\"name\": null` and an omitted `name` are both `None` inside deacon, so omitting unauthored properties closes the empty-vs-omitted half and leaves the null-vs-omitted half."
+    },
+    {
       "id": "bhv-readconfig-bad-config-path",
       "area": "read-configuration",
       "statement": "An explicit --config pointing at a file that does not exist is rejected (no silent discovery fallback).",
@@ -19,6 +29,16 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec"
+    },
+    {
+      "id": "bhv-readconfig-discovery-locations",
+      "area": "read-configuration",
+      "statement": "Configuration discovery searches exactly the three locations the spec names — `.devcontainer/devcontainer.json`, `.devcontainer.json`, and `.devcontainer/<folder>/devcontainer.json` one level deep — and a plain `devcontainer.json` at the workspace root is not one of them.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "divergent",
+      "decision": "follow-spec",
+      "notes": "The spec's devcontainer-reference lists all three locations in precedence order. deacon searches all three; the pinned reference v0.87.0 does NOT search the one-level-deep sub-folder without an explicit --config, so it exits non-zero on a workspace whose only configuration lives there (observed 2026-07-26, src-obs-discovery-named-subfolder). Covered by a spec-expectation case pinning deacon's side and a differential recording the reference's, with wvr-discovery-named-subfolder."
     },
     {
       "id": "bhv-readconfig-duplicate-keys",
@@ -61,6 +81,16 @@
       "notes": "extends is the in-flight proposal devcontainers/spec#22 (unspecified in the pinned spec). deacon resolves eagerly and errors on the missing target; the reference echoes extends literally. Recorded by ext-extends-resolution; backed by case-errors-extends-missing and wvr-extends-missing (issue #297)."
     },
     {
+      "id": "bhv-readconfig-feature-resolution-order",
+      "area": "read-configuration",
+      "statement": "`--include-features-configuration` reports the resolved Feature set in install order, and a Feature supplied by `--additional-features` joins that resolution rather than being appended after it.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "divergent",
+      "decision": "follow-spec",
+      "notes": "Both CLIs place a dependency before its dependant, but the reported featuresConfiguration documents differ in shape: deacon reports the source identifiers, the reference additionally reports cache paths and consecutive ids that are process-local. Recorded as divergent so the difference is characterized rather than surfacing later as drift (src-obs-feature-resolution-order)."
+    },
+    {
       "id": "bhv-readconfig-malformed-jsonc-rejected",
       "area": "read-configuration",
       "statement": "A devcontainer.json with a hard JSONC syntax error is rejected at parse rather than silently recovered; the reference CLI's recovering parser drops the broken property and accepts.",
@@ -91,6 +121,16 @@
       "notes": "both-reject agreement case. Backed by case-errors-missing-config and wvr-missing-config."
     },
     {
+      "id": "bhv-readconfig-substitution-object-fields",
+      "area": "read-configuration",
+      "statement": "Variable substitution reaches the object-shaped fields that carry user templates — `build.args`, `containerEnv`, `mounts`, and `customizations` — and a `${localEnv:VAR}` naming an unset variable resolves to the empty string rather than being left literal.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "`customizations` was the field actually missed once (#312), which is why it is named in the statement rather than left to 'object-shaped fields'. Both CLIs were observed producing identical substituted values for all four fields (src-obs-substitution-object-fields)."
+    },
+    {
       "id": "bhv-readconfig-tier1-corpus",
       "area": "read-configuration",
       "statement": "Reading real-world devcontainer.json configurations from the tier1 corpus produces resolved configurations that match the reference after normalization, except for the characterized document-shape divergences recorded below.",
@@ -109,6 +149,16 @@
       "reference": "aligned",
       "decision": "follow-spec",
       "notes": "both-accept agreement case; guards against silently dropping unmodeled fields (spec extensibility model). Backed by case-errors-unknown-field-preserved and wvr-unknown-field-preserved."
+    },
+    {
+      "id": "bhv-readconfig-unsupported-enum-rejected",
+      "area": "read-configuration",
+      "statement": "A modelled field whose value is outside the schema's closed enum (for example `userEnvProbe: telepathy`) is rejected during configuration resolution, with a diagnostic naming the offending variant and the permitted ones.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Same family as the wrong-type rejections: the reference's read-configuration is a lenient parse-and-echo that accepts and prints the value back, while deacon validates modelled fields eagerly (constitution IV). Characterized, not repaired — backed by wvr-unsupported-enum-values and a direction-pinning spec-expectation twin."
     },
     {
       "id": "bhv-readconfig-wrong-type-features-rejected",

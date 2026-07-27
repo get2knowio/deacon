@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-auto-forward",
+      "behaviors": [
+        "bhv-auto-forward-ports"
+      ],
+      "context": [],
+      "executable": {
+        "binary": "integration_auto_forward"
+      },
+      "outcomes": [
+        {
+          "channel": "chan-container-state",
+          "expectation": "a forwarded container port is reachable on the host via the port-forward daemon"
+        }
+      ]
+    }
+  ]
+}

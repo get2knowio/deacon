@@ -1,0 +1,9 @@
+services:
+  app:
+    image: alpine:3.19
+    command: ["/bin/sh", "-c", "trap 'exit 0' TERM INT; (sleep infinity || tail -f /dev/null) & wait $$!"]
+    volumes:
+      - ..:/workspace:cached
+      - conf-us5-compose-data:/data
+volumes:
+  conf-us5-compose-data:

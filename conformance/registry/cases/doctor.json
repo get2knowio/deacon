@@ -1,0 +1,360 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-doctor-boundary-no-configuration",
+      "behaviors": [
+        "bhv-doctor-diagnostics-report"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "doctor",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "boundary",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-doctor",
+          "subcommand": "doctor",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-doctor",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-doctor",
+          "assertion": {
+            "contains": "Deacon Doctor Diagnostics"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 boundary class: `doctor` diagnoses the HOST and the runtime, so a workspace with no devcontainer configuration is a perfectly ordinary input for it. Succeeding here is the behavior — an implementation that required a configuration would be useless in the situation the command exists for."
+    },
+    {
+      "id": "case-doctor-compose-workspace",
+      "behaviors": [
+        "bhv-doctor-diagnostics-report"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "doctor",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-doctor",
+          "subcommand": "doctor",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-compose-array"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-doctor",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-doctor",
+          "assertion": {
+            "contains": "Deacon Doctor Diagnostics"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. The Compose counterpart of the Dockerfile case, and the same point: `doctor` neither resolves the Compose project nor requires it to be resolvable."
+    },
+    {
+      "id": "case-doctor-dockerfile-workspace",
+      "behaviors": [
+        "bhv-doctor-diagnostics-report"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "doctor",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-doctor",
+          "subcommand": "doctor",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-dockerfile-build"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-doctor",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-doctor",
+          "assertion": {
+            "contains": "Deacon Doctor Diagnostics"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. For `doctor` the configuration source is a property of the workspace it is pointed at rather than of the diagnosis, and that is exactly what the case shows: a Dockerfile-based workspace produces the same host and runtime report. An implementation that resolved the build before diagnosing would be slower and would fail where the diagnosis is most needed."
+    },
+    {
+      "id": "case-doctor-human-diagnostics",
+      "behaviors": [
+        "bhv-doctor-diagnostics-report"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "doctor",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-doctor",
+          "subcommand": "doctor",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-doctor",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-doctor",
+          "assertion": {
+            "contains": "Deacon Doctor Diagnostics"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-005 for `doctor`, human rendering. The pinned reference has no `doctor` command at all, so this is evaluated against the declared expectation and the per-operation report states the substitution — the alternative would be an operation that looks under-tested for a reason nobody recorded."
+    },
+    {
+      "id": "case-doctor-malformed-configuration-still-diagnoses",
+      "behaviors": [
+        "bhv-doctor-diagnostics-report"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "doctor",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-doctor",
+          "subcommand": "doctor",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-malformed-json"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-doctor",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-doctor",
+          "assertion": {
+            "contains": "Deacon Doctor Diagnostics"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 malformed class, with the outcome that is easy to get backwards: an unparseable configuration must NOT stop the diagnosis. `doctor` is the command a user reaches for when something is wrong, so refusing to run because the workspace is broken would remove it exactly when it is needed."
+    },
+    {
+      "id": "case-doctor-structured-diagnostics",
+      "behaviors": [
+        "bhv-doctor-diagnostics-report"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "doctor",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-doctor",
+          "subcommand": "doctor",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--json"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-doctor",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-doctor",
+          "assertion": {
+            "jsonSubset": {
+              "host_os": {
+                "name": "linux"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The structured rendering of the same diagnosis. The assertion deliberately avoids `cli_version` and every probed path: those change with the release and with the machine, and a case whose verdict moved with either would be measuring the environment rather than the behavior."
+    },
+    {
+      "id": "case-doctor-unsupported-values-still-diagnoses",
+      "behaviors": [
+        "bhv-doctor-diagnostics-report"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "doctor",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "unsupported",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-doctor",
+          "subcommand": "doctor",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-unsupported-values"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-doctor",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-doctor",
+          "assertion": {
+            "contains": "Host OS"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class: a configuration naming values outside the schema's closed sets is likewise no obstacle to a host diagnosis. Same ground as the malformed case, different input class — both are here because `doctor`'s independence from the workspace configuration is the property worth pinning."
+    }
+  ]
+}

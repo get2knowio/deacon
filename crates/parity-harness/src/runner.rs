@@ -12,6 +12,7 @@
 //! temp workspace + RAII cleanup for Docker-backed cases lands in US5 (`workspace.rs`).
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use deacon_conformance::model::{
     CHAN_EXIT_CODE, CaseKind, ExpectedObservable, Operation, ResourceGroup, TestCase,
@@ -31,6 +32,21 @@ pub const RUNNER_BINARY: &str = "conformance_runner";
 /// The `${WORKSPACE}` token substituted in an operation's argv with the resolved
 /// workspace path (contract case-schema.md).
 const WORKSPACE_TOKEN: &str = "${WORKSPACE}";
+
+/// The per-case wall-clock bound every declarative case runs under (024 FR-077b).
+///
+/// This is deliberately NOT nextest's `slow-timeout`, which is per TEST FUNCTION. A driver
+/// function owns a whole resource group, so a `slow-timeout` failure says only "the group
+/// was slow" — indistinguishable from a wedged daemon, and naming nothing to fix. Bounding
+/// each case here fails with the CASE ID instead, and lets the remaining cases of the group
+/// still run and still report.
+///
+/// It bounds the case END TO END — every operation, both sides of a differential, and every
+/// observation — which is strictly wider than [`crate::exec`]'s per-invocation bound. A case
+/// that hangs BETWEEN invocations (a teardown that never returns, a snapshot probe against an
+/// unresponsive daemon) is invisible to the per-invocation bound and is exactly what this
+/// catches.
+pub const CASE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// Everything the runner needs from its caller: the deacon binary under test, the
 /// verified oracle (required only for `live-differential`), where fixtures live, and
@@ -53,8 +69,29 @@ pub struct RunConfig<'a> {
     pub snapshots_root: &'a Path,
 }
 
-/// Run one declarative case end to end and produce its [`CaseVerdict`].
+/// Run one declarative case end to end and produce its [`CaseVerdict`], bounded by
+/// [`CASE_TIMEOUT`].
+///
+/// The bound wraps the ENTIRE case, so expiry is reported as
+/// [`HarnessError::CaseTimeout`] naming the case id (FR-077b) rather than surfacing as an
+/// unattributable stall in whichever driver loop invoked it. Abandoning the evaluation
+/// future drops it, which runs the Docker workspace's RAII cleanup guard — a timed-out case
+/// still reclaims its container, network, volume and temp directory.
 pub async fn run_case(case: &TestCase, cfg: &RunConfig<'_>) -> Result<CaseVerdict, HarnessError> {
+    match tokio::time::timeout(CASE_TIMEOUT, run_case_unbounded(case, cfg)).await {
+        Ok(result) => result,
+        Err(_elapsed) => Err(HarnessError::CaseTimeout {
+            case: case.id.clone(),
+            bound: CASE_TIMEOUT,
+        }),
+    }
+}
+
+/// [`run_case`] without the per-case bound — the body the timeout wraps.
+async fn run_case_unbounded(
+    case: &TestCase,
+    cfg: &RunConfig<'_>,
+) -> Result<CaseVerdict, HarnessError> {
     // Only declarative cases run through the runner; a legacy/mixed/neither record is a
     // fail-loud authoring error (the loader/validator already reject it, but the runner
     // never silently accepts one either).
@@ -95,26 +132,52 @@ pub(crate) async fn execute_ops(
 ) -> Result<(RunContext, Option<DockerWorkspace>), HarnessError> {
     // Docker-backed cases run in an ISOLATED external temp workspace (US5) so their
     // container identity + labels are unique (collision-safe) and an RAII guard reclaims
-    // every resource on success AND unwind. Config-only cases run against the committed
-    // fixture directory directly (read-only, no container).
+    // every resource on success AND unwind.
+    //
+    // An `fs-heavy` case gets the same isolation for a different reason: its group means
+    // "significant filesystem operations", and those must not land in
+    // `conformance/fixtures/`, which is version-controlled input every other case reads.
+    // Its workspace reclaims the temp dir ONLY — the config-only lane is defined to need
+    // no daemon, so its cleanup must not shell out to one.
+    //
+    // Everything else runs against the committed fixture directory directly (read-only).
     let docker_case = is_docker_case(case);
+    let isolated = docker_case || case.resource_group == Some(ResourceGroup::FsHeavy);
     let mut docker_ws: Option<DockerWorkspace> = None;
-    let isolated_workspace: Option<PathBuf> = if docker_case {
-        let ws = DockerWorkspace::new(Some(cfg.deacon_path)).map_err(|e| {
-            HarnessError::DockerUnavailable {
+    let isolated_workspace: Option<PathBuf> = if isolated {
+        // Creating the temp dir and recursively copying every fixture tree into it is
+        // BLOCKING filesystem work. Under the bounded-concurrency Docker driver (T018)
+        // several cases set up at once, so doing it inline would stall the executor for
+        // every other in-flight case (Principle V) — offload it exactly as the docker
+        // probes below already are.
+        let fixture_dirs: Vec<PathBuf> = unique_fixture_ids(case)
+            .into_iter()
+            .map(|id| cfg.fixtures_root.join(id))
+            .collect();
+        let deacon_path = cfg.deacon_path.to_path_buf();
+        let ws = tokio::task::spawn_blocking(move || -> Result<DockerWorkspace, HarnessError> {
+            let ws = if docker_case {
+                DockerWorkspace::new(Some(&deacon_path))
+            } else {
+                DockerWorkspace::new_filesystem_only()
+            }
+            .map_err(|e| HarnessError::DockerUnavailable {
                 cause: format!("could not create an isolated workspace: {e}"),
+            })?;
+            for dir in fixture_dirs {
+                if !dir.is_dir() {
+                    // `ws` drops here, ON THE BLOCKING POOL, reclaiming the temp dir.
+                    return Err(HarnessError::FixtureMissing { path: dir });
+                }
+                ws.materialize(&dir)
+                    .map_err(|e| HarnessError::FixtureMissing {
+                        path: dir.join(format!("<materialize failed: {e}>")),
+                    })?;
             }
-        })?;
-        for id in unique_fixture_ids(case) {
-            let dir = cfg.fixtures_root.join(&id);
-            if !dir.is_dir() {
-                return Err(HarnessError::FixtureMissing { path: dir });
-            }
-            ws.materialize(&dir)
-                .map_err(|e| HarnessError::FixtureMissing {
-                    path: dir.join(format!("<materialize failed: {e}>")),
-                })?;
-        }
+            Ok(ws)
+        })
+        .await
+        .map_err(blocking_join_err)??;
         let path = ws.path().to_path_buf();
         docker_ws = Some(ws);
         Some(path)
@@ -142,8 +205,7 @@ pub(crate) async fn execute_ops(
         // For a Docker case every op shares the ISOLATED workspace (materialized once), so
         // `${WORKSPACE}` always resolves even for a later op that declares no fixture.
         let argv = substitute_argv(case, op, &workspace, isolated_workspace.is_some())?;
-        let mut full: Vec<String> = Vec::with_capacity(argv.len() + 1);
-        full.push(op.subcommand.clone());
+        let mut full: Vec<String> = subcommand_tokens(&op.subcommand);
         full.extend(argv);
         let args: Vec<&str> = full.iter().map(String::as_str).collect();
 
@@ -222,7 +284,7 @@ pub(crate) async fn execute_ops(
     }
 
     let workspace = context_workspace.unwrap_or_else(|| cfg.fixtures_root.to_path_buf());
-    let mut ctx = RunContext::new(workspace);
+    let mut ctx = RunContext::for_side(workspace, side);
     // Scope the filesystem observer to the case's declared allowlist (clarify Q1).
     ctx.fs_allowlist = case.fs_allowlist.clone();
     ctx.container_id = container_id;
@@ -233,6 +295,14 @@ pub(crate) async fn execute_ops(
     for (op_id, snapshot) in op_snapshots {
         ctx.record_op_snapshot(op_id, snapshot);
     }
+
+    // THE EVIDENCE-SOURCE BOUNDARY (024 US6, research Decision 5). Capture is complete and
+    // no observer has run yet, so this is the one point at which the injected-regression
+    // harness may perturb the RAW artifacts. It is a no-op — a single atomic load — in
+    // every ordinary run: only the `coverage-regressions` bin takes out the capability
+    // that arms it (FR-070), and only deacon's side is ever perturbed.
+    crate::inject::intercept(&mut ctx)?;
+
     Ok((ctx, docker_ws))
 }
 
@@ -255,6 +325,28 @@ fn unique_fixture_ids(case: &TestCase) -> Vec<String> {
     ids.sort();
     ids.dedup();
     ids
+}
+
+/// Reclaim a Docker case's workspace OFF the async executor, then drop it there too.
+///
+/// Reclamation shells out to `deacon down` plus several `docker` calls, all via blocking
+/// `std::process::Command::output`, and then removes the temp tree. Letting the guard drop
+/// inline stalls the runtime for seconds — per case, per side — which under the bounded-
+/// concurrency Docker driver (T018) stalls every OTHER in-flight case too (Principle V).
+///
+/// `cleanup_now` is idempotent and the guard's `Drop` runs inside the blocking task, so the
+/// temp directory is removed there as well. `None` (a config-only case) is a no-op.
+///
+/// The error path is deliberately left to `Drop`: an early `?` return abandons the guard,
+/// which still reclaims — synchronously, on the executor — because a leaked container is
+/// worse than a stalled runtime on a path that is already failing.
+pub(crate) async fn release_workspace(ws: Option<DockerWorkspace>) -> Result<(), HarnessError> {
+    let Some(mut ws) = ws else {
+        return Ok(());
+    };
+    tokio::task::spawn_blocking(move || ws.cleanup_now())
+        .await
+        .map_err(blocking_join_err)
 }
 
 /// Map a `spawn_blocking` join failure (the offloaded blocking task panicked) to a
@@ -465,7 +557,7 @@ pub(crate) fn capture_channel(
     // VIII): `chan-container-state` also tokenizes the workspace BASENAME, since each side
     // runs in its own temp workspace and the container-side paths carry only that name.
     let tokens = crate::normalize::tokens_for_channel(&exp.channel, &ctx.workspace);
-    let normalized = crate::normalize::normalize_channel(&exp.channel, &raw, &tokens);
+    let normalized = crate::normalize::normalize_channel(&exp.channel, &raw, &tokens, ctx.side);
     Ok((raw, normalized))
 }
 
@@ -487,14 +579,16 @@ pub async fn collect_spec_evidence(
     case: &TestCase,
     cfg: &RunConfig<'_>,
 ) -> Result<crate::evidence::CaseEvidence, HarnessError> {
-    // `_ws` (the RAII cleanup guard) is held until after every channel is captured, then
-    // dropped to reclaim the container/network/volume/temp dir (FR-039).
-    let (ctx, _ws) = execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
+    // `ws` (the RAII cleanup guard) is held until after every channel is captured, then
+    // released to reclaim the container/network/volume/temp dir (FR-039) — off the async
+    // executor, since reclamation shells out to `deacon down` + several `docker` calls.
+    let (ctx, ws) = execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
     let mut evidence = crate::evidence::CaseEvidence::new();
     for exp in &case.expected {
         let (raw, normalized) = capture_channel(case, exp, &ctx)?;
         evidence.push(raw, normalized);
     }
+    release_workspace(ws).await?;
     Ok(evidence)
 }
 
@@ -506,12 +600,13 @@ pub async fn collect_evidence_on(
     case: &TestCase,
     cfg: &RunConfig<'_>,
 ) -> Result<crate::evidence::CaseEvidence, HarnessError> {
-    let (ctx, _ws) = execute_ops(side, program, case, cfg).await?;
+    let (ctx, ws) = execute_ops(side, program, case, cfg).await?;
     let mut evidence = crate::evidence::CaseEvidence::new();
     for exp in &case.expected {
         let (raw, normalized) = capture_channel(case, exp, &ctx)?;
         evidence.push(raw, normalized);
     }
+    release_workspace(ws).await?;
     Ok(evidence)
 }
 
@@ -578,21 +673,57 @@ fn tokenized_argv(case: &TestCase) -> Vec<String> {
     let Some(op) = case.operations.first() else {
         return Vec::new();
     };
-    let mut argv = vec![op.subcommand.clone()];
+    let mut argv = subcommand_tokens(&op.subcommand);
     for a in &op.argv {
         argv.push(a.replace(WORKSPACE_TOKEN, "<WORKSPACE>"));
     }
     argv
 }
 
-/// Attach the failure phase to the `chan-exit-code` verdict's detail when the producing
-/// operation failed (FR-009). Path-free and deterministic, so the report stays
-/// byte-stable (T018).
+/// The command-line tokens a declared `subcommand` expands to.
+///
+/// `Operation.subcommand` is a single **registry** identifier — it has to be, because it is
+/// also an `sdim-operation` value and a key the reports partition by. Most identifiers are
+/// literally the command word, but `templates-apply` is a two-word command on BOTH sides
+/// (`deacon templates apply`, `devcontainer templates apply`), so the identifier is
+/// expanded here rather than forcing every case to smuggle `apply` into its `argv`. Doing
+/// it in the argv would put half the command name in a field the runner treats as opaque
+/// user arguments, and `tokenized_argv` — which records provenance — would then disagree
+/// with what was actually run.
+fn subcommand_tokens(subcommand: &str) -> Vec<String> {
+    match subcommand {
+        "templates-apply" => vec!["templates".to_string(), "apply".to_string()],
+        other => vec![other.to_string()],
+    }
+}
+
+/// Attach the failing STAGE and each side's outcome to the `chan-exit-code` verdict's
+/// detail (FR-009, and FR-042 for the error-path tier). Path-free and deterministic, so the
+/// report stays byte-stable (T018).
+///
+/// Two things are recorded, and the distinction is the point:
+///
+/// - **`failurePhase`** — the DECLARED `expectFailurePhase` when the operation carries one,
+///   else the coarse inference from the subcommand. The declaration wins because it is the
+///   reviewed record and the inference cannot see past the subcommand:
+///   [`cli_process::infer_failure_phase`] maps every `run-user-commands` failure to `exec`,
+///   so a case pinning `lifecycle:postStart` would have its own recorded stage contradicted
+///   by the report it appears in. `inferredFailurePhase` is kept alongside whenever it
+///   differs, so nothing is hidden.
+/// - **`sides`** — each side's exit code and whether it failed. A differential verdict says
+///   only *that* the two disagree; the error-path tier has to record *what each side did*
+///   (FR-042), and "deacon exited 1, the reference exited 0" is that fact. Recorded for the
+///   reference only when there is a reference run (a `spec-expectation` case has none).
+///
+/// Attached whenever the operation declares a phase or actually failed — a verdict on an
+/// operation that neither declared nor produced a failure has nothing to say here and keeps
+/// its detail unchanged.
 pub(crate) fn attach_failure_phase(
     verdict: &mut ChannelVerdict,
     case: &TestCase,
     exp: &ExpectedObservable,
     ctx: &RunContext,
+    reference: Option<&RunContext>,
 ) {
     if verdict.channel != CHAN_EXIT_CODE {
         return;
@@ -600,23 +731,64 @@ pub(crate) fn attach_failure_phase(
     let Ok(op) = resolve_expected_op(case, exp) else {
         return;
     };
-    let Some(phase) = ctx.outcome(&op.id).and_then(|o| o.failure_phase) else {
+    let outcome = ctx.outcome(&op.id);
+    let inferred = outcome.and_then(|o| o.failure_phase);
+    let declared = op.expect_failure_phase;
+    if declared.is_none() && inferred.is_none() {
         return;
-    };
-    let phase_value = serde_json::to_value(phase).unwrap_or(serde_json::Value::Null);
+    }
+
+    let mut fields = serde_json::Map::new();
+    if let Some(phase) = declared.or(inferred) {
+        fields.insert(
+            "failurePhase".to_string(),
+            serde_json::to_value(phase).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    if let (Some(declared), Some(inferred)) = (declared, inferred)
+        && declared != inferred
+    {
+        fields.insert(
+            "inferredFailurePhase".to_string(),
+            serde_json::to_value(inferred).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    let mut sides = serde_json::Map::new();
+    sides.insert("deacon".to_string(), side_outcome(outcome));
+    if let Some(reference) = reference {
+        sides.insert(
+            "reference".to_string(),
+            side_outcome(reference.outcome(&op.id)),
+        );
+    }
+    fields.insert("sides".to_string(), serde_json::Value::Object(sides));
+
     match verdict.detail.as_mut() {
-        Some(serde_json::Value::Object(map)) => {
-            map.insert("failurePhase".to_string(), phase_value);
-        }
-        _ => {
-            verdict.detail = Some(serde_json::json!({ "failurePhase": phase_value }));
-        }
+        Some(serde_json::Value::Object(map)) => map.append(&mut fields),
+        _ => verdict.detail = Some(serde_json::Value::Object(fields)),
+    }
+}
+
+/// One side's observable outcome for the exit-code channel: the exit code (`null` for a
+/// signal-terminated process, which stays distinct from `0`) and whether it failed.
+/// `null` throughout when the operation did not run on that side at all — which is a
+/// different claim from "it ran and succeeded".
+fn side_outcome(outcome: Option<&ProcessOutcome>) -> serde_json::Value {
+    match outcome {
+        Some(o) => serde_json::json!({
+            "exitCode": o.exit_code,
+            "failed": !o.success,
+        }),
+        None => serde_json::json!({ "exitCode": null, "failed": null }),
     }
 }
 
 /// The per-invocation time bound class for a subcommand (config-only vs lifecycle).
 fn exec_kind(subcommand: &str) -> ExecKind {
     match subcommand {
+        // Config-only: no container is created and no image is pulled, so these finish in
+        // the sub-second class. `outdated` and `upgrade` are NOT here — both resolve
+        // Feature versions against an OCI registry, which is network-bound.
         "read-configuration" | "doctor" => ExecKind::Config,
         _ => ExecKind::Lifecycle,
     }

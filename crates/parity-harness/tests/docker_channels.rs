@@ -9,6 +9,7 @@
 
 #![cfg(unix)]
 
+use parity_harness::exec::Side;
 use std::process::Command;
 
 use deacon_conformance::model::{
@@ -132,7 +133,7 @@ fn observers_capture_real_container_evidence() {
     // chan-image: labels + env, normalized (label_semantic keeps labels an object).
     let img_raw = ImageObserver.capture(&ctx, &op).expect("image capture");
     assert!(img_raw.present);
-    let img = normalize_channel(CHAN_IMAGE, &img_raw, &tokens);
+    let img = normalize_channel(CHAN_IMAGE, &img_raw, &tokens, Side::Deacon);
     assert_eq!(
         img.value["labels"]["org.opencontainers.image.title"], "Probe",
         "image labels captured + parsed semantically: {img:?}"
@@ -148,7 +149,7 @@ fn observers_capture_real_container_evidence() {
     let graph_raw = ContainerGraphObserver
         .capture(&ctx, &op)
         .expect("graph capture");
-    let graph = normalize_channel(CHAN_PROCESS_GRAPH, &graph_raw, &tokens);
+    let graph = normalize_channel(CHAN_PROCESS_GRAPH, &graph_raw, &tokens, Side::Deacon);
     assert!(
         graph.value["mounts"]
             .as_array()
@@ -172,7 +173,7 @@ fn observers_capture_real_container_evidence() {
     let inj_raw = InjectedProcessObserver
         .capture(&ctx, &op)
         .expect("injected capture");
-    let inj = normalize_channel(CHAN_INJECTED_PROCESS, &inj_raw, &tokens);
+    let inj = normalize_channel(CHAN_INJECTED_PROCESS, &inj_raw, &tokens, Side::Deacon);
     assert_eq!(inj.value["env"]["FOO"], "bar", "injected env captured");
     assert_eq!(inj.value["cwd"], "/work", "cwd captured");
     assert_eq!(inj.value["tty"], false, "tty captured");
@@ -185,7 +186,7 @@ fn observers_capture_real_container_evidence() {
     let temp_raw = TemporalObserver
         .capture(&ctx, &op)
         .expect("temporal capture");
-    let temp = normalize_channel(CHAN_TEMPORAL, &temp_raw, &tokens);
+    let temp = normalize_channel(CHAN_TEMPORAL, &temp_raw, &tokens, Side::Deacon);
     assert_eq!(temp.value["status"], "running");
     assert_eq!(temp.value["running"], true);
     assert!(

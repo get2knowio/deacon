@@ -1,0 +1,25 @@
+{
+	"name": "subst-${localWorkspaceFolderBasename}",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"args": {
+			"WS": "${localWorkspaceFolder}",
+			"HOST_USER": "${localEnv:USER}"
+		}
+	},
+	"containerEnv": {
+		"WS_ENV": "${localWorkspaceFolder}",
+		"MISSING": "${localEnv:DEFINITELY_NOT_SET_98765}"
+	},
+	"mounts": [
+		"source=${localWorkspaceFolder},target=/mirror,type=bind"
+	],
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"conformance.workspacePath": "${localWorkspaceFolder}",
+				"conformance.containerPath": "${containerWorkspaceFolder}"
+			}
+		}
+	}
+}

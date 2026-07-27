@@ -1,0 +1,14 @@
+{
+	"id": "conformance-minimal",
+	"version": "1.0.0",
+	"name": "Conformance Minimal",
+	"description": "A single-file template whose image tag comes from a template option.",
+	"options": {
+		"imageVariant": {
+			"type": "string",
+			"proposals": ["3.19", "3.20"],
+			"default": "3.19",
+			"description": "Alpine tag to pin the scaffolded configuration to"
+		}
+	}
+}

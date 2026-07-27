@@ -65,6 +65,12 @@ pub fn verdict_differential(
     } else if deacon.present {
         diff_paths(channel, &deacon.value, &reference.value, &mut diverging);
     }
+    // Applied to BOTH branches. A bare channel id is un-tolerable by construction:
+    // `AllowedDifference::is_global_ignore` rejects one at load (FR-032), so a
+    // divergence reported under it can never be covered by a legal scoped tolerance.
+    // Naming only the scalar-diff branch left the presence-mismatch branch emitting
+    // exactly the un-expressible path this function exists to eliminate.
+    name_the_scalar_observable(channel, &mut diverging);
     if diverging.is_empty() {
         return agree(channel);
     }
@@ -163,6 +169,44 @@ fn path_covers(allowed: &str, path: &str) -> bool {
             && path.starts_with(allowed)
             && path.as_bytes().get(allowed.len()) == Some(&b'.'))
 }
+
+/// Name the single observable of a scalar-evidence channel, so a divergence in it is
+/// addressable by a scoped tolerance (024 US4).
+///
+/// [`diff_paths`] emits the BARE channel id when the two sides' evidence is a differing
+/// scalar, because there is no key to descend into. But a bare channel id is exactly what
+/// `AllowedDifference::is_global_ignore` rejects (FR-032) — so, before this, an exit-code
+/// divergence was the one difference the tolerance model could not express at all: every
+/// path a case could legally declare was unreachable, and four committed tolerances
+/// spelling `chan-exit-code.exitCode` were inert. The error-path tier found this, because
+/// an exit code is the ONLY thing most of its cases compare.
+///
+/// The fix is to name the observable rather than to weaken FR-032. A channel listed in
+/// [`SCALAR_OBSERVABLE`] carries exactly one value, so `<channel>.<name>` is fully specific
+/// — it is the whole of that channel because that channel is one thing, not because the
+/// path matches everything. `chan-stdout` / `chan-stderr` are deliberately NOT listed: they
+/// carry arbitrary text, and a tolerance over the whole of one is a wildcard by any reading.
+fn name_the_scalar_observable(channel: &str, paths: &mut [String]) {
+    let Some(leaf) = SCALAR_OBSERVABLE
+        .iter()
+        .find(|(id, _)| *id == channel)
+        .map(|(_, leaf)| *leaf)
+    else {
+        return;
+    };
+    for path in paths.iter_mut() {
+        if path == channel {
+            *path = format!("{channel}.{leaf}");
+        }
+    }
+}
+
+/// Channels whose evidence is a single scalar, with the name of that one observable.
+///
+/// Closed and tiny on purpose: adding a channel here declares "this channel is one value",
+/// which is what makes a whole-channel tolerance specific rather than blanket.
+const SCALAR_OBSERVABLE: &[(&str, &str)] =
+    &[(deacon_conformance::model::CHAN_EXIT_CODE, "exitCode")];
 
 /// Collect the channel-prefixed dotted paths where `a` and `b` differ. Objects recurse
 /// key-wise; arrays/scalars that differ emit their path. `prefix` starts as the channel id.
@@ -507,6 +551,40 @@ mod tests {
         }
     }
 
+    /// A presence mismatch must name the scalar observable too. It reported the bare
+    /// channel id, and `AllowedDifference::is_global_ignore` rejects a bare channel id at
+    /// load (FR-032) — so no loadable tolerance could ever cover it.
+    #[test]
+    fn presence_mismatch_names_the_scalar_observable() {
+        let present = norm(CHAN_EXIT_CODE, json!(0));
+        let absent = NormalizedChannelEvidence {
+            channel: CHAN_EXIT_CODE.to_string(),
+            operation: "op".to_string(),
+            present: false,
+            value: Value::Null,
+        };
+        let tolerances = Tolerances::new(&[], &[]);
+        let mut consumed = std::collections::HashSet::new();
+        let verdict = verdict_differential(
+            CHAN_EXIT_CODE,
+            &present,
+            &absent,
+            &tolerances,
+            &mut consumed,
+        );
+
+        assert_eq!(verdict.outcome, Outcome::Diverge);
+        let paths = verdict.detail.as_ref().unwrap()["divergingPaths"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            paths,
+            vec![json!(format!("{CHAN_EXIT_CODE}.exitCode"))],
+            "a bare channel id here is un-tolerable by construction"
+        );
+    }
+
     #[test]
     fn exit_code_equals_agree_and_diverge() {
         let ev = norm(CHAN_EXIT_CODE, json!(0));
@@ -622,6 +700,76 @@ mod tests {
             verdict_differential(CHAN_EXIT_CODE, &a, &c, &no_tolerances(), &mut consumed).outcome,
             Outcome::Diverge
         );
+    }
+
+    /// An exit-code divergence is addressable as `chan-exit-code.exitCode`, which is what
+    /// every committed tolerance already spells — and is NOT a global ignore, so the record
+    /// loads. Before 024 US4 the diverging path was the bare channel id, which no legal
+    /// `observablePath` could match, so the most common difference there is was the one the
+    /// tolerance model could not express.
+    #[test]
+    fn an_exit_code_divergence_is_addressable_by_its_named_observable() {
+        let allowed = AllowedDifference {
+            behavior: "bhv-x".to_string(),
+            context: vec![],
+            observable_path: "chan-exit-code.exitCode".to_string(),
+            rationale: "the reference reports success without running the hook".to_string(),
+            waiver_id: Some("wvr-x".to_string()),
+            divergence_id: None,
+        };
+        assert!(
+            !allowed.is_global_ignore(),
+            "the named observable must survive the FR-032 global-ignore check"
+        );
+
+        let deacon = norm(CHAN_EXIT_CODE, json!(1));
+        let reference = norm(CHAN_EXIT_CODE, json!(0));
+        let behaviors = vec!["bhv-x".to_string()];
+        let allowed_slice = [allowed];
+        let tolerances = Tolerances::new(&allowed_slice, &behaviors);
+        let mut consumed = HashSet::new();
+        let verdict = verdict_differential(
+            CHAN_EXIT_CODE,
+            &deacon,
+            &reference,
+            &tolerances,
+            &mut consumed,
+        );
+        assert_eq!(verdict.outcome, Outcome::AllowedDifference, "{verdict:?}");
+        assert!(
+            verdict
+                .detail
+                .as_ref()
+                .map(|d| d.to_string().contains("chan-exit-code.exitCode"))
+                .unwrap_or(false),
+            "the detail must name the covered observable: {verdict:?}"
+        );
+        // …and the tolerance is CONSUMED, so it is not reported stale.
+        assert!(tolerances.stale(&consumed).is_empty());
+    }
+
+    /// `chan-stdout` is deliberately not a named-scalar channel: its evidence is arbitrary
+    /// text, so a whole-channel tolerance would be a wildcard. Its diverging path stays the
+    /// bare channel id, which no loadable `observablePath` can cover.
+    #[test]
+    fn a_stdout_divergence_is_not_made_addressable() {
+        let deacon = norm(deacon_conformance::model::CHAN_STDOUT, json!("a"));
+        let reference = norm(deacon_conformance::model::CHAN_STDOUT, json!("b"));
+        let mut consumed = HashSet::new();
+        let verdict = verdict_differential(
+            deacon_conformance::model::CHAN_STDOUT,
+            &deacon,
+            &reference,
+            &no_tolerances(),
+            &mut consumed,
+        );
+        assert_eq!(verdict.outcome, Outcome::Diverge);
+        let detail = verdict
+            .detail
+            .expect("diverge carries a detail")
+            .to_string();
+        assert!(detail.contains("\"chan-stdout\""), "{detail}");
+        assert!(!detail.contains("chan-stdout."), "{detail}");
     }
 
     fn tz_difference() -> AllowedDifference {

@@ -20,6 +20,16 @@
       "reference": "aligned",
       "decision": "follow-spec",
       "notes": "#322: up writes the merged devcontainer.metadata label (single-container, Dockerfile, and compose paths); exec/read-configuration/set-up read it back via the shared container_metadata::config_from_metadata_label helper. Evidence: case-up-exec-parity (parity_up_exec) — which reports ONE outcome covering this behavior AND bhv-up-exec-parity (research D2's inverse defect, characterized in 023 T054). An independently-reported case needs a runtime-resolved container-id token in an operation's argv; deferred as tasks.md#T110."
+    },
+    {
+      "id": "bhv-exec-image-path-preserved",
+      "area": "exec",
+      "statement": "`exec` runs the command with the environment the user-env probe captured; PATH entries the image contributed via `ENV PATH` are NOT preserved, while the reference preserves them.",
+      "applicability": [],
+      "spec": "nonconformant",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "A deacon DEFECT, tracked at https://github.com/get2knowio/deacon/issues/370 — not a preference. `spec: nonconformant` states that plainly; the decision enum has no 'known defect, fix queued' value and R5/R6 forbid `follow-spec`/`align-with-reference` while the reference is divergent, so `intentional-divergence` is the only rule-valid decision and means, here, 'recorded and not yet fixed' (the same reading as bhv-container-metadata-label-content). Measured at oracle 0.87.0 against fx-exec-dockerfile-overlay: image `Config.Env` PATH is `/opt/conformance/bin:/usr/local/sbin:...`, the reference's exec sees exactly that, deacon's exec sees it with `/opt/conformance/bin` removed. Mechanism: the probe runs a LOGIN shell, whose `/etc/profile` replaces rather than extends PATH; `container_env_probe::build_effective_env` then rebuilds the environment from the probe alone (the sibling `merge_environments` implements the documented `probed < containerEnv < remoteEnv` layering, but `exec` does not call it); `docker::build_exec_args` finally re-asserts the degraded value as an explicit `-e PATH=`. Characterized by wvr-exec-image-path-dropped."
     }
   ]
 }

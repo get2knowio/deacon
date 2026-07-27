@@ -4,44 +4,44 @@
     {
       "id": "clc-features-legacy-ids-defaults-to-array-of-old-ids-used-to-publish-thi-io-dc47b23f",
       "clause": "clu-features-legacy-ids-defaults-to-array-of-old-ids-used-to-publish-thi-io-dc47b23f",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "disposition": "not-applicable",
+      "rationale": "Defines `legacyIds` on `devcontainer-feature.json`, a Feature-authoring metadata property. Its schema twins (cst-feature-*/legacyIds, property-existence and type) are classified not-applicable for the same reason: deacon consumes published Features and never authors, validates or publishes them (constitution II)."
     },
     {
       "id": "clc-features-legacy-ids-defaults-to-false-indicates-that-the-feature-is-io-651a4b56",
       "clause": "clu-features-legacy-ids-defaults-to-false-indicates-that-the-feature-is-io-651a4b56",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "disposition": "not-applicable",
+      "rationale": "Defines `deprecated` on `devcontainer-feature.json`, a Feature-authoring metadata property whose schema twins (cst-feature-*/deprecated) are classified not-applicable. Deprecation is a signal to authors and registries; deacon installs a published Feature regardless of the flag and emits no deprecation surface. Out of consumer-only scope."
     },
     {
       "id": "clc-features-legacy-ids-if-this-property-is-set-to-true-then-it-indicate-desc-cc1c45f4",
       "clause": "clu-features-legacy-ids-if-this-property-is-set-to-true-then-it-indicate-desc-cc1c45f4",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "not-applicable",
+      "rationale": "Restates the meaning of the authoring-metadata `deprecated` flag and confirms that existing configurations keep working because the OCI artifacts remain. The obligation is on the publisher, not on the consumer; deacon's install path is unchanged by the flag. Out of consumer-only scope."
     },
     {
       "id": "clc-features-legacy-ids-the-cli-tooling-will-be-updated-to-also-look-at-algo-b10031b2",
       "clause": "clu-features-legacy-ids-the-cli-tooling-will-be-updated-to-also-look-at-algo-b10031b2",
-      "disposition": "non-testable",
-      "rationale": "Normative prose clause inventoried at initial triage; classified non-testable pending a dedicated conformance behavior (research Decision 11 \u2014 no evidence-free behavior is minted)."
+      "disposition": "not-applicable",
+      "rationale": "Describes a planned change to the reference tooling so that `installsAfter` also matches a Feature's authoring-declared `legacyIds`. It bites only for a renamed published Feature referenced by its old id, and the property it keys on is the same authoring metadata whose schema twins are not-applicable; deacon models no `legacyIds` field (no occurrence in crates/core or crates/deacon) and resolves order by the identifier the author wrote. Out of consumer-only scope, on the authoring side of the rename workflow."
     },
     {
       "id": "clc-features-legacy-ids-the-property-is-useful-for-renaming-a-currently-desc-60127c26",
       "clause": "clu-features-legacy-ids-the-property-is-useful-for-renaming-a-currently-desc-60127c26",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "not-applicable",
+      "rationale": "States the motivation for the authoring-metadata `legacyIds` property (renaming a published Feature within one namespace). Renaming and republishing are Feature-authoring workflows deacon has no command for. Out of consumer-only scope."
     },
     {
       "id": "clc-features-legacy-ids-the-semantic-version-of-the-feature-defined-by-t-desc-d1b0f722",
       "clause": "clu-features-legacy-ids-the-semantic-version-of-the-feature-defined-by-t-desc-d1b0f722",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "not-applicable",
+      "rationale": "Versioning guidance addressed to the Feature author across a rename (continue the semver line, do not restart at 1.0.0). It constrains what an author publishes, never what a consumer does with what is published. Out of consumer-only scope (constitution II)."
     },
     {
       "id": "clc-features-legacy-ids-will-dual-publish-the-old-ids-defined-by-the-leg-desc-0d5a6b09",
       "clause": "clu-features-legacy-ids-will-dual-publish-the-old-ids-defined-by-the-leg-desc-0d5a6b09",
-      "disposition": "non-testable",
-      "rationale": "Descriptive/informative prose; carries no directly testable consumer-runtime obligation."
+      "disposition": "not-applicable",
+      "rationale": "Describes what the publishing command does with `legacyIds` (dual-publish the old and new ids). `features publish` is permanently out of deacon's scope (constitution II); deacon only resolves and installs already-published Features."
     }
   ]
 }

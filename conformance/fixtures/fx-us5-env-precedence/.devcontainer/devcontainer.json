@@ -1,0 +1,8 @@
+{
+	"name": "ConformanceUs5EnvPrecedence",
+	"image": "alpine:3.19",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"containerEnv": { "CONF_LAYER": "config-wins", "CONF_ONLY_CONFIG": "config" },
+	"features": { "./features/conf-env": {} }
+}

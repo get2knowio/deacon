@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "odp-bhv-e4edcb80",
+      "obligation": "obl-bhv-e4edcb80",
+      "disposition": "case",
+      "cases": [
+        "case-host-ca"
+      ]
+    }
+  ]
+}

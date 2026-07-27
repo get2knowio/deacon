@@ -1,0 +1,7 @@
+{
+	"extends": "./base.json",
+	"containerEnv": { "LAYER": "middle", "FROM_MIDDLE": "yes" },
+	"forwardPorts": [3000],
+	"remoteUser": "middle-user",
+	"postCreateCommand": "echo from-middle"
+}

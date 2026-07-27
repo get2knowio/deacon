@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    { "id": "dim-arch", "values": ["amd64"] },
+    { "id": "dim-oracle", "values": ["0.87.0"] },
+    { "id": "dim-os", "values": ["linux"] },
+    { "id": "dim-runtime", "values": ["docker", "podman"] }
+  ]
+}

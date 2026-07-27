@@ -21,12 +21,16 @@
 //! disposition R-rules (V8) and structural coverage (V5) already hold and does not
 //! re-check them. Pure in-memory computation, no IO — identical on every platform.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::load::Registry;
 use crate::model::{
-    BehaviorUnit, CertificationProfile, Decision, ReferenceStatus, SpecStatus, TestCase,
+    BehaviorUnit, CaseKind, CertificationProfile, Decision, ReferenceStatus, SpecStatus, TestCase,
 };
+use crate::obligation::{
+    DispositionIndex, DispositionKind, Obligation, ObligationInventory, ObligationKind, Resolution,
+};
+use crate::scenario::OPERATION_DIMENSION;
 use crate::validate::applies_in_profile;
 
 /// The coverage state of a single in-profile, non-extension behavior
@@ -254,6 +258,288 @@ fn case_index(registry: &Registry) -> BTreeMap<&str, Vec<&TestCase>> {
 fn sorted_refs<'a>(refs: Option<&Vec<&'a str>>) -> Vec<&'a str> {
     let mut out = refs.cloned().unwrap_or_default();
     out.sort_unstable();
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Obligation coverage (024-deterministic-conformance-coverage, T043)
+// ---------------------------------------------------------------------------
+
+/// The reporting bucket an obligation falls into.
+///
+/// The five FR-026 buckets are **never folded together**; `Undispositioned` is the sixth,
+/// honest state for an obligation that carries no explicit disposition record yet — the
+/// number SC-001 requires to reach zero. Folding it into `Gap` would overstate what is
+/// known; folding it into `Covered` would understate the hole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ObligationBucket {
+    /// Satisfied by ≥1 executable case.
+    Covered,
+    /// Satisfied by a waiver (a harness-verified characterized divergence).
+    Waived,
+    /// Explicitly declared untestable, with a ground.
+    NonTestable,
+    /// An unresolved gap — always blocking.
+    Gap,
+    /// Modelled but not exercisable in the active environment profile: enumerated as a
+    /// visible backlog, counted as neither covered nor gap (FR-004a, spec Assumption 11).
+    InactiveEnvironment,
+    /// No explicit disposition. Not a state anyone chose.
+    Undispositioned,
+}
+
+impl ObligationBucket {
+    /// The wire spelling used in the coverage reports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ObligationBucket::Covered => "covered",
+            ObligationBucket::Waived => "waived",
+            ObligationBucket::NonTestable => "non-testable",
+            ObligationBucket::Gap => "gap",
+            ObligationBucket::InactiveEnvironment => "inactive-environment",
+            ObligationBucket::Undispositioned => "undispositioned",
+        }
+    }
+}
+
+/// One obligation's evaluated bucket plus the ids that back it.
+#[derive(Debug, Clone)]
+pub struct ObligationOutcome<'a> {
+    pub obligation: &'a Obligation,
+    pub bucket: ObligationBucket,
+    /// The covering case ids, or the backing waiver/gap ids — id-sorted. Empty for
+    /// `Undispositioned` and `InactiveEnvironment`.
+    pub by: Vec<String>,
+}
+
+/// Evaluate every obligation in `inventory` against `registry`, in inventory (id) order.
+///
+/// **Combination obligations** are matched per contracts/scenario-model.md "Coverage
+/// matching": a pair `(o, d₁=v₁, d₂=v₂)` is covered iff some case satisfies all three of
+///
+/// 1. `scenarioContext[sdim-operation] == o`,
+/// 2. `scenarioContext[d₁] == v₁` and `scenarioContext[d₂] == v₂`,
+/// 3. the case is **executable** — not a legacy carrier, except while an open residual
+///    names its carrier (the Edge Case ruling; see [`executable_case_ids`]).
+///
+/// Because a case assigns *every* dimension, one case covers `C(n,2)` pairs at once under
+/// its operation. That density is why the pair space is fillable at all, and why the
+/// report's job is to name the sparse remainder.
+///
+/// **Behavior obligations** reuse the established per-behavior coverage
+/// ([`Coverage::evaluate`]) rather than a second, forkable evaluator: an out-of-profile
+/// behavior is `inactive-environment`; otherwise its [`CoverageState`] maps onto the
+/// bucket vocabulary. Reusing it means the behavior denominator `certify` already
+/// measures and the obligation denominator this feature adds can never disagree.
+///
+/// **Explicit `odp-` disposition records take precedence over everything here** (User
+/// Story 2, contracts/obligation.md "Disposition resolution"). The precedence order is:
+///
+/// 1. `inactive-environment` — DERIVED from the active profile, so it outranks even an
+///    explicit record. It is a reporting bucket, not a disposition (rule 4): if an author
+///    could out-vote it, "the environment is inactive" would become a way to retire an
+///    obligation rather than a statement about the profile.
+/// 2. The single resolved [`crate::obligation::Resolution::One`] disposition.
+/// 3. Otherwise the evidence — what cases actually exist.
+///
+/// Step 3 is **not** a disposition default. It is what a *report* can honestly say about
+/// an obligation nobody has judged yet, and it never makes that obligation acceptable:
+/// V28 fires on exactly this state, in `validate` and in `certify`, whatever bucket the
+/// report prints. Removing it would not tighten any gate; it would only blind the report
+/// to evidence during the interval between generating an obligation and dispositioning it.
+pub fn evaluate_obligations<'a>(
+    registry: &'a Registry,
+    inventory: &'a ObligationInventory,
+) -> Vec<ObligationOutcome<'a>> {
+    let dispositions = DispositionIndex::build(registry);
+    let coverage = Coverage::evaluate(registry);
+    let by_behavior: BTreeMap<&str, &BehaviorCoverage<'a>> = coverage
+        .behaviors
+        .iter()
+        .map(|b| (b.behavior.id.as_str(), b))
+        .collect();
+    let out_of_profile: BTreeSet<&str> = coverage
+        .out_of_profile
+        .iter()
+        .map(|b| b.id.as_str())
+        .collect();
+
+    let executable = executable_case_ids(registry);
+    let scenario_cases: Vec<&TestCase> = registry
+        .cases
+        .iter()
+        .filter(|c| !c.scenario_context.is_empty() && executable.contains(c.id.as_str()))
+        .collect();
+
+    inventory
+        .units
+        .iter()
+        .map(|unit| {
+            // Precedence step 1: the derived inactive-environment bucket, before any
+            // hand-authored record is consulted.
+            if unit.kind == ObligationKind::Behavior {
+                let behavior = unit.behavior.as_deref().unwrap_or_default();
+                if out_of_profile.contains(behavior) {
+                    return ObligationOutcome {
+                        obligation: unit,
+                        bucket: ObligationBucket::InactiveEnvironment,
+                        by: Vec::new(),
+                    };
+                }
+            }
+            // Precedence step 2: the explicit records, when there are any.
+            match dispositions.resolve(&unit.id) {
+                Resolution::One(record) => {
+                    return ObligationOutcome {
+                        obligation: unit,
+                        bucket: match record.disposition {
+                            DispositionKind::Case => ObligationBucket::Covered,
+                            DispositionKind::NonTestable => ObligationBucket::NonTestable,
+                            DispositionKind::Waived => ObligationBucket::Waived,
+                            DispositionKind::Gap => ObligationBucket::Gap,
+                        },
+                        by: disposition_backing(record),
+                    };
+                }
+                // Several records are several judgements and no decision. It does NOT
+                // fall through to the evidence: the fallback below answers "nobody has
+                // looked at this yet", and someone plainly has — twice, incompatibly.
+                // Reporting whatever the evidence happens to say would let a conflict
+                // read as settled.
+                Resolution::Conflicting(_) => {
+                    return ObligationOutcome {
+                        obligation: unit,
+                        bucket: ObligationBucket::Undispositioned,
+                        by: Vec::new(),
+                    };
+                }
+                Resolution::Undispositioned => {}
+            }
+            // Precedence step 3: the evidence.
+            match unit.kind {
+                ObligationKind::Combination => {
+                    let by = matching_case_ids(unit, &scenario_cases);
+                    ObligationOutcome {
+                        obligation: unit,
+                        bucket: if by.is_empty() {
+                            ObligationBucket::Undispositioned
+                        } else {
+                            ObligationBucket::Covered
+                        },
+                        by,
+                    }
+                }
+                ObligationKind::Behavior => {
+                    let behavior = unit.behavior.as_deref().unwrap_or_default();
+                    match by_behavior.get(behavior) {
+                        None => ObligationOutcome {
+                            obligation: unit,
+                            bucket: ObligationBucket::Undispositioned,
+                            by: Vec::new(),
+                        },
+                        Some(entry) => {
+                            let (bucket, by): (ObligationBucket, Vec<String>) = match entry.state {
+                                CoverageState::Conformant | CoverageState::Divergent => (
+                                    ObligationBucket::Covered,
+                                    entry.cases.iter().map(|c| c.id.clone()).collect(),
+                                ),
+                                CoverageState::Waived => (
+                                    ObligationBucket::Waived,
+                                    entry.waivers.iter().map(|w| (*w).to_string()).collect(),
+                                ),
+                                CoverageState::Gap => (
+                                    ObligationBucket::Gap,
+                                    entry.gaps.iter().map(|g| (*g).to_string()).collect(),
+                                ),
+                            };
+                            if by.is_empty() {
+                                ObligationOutcome {
+                                    obligation: unit,
+                                    bucket: ObligationBucket::Undispositioned,
+                                    by,
+                                }
+                            } else {
+                                ObligationOutcome {
+                                    obligation: unit,
+                                    bucket,
+                                    by,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .collect()
+}
+
+/// The record ids a disposition puts forward as its backing, id-sorted — the covering
+/// cases, or the single waiver/gap. A `non-testable` disposition names no record: its
+/// backing is an argument, which is why V29 insists the argument name a ground.
+fn disposition_backing(record: &crate::obligation::ObligationDisposition) -> Vec<String> {
+    match record.disposition {
+        DispositionKind::Case => {
+            let mut cases = record.cases.clone();
+            cases.sort();
+            cases
+        }
+        DispositionKind::NonTestable => Vec::new(),
+        DispositionKind::Waived => record.waiver.iter().cloned().collect(),
+        DispositionKind::Gap => record.gap.iter().cloned().collect(),
+    }
+}
+
+/// The ids of cases whose evidence may satisfy a combination obligation.
+///
+/// A declarative case is executable by construction. A **legacy** case is executable only
+/// while an open residual keeps its carrier alive — the residual is the record that says
+/// "the coverage still exists, carried by a program not yet retired". Once the residual is
+/// gone and the carrier deleted, the legacy record stops satisfying anything, which is
+/// exactly the decay the residual model exists to produce.
+pub fn executable_case_ids(registry: &Registry) -> BTreeSet<&str> {
+    let live_carriers: BTreeSet<&str> = registry
+        .residuals
+        .iter()
+        .filter_map(|r| r.blocked_carrier.as_deref())
+        .collect();
+    registry
+        .cases
+        .iter()
+        .filter(|case| match case.classify() {
+            Ok(CaseKind::Declarative) => true,
+            Ok(CaseKind::Legacy) => case
+                .executable
+                .as_ref()
+                .is_some_and(|e| live_carriers.contains(e.binary.as_str())),
+            // A malformed record is rejected at load; treat it as non-evidence here so a
+            // shape error can never silently satisfy an obligation.
+            Err(_) => false,
+        })
+        .map(|case| case.id.as_str())
+        .collect()
+}
+
+/// The ids of cases whose scenario context matches a combination obligation, id-sorted.
+fn matching_case_ids(unit: &Obligation, cases: &[&TestCase]) -> Vec<String> {
+    let (Some(operation), Some(assignment)) = (unit.operation.as_deref(), unit.assignment.as_ref())
+    else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = cases
+        .iter()
+        .filter(|case| {
+            case.scenario_context
+                .get(OPERATION_DIMENSION)
+                .is_some_and(|o| o == operation)
+                && assignment.iter().all(|(dimension, value)| {
+                    case.scenario_context
+                        .get(dimension)
+                        .is_some_and(|assigned| assigned == value)
+                })
+        })
+        .map(|case| case.id.clone())
+        .collect();
+    out.sort();
     out
 }
 

@@ -1,0 +1,14 @@
+{
+	"id": "conformance-multifile",
+	"version": "1.0.0",
+	"name": "Conformance Multifile",
+	"description": "A multi-file template: a configuration, a Dockerfile, and an executable script.",
+	"options": {
+		"imageVariant": {
+			"type": "string",
+			"proposals": ["3.19", "3.20"],
+			"default": "3.19",
+			"description": "Alpine tag to pin the scaffolded Dockerfile to"
+		}
+	}
+}

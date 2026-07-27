@@ -166,7 +166,9 @@ fn legacy_declarative_mix_fails_loud_at_load() {
         }
       ]
     }"#;
-    fs::write(dir.path().join("cases.json"), cases_json).expect("write cases.json");
+    let cases_dir = dir.path().join("cases");
+    fs::create_dir_all(&cases_dir).expect("create cases dir");
+    fs::write(cases_dir.join("area.json"), cases_json).expect("write cases/area.json");
 
     let err = Registry::load(dir.path()).expect_err("a mixed case must fail to load");
     match err {
