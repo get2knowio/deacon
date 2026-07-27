@@ -64,6 +64,37 @@ pub const CANDIDATE_PARTS: [&str; 6] = [
     "mapping.json",
 ];
 
+/// What the deacon side of a comparison was measured against — the honest answer to
+/// `provenance.json`'s "compared against what?".
+///
+/// A two-variant enum rather than an unconditional [`VerifiedOracle`] because there are
+/// genuinely two answers and conflating them would be a lie in the one file whose job is to
+/// say what the evidence is. Every *campaign* tier compares against the verified pinned
+/// oracle; the FR-042a pipeline proof compares deacon against **its own unperturbed run**,
+/// with a known difference injected into one side at the sealed evidence-source boundary.
+///
+/// The proof's counterpart is not a reference implementation and must never be recorded as
+/// one: a `provenance.json` that claimed a verified oracle for a run that never invoked one
+/// would make the candidate's central claim — *this is what the two implementations did* —
+/// false, and a reviewer has no way to detect that from inside the file.
+#[derive(Debug, Clone, Copy)]
+pub enum ReferenceProvenance<'a> {
+    /// The verified pinned oracle. Taking the verified type rather than a path is what
+    /// makes "never compare against an unverified reference" (FR-003) a fact about the
+    /// value rather than a rule the caller has to remember.
+    Oracle(&'a VerifiedOracle),
+    /// deacon's own unperturbed run, with a difference injected into the other side at the
+    /// sealed evidence-source boundary (FR-042a, research D7).
+    ///
+    /// Carries the injection's record id so the candidate names *what was planted*: this
+    /// candidate documents the machinery working, not a divergence between two
+    /// implementations, and it says so in its own provenance.
+    InjectedSelfComparison {
+        /// The `reg-`-shaped perturbation record that was applied.
+        injection: &'a str,
+    },
+}
+
 /// Everything one reviewable candidate is assembled from.
 pub struct CandidateInputs<'a> {
     /// The finding this candidate belongs to (`fnd-…`) — also its directory name.
@@ -89,8 +120,8 @@ pub struct CandidateInputs<'a> {
     pub reduction: &'a Reduction,
     /// The comparison the observation came from — the raw and normalized evidence.
     pub result: &'a DifferentialResult,
-    /// The verified reference (FR-026's provenance).
-    pub oracle: &'a VerifiedOracle,
+    /// What the deacon side was compared **against** (FR-026's provenance).
+    pub reference: ReferenceProvenance<'a>,
     /// The loaded registry, for resolving the suggested mapping. **Read only** — FR-018
     /// forbids discovery writing anything the registry owns.
     pub registry: &'a Registry,
@@ -232,22 +263,7 @@ fn normalized(inputs: &CandidateInputs<'_>) -> Value {
 
 fn provenance(inputs: &CandidateInputs<'_>) -> Value {
     json!({
-        "oracle": {
-            "version": inputs.oracle.version,
-            "path": inputs.oracle.path.to_string_lossy(),
-            "source": match inputs.oracle.source {
-                OracleSource::Override => "override",
-                OracleSource::PathLookup => "path-lookup",
-            },
-            // The oracle is a `VerifiedOracle`, and that type is only constructible by the
-            // verification path — so this is a statement about a type-level fact, not a
-            // hopeful assertion (FR-003).
-            "verified": true,
-            "verification": format!(
-                "reported version equals the pinned {}",
-                inputs.pinned_input_set.oracle_version
-            ),
-        },
+        "reference": reference_provenance(inputs),
         "mutationOperators": inputs.mutation_operators,
         "reduction": {
             "steps": inputs.reduction.steps,
@@ -268,6 +284,43 @@ fn provenance(inputs: &CandidateInputs<'_>) -> Value {
         },
         "pinnedInputSet": pinned_input_set(inputs.pinned_input_set),
     })
+}
+
+/// What the deacon side was compared against, said plainly.
+///
+/// `kind` is the first key on purpose: a reviewer reading `provenance.json` must be able to
+/// tell "this documents a divergence from the reference" from "this documents the pipeline
+/// proving itself" without inferring it from which other keys happen to be present.
+fn reference_provenance(inputs: &CandidateInputs<'_>) -> Value {
+    match inputs.reference {
+        ReferenceProvenance::Oracle(oracle) => json!({
+            "kind": "verified-oracle",
+            "version": oracle.version,
+            "path": oracle.path.to_string_lossy(),
+            "source": match oracle.source {
+                OracleSource::Override => "override",
+                OracleSource::PathLookup => "path-lookup",
+            },
+            // The oracle is a `VerifiedOracle`, and only the verification path hands one
+            // out — so this is a statement about how the value was obtained, not a hopeful
+            // assertion (FR-003).
+            "verified": true,
+            "verification": format!(
+                "reported version equals the pinned {}",
+                inputs.pinned_input_set.oracle_version
+            ),
+        }),
+        ReferenceProvenance::InjectedSelfComparison { injection } => json!({
+            "kind": "injected-self-comparison",
+            "injection": injection,
+            "verified": false,
+            "verification": "NOT a reference comparison: deacon was compared against its \
+                             own unperturbed run, with the named difference injected into \
+                             one side at the sealed evidence-source boundary. This \
+                             candidate is evidence that the PIPELINE works (FR-042a), not \
+                             evidence that the two implementations disagree.",
+        }),
+    }
 }
 
 fn pinned_input_set(pins: &PinnedInputSet) -> Value {

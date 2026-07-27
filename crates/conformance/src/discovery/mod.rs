@@ -42,6 +42,7 @@
 //! | [`shrink`] | structural reduction; the reproduction predicate is a *parameter* (research D5) |
 //! | [`signature`] | the normalized signature + value-shape class (research D3) |
 //! | [`queue`] | the findings-queue model, strict loader, atomic writer, and D1–D5 |
+//! | [`promote`] | the review-only promotion + tolerance skeletons (writes nothing, ever) |
 //! | [`metamorphic`] | `mrl-` relation model + V31/V32 |
 //! | [`corpus`] | the corpus manifest model + immutable-reference validation |
 //! | [`report`] | byte-stable campaign + queue reports |
@@ -121,6 +122,7 @@ pub mod generate;
 pub mod grammar;
 pub mod metamorphic;
 pub mod mutate;
+pub mod promote;
 pub mod queue;
 pub mod report;
 pub mod rng;

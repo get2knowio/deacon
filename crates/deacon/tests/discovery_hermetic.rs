@@ -1764,3 +1764,768 @@ fn no_corpus_entry_is_a_mutation_seed() {
         );
     }
 }
+
+// ===========================================================================
+// User Story 5 — promote a finding only through review (T074–T078, T083, T126)
+// ===========================================================================
+
+/// The registry- and snapshot-owned write helpers **no** discovery program may reference.
+///
+/// Named by the function each one is, spelled with its opening paren: a bare word that
+/// happened to appear in prose would make this a scan that passes by matching nothing.
+/// Behaviors, cases, waivers, and allowed differences have no writer at all — they are
+/// hand-authored files the loader only reads — so what is scanned for is every writer that
+/// *could* be pointed at the deterministic record.
+const FORBIDDEN_WRITERS: [&str; 5] = [
+    // Committed reference snapshots (022) — only the reviewed refresh bin writes one.
+    "write_snapshot(",
+    // The machine-owned constraint / clause inventories (020, 021).
+    "write_inventory(",
+    "write_clauses(",
+    // The machine-owned obligation set (024).
+    "write_obligations(",
+    // The frozen migration baseline (023).
+    "write_baseline(",
+];
+
+/// Every source tree a "discovery program" is made of.
+///
+/// Both halves of the hermetic/live split (research D4) plus the two live bins. The
+/// `discovery` command group lives in `crates/conformance/src/bin/conformance.rs` beside
+/// commands that legitimately write the inventory, so a whole-file scan there would be a
+/// false positive; its behavior is asserted from **outside the process** instead, by
+/// `crates/conformance/tests/discovery_cli.rs`'s
+/// `the_discovery_group_never_writes_into_the_registry`.
+const DISCOVERY_SOURCE_ROOTS: [&str; 4] = [
+    "crates/conformance/src/discovery",
+    "crates/parity-harness/src/discovery",
+    "crates/parity-harness/src/bin/discovery-campaign.rs",
+    "crates/parity-harness/src/bin/discovery-proof.rs",
+];
+
+/// Collect `.rs` files under `path` (which may itself be a file).
+fn rust_sources(path: &Path, out: &mut Vec<PathBuf>) {
+    if path.is_file() {
+        if path.extension().is_some_and(|e| e == "rs") {
+            out.push(path.to_path_buf());
+        }
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        rust_sources(&entry.path(), out);
+    }
+}
+
+/// **T083 / SC-008**: no discovery source file references a registry or snapshot write
+/// helper.
+///
+/// Modelled directly on `only_the_refresh_bin_writes_committed_snapshots` (022 T038), and
+/// for the same reason: the property that matters is not "no discovery program writes the
+/// record today" but "a write path introduced tomorrow fails a test". A behavioral check
+/// can only observe the paths a run happens to take; a structural one observes the paths
+/// that exist.
+///
+/// Both the scan and the forbidden list carry positive controls, because the failure mode
+/// of a guard like this is passing by looking at nothing.
+#[test]
+fn no_discovery_source_references_a_registry_or_snapshot_writer() {
+    let root = workspace_root();
+    let mut sources: Vec<PathBuf> = Vec::new();
+    for rel in DISCOVERY_SOURCE_ROOTS {
+        let path = root.join(rel);
+        assert!(
+            path.exists(),
+            "the scan targets {rel}, which does not exist — a guard that scans nothing \
+             passes by checking nothing"
+        );
+        rust_sources(&path, &mut sources);
+    }
+    assert!(
+        sources.len() >= 10,
+        "expected the discovery source trees to hold both halves of the split; found only \
+         {} file(s)",
+        sources.len()
+    );
+
+    let mut offenders: Vec<String> = Vec::new();
+    for source in &sources {
+        let text = std::fs::read_to_string(source)
+            .unwrap_or_else(|e| panic!("could not read {}: {e}", source.display()));
+        for writer in FORBIDDEN_WRITERS {
+            if text.contains(writer) {
+                offenders.push(format!(
+                    "{} references `{writer}`",
+                    source
+                        .strip_prefix(&root)
+                        .unwrap_or(source)
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                ));
+            }
+        }
+    }
+    assert_eq!(
+        offenders,
+        Vec::<String>::new(),
+        "a discovery program must not be able to write the deterministic record (FR-036): \
+         promotion is a human editing the registry with a scaffold as a starting point, and \
+         a stochastic process that could author the record it is tested against would make \
+         every claim in that record unfalsifiable"
+    );
+
+    // Positive control: each forbidden writer is a real function with real callers
+    // SOMEWHERE, so an empty offender list means "not in discovery" rather than "these
+    // names no longer exist and the scan matches nothing".
+    let mut all: Vec<PathBuf> = Vec::new();
+    for crate_src in ["conformance/src", "parity-harness/src"] {
+        rust_sources(&root.join("crates").join(crate_src), &mut all);
+    }
+    for writer in FORBIDDEN_WRITERS {
+        assert!(
+            all.iter()
+                .any(|p| std::fs::read_to_string(p).is_ok_and(|t| t.contains(writer))),
+            "`{writer}` appears nowhere in the workspace, so scanning for it proves nothing \
+             — the helper was renamed and this guard silently stopped guarding"
+        );
+    }
+}
+
+/// The four `conformance/` roots a discovery program must never touch — the homes of the
+/// six record kinds FR-036 enumerates, plus the machine-owned artifacts that back them.
+const DETERMINISTIC_RECORD_ROOTS: [&str; 4] = ["registry", "snapshots", "obligations", "inventory"];
+
+/// Every file under `dir`, with its bytes, for a before/after comparison.
+fn byte_census(dir: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    fn walk(dir: &Path, out: &mut std::collections::BTreeMap<PathBuf, Vec<u8>>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                out.insert(path, bytes);
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(dir, &mut out);
+    out
+}
+
+/// **T074 / SC-008**: exercising every writer the discovery half owns leaves the
+/// deterministic record byte-identical.
+///
+/// The behavioral companion to the structural scan above, and the two are complementary
+/// rather than redundant: the scan proves no *path* exists, this proves the paths that DO
+/// exist go somewhere else. Together they cover the two ways this could break — a new call
+/// to a registry writer, and an existing discovery writer being pointed at a registry path.
+#[test]
+fn no_discovery_writer_can_reach_the_deterministic_record() {
+    use deacon_conformance::discovery::promote;
+
+    let registry = load_registry();
+    let conformance = deacon_conformance::default_registry_dir()
+        .parent()
+        .map(Path::to_path_buf)
+        .expect("the registry dir has a parent");
+
+    let before: Vec<_> = DETERMINISTIC_RECORD_ROOTS
+        .iter()
+        .map(|name| byte_census(&conformance.join(name)))
+        .collect();
+    assert!(
+        before.iter().any(|c| !c.is_empty()),
+        "the census read nothing; a before/after comparison over an empty set passes by \
+         comparing nothing"
+    );
+
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let data = synthetic_queue(
+        &registry,
+        &["configuration.remoteUser", "configuration.image"],
+    );
+
+    // Every writer the discovery half exposes, driven for real against a scratch root. A
+    // regression that hardcoded a `conformance/registry/…` destination would be caught by
+    // the census below rather than by reading the code.
+    queue::write_findings(scratch.path(), &data.findings).expect("findings are writable");
+    queue::write_campaigns(scratch.path(), &data.campaigns).expect("campaigns are writable");
+    corpus::write(scratch.path(), &[]).expect("the corpus manifest is writable");
+    let pins = discovery_report::CurrentPins::from_registry(&registry);
+    let report = discovery_report::build_queue_report(&data, &pins);
+    discovery_report::write_queue_report(scratch.path(), &report).expect("the report is writable");
+
+    // And the two promotion surfaces, which return documents and take no path at all —
+    // asserted here so "scaffold writes nothing" is checked rather than assumed.
+    let finding = data.findings.first().expect("a synthetic finding");
+    promote::promotion_skeleton(finding).expect("a promotion skeleton");
+    promote::tolerance_skeleton(finding).expect("a tolerance skeleton");
+
+    for (name, census) in DETERMINISTIC_RECORD_ROOTS.iter().zip(before) {
+        assert_eq!(
+            byte_census(&conformance.join(name)),
+            census,
+            "`conformance/{name}` changed while exercising the discovery writers; a \
+             discovery program that can author a behavior, case, waiver, tolerated \
+             difference, disposition, or snapshot makes the record it is tested against \
+             unfalsifiable (FR-036)"
+        );
+    }
+
+    // The writers DID write — otherwise the assertion above is satisfied by a run in which
+    // nothing happened at all.
+    for name in [
+        "findings.json",
+        "campaigns.json",
+        "corpus.json",
+        "queue.json",
+    ] {
+        assert!(
+            scratch.path().join(name).is_file(),
+            "{name} was not written to the scratch root, so the guard above compared a \
+             record nothing tried to change"
+        );
+    }
+}
+
+/// **T075 / SC-009**: a promoted finding's case is an **ordinary** case — it satisfies
+/// every validation rule a hand-authored one does, including a full scenario context and
+/// the coverage-obligation records that accompany it.
+///
+/// Asserted against a real committed case rather than a synthetic one, because the claim is
+/// precisely that promotion produces nothing special: if a promoted case needed its own
+/// validation path, "passes the full existing record validation" would be a claim about a
+/// different validator.
+#[test]
+fn a_promoted_findings_case_satisfies_the_ordinary_record_validation() {
+    let registry = load_registry();
+
+    // A case with a FULL scenario context — the shape FR-040 requires a promoted case to
+    // have (V26: assign every dimension or none).
+    let dimensions: Vec<&str> = registry.scenario.iter().map(|d| d.id.as_str()).collect();
+    assert!(
+        !dimensions.is_empty(),
+        "the registry declares no scenario dimensions, so `scenarioContext` completeness \
+         would be satisfied by every case vacuously"
+    );
+    let case = registry
+        .cases
+        .iter()
+        .find(|c| {
+            !c.scenario_context.is_empty()
+                && dimensions
+                    .iter()
+                    .all(|d| c.scenario_context.contains_key(*d))
+        })
+        .expect(
+            "the registry must carry at least one case with a complete scenarioContext — \
+             that is the shape a promotion has to produce",
+        );
+
+    // The queue half: a finding promoted to it resolves (**D3** clean).
+    let mut data = synthetic_queue(&registry, &["configuration.remoteUser"]);
+    data.findings[0]
+        .triage(
+            queue::Classification::DeaconRegression,
+            Some("promoted by the SC-009 guard"),
+        )
+        .expect("a promotable classification is accepted");
+    data.findings[0]
+        .promote(&case.id)
+        .expect("promotion is permitted");
+    assert_eq!(
+        queue::check(&data, &queue::RegistryView::from_registry(&registry)),
+        Vec::new(),
+        "a finding promoted to a real case must validate clean; the promotion is the only \
+         reference that crosses out of the discovery root and it has to resolve"
+    );
+
+    // The registry half: the case passes the FULL existing validation, unchanged. Nothing
+    // here is discovery-specific — that is the point.
+    let registry_violations = deacon_conformance::validate::validate_path(
+        &deacon_conformance::default_registry_dir(),
+        "2026-07-27",
+        &workspace_root(),
+    )
+    .expect("the committed registry loads");
+    let about_the_case: Vec<String> = registry_violations
+        .iter()
+        .filter(|v| v.record == case.id)
+        .map(|v| format!("{} {}: {}", v.code, v.record, v.message))
+        .collect();
+    assert_eq!(
+        about_the_case,
+        Vec::<String>::new(),
+        "the case a promotion names must satisfy every rule a hand-authored case does"
+    );
+
+    // And the coverage-obligation half (FR-040): the case is cited by at least one
+    // obligation disposition. This is the trap 024 documents — adding a case and
+    // registering only the BEHAVIOR disposition leaves the combination records reading
+    // `gap` beside a case that covers them.
+    assert!(
+        registry
+            .obligation_dispositions
+            .iter()
+            .any(|d| d.cases.iter().any(|c| c == &case.id)),
+        "case `{}` is cited by no obligation disposition; a promoted case whose obligations \
+         were never flipped off `gap` leaves the coverage report claiming a hole that is \
+         filled (FR-040)",
+        case.id
+    );
+}
+
+/// **T076 / FR-038**: a promotion lacking a behavior identity or a disposition fails
+/// validation **naming what is missing**.
+///
+/// Both halves, because they fail in different places and a reviewer meets them at
+/// different moments: the pre-flight refuses an incomplete record while the reviewer can
+/// still act on it cheaply, and **D3** refuses an unresolvable promotion afterwards, over
+/// committed data, where a deleted or renamed case would otherwise leave a finding reading
+/// as covered while nothing executes it.
+#[test]
+fn a_promotion_missing_an_identity_or_a_disposition_fails_and_says_which() {
+    use deacon_conformance::discovery::promote::{self, PromotionError};
+
+    let registry = load_registry();
+    let mut data = synthetic_queue(&registry, &["configuration.remoteUser"]);
+    data.findings[0]
+        .triage(queue::Classification::DeaconRegression, None)
+        .expect("classification accepted");
+    let finding = &data.findings[0];
+
+    // One axis missing at a time, so a checker that reported "something is missing" without
+    // saying which would fail here rather than passing on a lump.
+    for missing in promote::BEHAVIOR_DISPOSITION_AXES {
+        let mut behavior = serde_json::json!({
+            "id": "bhv-promoted-by-review",
+            "spec": "conformant",
+            "reference": "divergent",
+            "decision": "follow-spec",
+        });
+        behavior
+            .as_object_mut()
+            .expect("an object")
+            .remove(missing)
+            .expect("the axis was present");
+
+        let errors = promote::validate_promotion(finding, &behavior, Some("case-x"), &["case-x"]);
+        assert_eq!(
+            errors.len(),
+            1,
+            "exactly one objection is expected when exactly one axis is missing: {errors:?}"
+        );
+        match &errors[0] {
+            PromotionError::MissingDisposition { axis, detail, .. } => {
+                assert_eq!(*axis, missing);
+                assert!(
+                    detail.contains(missing),
+                    "the diagnosis must NAME the axis: {detail}"
+                );
+            }
+            other => panic!("expected a missing-disposition objection, got {other:?}"),
+        }
+    }
+
+    // No behavior identity at all.
+    let anonymous = serde_json::json!({
+        "spec": "conformant",
+        "reference": "divergent",
+        "decision": "follow-spec",
+    });
+    let errors = promote::validate_promotion(finding, &anonymous, Some("case-x"), &["case-x"]);
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            PromotionError::MissingBehaviorIdentity { detail, .. } if detail.contains("`id` is absent")
+        )),
+        "a promotion with no behavior identity cannot be found again, which is the whole \
+         point of promoting it: {errors:?}"
+    );
+
+    // The committed-data half: **D3** names the promotion that does not resolve.
+    let mut promoted = synthetic_queue(&registry, &["configuration.image"]);
+    promoted.findings[0]
+        .triage(queue::Classification::ReferenceQuirk, None)
+        .expect("classification accepted");
+    promoted.findings[0]
+        .promote("case-that-nobody-committed")
+        .expect("the state machine permits the transition; D3 is what refuses it");
+    let violations = queue::check(&promoted, &queue::RegistryView::from_registry(&registry));
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.class() == "D3" && v.to_string().contains("case-that-nobody-committed")),
+        "D3 must NAME the case that does not resolve: {violations:?}"
+    );
+}
+
+/// Recursively copy `from` into `to`.
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap_or_else(|e| panic!("create {}: {e}", to.display()));
+    let entries =
+        std::fs::read_dir(from).unwrap_or_else(|e| panic!("read {}: {e}", from.display()));
+    for entry in entries.flatten() {
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if src.is_dir() {
+            copy_tree(&src, &dst);
+        } else {
+            std::fs::copy(&src, &dst).unwrap_or_else(|e| panic!("copy {}: {e}", src.display()));
+        }
+    }
+}
+
+/// **T077 / SC-018**: `certify`'s verdict with a queue holding unreviewed findings is
+/// **identical** to its verdict with an empty queue.
+///
+/// Verified by varying only the discovery root's content beside a registry copy, rather
+/// than by reading the loader: the guarantee research D6 states is structural — the loader
+/// enumerates *named* subdirectories under `conformance/registry/` and has no wildcard walk
+/// at the root, so a sibling of `registry/` has no code path that could reach it — and the
+/// way to check a structural claim is to try to break it.
+///
+/// The queue is asserted non-empty, untriaged, and clean, because "certification is
+/// unchanged" is trivially true of a queue that does not load.
+#[test]
+fn certification_is_unchanged_by_a_queue_full_of_unreviewed_findings() {
+    use deacon_conformance::certify::certify;
+    use deacon_conformance::validate::{ClauseInputs, InventoryInputs};
+
+    let real_registry_dir = deacon_conformance::default_registry_dir();
+    let conformance = real_registry_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .expect("the registry dir has a parent");
+
+    // A scratch `conformance/`-shaped root: a COPY of the real registry (so every record
+    // resolves) beside a discovery root this test owns. Copied rather than symlinked so the
+    // guard behaves identically on every platform.
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let scratch_registry = scratch.path().join("registry");
+    copy_tree(&real_registry_dir, &scratch_registry);
+    let scratch_discovery = scratch.path().join("discovery");
+    std::fs::create_dir_all(&scratch_discovery).expect("discovery root");
+
+    // The inventory / clause / snapshot inputs are read-only and unrelated to the queue, so
+    // they point at the real committed tree — varying them would be varying the thing this
+    // test holds constant.
+    let schemas_dir = conformance.join("schemas");
+    let inventory_file = conformance.join("inventory").join("constraints.json");
+    let spec_dir = conformance.join("spec");
+    let clauses_file = conformance.join("inventory").join("clauses.json");
+    let snapshots_dir = conformance.join("snapshots");
+
+    let run = || -> String {
+        let registry = Registry::load(&scratch_registry).expect("the registry copy loads");
+        let result = certify(
+            &registry,
+            "2026-07-27",
+            &InventoryInputs {
+                schemas_dir: &schemas_dir,
+                inventory_file: &inventory_file,
+            },
+            &ClauseInputs {
+                spec_dir: &spec_dir,
+                clauses_file: &clauses_file,
+            },
+            &snapshots_dir,
+        );
+        serde_json::to_string_pretty(&result).expect("certification serializes")
+    };
+
+    // An EMPTY queue.
+    let empty: FindingsFile = serde_json::from_value(serde_json::json!({
+        "schemaVersion": queue::SCHEMA_VERSION,
+        "records": []
+    }))
+    .expect("an empty findings file");
+    std::fs::write(
+        scratch_discovery.join("findings.json"),
+        queue::render_findings(&empty),
+    )
+    .expect("write findings");
+    let with_empty_queue = run();
+
+    // The SAME registry, with a queue full of unreviewed findings beside it.
+    let registry = load_registry();
+    let populated = synthetic_queue(
+        &registry,
+        &[
+            "configuration.remoteUser",
+            "configuration.workspaceFolder",
+            "configuration.userEnvProbe",
+            "configuration.image",
+        ],
+    );
+    queue::write_findings(&scratch_discovery, &populated.findings).expect("write findings");
+    queue::write_campaigns(&scratch_discovery, &populated.campaigns).expect("write campaigns");
+    corpus::write(&scratch_discovery, &[]).expect("write corpus");
+    let with_full_queue = run();
+
+    // The queue is real: it loads, it is non-empty, and every finding is in the visible
+    // untriaged bucket. Without this the equality below would hold because nothing was
+    // there.
+    let loaded = DiscoveryData::load(&scratch_discovery).expect("the scratch queue loads");
+    assert_eq!(loaded.findings.len(), 4);
+    assert!(
+        loaded
+            .findings
+            .iter()
+            .all(|f| f.state == queue::FindingState::Untriaged),
+        "the queue must hold UNREVIEWED findings — the state SC-018 is about"
+    );
+    assert_eq!(
+        queue::check(&loaded, &queue::RegistryView::from_registry(&registry)),
+        Vec::new(),
+        "the synthetic queue must itself be clean, or this test would be asserting that a \
+         BROKEN queue does not reach certify"
+    );
+
+    assert_eq!(
+        with_empty_queue, with_full_queue,
+        "certification must be byte-identical either way: a discovery finding is a \
+         candidate for an assertion, not an assertion, and a stochastic process that could \
+         move a release gate would make green non-reproducible"
+    );
+}
+
+/// **T126 / FR-041**: a tolerance scaffold is **scoped**, and a blanket or unscoped scope is
+/// refused rather than emitted.
+///
+/// The rule is asserted at its single definition and at the surface that uses it, because
+/// the two failures are different: a rule that accepted a bare channel would let a blanket
+/// tolerance be authored, and an emitter that bypassed the rule would produce one even
+/// though the rule is correct.
+#[test]
+fn a_tolerance_scaffold_is_scoped_and_a_blanket_scope_is_refused() {
+    use deacon_conformance::discovery::promote::{self, PromotionError};
+
+    // The rule itself. A bare channel tolerates everything on that channel forever, which
+    // is the global ignore list the registry already refuses at load (V19).
+    for blanket in [
+        "chan-structured-output",
+        "chan-exit-code",
+        "chan-structured-output.",
+        "",
+    ] {
+        assert!(
+            matches!(
+                promote::reject_blanket_observable_path("fnd-x", blanket),
+                Err(PromotionError::UnscopedTolerance { .. })
+            ),
+            "{blanket:?} must be refused as a blanket tolerance"
+        );
+    }
+    promote::reject_blanket_observable_path("fnd-x", "chan-structured-output.configuration")
+        .expect("a scoped path is accepted");
+
+    // The emitter. Nothing it produces may be a bare channel, and the waiver it emits must
+    // carry the two fields that make a tolerance self-invalidating rather than permanent.
+    let registry = load_registry();
+    let data = synthetic_queue(&registry, &["configuration.remoteUser"]);
+    let finding = data.findings.first().expect("a synthetic finding");
+    let document = promote::tolerance_skeleton(finding).expect("a tolerance scaffolds");
+
+    let path = document["allowedDifference"]["observablePath"]
+        .as_str()
+        .expect("the tolerance names an observable path");
+    let (channel, rest) = path
+        .split_once('.')
+        .unwrap_or_else(|| panic!("`{path}` is a bare channel"));
+    assert!(
+        registry.channels.iter().any(|c| c.id == channel),
+        "the tolerance's channel `{channel}` must be one the registry declares"
+    );
+    assert!(
+        !rest.trim().is_empty(),
+        "`{path}` scopes to nothing within its channel"
+    );
+    assert_eq!(path, "chan-structured-output.configuration.remoteUser");
+
+    // Self-invalidating, not permanent: rationale + expiry are required, and both are
+    // sentinels the loader rejects until a human writes them.
+    for field in ["rationale", "expires"] {
+        assert_eq!(
+            document["waiver"][field],
+            serde_json::json!(promote::UNREVIEWED),
+            "a tolerance without a decided `{field}` is an unbacked silence"
+        );
+    }
+    assert_eq!(
+        document["allowedDifference"]["waiverId"], document["waiver"]["id"],
+        "the allowed difference must reference the waiver that backs it; an unbacked \
+         tolerance is exactly what V19 refuses"
+    );
+    // The context, too: an empty context reads as "everywhere", which is the blanket
+    // tolerance moved into a different field.
+    let context = document["allowedDifference"]["context"]
+        .as_array()
+        .expect("a context array");
+    assert!(!context.is_empty());
+    assert!(
+        context
+            .iter()
+            .all(|c| c == &serde_json::json!(promote::UNREVIEWED))
+    );
+
+    // And a signature with no observable path cannot be tolerated at all, rather than
+    // being tolerated channel-wide.
+    let mut pathless = data.findings[0].clone();
+    pathless.signature = Signature::derive(
+        "chan-structured-output",
+        &Divergence {
+            kind: DivergenceKind::Value,
+            path: "",
+            deacon: None,
+            reference: None,
+        },
+    );
+    assert!(matches!(
+        promote::tolerance_skeleton(&pathless),
+        Err(PromotionError::UnscopedTolerance { .. })
+    ));
+}
+
+/// **T078 / SC-016**: an injected difference traverses the whole pipeline — generation,
+/// comparison, minimization, candidate emission, classification, and review-only promotion
+/// — and an injection that never lands **fails loudly** rather than reading as "found
+/// nothing".
+///
+/// This is the acceptance test for FR-042a, and it drives the REAL machinery end to end:
+/// the real constrained generator (US1), the real comparison and signature derivation, the
+/// real structural shrinker (US2), the real reviewable-candidate writer, and the real
+/// finding state machine (US4). The only synthetic thing is the difference itself, planted
+/// through the sealed `EvidenceSource` boundary (research D7) — where injecting into an
+/// observer's *return* value does not compile, so the proof cannot assert on data it wrote
+/// downstream of the part under test.
+///
+/// Hermetic: no oracle, no Docker, no network. The counterpart is deacon's own unperturbed
+/// run, which is also what makes the baseline provably empty and every surfaced difference
+/// attributable to the injection.
+#[tokio::test]
+async fn an_injected_difference_traverses_the_whole_pipeline_and_a_dud_fails_loudly() {
+    use parity_harness::discovery::pipeline_proof::{self, ProofRequest, Stage, TraversalVerdict};
+    use parity_harness::inject::RegressionHarness;
+
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let request = ProofRequest {
+        deacon_binary: PathBuf::from(env!("CARGO_BIN_EXE_deacon")),
+        registry_dir: deacon_conformance::default_registry_dir(),
+        report_root: scratch.path().to_path_buf(),
+        seed_hex: "0x02542a1f".to_string(),
+        seed: 0x0254_2a1f,
+        profile: SYNTHETIC_PROFILE.to_string(),
+        bound: std::time::Duration::from_secs(60),
+        // Deliberately small: this guard asserts that reduction RUNS and that the signature
+        // survives it, not how far it gets. A large budget would spend fast-lane minutes
+        // re-establishing what the shrinker's own unit tests already cover.
+        shrink_budget: 6,
+        max_draws: 64,
+    };
+
+    // The FR-070 capability. Injection fails closed without it, so a proof that forgot to
+    // declare it would report every injection inapplicable rather than silently passing.
+    let capability = RegressionHarness::declare();
+    let _ = &capability;
+
+    let ctx = pipeline_proof::establish(&request)
+        .await
+        .expect("a clean baseline must be establishable; failing to find one proves nothing");
+
+    // --- the difference traverses ---------------------------------------
+    let injections = pipeline_proof::proof_injections().expect("the proof's injections load");
+    assert!(!injections.is_empty());
+    for record in &injections {
+        let traversal = pipeline_proof::traverse(&ctx, record)
+            .await
+            .unwrap_or_else(|e| panic!("traversing `{}` failed: {e}", record.id));
+        assert_eq!(
+            traversal.verdict,
+            TraversalVerdict::Traversed,
+            "`{}` did not traverse: {traversal:?}",
+            record.id
+        );
+        assert_eq!(
+            traversal
+                .stages
+                .iter()
+                .map(|s| s.stage)
+                .collect::<Vec<Stage>>(),
+            Stage::all().to_vec(),
+            "every stage FR-042a names must be reached, in order: {traversal:?}"
+        );
+        assert!(traversal.applied >= 1, "the perturbation must have LANDED");
+        assert!(
+            traversal.signature.is_some() && traversal.finding.is_some(),
+            "a difference that traversed must carry the signature it derived and the finding \
+             a campaign would have admitted"
+        );
+        // The difference surfaced on the channel the record declared — not merely somewhere.
+        assert_eq!(traversal.channel, record.channel);
+    }
+
+    // --- and an injection that never lands fails LOUDLY ------------------
+    //
+    // The distinction FR-042a draws, and the one this whole machinery exists to keep: a
+    // perturbation that was never applied says NOTHING about the pipeline. Reporting it as
+    // "the pipeline found nothing" would make a mis-authored proof indistinguishable from a
+    // working one, which is the most comfortable possible way for this feature to be broken.
+    let dud: deacon_conformance::regression::RegressionFile = serde_json::from_str(
+        r#"{"records":[{
+             "id": "reg-proof-dud",
+             "channel": "chan-structured-output",
+             "target": "structured-output-document",
+             "perturbation": {
+               "kind": "remove-json-pointer",
+               "pointer": "/configuration/aKeyNoConfigurationHasEverCarried"
+             },
+             "expectedDetectingCases": ["discovery-proof"]
+           }]}"#,
+    )
+    .expect("the dud record loads");
+    let dud = dud.records.into_iter().next().expect("one dud record");
+
+    let traversal = pipeline_proof::traverse(&ctx, &dud)
+        .await
+        .expect("an inapplicable injection is a VERDICT, not an aborted run");
+    match &traversal.verdict {
+        TraversalVerdict::InjectionInapplicable { cause } => {
+            assert!(
+                cause.contains("aKeyNoConfigurationHasEverCarried") || cause.contains("resolve"),
+                "the diagnosis must name why nothing was perturbed: {cause}"
+            );
+        }
+        other => panic!(
+            "an injection that never landed must be reported as inapplicable, never as \
+             traversed and never as a pipeline defect: {other:?}"
+        ),
+    }
+    assert_eq!(
+        traversal.applied, 0,
+        "nothing was perturbed, and the record says so"
+    );
+    assert_eq!(
+        traversal.stages.len(),
+        1,
+        "only generation was reached; claiming any later stage would claim the pipeline was \
+         exercised by an injection that never entered it"
+    );
+
+    // The status rule, from the same function the bin calls: an inapplicable injection
+    // FAILS the run, and is counted apart from a pipeline defect.
+    let failing =
+        pipeline_proof::ProofReport::build("0x02542a1f", ctx.candidate_id(), vec![traversal]);
+    assert_eq!(failing.exit_status(), 1);
+    assert_eq!(failing.inapplicable_count, 1);
+    assert_eq!(
+        failing.failed_count, 0,
+        "an inapplicable injection is a PROOF defect, counted separately from a pipeline \
+         defect — merging them would lose the distinction FR-042a exists to draw"
+    );
+}

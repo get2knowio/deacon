@@ -722,3 +722,79 @@ fn the_discovery_group_never_writes_into_the_registry() {
         "no discovery command may alter the conformance registry (FR-036)"
     );
 }
+
+/// **T126 / FR-041**, at the process boundary: `discovery scaffold --tolerate` emits a
+/// scoped waiver plus the allowed-difference entry that references it, to **stdout only**.
+///
+/// Asserted from outside the process because that is where the contract lives: the library
+/// guard in `discovery_hermetic` proves the skeleton is scoped, and this proves the command
+/// exits `0`, writes nothing, and puts the document on stdout rather than mixing it into
+/// the diagnostics a reviewer pipes past.
+#[test]
+fn scaffold_tolerate_emits_a_scoped_waiver_and_writes_nothing() {
+    let scratch = Scratch::new();
+    let (finding_id, findings, campaigns) = populated_queue();
+    scratch.write("findings.json", &findings);
+    scratch.write("campaigns.json", &campaigns);
+
+    let before =
+        std::fs::read_to_string(scratch.dir.path().join("discovery").join("findings.json"))
+            .expect("read");
+    let out = scratch.run(&["discovery", "scaffold", &finding_id, "--tolerate"]);
+    assert_eq!(code(&out), 0, "stderr: {}", stderr(&out));
+
+    let document: serde_json::Value =
+        serde_json::from_str(&stdout(&out)).expect("the tolerance skeleton is JSON on stdout");
+
+    // Scoped WITHIN a channel, never to one: a bare-channel `observablePath` is a global
+    // ignore list wearing a waiver id, and the registry refuses one at load (V19).
+    let path = document["allowedDifference"]["observablePath"]
+        .as_str()
+        .expect("an observable path");
+    let (channel, rest) = path
+        .split_once('.')
+        .unwrap_or_else(|| panic!("`{path}` is a bare channel"));
+    assert_eq!(channel, "chan-structured-output");
+    assert!(!rest.is_empty(), "`{path}` scopes to nothing");
+
+    // Self-invalidating rather than permanent, and unusable until a human edits it.
+    assert_eq!(
+        document["waiver"]["rationale"],
+        serde_json::json!("UNREVIEWED")
+    );
+    assert_eq!(
+        document["waiver"]["expires"],
+        serde_json::json!("UNREVIEWED")
+    );
+    assert_eq!(
+        document["allowedDifference"]["waiverId"],
+        document["waiver"]["id"]
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(scratch.dir.path().join("discovery").join("findings.json"))
+            .expect("read"),
+        before,
+        "`--tolerate` writes NOTHING either — the tolerate path is the same review-only \
+         discipline as the promotion path, not an exception to it"
+    );
+
+    // And the same FR-035 refusal: a defect in the discovery machinery is not a difference
+    // anyone can legitimately tolerate.
+    scratch.write(
+        "findings.json",
+        &findings
+            .replace(
+                "\"classification\": null",
+                "\"classification\": \"fixture-defect\"",
+            )
+            .replace("\"state\": \"untriaged\"", "\"state\": \"triaged\""),
+    );
+    let refused = scratch.run(&["discovery", "scaffold", &finding_id, "--tolerate"]);
+    assert_eq!(code(&refused), 1);
+    assert!(
+        stderr(&refused).contains("not promotable"),
+        "stderr: {}",
+        stderr(&refused)
+    );
+}

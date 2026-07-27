@@ -531,7 +531,7 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
                     mutation_operators: &candidate.operator_ids(),
                     reduction: &reduction,
                     result: &result,
-                    oracle,
+                    reference: candidate::ReferenceProvenance::Oracle(oracle),
                     registry: &registry,
                     root: &candidates_root,
                 })?;
@@ -1053,11 +1053,12 @@ async fn run_corpus(
 
 /// The seven pinned inputs (FR-002), built identically for every tier.
 ///
-/// `oracle` is `None` for the metamorphic tier, which never invokes the reference — but the
-/// pin it *would* have been compared against is still part of what makes its findings
-/// checkable, and the pinned input set has no optional elements. One function rather than
-/// one per driver, so a tier cannot quietly record a different set of pins than another.
-fn pinned_input_set(
+/// `oracle` is `None` for the metamorphic tier (and for the FR-042a pipeline proof), which
+/// never invokes the reference — but the pin it *would* have been compared against is still
+/// part of what makes its findings checkable, and the pinned input set has no optional
+/// elements. One function rather than one per driver, so a tier cannot quietly record a
+/// different set of pins than another.
+pub(crate) fn pinned_input_set(
     grammar: &Grammar,
     oracle: Option<&VerifiedOracle>,
 ) -> Result<PinnedInputSet, HarnessError> {

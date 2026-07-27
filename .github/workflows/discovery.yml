@@ -176,6 +176,24 @@ jobs:
       - name: Build deacon
         run: cargo build -p deacon
 
+      - name: Prove the pipeline can carry an injected difference
+        # FR-042a, run BEFORE the campaign and deliberately so: a campaign that reports no
+        # findings and a campaign whose pipeline silently swallows them are byte-identical
+        # from the outside, and the only way to tell them apart is to plant a difference
+        # you know is there and require it to come out the other end.
+        #
+        # This is the ONE discovery command whose status depends on an outcome, and it is
+        # still not finding-dependent: it asserts a property of the MACHINERY, so non-zero
+        # means the pipeline is broken. An injection that never landed also exits 1, as a
+        # PROOF defect rather than as "found nothing" — a mis-authored record must never
+        # masquerade as a working pipeline.
+        #
+        # Hermetic: it needs deacon and nothing else. No oracle, no Docker, no network —
+        # the counterpart is deacon's own unperturbed run, which is what makes the
+        # baseline provably empty and every surfaced difference attributable to the
+        # injection.
+        run: make test-discovery-proof
+
       - name: Run the discovery lane
         # The SINGLE sanctioned entry point: `[profile.discovery]`, whose default-filter
         # is an explicit `binary(=…)` allow-list rather than a `discovery_*` glob (the

@@ -287,20 +287,20 @@ cannot; then promote a finding by hand and confirm it validates as an ordinary c
 
 ### Tests for User Story 5
 
-- [ ] T074 [P] [US5] No-write-path test in `crates/deacon/tests/discovery_hermetic.rs`: no discovery program can write a behavior, case, waiver, tolerated difference, disposition, or snapshot — modelled on `only_the_refresh_bin_writes_committed_snapshots` (SC-008)
-- [ ] T075 [P] [US5] Promotion-validates test in `crates/deacon/tests/discovery_hermetic.rs`: a promoted finding's case passes full record validation including `scenarioContext` and obligation updates (SC-009)
-- [ ] T076 [P] [US5] Missing-identity test in `crates/deacon/tests/discovery_hermetic.rs`: a promotion lacking a behavior identity or a disposition fails validation naming what is missing (FR-038)
-- [ ] T077 [P] [US5] Certify-isolation test in `crates/deacon/tests/discovery_hermetic.rs`: `certify`'s result with a queue holding unreviewed findings is identical to its result with an empty queue (SC-018)
-- [ ] T078 [P] [US5] Injected-difference traversal test in `crates/deacon/tests/discovery_hermetic.rs`: an injected difference traverses generation → comparison → minimization → candidate → classification → promotable, and an injection that never lands fails loudly rather than reading as "found nothing" (SC-016)
+- [X] T074 [P] [US5] No-write-path test in `crates/deacon/tests/discovery_hermetic.rs`: no discovery program can write a behavior, case, waiver, tolerated difference, disposition, or snapshot — modelled on `only_the_refresh_bin_writes_committed_snapshots` (SC-008)
+- [X] T075 [P] [US5] Promotion-validates test in `crates/deacon/tests/discovery_hermetic.rs`: a promoted finding's case passes full record validation including `scenarioContext` and obligation updates (SC-009)
+- [X] T076 [P] [US5] Missing-identity test in `crates/deacon/tests/discovery_hermetic.rs`: a promotion lacking a behavior identity or a disposition fails validation naming what is missing (FR-038)
+- [X] T077 [P] [US5] Certify-isolation test in `crates/deacon/tests/discovery_hermetic.rs`: `certify`'s result with a queue holding unreviewed findings is identical to its result with an empty queue (SC-018)
+- [X] T078 [P] [US5] Injected-difference traversal test in `crates/deacon/tests/discovery_hermetic.rs`: an injected difference traverses generation → comparison → minimization → candidate → classification → promotable, and an injection that never lands fails loudly rather than reading as "found nothing" (SC-016)
 
 ### Implementation for User Story 5
 
-- [ ] T079 [US5] Implement `discovery scaffold` in `crates/conformance/src/bin/conformance.rs` emitting skeleton behavior/case/fixture records to **stdout only**, with `UNREVIEWED` sentinels the loader rejects — generation never writes a hand-authored file
-- [ ] T080 [US5] Implement violation class **D3** (`promotedTo` must resolve to a real case) in `crates/conformance/src/discovery/queue.rs`
-- [ ] T081 [US5] Implement the pipeline proof in `crates/parity-harness/src/discovery/pipeline_proof.rs` using `parity_harness::inject::perturb_source`'s sealed `EvidenceSource` boundary, so injecting into an observer's return value does not compile (research D7)
-- [ ] T082 [US5] Implement the `discovery-proof` bin in `crates/parity-harness/src/bin/discovery-proof.rs`, exiting non-zero on a failed traversal **or** an inapplicable injection
-- [ ] T083 [US5] Add the no-write-path guard to `crates/deacon/tests/discovery_hermetic.rs` asserting no discovery source file references a registry or snapshot write helper
-- [ ] T126 [US5] Implement the tolerate path in `crates/conformance/src/bin/conformance.rs`: `discovery scaffold --tolerate` emits a scoped `wvr-` waiver skeleton (rationale + `expires`) plus the scoped `allowedDifferences` entry that references it, to **stdout only**; add a test in `crates/deacon/tests/discovery_hermetic.rs` rejecting a blanket or unscoped scope (FR-041)
+- [X] T079 [US5] Implement `discovery scaffold` in `crates/conformance/src/bin/conformance.rs` emitting skeleton behavior/case/fixture records to **stdout only**, with `UNREVIEWED` sentinels the loader rejects — generation never writes a hand-authored file
+- [X] T080 [US5] Implement violation class **D3** (`promotedTo` must resolve to a real case) in `crates/conformance/src/discovery/queue.rs`
+- [X] T081 [US5] Implement the pipeline proof in `crates/parity-harness/src/discovery/pipeline_proof.rs` using `parity_harness::inject::perturb_source`'s sealed `EvidenceSource` boundary, so injecting into an observer's return value does not compile (research D7)
+- [X] T082 [US5] Implement the `discovery-proof` bin in `crates/parity-harness/src/bin/discovery-proof.rs`, exiting non-zero on a failed traversal **or** an inapplicable injection
+- [X] T083 [US5] Add the no-write-path guard to `crates/deacon/tests/discovery_hermetic.rs` asserting no discovery source file references a registry or snapshot write helper
+- [X] T126 [US5] Implement the tolerate path in `crates/conformance/src/bin/conformance.rs`: `discovery scaffold --tolerate` emits a scoped `wvr-` waiver skeleton (rationale + `expires`) plus the scoped `allowedDifferences` entry that references it, to **stdout only**; add a test in `crates/deacon/tests/discovery_hermetic.rs` rejecting a blanket or unscoped scope (FR-041)
 
 **Checkpoint**: A stochastic process cannot author the record it is tested against.
 

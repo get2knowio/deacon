@@ -1317,8 +1317,9 @@ pub fn split_finding(
 /// outward references.
 ///
 /// A borrowed view rather than a whole [`crate::load::Registry`] so the check is
-/// explicit about the only two things it reads — the declared channel set and the
-/// recorded revisions — and so a test can supply them without building a registry.
+/// explicit about the only four things it reads — the declared channel set, the recorded
+/// revisions, the declared profiles, and the declared case ids — and so a test can supply
+/// them without building a registry.
 ///
 /// Note the direction: the discovery check reads the registry, never the reverse. That
 /// asymmetry is what makes the queue unreachable from `certify`.
@@ -1331,6 +1332,9 @@ pub struct RegistryView<'a> {
     /// Declared certification profile ids (`profiles.json`) — what a campaign's
     /// [`Campaign::profile`] must resolve to.
     pub profiles: Vec<&'a str>,
+    /// Declared case ids (`cases/<area>.json`) — what a promoted finding's
+    /// [`Finding::promoted_to`] must resolve to (**D3**).
+    pub cases: Vec<&'a str>,
 }
 
 impl<'a> RegistryView<'a> {
@@ -1340,6 +1344,7 @@ impl<'a> RegistryView<'a> {
             channels: registry.channels.iter().map(|c| c.id.as_str()).collect(),
             revisions: registry.revisions.iter().collect(),
             profiles: registry.profiles.iter().map(|p| p.id.as_str()).collect(),
+            cases: registry.cases.iter().map(|c| c.id.as_str()).collect(),
         }
     }
 
@@ -1349,6 +1354,10 @@ impl<'a> RegistryView<'a> {
 
     fn declares_profile(&self, profile: &str) -> bool {
         self.profiles.contains(&profile)
+    }
+
+    fn declares_case(&self, case: &str) -> bool {
+        self.cases.contains(&case)
     }
 
     /// Whether a revision of `kind` with this `pin` is recorded.
@@ -1368,19 +1377,18 @@ impl<'a> RegistryView<'a> {
 /// Reports **all** violations in one pass, matching `validate` — a checker that stops at
 /// the first problem makes fixing a batch an iterative guessing game.
 ///
-/// Currently emits **D1**, **D2**, **D4**, and **D5**:
+/// Emits **D1** – **D5**:
 ///
 /// | Class | Checked here |
 /// |---|---|
 /// | **D1** | derived-id mismatch (signature, finding, **split child**, witness, **campaign**); duplicate id; empty `witnesses`; a signature naming an undeclared channel; a `firstObserved`/`lastObserved` that does not resolve **or is not backed by a witness**; a witness naming an unresolvable campaign; a `splitFrom` that is self-referential or unresolvable; a `split` ancestor with fewer than two children; a campaign `profile` absent from `profiles.json`; a non-finite `spaceCoveredFraction`; an empty seed; an empty repo-owned pinned-input element |
 /// | **D2** | a `triaged`/`promoted`/`no-longer-reproducing` finding with no classification; an `untriaged` or `split` finding carrying one; a `promoted` finding classified `normalizer-defect` / `fixture-defect` |
+/// | **D3** | a `promoted` finding with no `promotedTo`, or one naming a case absent from the registry; a `promotedTo` carried in any state **other** than `promoted` |
 /// | **D4** | a corpus entry whose `commit` is not a 40-hex object name; a malformed `contentDigest`; a corpus id that does not derive from its own substance; a duplicate corpus id or name |
 /// | **D5** | a `schemaPin` / `prosePin` / `oracleVersion` naming a revision absent from `revisions.json` |
 ///
-/// **D3** (`promotedTo` resolution) is added by the user story that owns that rule (T080);
-/// it is an independent pass over the same loaded data, so adding it changes no existing
-/// call site. **D4**'s second clause — a digest recorded and then removed — is a property
-/// of a *change* rather than of a file, so it lives in
+/// **D4**'s second clause — a digest recorded and then removed — is a property of a
+/// *change* rather than of a file, so it lives in
 /// [`corpus::check_drift`](super::corpus::check_drift), which takes a baseline explicitly.
 ///
 /// D2 is checked here *and* refused by [`Finding::promote`], deliberately: `check` runs
@@ -1396,6 +1404,7 @@ pub fn check(data: &DiscoveryData, registry: &RegistryView<'_>) -> Vec<Discovery
     let mut violations = Vec::new();
     check_findings(data, registry, &mut violations);
     check_classifications(data, &mut violations);
+    check_promotions(data, registry, &mut violations);
     check_campaigns(data, registry, &mut violations);
     violations.extend(super::corpus::check(&data.corpus));
     violations
@@ -1666,6 +1675,75 @@ fn check_classifications(data: &DiscoveryData, out: &mut Vec<DiscoveryError>) {
     }
 }
 
+/// **D3** — promotion resolution (**T080**, FR-042, data-model.md § 3).
+///
+/// Q7 of contracts/findings-queue.md: a `promoted` finding names the registry case that
+/// now carries it, and that case exists. Three shapes, one class, because all three are
+/// the same defect — **the queue claiming coverage that does not exist**:
+///
+/// - **`promoted` with no `promotedTo`.** The state says a case carries this finding and
+///   the record declines to say which, so the claim cannot be checked by anyone. FR-042
+///   exists precisely so a promoted finding is not rediscovered and re-triaged, and a
+///   promotion naming nothing gives a reviewer no way to reach the case that would tell
+///   them the work is done.
+/// - **`promotedTo` naming a case the registry does not declare.** The most dangerous
+///   shape, and the reason this class needs the registry at all: it reads as covered
+///   from inside the queue while nothing anywhere executes the finding. A case deleted
+///   or renamed after the promotion produces exactly this, which is why it is checked
+///   against the loaded registry on every run rather than only at the moment of
+///   promotion.
+/// - **`promotedTo` in any other state.** data-model.md § 3 declares the field set *only*
+///   in state `promoted`. A `triaged` record carrying one asserts a promotion that never
+///   happened; a `no-longer-reproducing` one asserts a case still carries a difference
+///   the queue has recorded as gone. Both mislead in the direction of claiming more
+///   coverage than exists, which is the direction that matters.
+///
+/// The check is deliberately **one-way**: it reads the registry's declared case ids and
+/// writes nothing. Discovery never authors a case (FR-036), so the only thing D3 can do
+/// about an unresolvable promotion is name it.
+fn check_promotions(
+    data: &DiscoveryData,
+    registry: &RegistryView<'_>,
+    out: &mut Vec<DiscoveryError>,
+) {
+    for finding in &data.findings {
+        match (finding.state, finding.promoted_to.as_deref()) {
+            (FindingState::Promoted, None) => {
+                out.push(DiscoveryError::PromotionUnresolved {
+                    record: finding.id.clone(),
+                    cause: "state `promoted` carries no `promotedTo` — the state asserts \
+                            that a registry case now carries this finding, so the record \
+                            must name which one or the claim cannot be checked"
+                        .to_string(),
+                });
+            }
+            (FindingState::Promoted, Some(case)) if !registry.declares_case(case) => {
+                out.push(DiscoveryError::PromotionUnresolved {
+                    record: finding.id.clone(),
+                    cause: format!(
+                        "`promotedTo` names case `{case}`, which is not declared in \
+                         `conformance/registry/cases/`. The finding reads as covered from \
+                         inside the queue while nothing executes it — the one shape a \
+                         promotion must never take"
+                    ),
+                });
+            }
+            (state, Some(case)) if state != FindingState::Promoted => {
+                out.push(DiscoveryError::PromotionUnresolved {
+                    record: finding.id.clone(),
+                    cause: format!(
+                        "state `{}` carries `promotedTo` `{case}` — the field is set only \
+                         in state `promoted`, and carrying one anywhere else asserts a \
+                         promotion that did not happen",
+                        state.as_str()
+                    ),
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
 /// D1 + D5 over the campaign history.
 fn check_campaigns(
     data: &DiscoveryData,
@@ -1818,11 +1896,16 @@ mod tests {
     /// The certification profile every test campaign runs under.
     const TEST_PROFILE: &str = "prof-linux-amd64-docker-0870";
 
+    /// The one case id the synthetic registry view declares — what a promotion may
+    /// legitimately name (**D3**).
+    const TEST_CASE: &str = "case-readconfig-decl-image";
+
     fn view<'a>(revisions: &'a [SourceRevision]) -> RegistryView<'a> {
         RegistryView {
             channels: vec!["chan-structured-output", "chan-exit-code"],
             revisions: revisions.iter().collect(),
             profiles: vec![TEST_PROFILE],
+            cases: vec![TEST_CASE],
         }
     }
 
@@ -2609,6 +2692,86 @@ mod tests {
                     .any(|v| v.class() == "D2" && v.to_string().contains("not promotable")),
                 "{}: {violations:?}",
                 non_promotable.as_str()
+            );
+        }
+    }
+
+    // --- T080 D3 ------------------------------------------------------------
+
+    /// A promotion the registry *can* back is clean — the positive control, without which
+    /// every assertion below would pass on a check that rejected all promotions.
+    #[test]
+    fn d3_a_promotion_naming_a_declared_case_is_clean() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.findings[0].state = FindingState::Promoted;
+        data.findings[0].classification = Some(Classification::DeaconRegression);
+        data.findings[0].promoted_to = Some(TEST_CASE.to_string());
+        assert_eq!(check(&data, &view(&revs)), Vec::new());
+    }
+
+    #[test]
+    fn d3_a_promoted_finding_must_name_a_case() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.findings[0].state = FindingState::Promoted;
+        data.findings[0].classification = Some(Classification::DeaconRegression);
+        data.findings[0].promoted_to = None;
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.class() == "D3" && v.to_string().contains("carries no `promotedTo`")),
+            "a promotion that names nothing is a claim nobody can check: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn d3_a_promotion_naming_an_unknown_case_is_coverage_that_does_not_exist() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.findings[0].state = FindingState::Promoted;
+        data.findings[0].classification = Some(Classification::DeaconRegression);
+        data.findings[0].promoted_to = Some("case-that-was-deleted".to_string());
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations.iter().any(|v| v.class() == "D3"
+                && v.to_string().contains("case-that-was-deleted")
+                && v.to_string().contains("not declared")),
+            "the diagnosis must NAME the case that does not resolve: {violations:?}"
+        );
+    }
+
+    /// `promotedTo` outside state `promoted` asserts a promotion that did not happen —
+    /// and it always errs toward claiming MORE coverage than exists, which is the
+    /// direction that matters.
+    #[test]
+    fn d3_promoted_to_is_set_only_in_state_promoted() {
+        let revs = revisions();
+        for (state, classification) in [
+            (FindingState::Untriaged, None),
+            (
+                FindingState::Triaged,
+                Some(Classification::DeaconRegression),
+            ),
+            (
+                FindingState::NoLongerReproducing,
+                Some(Classification::DeaconRegression),
+            ),
+        ] {
+            let mut data = clean_data();
+            data.findings[0].state = state;
+            data.findings[0].classification = classification;
+            // A case that DOES resolve, so the only objection left is the state.
+            data.findings[0].promoted_to = Some(TEST_CASE.to_string());
+            let violations = check(&data, &view(&revs));
+            assert!(
+                violations
+                    .iter()
+                    .any(|v| v.class() == "D3"
+                        && v.to_string().contains("set only in state `promoted`")),
+                "state {}: {violations:?}",
+                state.as_str()
             );
         }
     }

@@ -228,9 +228,8 @@ pub fn discovery_dir_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
 /// imply the registry validator can see the queue, which is exactly what the discovery
 /// root's placement exists to prevent (research D6/D11).
 ///
-/// The variant for **D3** (`promotedTo` resolution) lands with the user story that owns
-/// that rule (T080); [`DiscoveryError::class`] already reserves its code. **D4** landed
-/// with US7 as [`DiscoveryError::CorpusIntegrity`].
+/// **D3** landed with US5 as [`DiscoveryError::PromotionUnresolved`]; **D4** landed with
+/// US7 as [`DiscoveryError::CorpusIntegrity`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DiscoveryError {
     /// **D1** — a record that does not parse, or that parses but is structurally
@@ -243,8 +242,14 @@ pub enum DiscoveryError {
     MalformedRecord { record: String, cause: String },
 
     /// **D1** — a reference that names something absent: a `firstObserved` /
-    /// `lastObserved` campaign missing from `campaigns.json`, or (once promotion lands)
-    /// a `promotedTo` case missing from the registry.
+    /// `lastObserved` campaign missing from `campaigns.json`, a witness naming an
+    /// unresolvable campaign, or a `splitFrom` naming a finding that is gone.
+    ///
+    /// An unresolvable **`promotedTo`** is deliberately *not* here: it is
+    /// [`DiscoveryError::PromotionUnresolved`] (**D3**), because it is a claim about
+    /// *coverage* rather than about provenance, and folding it in would report a
+    /// finding that reads as covered while nothing executes it under the same code as a
+    /// stale campaign pointer.
     #[error(
         "discovery record `{record}` references {kind} `{reference}`, which does not \
          resolve. Remedy: restore the referenced record or correct the reference — a \
@@ -288,6 +293,28 @@ pub enum DiscoveryError {
     )]
     ClassificationArity { record: String, cause: String },
 
+    /// **D3** — a promotion the registry cannot back: a `promoted` finding with no
+    /// `promotedTo`, one naming a case the registry does not declare, or a `promotedTo`
+    /// carried in any state other than `promoted`.
+    ///
+    /// One class because all three are the same defect — **the queue claiming coverage
+    /// that does not exist**. That is worse than an uncovered finding: an uncovered
+    /// finding is visible in the untriaged bucket and gets reviewed, whereas a promotion
+    /// nothing executes reads as done and is never looked at again (FR-042's whole
+    /// purpose is that a promoted finding is not rediscovered and re-triaged).
+    ///
+    /// Deliberately checked against the *loaded registry* on every run rather than only
+    /// at the moment of promotion: a case deleted or renamed afterwards produces exactly
+    /// this shape, and nothing in the registry can notice, because the registry never
+    /// reads the queue (research D6).
+    #[error(
+        "discovery finding `{record}` has an unresolvable promotion: {cause}. Remedy: \
+         author the case with `discovery scaffold`'s skeleton, commit it, and point \
+         `promotedTo` at its real id — discovery never writes a case, so a promotion the \
+         registry cannot back is a claim nothing executes."
+    )]
+    PromotionUnresolved { record: String, cause: String },
+
     /// **D4** — a corpus entry that does not name a retrievable, verifiable snapshot: a
     /// `commit` that is not a 40-hex object name (a branch, a tag, `HEAD`, `latest`, an
     /// abbreviated SHA), a malformed `contentDigest`, an id that does not derive from the
@@ -330,6 +357,7 @@ impl DiscoveryError {
             | DiscoveryError::UnresolvableReference { .. }
             | DiscoveryError::UnknownChannel { .. } => "D1",
             DiscoveryError::ClassificationArity { .. } => "D2",
+            DiscoveryError::PromotionUnresolved { .. } => "D3",
             DiscoveryError::CorpusIntegrity { .. } => "D4",
             DiscoveryError::StalePin { .. } => "D5",
         }
@@ -343,6 +371,7 @@ impl DiscoveryError {
             | DiscoveryError::UnresolvableReference { record, .. }
             | DiscoveryError::UnknownChannel { record, .. }
             | DiscoveryError::ClassificationArity { record, .. }
+            | DiscoveryError::PromotionUnresolved { record, .. }
             | DiscoveryError::CorpusIntegrity { record, .. }
             | DiscoveryError::StalePin { record, .. } => record,
         }

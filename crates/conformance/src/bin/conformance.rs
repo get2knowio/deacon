@@ -207,6 +207,14 @@ enum DiscoveryCommand {
         /// The finding to scaffold a promotion for (`fnd-<hash8>`).
         #[arg(value_name = "FND-ID")]
         finding: String,
+        /// Scaffold a **tolerance** instead of a promotion: a scoped `wvr-` waiver
+        /// (rationale + `expires`) plus the `allowedDifferences` entry that references
+        /// it (FR-041). Still stdout only.
+        ///
+        /// A blanket or unscoped tolerance is refused rather than emitted — a bare-channel
+        /// `observablePath` is a global ignore list wearing a waiver id.
+        #[arg(long)]
+        tolerate: bool,
     },
 }
 
@@ -565,7 +573,9 @@ fn run(cli: Cli) -> i32 {
                 notes,
             } => discovery_triage(&registry_dir, &finding, &classification, notes.as_deref()),
             DiscoveryCommand::Split { finding } => discovery_split(&registry_dir, &finding),
-            DiscoveryCommand::Scaffold { finding } => discovery_scaffold(&registry_dir, &finding),
+            DiscoveryCommand::Scaffold { finding, tolerate } => {
+                discovery_scaffold(&registry_dir, &finding, tolerate)
+            }
         },
     }
 }
@@ -972,20 +982,26 @@ fn discovery_split(registry_dir: &Path, finding_id: &str) -> i32 {
     }
 }
 
-/// `discovery scaffold` (contracts/discovery-cli.md): emit a skeleton behavior + case +
-/// fixture layout for promoting a finding, to **stdout only**.
+/// `discovery scaffold` (contracts/discovery-cli.md): emit a skeleton for promoting — or,
+/// with `--tolerate`, for *tolerating* — a finding, to **stdout only**.
 ///
 /// Writes **nothing**. That is the same discipline as `inventory scaffold` /
 /// `clause scaffold`, and here it is what makes FR-036 hold: there is no code path from a
 /// finding to a registry write, so a stochastic process cannot author the record it is
-/// tested against. Every field carries the `UNREVIEWED` sentinel the registry loader
-/// rejects, so scaffolded output cannot be committed unedited.
+/// tested against. Every field a human must decide carries the `UNREVIEWED` sentinel the
+/// registry loader rejects, so scaffolded output cannot be committed unedited.
 ///
-/// Exit `0` when emitted; `1` on an unknown finding or a non-promotable classification
-/// (`normalizer-defect` / `fixture-defect`, FR-035) — those describe a defect in the
-/// discovery machinery, not a behavior of either implementation, so resolving them
-/// changes the normalizer or the generator rather than the record.
-fn discovery_scaffold(registry_dir: &Path, finding_id: &str) -> i32 {
+/// The skeletons themselves live in `deacon_conformance::discovery::promote`, not here:
+/// they are pure `Finding → JSON` transformations, and keeping them in the library is what
+/// lets the hermetic guards assert the FR-041 scoping rule without spawning a process. This
+/// function is the process boundary and nothing else — load, dispatch, render, explain.
+///
+/// Exit `0` when emitted; `1` on an unknown finding, a non-promotable classification
+/// (`normalizer-defect` / `fixture-defect`, FR-035), or a tolerance that would be blanket
+/// or unscoped (FR-041).
+fn discovery_scaffold(registry_dir: &Path, finding_id: &str, tolerate: bool) -> i32 {
+    use deacon_conformance::discovery::promote;
+
     let discovery_dir = deacon_conformance::discovery_dir_for(registry_dir);
     let data = match load_discovery_data(&discovery_dir) {
         Ok(data) => data,
@@ -1000,55 +1016,18 @@ fn discovery_scaffold(registry_dir: &Path, finding_id: &str) -> i32 {
         return 1;
     };
 
-    if let Some(classification) = finding.classification
-        && !classification.is_promotable()
-    {
-        eprintln!(
-            "error: finding `{finding_id}` is classified `{}`, which is not promotable \
-             (FR-035): it describes a defect in the discovery machinery, not a behavior of \
-             either implementation. Fix the normalizer or the generator instead.",
-            classification.as_str()
-        );
-        return 1;
-    }
-
-    let signature = &finding.signature;
-    let witness = finding
-        .witnesses
-        .first()
-        .expect("a finding always carries at least one witness");
-
-    let document = serde_json::json!({
-        "behavior": {
-            "id": format!("bhv-{SCAFFOLD_SENTINEL}"),
-            "summary": SCAFFOLD_SENTINEL,
-            "spec": SCAFFOLD_SENTINEL,
-            "reference": SCAFFOLD_SENTINEL,
-            "decision": SCAFFOLD_SENTINEL,
-            "notes": format!(
-                "Promoted from discovery finding {finding_id} (signature {}, channel {}, \
-                 path {}, {} / {}).",
-                signature.id,
-                signature.channel,
-                signature.path,
-                signature.kind.as_str(),
-                signature.value_shape_class.as_str(),
-            ),
-        },
-        "case": {
-            "id": format!("case-{SCAFFOLD_SENTINEL}"),
-            "behaviors": [format!("bhv-{SCAFFOLD_SENTINEL}")],
-            "oracleType": SCAFFOLD_SENTINEL,
-            "scenarioContext": SCAFFOLD_SENTINEL,
-            "fixtures": [format!("fx-{SCAFFOLD_SENTINEL}")],
-        },
-        "fixture": {
-            "id": format!("fx-{SCAFFOLD_SENTINEL}"),
-            "minimalInput": witness.minimal_input,
-            "isMinimal": witness.is_minimal,
-            "mutationOperators": witness.mutation_operators,
-        },
-    });
+    let document = if tolerate {
+        promote::tolerance_skeleton(finding)
+    } else {
+        promote::promotion_skeleton(finding)
+    };
+    let document = match document {
+        Ok(document) => document,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
 
     match serde_json::to_string_pretty(&document) {
         Ok(text) => println!("{text}"),
@@ -1057,14 +1036,30 @@ fn discovery_scaffold(registry_dir: &Path, finding_id: &str) -> i32 {
             return 2;
         }
     }
-    eprintln!(
-        "scaffolded a promotion skeleton for {finding_id}; stdout only — nothing was written. \
-         Every `{SCAFFOLD_SENTINEL}` field carries the sentinel the registry loader rejects. \
-         Author the behavior's three axes by hand: a finding tells you what DIFFERS, not \
-         whether deacon is wrong, the reference is wrong, or the spec is silent — that is the \
-         review. Then copy the fixture, author the case with a FULL `scenarioContext` (V26), \
-         and flip the `odp-cmb-*` dispositions it covers off `gap` in the same commit."
-    );
+
+    if tolerate {
+        eprintln!(
+            "scaffolded a TOLERANCE skeleton for {finding_id}; stdout only — nothing was \
+             written. The waiver is scoped to the observable path the difference occurs at, \
+             never to the whole channel (FR-041): a bare-channel scope is a global ignore \
+             list wearing a waiver id, and it is refused rather than emitted. Fill in \
+             `rationale`, `expires`, the behavior, and the binary/fixture the scope names, \
+             then add the `allowedDifferences` entry to the case that observes this path. \
+             Every `{SCAFFOLD_SENTINEL}` field is rejected by the registry loader, so this \
+             cannot be committed unedited. Tolerating records that the difference is \
+             ACCEPTABLE — the waiver self-invalidates as stale the moment it stops \
+             reproducing, so this is not a way to make a difference go away."
+        );
+    } else {
+        eprintln!(
+            "scaffolded a promotion skeleton for {finding_id}; stdout only — nothing was written. \
+             Every `{SCAFFOLD_SENTINEL}` field carries the sentinel the registry loader rejects. \
+             Author the behavior's three axes by hand: a finding tells you what DIFFERS, not \
+             whether deacon is wrong, the reference is wrong, or the spec is silent — that is the \
+             review. Then copy the fixture, author the case with a FULL `scenarioContext` (V26), \
+             and flip the `odp-cmb-*` dispositions it covers off `gap` in the same commit."
+        );
+    }
     0
 }
 

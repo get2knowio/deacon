@@ -1374,8 +1374,18 @@ fn every_emitted_candidate_has_all_six_parts_and_reproduces_from_them() {
 
         // (5) Reference provenance, and how the input was produced and reduced.
         let provenance = &parts["provenance.json"];
-        assert_eq!(provenance["oracle"]["version"], oracle.version.as_str());
-        assert_eq!(provenance["oracle"]["verified"], serde_json::json!(true));
+        // A campaign compares against the VERIFIED pinned oracle, and the provenance says
+        // which of the two comparison shapes produced this candidate. The `kind` is
+        // asserted first because it is what a reviewer reads to tell a real divergence
+        // from an injected self-comparison (the FR-042a pipeline proof records the other
+        // variant, `injected-self-comparison`), and a candidate that claimed the wrong one
+        // would be a lie in the file whose only job is to say what the evidence is.
+        assert_eq!(
+            provenance["reference"]["kind"],
+            serde_json::json!("verified-oracle")
+        );
+        assert_eq!(provenance["reference"]["version"], oracle.version.as_str());
+        assert_eq!(provenance["reference"]["verified"], serde_json::json!(true));
         assert!(provenance["reduction"]["isMinimal"].is_boolean());
         if provenance["reduction"]["isMinimal"] == serde_json::json!(false) {
             assert!(

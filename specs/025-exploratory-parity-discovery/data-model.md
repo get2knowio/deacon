@@ -366,12 +366,20 @@ target/discovery/candidates/<fnd-id>/
 ├── context.json        # operations + argv; the campaign and seed; pinnedInputSet
 ├── raw.json            # both sides' evidence, unnormalized  ← separate from normalized
 ├── normalized.json     # both sides' normalized evidence + the diff
-├── provenance.json     # oracle version + verification result; mutation operators applied
+├── provenance.json     # what the deacon side was compared against; mutation operators applied
 └── mapping.json        # suggested behavior mapping, or an explicit no-match
 ```
 
 `raw.json` and `normalized.json` are separate files, mirroring the committed-snapshot layout — raw
 and normalized evidence must never be conflated (FR-014, the FR-016 precedent from 022).
+
+`provenance.json`'s `reference` block names the comparison shape in its `kind`, because there are
+two and conflating them would be a lie in the one file whose job is to say what the evidence is:
+`verified-oracle` (every campaign tier — the pinned reference, with its version and the fact that
+it was verified) and `injected-self-comparison` (the FR-042a pipeline proof — deacon against its
+own unperturbed run, with a known difference planted at the sealed evidence-source boundary, naming
+the injection). The second is evidence that the *pipeline* works, never that the two
+implementations disagree, and it says so rather than leaving a reviewer to infer it.
 
 `mapping.json` carries either a resolvable `bhv-` id or `{"match": "none"}`. It never invents an
 id (FR-025): a suggestion that fabricates a behavior identity would make the reviewer's job

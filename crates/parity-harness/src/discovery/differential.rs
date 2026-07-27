@@ -254,6 +254,52 @@ pub async fn compare(
         normalized: reference_doc.clone(),
     };
 
+    Ok(result_from_sides(
+        input.candidate_id,
+        deacon,
+        reference,
+        characterization,
+        input.deliberately_invalid,
+    ))
+}
+
+/// Relate two sides' evidence into a [`DifferentialResult`].
+///
+/// Extracted from [`compare`] rather than duplicated, and it is the **only** place a
+/// comparison is defined. The pipeline proof (`super::pipeline_proof`) acquires its two
+/// sides differently — one of them is perturbed at the sealed evidence-source boundary —
+/// but it must relate them exactly as a live campaign does, or the proof would be asserting
+/// that *a* comparison propagates a difference rather than that *this* one does.
+pub(crate) fn result_from_sides(
+    candidate_id: &str,
+    deacon: SideEvidence,
+    reference: SideEvidence,
+    characterization: &Characterization,
+    deliberately_invalid: bool,
+) -> DifferentialResult {
+    let observations =
+        observations_between(&deacon, &reference, characterization, deliberately_invalid);
+    DifferentialResult {
+        candidate_id: candidate_id.to_string(),
+        parse_stage_failure: deacon.normalized.is_none() && reference.normalized.is_none(),
+        deacon,
+        reference,
+        observations,
+    }
+}
+
+/// Every difference between two sides' evidence, in the diff's deterministic order.
+///
+/// Three branches, and the middle one is the reason this is not simply "diff the two
+/// documents": a CLI that exits zero having emitted nothing parseable would otherwise be
+/// reported as agreement, which is the quietest possible failure and exactly the kind this
+/// feature exists to find.
+fn observations_between(
+    deacon: &SideEvidence,
+    reference: &SideEvidence,
+    characterization: &Characterization,
+    deliberately_invalid: bool,
+) -> Vec<Observation> {
     let mut observations = Vec::new();
 
     // `chan-exit-code`: the OUTCOME CLASS, never the numeric code and never the message.
@@ -277,7 +323,7 @@ pub async fn compare(
         let verdict = characterization.verdict(
             &signature,
             ObservationContext {
-                deliberately_invalid: input.deliberately_invalid,
+                deliberately_invalid,
                 stricter: Some(stricter),
             },
         );
@@ -297,8 +343,10 @@ pub async fn compare(
     // that exited zero having emitted nothing parseable would be reported as agreement.
     // That is the quietest possible failure and exactly the kind this feature exists to
     // find, so it is a difference in its own right.
-    if deacon.outcome == reference.outcome && deacon_doc.is_some() != reference_doc.is_some() {
-        let (kind, deacon_value, reference_value) = if deacon_doc.is_some() {
+    if deacon.outcome == reference.outcome
+        && deacon.normalized.is_some() != reference.normalized.is_some()
+    {
+        let (kind, deacon_value, reference_value) = if deacon.normalized.is_some() {
             (
                 DivergenceKind::DeaconOnly,
                 Some(Value::String("structured document".to_string())),
@@ -323,7 +371,7 @@ pub async fn compare(
         let verdict = characterization.verdict(
             &signature,
             ObservationContext {
-                deliberately_invalid: input.deliberately_invalid,
+                deliberately_invalid,
                 stricter: None,
             },
         );
@@ -340,13 +388,13 @@ pub async fn compare(
     // `chan-structured-output`: the normalized documents, compared only when BOTH sides
     // produced one. Comparing a document against an absence would re-report the presence
     // difference already recorded above, once per key.
-    if let (Some(d), Some(r)) = (&deacon_doc, &reference_doc) {
+    if let (Some(d), Some(r)) = (&deacon.normalized, &reference.normalized) {
         for divergence in normalize::diff(d, r) {
             let signature = signature_of(CHAN_STRUCTURED_OUTPUT, &divergence);
             let verdict = characterization.verdict(
                 &signature,
                 ObservationContext {
-                    deliberately_invalid: input.deliberately_invalid,
+                    deliberately_invalid,
                     // Not an outcome divergence: both sides resolved, so neither was
                     // stricter than the other about accepting the input.
                     stricter: None,
@@ -363,13 +411,7 @@ pub async fn compare(
         }
     }
 
-    Ok(DifferentialResult {
-        candidate_id: input.candidate_id.to_string(),
-        deacon,
-        reference,
-        parse_stage_failure: deacon_doc.is_none() && reference_doc.is_none(),
-        observations,
-    })
+    observations
 }
 
 /// **T035** — derive a signature from `normalize::diff`'s own output.
@@ -403,10 +445,27 @@ pub fn signature_of(channel: &str, divergence: &ConfigDivergence) -> Signature {
 /// here would be the second normalization path FR-015 forbids; *calling* them in the
 /// declared order is the reuse it requires.
 fn structured_document(invocation: &Invocation, workspace: &Path, side: Side) -> Option<Value> {
-    if !invocation.success {
+    structured_document_bytes(invocation.success, &invocation.stdout, workspace, side)
+}
+
+/// The same normalization, over raw captured bytes rather than an [`Invocation`].
+///
+/// The pipeline proof needs this seam: its deacon side is the stdout of a real run **after**
+/// a perturbation has been applied to it at the sealed evidence-source boundary, so there is
+/// no `Invocation` carrying those bytes — and reconstructing one would mean inventing a
+/// capture that never happened. Taking the bytes keeps the proof on the single normalization
+/// chain FR-015 permits instead of growing a second one beside it.
+pub(crate) fn structured_document_bytes(
+    success: bool,
+    stdout: &[u8],
+    workspace: &Path,
+    side: Side,
+) -> Option<Value> {
+    if !success {
         return None;
     }
-    let raw = invocation.stdout_json().ok()?;
+    let text = String::from_utf8_lossy(stdout);
+    let raw: Value = serde_json::from_str(text.trim()).ok()?;
     let tokens = normalize::tokens_for_channel(CHAN_STRUCTURED_OUTPUT, workspace);
     Some(normalize::config_document_rules(
         &normalize::path_token(&raw, &tokens),
