@@ -204,6 +204,9 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
     let mut generator = Generator::new(&grammar, request.seed);
     let mut counters = Counters::new();
     let mut admitted: Vec<String> = Vec::new();
+    // Signatures this campaign admitted that the standing queue did NOT already carry —
+    // what the admission cap is measured against (FR-034b).
+    let mut newly_admitted: BTreeSet<String> = BTreeSet::new();
     let mut suppressed: BTreeSet<String> = BTreeSet::new();
     let mut observed: BTreeSet<String> = BTreeSet::new();
 
@@ -319,12 +322,22 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
             let finding_id = observation.signature.finding_id();
             let already_known =
                 known_before.contains(&finding_id) || admitted.contains(&finding_id);
-            if !already_known && admitted.len() as u64 >= request.budget.admission_cap {
+            // The cap counts **newly distinct** signatures (FR-034b), not every finding
+            // this campaign touched. Measuring it against `admitted` — which also holds
+            // findings the standing queue already carried and this run merely re-witnessed
+            // — would let a queue that has grown past the cap freeze: every campaign would
+            // reach it on re-witnesses alone and suppress every genuinely new signature,
+            // forever. The cap exists to bound a review backlog, and re-observing something
+            // already in the queue adds nothing to that backlog.
+            if !already_known && newly_admitted.len() as u64 >= request.budget.admission_cap {
                 // FR-034b: never a silent truncation. The excess is reported, so a campaign
                 // that keeps hitting the cap is itself a visible signal that something
                 // systemic is diverging.
                 suppressed.insert(finding_id);
                 continue;
+            }
+            if !already_known {
+                newly_admitted.insert(finding_id.clone());
             }
             let witness = Witness {
                 id: Witness::derived_id(&campaign_id, &candidate.id),

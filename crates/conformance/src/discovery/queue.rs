@@ -157,6 +157,97 @@ impl FindingState {
             FindingState::NoLongerReproducing,
         ]
     }
+
+    /// Whether `self → next` is a transition data-model.md § 3's state machine declares
+    /// (**T069**).
+    ///
+    /// The permitted set is exactly the arrows in that diagram, and the three arrows it
+    /// does **not** draw are each absent for a reason worth stating, because each looks
+    /// plausible enough that someone will eventually add it:
+    ///
+    /// - **`untriaged → no-longer-reproducing`** is absent. `no-longer-reproducing`
+    ///   invalidates a *judgement*, and an untriaged finding has none — there is nothing
+    ///   for the disappearance to invalidate. Worse, the state requires a classification
+    ///   (**D2**), so allowing the arrow would manufacture a violation out of a campaign
+    ///   merely not re-observing something nobody had looked at. An untriaged finding that
+    ///   stops reproducing simply stays untriaged, which is the truth: it is still "not
+    ///   yet looked at".
+    /// - **`no-longer-reproducing → promoted`** is absent. Promotion authors a case
+    ///   asserting a difference the implementations exhibit *now*; a finding whose
+    ///   difference stopped reproducing has no current evidence, so promoting it would put
+    ///   a case in the registry that the next run cannot reproduce. Reviving it first (a
+    ///   campaign observing it again) is exactly the evidence promotion needs.
+    /// - **`untriaged → split`** is absent. A split exists because one *classification*
+    ///   could not describe several witnesses; before anyone has classified anything there
+    ///   is no judgement to separate.
+    ///
+    /// `promoted` and `split` are terminal. Re-classifying a finding *within* a state is
+    /// not a transition at all and does not consult this function — see
+    /// [`Finding::triage`].
+    pub fn may_transition_to(self, next: FindingState) -> bool {
+        matches!(
+            (self, next),
+            (FindingState::Untriaged, FindingState::Triaged)
+                | (FindingState::Triaged, FindingState::Split)
+                | (FindingState::Triaged, FindingState::Promoted)
+                | (FindingState::Triaged, FindingState::NoLongerReproducing)
+                | (FindingState::NoLongerReproducing, FindingState::Triaged)
+        )
+    }
+}
+
+/// Why a state change or a split was refused (**T069**/**T070**).
+///
+/// A rejected transition is an ordinary, expected outcome — a reviewer asking to promote
+/// a `normalizer-defect`, or to split a finding with a single witness — so it is a typed
+/// error rather than a panic, and every variant names the remedy rather than only the
+/// rule.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TransitionError {
+    /// The state machine declares no arrow from `from` to `to`.
+    #[error(
+        "finding `{finding}` cannot move from `{from}` to `{to}`: the lifecycle declares \
+         no such transition. Remedy: reach `{to}` through the declared path, or leave the \
+         finding where it is — a state reached out of order asserts an event that did not \
+         happen."
+    )]
+    NotPermitted {
+        finding: String,
+        from: &'static str,
+        to: &'static str,
+    },
+
+    /// A state that requires a classification was requested for a finding without one.
+    #[error(
+        "finding `{finding}` has no classification, and state `{to}` requires exactly one \
+         (FR-028). Remedy: `discovery triage {finding} --classification <c>` first."
+    )]
+    MissingClassification { finding: String, to: &'static str },
+
+    /// Promotion of a `normalizer-defect` / `fixture-defect` finding (FR-035).
+    #[error(
+        "finding `{finding}` is classified `{classification}`, which is not promotable \
+         (FR-035): it describes a defect in the discovery or comparison machinery, not a \
+         behavior of either implementation. Remedy: fix the normalizer or the generator — \
+         promoting it would record a claim about deacon or the reference that the evidence \
+         does not support."
+    )]
+    NonPromotable {
+        finding: String,
+        classification: &'static str,
+    },
+
+    /// A split was asked of a finding with fewer than two witnesses.
+    #[error(
+        "finding `{finding}` carries {witnesses} witness(es); a split separates witnesses \
+         whose causes differ, so there is nothing to separate. Remedy: wait for a second \
+         witness, or triage the finding as it stands."
+    )]
+    NothingToSplit { finding: String, witnesses: usize },
+
+    /// The named finding is not in the queue.
+    #[error("no finding `{finding}` in the queue")]
+    UnknownFinding { finding: String },
 }
 
 /// The two sides' concrete observed values for one witness.
@@ -271,11 +362,154 @@ impl Finding {
     /// Whether this finding is in a state that requires a classification (`triaged` or
     /// later, excluding `split`, whose classification belongs to its children — Q10).
     pub fn requires_classification(&self) -> bool {
-        matches!(
-            self.state,
-            FindingState::Triaged | FindingState::Promoted | FindingState::NoLongerReproducing
-        )
+        state_requires_classification(self.state)
     }
+
+    /// A split child's `fnd-<hash8>`, over `parentId ‖ witnessId…` (**T070**).
+    ///
+    /// A child **cannot** use [`Signature::finding_id`], and the reason is structural
+    /// rather than stylistic: a split separates witnesses, not signatures, so every child
+    /// carries its parent's signature verbatim. Deriving from the signature would give the
+    /// parent and all its children one id — the duplicate the derivation exists to make
+    /// unrepresentable.
+    ///
+    /// Anchoring instead on `parent ‖ the witnesses this child claims` keeps the property
+    /// that matters: the id is a function of what the child *is*, so re-authoring the same
+    /// split reproduces the same ids (and therefore the same triage state), while moving a
+    /// witness between children correctly re-keys both. Witness ids are hashed in the order
+    /// given, and [`split_finding`] preserves the parent's witness order, so the result is
+    /// stable rather than dependent on iteration order.
+    pub fn derive_child_id(parent_id: &str, witness_ids: &[&str]) -> String {
+        let mut parts: Vec<&str> = Vec::with_capacity(witness_ids.len() + 1);
+        parts.push(parent_id);
+        parts.extend_from_slice(witness_ids);
+        format!("fnd-{}", super::hash8(&parts))
+    }
+
+    /// This finding's id as [`Finding::derive_child_id`] computes it from its own parent
+    /// and witnesses — `None` when it is not a split child.
+    pub fn derived_child_id(&self) -> Option<String> {
+        let parent = self.split_from.as_deref()?;
+        let witnesses: Vec<&str> = self.witnesses.iter().map(|w| w.id.as_str()).collect();
+        Some(Finding::derive_child_id(parent, &witnesses))
+    }
+
+    /// Record a reviewer's classification (**T069**), advancing `untriaged → triaged`.
+    ///
+    /// Re-classifying a finding that is already `triaged` or `no-longer-reproducing` is
+    /// **not** a transition and deliberately leaves the state alone: only a campaign that
+    /// actually reproduces a finding may move it out of `no-longer-reproducing`
+    /// (contracts/findings-queue.md, "Reproduction lifecycle"). Advancing it here would
+    /// assert an observation nothing made and would silently empty the FR-033 bucket the
+    /// report exists to show.
+    ///
+    /// Refused for `promoted` (terminal) and `split` (an inert ancestor that surrendered
+    /// classification to its children — Q10).
+    pub fn triage(
+        &mut self,
+        classification: Classification,
+        notes: Option<&str>,
+    ) -> Result<FindingState, TransitionError> {
+        if matches!(self.state, FindingState::Promoted | FindingState::Split) {
+            return Err(TransitionError::NotPermitted {
+                finding: self.id.clone(),
+                from: self.state.as_str(),
+                to: FindingState::Triaged.as_str(),
+            });
+        }
+        if self.state == FindingState::Untriaged {
+            // Asserted rather than assumed: if the table ever stopped declaring this
+            // arrow, triage must fail loudly instead of quietly writing a state the
+            // lifecycle no longer recognizes.
+            if !self.state.may_transition_to(FindingState::Triaged) {
+                return Err(TransitionError::NotPermitted {
+                    finding: self.id.clone(),
+                    from: self.state.as_str(),
+                    to: FindingState::Triaged.as_str(),
+                });
+            }
+            self.state = FindingState::Triaged;
+        }
+        self.classification = Some(classification);
+        if let Some(notes) = notes {
+            self.notes = notes.to_string();
+        }
+        Ok(self.state)
+    }
+
+    /// Move a triaged finding to `promoted`, naming the registry case that now carries it.
+    ///
+    /// Refuses a non-promotable classification **by construction** (FR-035) rather than
+    /// leaving it to the checker: `check` runs over committed data, so a promotion that
+    /// only failed there would already have been written, and the record it wrote is the
+    /// one claiming coverage that cannot exist.
+    ///
+    /// Whether `case_id` resolves to a real case is **D3**'s question (US5, T080) — this
+    /// method cannot answer it without the registry, and inventing a partial check here
+    /// would make the real one look redundant.
+    pub fn promote(&mut self, case_id: &str) -> Result<(), TransitionError> {
+        let Some(classification) = self.classification else {
+            return Err(TransitionError::MissingClassification {
+                finding: self.id.clone(),
+                to: FindingState::Promoted.as_str(),
+            });
+        };
+        if !classification.is_promotable() {
+            return Err(TransitionError::NonPromotable {
+                finding: self.id.clone(),
+                classification: classification.as_str(),
+            });
+        }
+        if !self.state.may_transition_to(FindingState::Promoted) {
+            return Err(TransitionError::NotPermitted {
+                finding: self.id.clone(),
+                from: self.state.as_str(),
+                to: FindingState::Promoted.as_str(),
+            });
+        }
+        self.state = FindingState::Promoted;
+        self.promoted_to = Some(case_id.to_string());
+        Ok(())
+    }
+
+    /// Record that this finding's difference stopped reproducing (FR-033).
+    ///
+    /// **A state, not a deletion.** The disappearance is information: it may mean a fix
+    /// landed, or it may mean the generator stopped reaching the input, and only the
+    /// retained record tells those apart. [`upsert_finding`] revives it to `triaged`,
+    /// keeping its classification, if a later campaign reproduces it.
+    pub fn mark_no_longer_reproducing(&mut self) -> Result<(), TransitionError> {
+        if self.classification.is_none() {
+            return Err(TransitionError::MissingClassification {
+                finding: self.id.clone(),
+                to: FindingState::NoLongerReproducing.as_str(),
+            });
+        }
+        if !self
+            .state
+            .may_transition_to(FindingState::NoLongerReproducing)
+        {
+            return Err(TransitionError::NotPermitted {
+                finding: self.id.clone(),
+                from: self.state.as_str(),
+                to: FindingState::NoLongerReproducing.as_str(),
+            });
+        }
+        self.state = FindingState::NoLongerReproducing;
+        Ok(())
+    }
+}
+
+/// Whether a state requires exactly one classification (Q4/Q10).
+///
+/// `split` is deliberately excluded: a split ancestor surrendered its classification to
+/// its children, because a split exists precisely because one classification could not
+/// describe them all.
+fn state_requires_classification(state: FindingState) -> bool {
+    matches!(
+        state,
+        FindingState::Triaged | FindingState::Promoted | FindingState::NoLongerReproducing
+    )
 }
 
 /// Reject an empty witness list at deserialize time (invariant Q2).
@@ -873,6 +1107,14 @@ pub enum Upsert {
     /// The finding already carried this exact witness (the same campaign re-observing
     /// the same candidate); nothing changed.
     AlreadyWitnessed,
+    /// The signature belongs to a **split lineage**, so nothing was merged and nothing was
+    /// created (FR-032).
+    ///
+    /// Reported distinctly from [`Upsert::AlreadyWitnessed`] because the two say different
+    /// things to a reader of the campaign log: "we have seen this exact observation before"
+    /// versus "a reviewer decided this signature covers several causes, and attributing a
+    /// new observation to one of them is a judgement only a reviewer can make".
+    SplitLineage,
 }
 
 /// Insert a new finding for `signature`, or append `witness` to the existing one
@@ -906,13 +1148,27 @@ pub fn upsert_finding(
     let id = signature.finding_id();
 
     let Some(existing) = findings.iter_mut().find(|f| f.id == id) else {
+        // A split lineage is never re-merged (FR-032) — including when the ANCESTOR is
+        // gone and only children remain. Without this clause the lookup above misses (a
+        // child's id is derived from its parent and witnesses, never from the signature),
+        // a fresh merged record is created under the ancestor's id, and the reviewer's
+        // decision that these witnesses have different causes is silently undone by the
+        // next campaign. Checking the children's own signature is what makes the rule hold
+        // on the lineage rather than on one record's continued existence.
+        if findings
+            .iter()
+            .any(|f| f.split_from.is_some() && f.signature.id == signature.id)
+        {
+            return Upsert::SplitLineage;
+        }
         findings.push(Finding::newly_admitted(signature, witness, campaign_id));
         return Upsert::Inserted;
     };
 
     if existing.state == FindingState::Split {
-        // An inert ancestor accepts no new witnesses (invariant Q10).
-        return Upsert::AlreadyWitnessed;
+        // An inert ancestor accepts no new witnesses (invariant Q10). Attributing the
+        // observation to one of its children is a judgement only a reviewer can make.
+        return Upsert::SplitLineage;
     }
     if existing.witnesses.iter().any(|w| w.id == witness.id) {
         return Upsert::AlreadyWitnessed;
@@ -924,6 +1180,117 @@ pub fn upsert_finding(
         existing.state = FindingState::Triaged;
     }
     Upsert::WitnessAppended
+}
+
+// ---------------------------------------------------------------------------
+// T070 — split with `splitFrom` lineage
+// ---------------------------------------------------------------------------
+
+/// What a [`split_finding`] call produced: the ancestor and the children it now has.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Split {
+    /// The finding that became an inert ancestor.
+    pub parent: String,
+    /// The children, in the parent's own witness order. Always ≥ 2 (invariant Q10).
+    pub children: Vec<String>,
+}
+
+/// Split a signature-merged finding whose witnesses turn out to have different causes
+/// (FR-032, invariant Q10).
+///
+/// # What the split does
+///
+/// The parent becomes an **inert ancestor**: it keeps its witnesses as historical record,
+/// accepts no new ones ([`upsert_finding`] enforces that), and surrenders its
+/// classification, because a split exists precisely because one classification could not
+/// describe them all. A parent that kept a classification would assert the judgement the
+/// split rejected.
+///
+/// # Why one child per witness
+///
+/// `discovery split <fnd-id>` takes no grouping argument (contracts/discovery-cli.md), so
+/// the only partition derivable from the reviewer's actual statement — "these witnesses
+/// have different causes" — is the finest one. Guessing a coarser grouping would re-assert
+/// a merge the reviewer just rejected, and it would have to guess *which* witnesses share
+/// a cause, which is the very judgement the split was invoked to record. A reviewer who
+/// concludes two children share a cause triages them identically; nothing is lost, whereas
+/// a wrong merge is not recoverable without re-splitting.
+///
+/// Each child carries its parent's signature verbatim (a split separates witnesses, not
+/// signatures), takes its own [`Finding::derive_child_id`], starts `untriaged` with no
+/// classification, and names the parent in `splitFrom`.
+///
+/// # Errors
+///
+/// - [`TransitionError::UnknownFinding`] when nothing carries that id.
+/// - [`TransitionError::NotPermitted`] when the finding is already `split` or `promoted`,
+///   or is not in a state the lifecycle lets a split leave (see
+///   [`FindingState::may_transition_to`]).
+/// - [`TransitionError::NothingToSplit`] with fewer than two witnesses.
+///
+/// On any error the queue is left **untouched**: every check runs before the first
+/// mutation, so a refused split cannot leave a parent marked inert with no children — a
+/// shape that is both a **D2** and a Q10 violation and that nothing would then repair.
+pub fn split_finding(
+    findings: &mut Vec<Finding>,
+    parent_id: &str,
+) -> Result<Split, TransitionError> {
+    let Some(index) = findings.iter().position(|f| f.id == parent_id) else {
+        return Err(TransitionError::UnknownFinding {
+            finding: parent_id.to_string(),
+        });
+    };
+    let parent = &findings[index];
+
+    // Witness arity first, deliberately. It is the more fundamental objection — a finding
+    // with one witness has nothing to separate whatever state it is in — so reporting it
+    // first tells a reviewer the thing they can act on rather than sending them to triage a
+    // finding that still could not be split afterwards.
+    if parent.witnesses.len() < 2 {
+        return Err(TransitionError::NothingToSplit {
+            finding: parent.id.clone(),
+            witnesses: parent.witnesses.len(),
+        });
+    }
+    if !parent.state.may_transition_to(FindingState::Split) {
+        return Err(TransitionError::NotPermitted {
+            finding: parent.id.clone(),
+            from: parent.state.as_str(),
+            to: FindingState::Split.as_str(),
+        });
+    }
+
+    let signature = parent.signature.clone();
+    let children: Vec<Finding> = parent
+        .witnesses
+        .iter()
+        .map(|witness| Finding {
+            id: Finding::derive_child_id(parent_id, &[witness.id.as_str()]),
+            signature: signature.clone(),
+            witnesses: vec![witness.clone()],
+            classification: None,
+            state: FindingState::Untriaged,
+            // The child's provenance is its own witness's campaign, not the parent's:
+            // `firstObserved` / `lastObserved` assert an observation of THIS finding, and
+            // the parent's may name a campaign that witnessed a sibling instead.
+            first_observed: witness.campaign_id.clone(),
+            last_observed: witness.campaign_id.clone(),
+            promoted_to: None,
+            split_from: Some(parent_id.to_string()),
+            notes: String::new(),
+        })
+        .collect();
+
+    let parent = &mut findings[index];
+    parent.state = FindingState::Split;
+    parent.classification = None;
+
+    let split = Split {
+        parent: parent_id.to_string(),
+        children: children.iter().map(|c| c.id.clone()).collect(),
+    };
+    findings.extend(children);
+    Ok(split)
 }
 
 // ---------------------------------------------------------------------------
@@ -985,19 +1352,21 @@ impl<'a> RegistryView<'a> {
 /// Reports **all** violations in one pass, matching `validate` — a checker that stops at
 /// the first problem makes fixing a batch an iterative guessing game.
 ///
-/// Currently emits **D1** and **D5**, which is this phase's scope (T021):
+/// Currently emits **D1**, **D2**, and **D5**:
 ///
 /// | Class | Checked here |
 /// |---|---|
-/// | **D1** | derived-id mismatch (signature, finding, witness, **campaign**); duplicate id; empty `witnesses`; a signature naming an undeclared channel; a `firstObserved`/`lastObserved` that does not resolve **or is not backed by a witness**; a witness naming an unresolvable campaign; a `splitFrom` that is self-referential or unresolvable; a campaign `profile` absent from `profiles.json`; a non-finite `spaceCoveredFraction`; an empty seed; an empty repo-owned pinned-input element |
+/// | **D1** | derived-id mismatch (signature, finding, **split child**, witness, **campaign**); duplicate id; empty `witnesses`; a signature naming an undeclared channel; a `firstObserved`/`lastObserved` that does not resolve **or is not backed by a witness**; a witness naming an unresolvable campaign; a `splitFrom` that is self-referential or unresolvable; a `split` ancestor with fewer than two children; a campaign `profile` absent from `profiles.json`; a non-finite `spaceCoveredFraction`; an empty seed; an empty repo-owned pinned-input element |
+/// | **D2** | a `triaged`/`promoted`/`no-longer-reproducing` finding with no classification; an `untriaged` or `split` finding carrying one; a `promoted` finding classified `normalizer-defect` / `fixture-defect` |
 /// | **D5** | a `schemaPin` / `prosePin` / `oracleVersion` naming a revision absent from `revisions.json` |
 ///
-/// **D2** (classification arity), **D3** (`promotedTo` resolution), and **D4** (corpus
-/// immutability) are added by the user stories that own those rules (T068 / T080 / T105);
-/// each is an independent pass over the same loaded data, so adding one changes no
-/// existing call site. Until then a hand-edited `state: promoted` is NOT caught here —
-/// which is why the promotion path itself refuses a non-promotable classification rather
-/// than relying on the checker.
+/// **D3** (`promotedTo` resolution) and **D4** (corpus immutability) are added by the user
+/// stories that own those rules (T080 / T105); each is an independent pass over the same
+/// loaded data, so adding one changes no existing call site.
+///
+/// D2 is checked here *and* refused by [`Finding::promote`], deliberately: `check` runs
+/// over committed data, so a promotion that only failed here would already have been
+/// written, and the record it wrote is the one claiming coverage that cannot exist.
 ///
 /// Empty `witnesses` is listed under D1 above and is *also* rejected at deserialize time
 /// ([`non_empty_witnesses`]). That is deliberate belt-and-braces: the loader rejection
@@ -1007,6 +1376,7 @@ impl<'a> RegistryView<'a> {
 pub fn check(data: &DiscoveryData, registry: &RegistryView<'_>) -> Vec<DiscoveryError> {
     let mut violations = Vec::new();
     check_findings(data, registry, &mut violations);
+    check_classifications(data, &mut violations);
     check_campaigns(data, registry, &mut violations);
     violations
 }
@@ -1034,24 +1404,45 @@ fn check_findings(
                 ),
             });
         }
-        // The derived-finding-id rule applies to findings the DEDUPLICATION owns, which
-        // is every finding except a split child. A child shares its parent's signature by
-        // construction (a split separates witnesses, not signatures), so it cannot also
-        // share the parent's derived id — the two requirements are incompatible, and the
-        // rule that has to give is this one. The child's own id rule is a substantive
-        // identity decision that belongs with the lineage work (T070/T072); what matters
-        // here is that the check does not demand something no valid child could satisfy.
-        if finding.split_from.is_none() {
-            let derived_finding_id = finding.signature.finding_id();
-            if finding.id != derived_finding_id {
-                out.push(DiscoveryError::MalformedRecord {
-                    record: finding.id.clone(),
-                    cause: format!(
-                        "finding id does not match its signature (expected \
-                         `{derived_finding_id}`) — the id is derived precisely so two \
-                         findings cannot share a signature"
-                    ),
-                });
+        // Two id rules, one per lineage position (**T070**).
+        //
+        // A finding the DEDUPLICATION owns takes its id from its signature, which is what
+        // makes two findings with one signature unrepresentable. A split CHILD cannot: it
+        // carries its parent's signature verbatim (a split separates witnesses, not
+        // signatures), so signature-derivation would give the parent and every child one
+        // id — exactly the duplicate the derivation exists to prevent. A child therefore
+        // anchors on `parent ‖ its own witnesses`, which keeps the same property (the id is
+        // a function of what the record is) without the collision.
+        //
+        // Both are checked. An unchecked derivation is a comment: a hand-edited child id
+        // would silently detach the record from its lineage, and re-authoring the same
+        // split would then produce a second copy under the correct id.
+        match finding.derived_child_id() {
+            None => {
+                let derived_finding_id = finding.signature.finding_id();
+                if finding.id != derived_finding_id {
+                    out.push(DiscoveryError::MalformedRecord {
+                        record: finding.id.clone(),
+                        cause: format!(
+                            "finding id does not match its signature (expected \
+                             `{derived_finding_id}`) — the id is derived precisely so two \
+                             findings cannot share a signature"
+                        ),
+                    });
+                }
+            }
+            Some(derived_child_id) => {
+                if finding.id != derived_child_id {
+                    out.push(DiscoveryError::MalformedRecord {
+                        record: finding.id.clone(),
+                        cause: format!(
+                            "split-child id does not match `splitFrom ‖ its witness ids` \
+                             (expected `{derived_child_id}`) — a child that is not keyed to \
+                             its own lineage detaches from it, and re-authoring the same \
+                             split then produces a second copy"
+                        ),
+                    });
+                }
             }
         }
         if !seen.insert(finding.id.as_str()) {
@@ -1150,6 +1541,107 @@ fn check_findings(
                     reference: parent.clone(),
                 });
             }
+        }
+
+        // Q10: a split ancestor has at least two children naming it. One child is not a
+        // split — it is the same finding with a new id — and zero children is the shape a
+        // half-finished split leaves behind: a parent that has surrendered its
+        // classification and accepts no new witnesses, with nothing carrying its evidence
+        // forward. [`split_finding`] cannot produce either, so reaching them means a hand
+        // edit, which is exactly what a checker is for.
+        if finding.state == FindingState::Split {
+            let children = data
+                .findings
+                .iter()
+                .filter(|f| f.split_from.as_deref() == Some(finding.id.as_str()))
+                .count();
+            if children < 2 {
+                out.push(DiscoveryError::MalformedRecord {
+                    record: finding.id.clone(),
+                    cause: format!(
+                        "state `split` with {children} child(ren); a split ancestor needs \
+                         at least two findings naming it in `splitFrom`, because a split \
+                         exists precisely to separate witnesses one classification could \
+                         not describe"
+                    ),
+                });
+            }
+        }
+    }
+}
+
+/// **D2** — classification arity and promotability (**T068**).
+///
+/// Q4 and Q6 of contracts/findings-queue.md, plus the half of Q10 that is about
+/// classification rather than lineage. All four shapes are one class because they are one
+/// defect: the queue asserting a judgement nobody made, or holding one that cannot lead
+/// anywhere.
+///
+/// **"More than one classification" is unrepresentable**, not unchecked: [`Finding`]
+/// carries `Option<Classification>`, and a JSON array where a string belongs is rejected by
+/// the strict loader before this ever runs. The arity rule therefore reduces here to its
+/// only reachable violation — *zero* where exactly one is required. That is the stronger
+/// outcome, not a gap: the invariant holds by construction on the side a checker would
+/// otherwise have to police.
+fn check_classifications(data: &DiscoveryData, out: &mut Vec<DiscoveryError>) {
+    for finding in &data.findings {
+        match (finding.state, finding.classification) {
+            // Q4 — exactly one, once triaged or later.
+            (state, None) if state_requires_classification(state) => {
+                out.push(DiscoveryError::ClassificationArity {
+                    record: finding.id.clone(),
+                    cause: format!(
+                        "state `{}` requires exactly one classification and the record \
+                         carries none",
+                        state.as_str()
+                    ),
+                });
+            }
+            // Q4 — `null` only while untriaged.
+            (FindingState::Untriaged, Some(classification)) => {
+                out.push(DiscoveryError::ClassificationArity {
+                    record: finding.id.clone(),
+                    cause: format!(
+                        "state `untriaged` carries classification `{}` — untriaged means \
+                         nobody has looked, so a classification here makes the FR-029 \
+                         bucket count something that has in fact been judged",
+                        classification.as_str()
+                    ),
+                });
+            }
+            // Q10 — a split ancestor surrenders its classification to its children.
+            (FindingState::Split, Some(classification)) => {
+                out.push(DiscoveryError::ClassificationArity {
+                    record: finding.id.clone(),
+                    cause: format!(
+                        "state `split` carries classification `{}` — a split exists \
+                         precisely because one classification could not describe all its \
+                         witnesses, so a parent that keeps one asserts the judgement the \
+                         split rejected",
+                        classification.as_str()
+                    ),
+                });
+            }
+            _ => {}
+        }
+        // Q6 — the two machinery classifications can never reach `promoted` (FR-035).
+        // Checked independently of the arity arms above so a promoted record with a
+        // non-promotable classification is reported for what it is rather than passing
+        // because it satisfied the arity rule.
+        if finding.state == FindingState::Promoted
+            && let Some(classification) = finding.classification
+            && !classification.is_promotable()
+        {
+            out.push(DiscoveryError::ClassificationArity {
+                record: finding.id.clone(),
+                cause: format!(
+                    "state `promoted` with classification `{}`, which is not promotable \
+                     (FR-035): it describes a defect in the discovery or comparison \
+                     machinery, not a behavior of either implementation, so no registry \
+                     case can legitimately carry it",
+                    classification.as_str()
+                ),
+            });
         }
     }
 }
@@ -1761,11 +2253,336 @@ mod tests {
                 witness(&cid("b"), "cnd-2"),
                 &cid("b")
             ),
-            Upsert::AlreadyWitnessed,
+            Upsert::SplitLineage,
             "re-merging a split lineage silently reverts a reviewer's judgement (FR-032)"
         );
         assert_eq!(findings[0].witnesses.len(), 1);
         assert_eq!(findings[0].last_observed, cid("a"));
+    }
+
+    // --- T070 split lineage -------------------------------------------------
+
+    #[test]
+    fn splitting_produces_one_lineage_keyed_child_per_witness() {
+        let mut findings = vec![Finding::newly_admitted(
+            signature("p"),
+            witness(&cid("a"), "cnd-1"),
+            &cid("a"),
+        )];
+        // Two witnesses and a reviewer's classification: the shape a split acts on.
+        upsert_finding(
+            &mut findings,
+            signature("p"),
+            witness(&cid("b"), "cnd-2"),
+            &cid("b"),
+        );
+        findings[0]
+            .triage(Classification::DeaconRegression, None)
+            .expect("triage");
+
+        let parent_id = findings[0].id.clone();
+        let split = split_finding(&mut findings, &parent_id).expect("split");
+        assert_eq!(split.children.len(), 2);
+
+        // The parent is an inert ancestor: witnesses retained, classification surrendered.
+        let parent = findings.iter().find(|f| f.id == parent_id).expect("parent");
+        assert_eq!(parent.state, FindingState::Split);
+        assert_eq!(parent.classification, None);
+        assert_eq!(parent.witnesses.len(), 2);
+
+        for (child_id, source) in split.children.iter().zip(parent.witnesses.clone()) {
+            let child = findings.iter().find(|f| &f.id == child_id).expect("child");
+            assert_eq!(child.split_from.as_deref(), Some(parent_id.as_str()));
+            assert_eq!(child.state, FindingState::Untriaged);
+            assert_eq!(child.classification, None);
+            assert_eq!(child.witnesses, vec![source.clone()]);
+            assert_eq!(child.first_observed, source.campaign_id);
+            assert_eq!(child.last_observed, source.campaign_id);
+            // Keyed to its own lineage, and NOT to the signature it shares with its parent.
+            assert_eq!(child.derived_child_id().as_deref(), Some(child_id.as_str()));
+            assert_ne!(child.id, child.signature.finding_id());
+        }
+        assert_ne!(split.children[0], split.children[1]);
+    }
+
+    #[test]
+    fn a_refused_split_leaves_the_queue_untouched() {
+        // Every check runs before the first mutation, so a refusal cannot leave a parent
+        // marked inert with no children — a shape that is both a D2 and a Q10 violation
+        // and that nothing would then repair.
+        let mut findings = vec![Finding::newly_admitted(
+            signature("p"),
+            witness(&cid("a"), "cnd-1"),
+            &cid("a"),
+        )];
+        let before = findings.clone();
+        let id = findings[0].id.clone();
+
+        let err = split_finding(&mut findings, &id).expect_err("one witness cannot be split");
+        assert!(matches!(err, TransitionError::NothingToSplit { .. }));
+        assert!(err.to_string().contains("nothing to separate"));
+        assert_eq!(findings, before);
+
+        assert!(matches!(
+            split_finding(&mut findings, "fnd-nowhere"),
+            Err(TransitionError::UnknownFinding { .. })
+        ));
+        assert_eq!(findings, before);
+    }
+
+    #[test]
+    fn a_split_lineage_is_never_re_merged_even_after_the_ancestor_is_gone() {
+        // The clause that makes FR-032 hold on the LINEAGE rather than on one record's
+        // continued existence. Without it the id lookup misses (a child is keyed to its
+        // parent, not to the signature), a fresh merged record is created under the
+        // ancestor's id, and the reviewer's decision is silently undone.
+        let mut findings = vec![Finding::newly_admitted(
+            signature("p"),
+            witness(&cid("a"), "cnd-1"),
+            &cid("a"),
+        )];
+        upsert_finding(
+            &mut findings,
+            signature("p"),
+            witness(&cid("b"), "cnd-2"),
+            &cid("b"),
+        );
+        let parent_id = findings[0].id.clone();
+        findings[0]
+            .triage(Classification::DeaconRegression, None)
+            .expect("triage");
+        split_finding(&mut findings, &parent_id).expect("split");
+
+        findings.retain(|f| f.id != parent_id);
+        assert_eq!(
+            upsert_finding(
+                &mut findings,
+                signature("p"),
+                witness(&cid("a"), "cnd-9"),
+                &cid("a")
+            ),
+            Upsert::SplitLineage
+        );
+        assert_eq!(findings.len(), 2, "no merged record may be resurrected");
+    }
+
+    // --- T069 state machine -------------------------------------------------
+
+    #[test]
+    fn the_transition_table_is_exactly_the_declared_state_machine() {
+        use FindingState::*;
+        let permitted = [
+            (Untriaged, Triaged),
+            (Triaged, Split),
+            (Triaged, Promoted),
+            (Triaged, NoLongerReproducing),
+            (NoLongerReproducing, Triaged),
+        ];
+        for &from in FindingState::all() {
+            for &to in FindingState::all() {
+                assert_eq!(
+                    from.may_transition_to(to),
+                    permitted.contains(&(from, to)),
+                    "{} -> {}",
+                    from.as_str(),
+                    to.as_str()
+                );
+            }
+        }
+        // The three arrows that look plausible and are absent on purpose.
+        assert!(!Untriaged.may_transition_to(NoLongerReproducing));
+        assert!(!Untriaged.may_transition_to(Split));
+        assert!(!NoLongerReproducing.may_transition_to(Promoted));
+        // Terminal states go nowhere.
+        for &to in FindingState::all() {
+            assert!(!Promoted.may_transition_to(to));
+            assert!(!Split.may_transition_to(to));
+        }
+    }
+
+    #[test]
+    fn triage_advances_only_out_of_untriaged_and_never_out_of_a_terminal_state() {
+        let mut finding =
+            Finding::newly_admitted(signature("p"), witness(&cid("a"), "cnd-1"), &cid("a"));
+
+        assert_eq!(
+            finding
+                .triage(Classification::DeaconRegression, Some("because"))
+                .expect("first triage"),
+            FindingState::Triaged
+        );
+        assert_eq!(finding.notes, "because");
+
+        // Re-classifying is not a transition: the state stays put.
+        assert_eq!(
+            finding.triage(Classification::SpecAmbiguity, None).unwrap(),
+            FindingState::Triaged
+        );
+        assert_eq!(finding.classification, Some(Classification::SpecAmbiguity));
+
+        // And a no-longer-reproducing finding is classifiable WITHOUT being revived: only
+        // a campaign that reproduces it may do that.
+        finding
+            .mark_no_longer_reproducing()
+            .expect("stops reproducing");
+        assert_eq!(
+            finding
+                .triage(Classification::DeaconRegression, None)
+                .unwrap(),
+            FindingState::NoLongerReproducing
+        );
+
+        for terminal in [FindingState::Promoted, FindingState::Split] {
+            finding.state = terminal;
+            let err = finding
+                .triage(Classification::DeaconRegression, None)
+                .expect_err("a terminal state is not the reviewer's to re-classify");
+            assert!(matches!(err, TransitionError::NotPermitted { .. }));
+        }
+    }
+
+    #[test]
+    fn promotion_requires_a_classification_and_refuses_the_non_promotable_two() {
+        let mut finding =
+            Finding::newly_admitted(signature("p"), witness(&cid("a"), "cnd-1"), &cid("a"));
+
+        // Untriaged: no classification at all.
+        assert!(matches!(
+            finding.promote("case-x"),
+            Err(TransitionError::MissingClassification { .. })
+        ));
+
+        for non_promotable in [
+            Classification::NormalizerDefect,
+            Classification::FixtureDefect,
+        ] {
+            finding.state = FindingState::Untriaged;
+            finding.classification = None;
+            finding.triage(non_promotable, None).expect("triage");
+            let err = finding
+                .promote("case-x")
+                .expect_err("a machinery defect is not a behavior of either implementation");
+            assert!(matches!(err, TransitionError::NonPromotable { .. }));
+            assert!(err.to_string().contains("not promotable"));
+            assert_eq!(
+                finding.state,
+                FindingState::Triaged,
+                "a refused promotion must not move the finding"
+            );
+            assert_eq!(finding.promoted_to, None);
+        }
+
+        finding
+            .triage(Classification::DeaconRegression, None)
+            .expect("triage");
+        finding.promote("case-real").expect("promotable");
+        assert_eq!(finding.state, FindingState::Promoted);
+        assert_eq!(finding.promoted_to.as_deref(), Some("case-real"));
+
+        // Promoted is terminal.
+        assert!(matches!(
+            finding.promote("case-other"),
+            Err(TransitionError::NotPermitted { .. })
+        ));
+    }
+
+    #[test]
+    fn an_untriaged_finding_that_stops_reproducing_stays_untriaged() {
+        // The state requires a classification (D2), so allowing the arrow would manufacture
+        // a violation out of a campaign merely not re-observing something nobody had looked
+        // at.
+        let mut finding =
+            Finding::newly_admitted(signature("p"), witness(&cid("a"), "cnd-1"), &cid("a"));
+        let err = finding
+            .mark_no_longer_reproducing()
+            .expect_err("untriaged has no judgement for the disappearance to invalidate");
+        assert!(matches!(err, TransitionError::MissingClassification { .. }));
+        assert_eq!(finding.state, FindingState::Untriaged);
+    }
+
+    // --- T068 D2 ------------------------------------------------------------
+
+    #[test]
+    fn d2_a_triaged_or_later_finding_must_carry_a_classification() {
+        let revs = revisions();
+        for state in [
+            FindingState::Triaged,
+            FindingState::Promoted,
+            FindingState::NoLongerReproducing,
+        ] {
+            let mut data = clean_data();
+            data.findings[0].state = state;
+            data.findings[0].classification = None;
+            let violations = check(&data, &view(&revs));
+            assert!(
+                violations
+                    .iter()
+                    .any(|v| v.class() == "D2" && v.to_string().contains("carries none")),
+                "state {}: {violations:?}",
+                state.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn d2_an_untriaged_or_split_finding_must_not_carry_one() {
+        let revs = revisions();
+
+        let mut data = clean_data();
+        data.findings[0].classification = Some(Classification::DeaconRegression);
+        assert!(
+            check(&data, &view(&revs))
+                .iter()
+                .any(|v| v.class() == "D2" && v.to_string().contains("nobody has looked")),
+            "an untriaged finding carrying a classification makes the FR-029 bucket lie"
+        );
+
+        let mut data = clean_data();
+        data.findings[0].state = FindingState::Split;
+        data.findings[0].classification = Some(Classification::DeaconRegression);
+        assert!(
+            check(&data, &view(&revs))
+                .iter()
+                .any(|v| v.class() == "D2"
+                    && v.to_string().contains("the judgement the split rejected")),
+            "a split parent that keeps a classification asserts what the split rejected"
+        );
+    }
+
+    #[test]
+    fn d2_a_promoted_finding_may_not_be_classified_normalizer_or_fixture_defect() {
+        let revs = revisions();
+        for non_promotable in [
+            Classification::NormalizerDefect,
+            Classification::FixtureDefect,
+        ] {
+            let mut data = clean_data();
+            data.findings[0].state = FindingState::Promoted;
+            data.findings[0].classification = Some(non_promotable);
+            data.findings[0].promoted_to = Some("case-anything".into());
+            let violations = check(&data, &view(&revs));
+            assert!(
+                violations
+                    .iter()
+                    .any(|v| v.class() == "D2" && v.to_string().contains("not promotable")),
+                "{}: {violations:?}",
+                non_promotable.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn d1_a_split_ancestor_needs_at_least_two_children() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.findings[0].state = FindingState::Split;
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.class() == "D1" && v.to_string().contains("0 child(ren)")),
+            "{violations:?}"
+        );
     }
 
     // --- T021 D1 / D5 ------------------------------------------------------
@@ -2081,29 +2898,45 @@ mod tests {
     }
 
     #[test]
-    fn a_split_child_is_exempt_from_the_derived_finding_id_rule() {
+    fn a_split_child_is_keyed_to_its_lineage_rather_than_to_its_signature() {
         // A child shares its parent's signature by construction (a split separates
-        // witnesses, not signatures), so it cannot also share the parent's derived id.
-        // Demanding both would make every valid child a violation.
+        // witnesses, not signatures), so it cannot also carry the parent's derived id.
+        // It is not exempt from identity, though — it anchors on `parent ‖ its witnesses`,
+        // which keeps the property that matters without the collision.
         let revs = revisions();
         let mut data = clean_data();
-        let parent_id = data.findings[0].id.clone();
-        data.findings[0].state = FindingState::Split;
-
-        let mut child = data.findings[0].clone();
-        child.id = "fnd-child001".into();
-        child.state = FindingState::Untriaged;
-        child.classification = None;
-        child.split_from = Some(parent_id);
-        data.findings.push(child);
+        let mut findings = data.findings.clone();
+        data.campaigns.push(campaign("b"));
+        upsert_finding(
+            &mut findings,
+            signature("configuration.remoteUser"),
+            witness(&cid("b"), "cnd-22222222"),
+            &cid("b"),
+        );
+        findings[0]
+            .triage(Classification::DeaconRegression, None)
+            .expect("triage");
+        let parent_id = findings[0].id.clone();
+        split_finding(&mut findings, &parent_id).expect("split");
+        data.findings = findings;
 
         let violations = check(&data, &view(&revs));
         assert!(
             violations.is_empty(),
-            "a split child with its own id must not be a violation: {violations:?}"
+            "a split produced by the tooling must validate clean: {violations:?}"
         );
 
-        // The exemption is scoped: a NON-child with a wrong id is still caught.
+        // A hand-edited child id detaches the record from its lineage and is caught.
+        data.findings[1].id = "fnd-handwritten".into();
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.to_string().contains("split-child id does not match")),
+            "{violations:?}"
+        );
+
+        // And a NON-child with a wrong id is still judged against its signature.
         data.findings[1].split_from = None;
         let violations = check(&data, &view(&revs));
         assert!(

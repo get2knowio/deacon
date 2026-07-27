@@ -514,20 +514,19 @@ fn the_hermetic_discovery_surface_cannot_reach_the_network() {
 // T055 (US3, SC-014) — the surface never gates on what it found
 // ---------------------------------------------------------------------------
 
-/// Build a queue holding `paths.len()` untriaged findings plus the campaign that admitted
-/// them, using the real derived ids and the registry's real pins so it validates clean.
-///
-/// Deliberately routed through the strict loader (`FindingsFile` / `CampaignsFile`)
-/// rather than constructed as structs: the loader is part of the hermetic surface, and a
-/// fixture that bypassed it could assert a shape the real data root can never hold.
-fn synthetic_queue(registry: &Registry, paths: &[&str]) -> DiscoveryData {
+/// The certification profile every synthetic campaign in this file records.
+const SYNTHETIC_PROFILE: &str = "prof-linux-amd64-docker-0870";
+
+/// The pinned input set every synthetic campaign records — the registry's **real** pins,
+/// so a synthetic finding is never accidentally pin-stale and the pin-stale bucket keeps
+/// meaning what it says.
+fn synthetic_pins(registry: &Registry) -> queue::PinnedInputSet {
     let pins = discovery_report::CurrentPins::from_registry(registry);
     let oracle = pins
         .oracle_version
         .clone()
         .expect("the registry must record an oracle revision");
-    let profile = "prof-linux-amd64-docker-0870";
-    let pinned_input_set: queue::PinnedInputSet = serde_json::from_value(serde_json::json!({
+    serde_json::from_value(serde_json::json!({
         "schemaPin": pins.schema_pin,
         "prosePin": pins.prose_pin,
         "oracleVersion": oracle,
@@ -539,63 +538,32 @@ fn synthetic_queue(registry: &Registry, paths: &[&str]) -> DiscoveryData {
         "mutationCatalogVersion": "v1",
         "generatorVersion": deacon_conformance::discovery::rng::prng_identity()
     }))
-    .expect("the synthetic pinned input set must parse");
+    .expect("the synthetic pinned input set must parse")
+}
+
+/// One synthetic campaign, routed through the strict loader.
+///
+/// The id is **derived**, never chosen: `check` recomputes it from the record's own
+/// substance, so a hand-picked id would (correctly) fail the D1 identity clause and the
+/// fixture would stop being the clean queue these tests need. `seed` is what makes two
+/// calls two different campaigns.
+fn synthetic_campaign(
+    pinned_input_set: &queue::PinnedInputSet,
+    seed: &str,
+    admitted: u64,
+    suppressed: u64,
+) -> queue::Campaign {
     let lane = queue::CampaignLane::Scheduled;
     let tier = queue::CampaignTier::ConfigDifferential;
-    let campaign_id =
-        &queue::Campaign::derive_id("0x5eed1234", &pinned_input_set, lane, profile, tier);
-
-    let mut records = Vec::new();
-    for (index, path) in paths.iter().enumerate() {
-        let deacon = serde_json::json!("vscode");
-        let reference = serde_json::json!("root");
-        let signature = Signature::derive(
-            "chan-structured-output",
-            &Divergence {
-                kind: DivergenceKind::Value,
-                path,
-                deacon: Some(&deacon),
-                reference: Some(&reference),
-            },
-        );
-        let candidate_id = format!("cnd-0000000{index}");
-        records.push(serde_json::json!({
-            "id": signature.finding_id(),
-            "signature": signature,
-            "witnesses": [{
-                "id": queue::Witness::derived_id(campaign_id, &candidate_id),
-                "campaignId": campaign_id,
-                "candidateId": candidate_id,
-                "minimalInput": { "image": "alpine:3.18" },
-                "isMinimal": true,
-                "reductionSteps": ["drop-optional-key"],
-                "observedValues": { "deacon": "vscode", "reference": "root" },
-                "mutationOperators": ["mop-wrong-type"]
-            }],
-            "classification": null,
-            "state": "untriaged",
-            "firstObserved": campaign_id,
-            "lastObserved": campaign_id,
-            "promotedTo": null,
-            "splitFrom": null,
-            "notes": ""
-        }));
-    }
-
-    let findings: FindingsFile = serde_json::from_value(serde_json::json!({
-        "schemaVersion": queue::SCHEMA_VERSION,
-        "records": records,
-    }))
-    .expect("the synthetic findings must satisfy the strict loader");
-
-    let campaigns: CampaignsFile = serde_json::from_value(serde_json::json!({
+    let id = queue::Campaign::derive_id(seed, pinned_input_set, lane, SYNTHETIC_PROFILE, tier);
+    let file: CampaignsFile = serde_json::from_value(serde_json::json!({
         "schemaVersion": queue::SCHEMA_VERSION,
         "records": [{
-            "id": campaign_id,
-            "seed": "0x5eed1234",
+            "id": id,
+            "seed": seed,
             "lane": "scheduled",
             "tier": "config-differential",
-            "profile": profile,
+            "profile": SYNTHETIC_PROFILE,
             "pinnedInputSet": pinned_input_set,
             "budget": {
                 "wallClockSeconds": queue::DEFAULT_WALL_CLOCK_SECONDS,
@@ -611,17 +579,110 @@ fn synthetic_queue(registry: &Registry, paths: &[&str]) -> DiscoveryData {
                 "budgetExhausted": false,
                 "spaceCoveredFraction": 0.0,
                 "mutationApplications": { "unknown-field": 512 },
-                "signaturesObserved": paths.len(),
-                "signaturesAdmitted": paths.len(),
-                "signaturesSuppressed": 0
+                "signaturesObserved": admitted + suppressed,
+                "signaturesAdmitted": admitted,
+                "signaturesSuppressed": suppressed
             }
         }]
     }))
     .expect("the synthetic campaign must satisfy the strict loader");
+    file.records
+        .into_iter()
+        .next()
+        .expect("one synthetic campaign")
+}
+
+/// A value-difference signature at `path` on the structured-output channel.
+fn signature_at(path: &str) -> Signature {
+    let deacon = serde_json::json!("vscode");
+    let reference = serde_json::json!("root");
+    Signature::derive(
+        "chan-structured-output",
+        &Divergence {
+            kind: DivergenceKind::Value,
+            path,
+            deacon: Some(&deacon),
+            reference: Some(&reference),
+        },
+    )
+}
+
+/// A **present-versus-absent** signature at `path`: the same observable location as
+/// [`signature_at`], a different kind of difference, and therefore a different signature.
+fn absence_signature_at(path: &str) -> Signature {
+    let reference = serde_json::json!("root");
+    Signature::derive(
+        "chan-structured-output",
+        &Divergence {
+            kind: DivergenceKind::RefOnly,
+            path,
+            deacon: None,
+            reference: Some(&reference),
+        },
+    )
+}
+
+/// One witness of `signature`, attributed to `campaign` and `candidate`.
+///
+/// Routed through the strict loader for the same reason the queue is: a witness the real
+/// file could not hold would let a test assert a shape that cannot occur.
+fn synthetic_witness(campaign: &queue::Campaign, candidate: &str) -> queue::Witness {
+    serde_json::from_value(serde_json::json!({
+        "id": queue::Witness::derived_id(&campaign.id, candidate),
+        "campaignId": campaign.id,
+        "candidateId": candidate,
+        "minimalInput": { "image": "alpine:3.18" },
+        "isMinimal": true,
+        "reductionSteps": ["drop-optional-key"],
+        "observedValues": { "deacon": "vscode", "reference": "root" },
+        "mutationOperators": ["mop-wrong-type"]
+    }))
+    .expect("the synthetic witness must satisfy the strict loader")
+}
+
+/// Build a queue holding `paths.len()` untriaged findings plus the campaign that admitted
+/// them, using the real derived ids and the registry's real pins so it validates clean.
+///
+/// Deliberately routed through the strict loader (`FindingsFile` / `CampaignsFile`)
+/// rather than constructed as structs: the loader is part of the hermetic surface, and a
+/// fixture that bypassed it could assert a shape the real data root can never hold.
+fn synthetic_queue(registry: &Registry, paths: &[&str]) -> DiscoveryData {
+    let pinned_input_set = synthetic_pins(registry);
+    let campaign = synthetic_campaign(
+        &pinned_input_set,
+        "0x5eed1234",
+        paths.len() as u64,
+        /* suppressed */ 0,
+    );
+
+    let mut records = Vec::new();
+    for (index, path) in paths.iter().enumerate() {
+        let signature = signature_at(path);
+        let candidate_id = format!("cnd-0000000{index}");
+        let witness = synthetic_witness(&campaign, &candidate_id);
+        records.push(serde_json::json!({
+            "id": signature.finding_id(),
+            "signature": signature,
+            "witnesses": [witness],
+            "classification": null,
+            "state": "untriaged",
+            "firstObserved": campaign.id,
+            "lastObserved": campaign.id,
+            "promotedTo": null,
+            "splitFrom": null,
+            "notes": ""
+        }));
+    }
+
+    let findings: FindingsFile = serde_json::from_value(serde_json::json!({
+        "schemaVersion": queue::SCHEMA_VERSION,
+        "records": records,
+    }))
+    .expect("the synthetic findings must satisfy the strict loader");
 
     DiscoveryData {
         findings: findings.records,
-        campaigns: campaigns.records,
+        campaigns: vec![campaign],
     }
 }
 
@@ -751,4 +812,705 @@ fn the_discovery_surface_never_reaches_the_shipped_cli() {
          conformance-tracking command in the consumer surface is a scope violation that \
          ships to users and is then hard to withdraw. Subcommands found: {subcommands:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// US4 (T061–T066, T125) — classify and deduplicate what was found
+// ---------------------------------------------------------------------------
+
+/// Triage `finding` in place, failing the test with the refusal rather than swallowing it.
+fn triage(finding: &mut queue::Finding, classification: queue::Classification) {
+    finding
+        .triage(classification, None)
+        .unwrap_or_else(|e| panic!("triage must be accepted: {e}"));
+}
+
+/// Assert the queue has no D-class violation, naming every one it does have.
+fn assert_clean(data: &DiscoveryData, registry: &Registry, label: &str) {
+    let violations = queue::check(data, &queue::RegistryView::from_registry(registry));
+    assert!(
+        violations.is_empty(),
+        "the {label} queue must validate clean:\n{}",
+        violations
+            .iter()
+            .map(|v| format!("  {} {}: {v}", v.class(), v.record()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// **T061 / SC-007**: every finding either carries exactly one classification or sits in a
+/// visible unclassified bucket. None is in neither, none is in both.
+///
+/// The partition has **two** unclassified buckets, not one, and the second is easy to miss:
+/// `untriaged` (nobody has looked) and `split` (an inert ancestor that surrendered its
+/// classification to its children — Q10). Both are counted in the report, which is what
+/// keeps SC-007's "no finding is in neither state" true: a split parent is unclassified on
+/// purpose and is still visible, rather than being a third, silent category.
+///
+/// Both failure directions are exercised, because a checker that only caught the missing
+/// classification would let the opposite defect through — an untriaged finding carrying a
+/// judgement, which makes the FR-029 bucket count something that has in fact been judged.
+#[test]
+fn every_finding_carries_exactly_one_classification_or_is_visibly_unclassified() {
+    let registry = load_registry();
+    let view = queue::RegistryView::from_registry(&registry);
+    let pins = discovery_report::CurrentPins::from_registry(&registry);
+
+    let mut data = synthetic_queue(
+        &registry,
+        &[
+            "configuration.remoteUser",
+            "configuration.workspaceFolder",
+            "configuration.userEnvProbe",
+        ],
+    );
+    triage(
+        &mut data.findings[0],
+        queue::Classification::DeaconRegression,
+    );
+    triage(&mut data.findings[1], queue::Classification::ReferenceQuirk);
+    // The third stays untriaged: the partition must hold across a MIXED queue, which is
+    // the only state a real queue is ever in.
+
+    assert_clean(&data, &registry, "mixed");
+
+    let unclassified_states = [queue::FindingState::Untriaged, queue::FindingState::Split];
+    for finding in &data.findings {
+        let classified = finding.classification.is_some();
+        let visibly_unclassified = unclassified_states.contains(&finding.state);
+        assert_ne!(
+            classified,
+            visibly_unclassified,
+            "finding {} is in {} state(s): classification={:?}, state={} — SC-007 requires \
+             exactly one",
+            finding.id,
+            if classified { "both" } else { "neither" },
+            finding.classification,
+            finding.state.as_str()
+        );
+    }
+
+    // The report accounts for every finding, so "exactly one" is observable from the
+    // artifact and not only from the in-memory records.
+    let report = discovery_report::build_queue_report(&data, &pins);
+    assert_eq!(report.total, 3);
+    assert_eq!(report.untriaged.len(), 1);
+    assert_eq!(report.triaged.len(), 2);
+    assert!(
+        report.triaged.iter().all(|f| f.classification.is_some()),
+        "a triaged finding without a classification would be in NEITHER state"
+    );
+    assert!(
+        report.untriaged.iter().all(|f| f.classification.is_none()),
+        "an untriaged finding with a classification would be in BOTH"
+    );
+
+    // Direction 1: a classification that went missing.
+    let mut missing = data.clone();
+    missing.findings[0].classification = None;
+    assert!(
+        queue::check(&missing, &view)
+            .iter()
+            .any(|v| v.class() == "D2"),
+        "a triaged finding with no classification must be D2"
+    );
+
+    // Direction 2: a classification that arrived too early.
+    let mut premature = data.clone();
+    premature.findings[2].classification = Some(queue::Classification::SpecAmbiguity);
+    assert!(
+        queue::check(&premature, &view)
+            .iter()
+            .any(|v| v.class() == "D2"),
+        "an untriaged finding carrying a classification must be D2 — otherwise the visible \
+         unclassified bucket counts something that has been judged"
+    );
+}
+
+/// **T062 / SC-006**: equal signatures from two campaigns collapse to one finding with two
+/// witnesses — and repeating a campaign adds nothing at all.
+///
+/// The two halves are different claims. Collapsing says the queue reflects *distinct
+/// problems*; adding nothing on a repeat says it does not reflect *campaign volume*. A
+/// queue that grew by one record every night would be a log, and nobody triages a log.
+#[test]
+fn equal_signatures_from_two_campaigns_collapse_to_one_finding_with_two_witnesses() {
+    let registry = load_registry();
+    let pins = synthetic_pins(&registry);
+    let first = synthetic_campaign(&pins, "0x5eed0001", 1, 0);
+    let second = synthetic_campaign(&pins, "0x5eed0002", 1, 0);
+    assert_ne!(first.id, second.id, "two seeds are two campaigns");
+
+    let signature = signature_at("configuration.remoteUser");
+    let mut findings: Vec<queue::Finding> = Vec::new();
+
+    assert_eq!(
+        queue::upsert_finding(
+            &mut findings,
+            signature.clone(),
+            synthetic_witness(&first, "cnd-00000001"),
+            &first.id
+        ),
+        queue::Upsert::Inserted
+    );
+    // A DIFFERENT campaign, a DIFFERENT candidate, the SAME signature.
+    assert_eq!(
+        queue::upsert_finding(
+            &mut findings,
+            signature.clone(),
+            synthetic_witness(&second, "cnd-00000002"),
+            &second.id
+        ),
+        queue::Upsert::WitnessAppended
+    );
+
+    assert_eq!(findings.len(), 1, "equal signatures are one finding");
+    assert_eq!(findings[0].witnesses.len(), 2, "both observations retained");
+    assert_eq!(findings[0].first_observed, first.id);
+    assert_eq!(
+        findings[0].last_observed, second.id,
+        "the most recent campaign that reproduced it"
+    );
+
+    // One finding takes ONE classification, covering both witnesses.
+    triage(&mut findings[0], queue::Classification::DeaconRegression);
+    assert_eq!(
+        findings[0].classification,
+        Some(queue::Classification::DeaconRegression)
+    );
+
+    let data = DiscoveryData {
+        findings,
+        campaigns: vec![first.clone(), second.clone()],
+    };
+    assert_clean(&data, &registry, "merged");
+
+    // SC-006 proper: repeating a campaign with an unchanged seed and unchanged pins adds
+    // ZERO new findings — and does not even add a witness, because the same campaign
+    // observing the same candidate is the same observation.
+    let mut repeated = data.findings.clone();
+    assert_eq!(
+        queue::upsert_finding(
+            &mut repeated,
+            signature,
+            synthetic_witness(&second, "cnd-00000002"),
+            &second.id
+        ),
+        queue::Upsert::AlreadyWitnessed
+    );
+    assert_eq!(repeated, data.findings, "a repeat changes nothing at all");
+}
+
+/// **T063 / FR-031**: distinct signatures that map to the same behavior stay distinct
+/// findings. They are *reported* grouped; grouping is a view, never a merge.
+///
+/// Merging them would destroy the ability to tell whether a fix addressed one cause or all
+/// of them — which is precisely the question a reviewer asks after landing the fix.
+///
+/// Both grouping keys are exercised. The `behavior` key is a **reviewed** mapping: it
+/// exists only because a human promoted each finding into a case naming that behavior, and
+/// a finding never names a behavior itself (FR-025). The `observable-path` key is what
+/// relates two findings *before* anyone has decided what they mean, and it is deliberately
+/// not called a behavior claim.
+#[test]
+fn distinct_signatures_mapping_to_one_behavior_are_grouped_but_never_merged() {
+    let registry = load_registry();
+    let pins = discovery_report::CurrentPins::from_registry(&registry);
+    let behaviors = discovery_report::BehaviorIndex::from_registry(&registry);
+
+    // Two DIFFERENT signatures at the SAME observable location: one value difference and
+    // one present-versus-absent difference. Same channel, same path, different kind — so
+    // they are two signatures by construction, which is the situation FR-031 is about.
+    let mut data = synthetic_queue(&registry, &["configuration.remoteUser"]);
+    let campaign = data.campaigns[0].clone();
+    let second = absence_signature_at("configuration.remoteUser");
+    assert_ne!(
+        data.findings[0].signature.id, second.id,
+        "the fixture must really hold two distinct signatures"
+    );
+    queue::upsert_finding(
+        &mut data.findings,
+        second,
+        synthetic_witness(&campaign, "cnd-00000009"),
+        &campaign.id,
+    );
+    assert_eq!(data.findings.len(), 2, "distinct signatures stay distinct");
+    assert_clean(&data, &registry, "two-signature");
+
+    // Before promotion: grouped by the observable path they share, still two findings.
+    let report = discovery_report::build_queue_report_with_behaviors(&data, &pins, &behaviors);
+    assert_eq!(report.total, 2);
+    let path_group = report
+        .groups
+        .iter()
+        .find(|g| g.kind == discovery_report::GroupKind::ObservablePath)
+        .expect("two findings at one observable path must be grouped");
+    assert_eq!(path_group.findings.len(), 2);
+    assert_eq!(
+        path_group.key,
+        "chan-structured-output configuration.remoteUser"
+    );
+
+    // After promotion into ONE case: grouped by the behavior that case names.
+    let case = registry
+        .cases
+        .iter()
+        .find(|c| !c.behaviors.is_empty())
+        .expect("the registry must hold a case naming at least one behavior");
+    for finding in &mut data.findings {
+        triage(finding, queue::Classification::DeaconRegression);
+        finding
+            .promote(&case.id)
+            .unwrap_or_else(|e| panic!("a deacon-regression finding is promotable: {e}"));
+    }
+    assert_clean(&data, &registry, "promoted");
+
+    let report = discovery_report::build_queue_report_with_behaviors(&data, &pins, &behaviors);
+    let behavior_group = report
+        .groups
+        .iter()
+        .find(|g| g.kind == discovery_report::GroupKind::Behavior && g.key == case.behaviors[0])
+        .unwrap_or_else(|| {
+            panic!(
+                "both findings promoted into `{}` must be grouped under `{}`; groups: {:?}",
+                case.id, case.behaviors[0], report.groups
+            )
+        });
+    assert_eq!(behavior_group.findings.len(), 2);
+
+    // The grouping changed nothing about the findings themselves: two records, each with
+    // its own signature and its own witnesses.
+    assert_eq!(report.total, 2, "grouping is a view, never a merge");
+    assert_eq!(report.promoted.len(), 2);
+    assert_ne!(report.promoted[0].id, report.promoted[1].id);
+    assert_ne!(
+        report.promoted[0].value_shape_class, report.promoted[1].value_shape_class,
+        "the two findings really are different differences"
+    );
+    for summary in &report.promoted {
+        assert_eq!(
+            summary.witnesses, 1,
+            "witnesses stay with their own finding"
+        );
+    }
+
+    let md = discovery_report::render_md(&report);
+    assert!(
+        md.contains("never a merge"),
+        "the artifact must say what grouping is and is not: {md}"
+    );
+    assert!(md.contains(&case.behaviors[0]), "{md}");
+}
+
+/// **T064 / FR-035**: `normalizer-defect` and `fixture-defect` are rejected at promotion.
+///
+/// They describe a defect in the discovery or comparison machinery, not a behavior of
+/// either implementation, so promoting one would record a claim about deacon or the
+/// reference that the evidence does not support. Resolving them changes the normalizer or
+/// the generator.
+///
+/// Rejected in **two** places, and both matter. The promotion path refuses by construction,
+/// so the record is never written; **D2** refuses a hand edit that bypassed the path, so a
+/// record that was written anyway does not stand. A checker alone would be too late — by
+/// the time it runs, the queue is already claiming coverage that cannot exist.
+#[test]
+fn a_normalizer_or_fixture_defect_can_never_be_promoted() {
+    let registry = load_registry();
+    let view = queue::RegistryView::from_registry(&registry);
+    let case = registry
+        .cases
+        .first()
+        .expect("the registry must hold at least one case");
+
+    for non_promotable in [
+        queue::Classification::NormalizerDefect,
+        queue::Classification::FixtureDefect,
+    ] {
+        assert!(
+            !non_promotable.is_promotable(),
+            "{} must be non-promotable",
+            non_promotable.as_str()
+        );
+
+        let mut data = synthetic_queue(&registry, &["configuration.remoteUser"]);
+        triage(&mut data.findings[0], non_promotable);
+
+        // 1. The promotion path refuses, and leaves the record exactly as it was.
+        let before = data.findings[0].clone();
+        let err = data.findings[0]
+            .promote(&case.id)
+            .expect_err("a machinery defect is not a behavior of either implementation");
+        assert!(matches!(err, queue::TransitionError::NonPromotable { .. }));
+        assert!(err.to_string().contains("not promotable"), "{err}");
+        assert!(
+            err.to_string().contains("normalizer or the generator"),
+            "the diagnosis must name where the fix belongs: {err}"
+        );
+        assert_eq!(
+            data.findings[0], before,
+            "a refused promotion writes nothing"
+        );
+        assert_clean(&data, &registry, "refused-promotion");
+
+        // 2. And a hand edit that bypassed the path does not stand.
+        data.findings[0].state = queue::FindingState::Promoted;
+        data.findings[0].promoted_to = Some(case.id.clone());
+        let violations = queue::check(&data, &view);
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.class() == "D2" && v.to_string().contains("not promotable")),
+            "a hand-edited promotion of `{}` must be D2: {violations:?}",
+            non_promotable.as_str()
+        );
+    }
+
+    // The four promotable classifications really do promote, or the assertions above would
+    // pass equally for a promotion path that refuses everything.
+    for promotable in [
+        queue::Classification::DeaconRegression,
+        queue::Classification::ReferenceQuirk,
+        queue::Classification::SpecAmbiguity,
+        queue::Classification::UnsupportedBehavior,
+    ] {
+        let mut data = synthetic_queue(&registry, &["configuration.remoteUser"]);
+        triage(&mut data.findings[0], promotable);
+        data.findings[0]
+            .promote(&case.id)
+            .unwrap_or_else(|e| panic!("{} must promote: {e}", promotable.as_str()));
+        assert_eq!(data.findings[0].state, queue::FindingState::Promoted);
+        assert_clean(&data, &registry, "promoted");
+    }
+
+    // The process-level half must still exist: `discovery scaffold` refusing a
+    // non-promotable finding is what a reviewer actually meets, and deleting that test
+    // would leave the refusal asserted only where no reviewer runs it.
+    let cli_guard = workspace_root().join("crates/conformance/tests/discovery_cli.rs");
+    let cli_guard_text = std::fs::read_to_string(&cli_guard)
+        .unwrap_or_else(|e| panic!("the process-level promotion guard {cli_guard:?}: {e}"));
+    assert!(
+        cli_guard_text.contains("fn scaffold_writes_nothing_and_refuses_a_non_promotable_finding"),
+        "{cli_guard:?} must keep asserting the refusal from outside the process"
+    );
+}
+
+/// **T065 / FR-033**: a finding that stops reproducing is *reported* with the campaign that
+/// last observed it — never deleted.
+///
+/// Deleting it would destroy the ability to distinguish two very different situations: a
+/// fix landed, or the generator stopped reaching that input. The first is success; the
+/// second is a coverage regression in the discovery machinery itself. Only the retained
+/// record makes them separable, and only the retained *last observation* says which run to
+/// go back to.
+#[test]
+fn a_finding_that_stops_reproducing_is_reported_with_its_last_campaign() {
+    let registry = load_registry();
+    let pins = discovery_report::CurrentPins::from_registry(&registry);
+    let pinned = synthetic_pins(&registry);
+    let first = synthetic_campaign(&pinned, "0x5eed0011", 1, 0);
+    let second = synthetic_campaign(&pinned, "0x5eed0012", 1, 0);
+
+    let signature = signature_at("configuration.remoteUser");
+    let mut findings: Vec<queue::Finding> = Vec::new();
+    queue::upsert_finding(
+        &mut findings,
+        signature.clone(),
+        synthetic_witness(&first, "cnd-00000001"),
+        &first.id,
+    );
+    queue::upsert_finding(
+        &mut findings,
+        signature.clone(),
+        synthetic_witness(&second, "cnd-00000002"),
+        &second.id,
+    );
+    triage(&mut findings[0], queue::Classification::DeaconRegression);
+
+    // A third campaign runs and does not reproduce it.
+    let third = synthetic_campaign(&pinned, "0x5eed0013", 0, 0);
+    findings[0]
+        .mark_no_longer_reproducing()
+        .expect("a triaged finding may stop reproducing");
+
+    let data = DiscoveryData {
+        findings,
+        campaigns: vec![first, second.clone(), third],
+    };
+    assert_clean(&data, &registry, "no-longer-reproducing");
+
+    let report = discovery_report::build_queue_report(&data, &pins);
+    assert_eq!(report.total, 1, "the record is retained, not deleted");
+    assert_eq!(report.no_longer_reproducing.len(), 1);
+    let summary = &report.no_longer_reproducing[0];
+    assert_eq!(
+        summary.last_observed, second.id,
+        "the bucket must name the campaign that LAST observed it — the run a reviewer goes \
+         back to"
+    );
+    assert_eq!(
+        summary.classification.as_deref(),
+        Some("deacon-regression"),
+        "the reviewer's judgement survives the disappearance"
+    );
+
+    let md = discovery_report::render_md(&report);
+    assert!(md.contains("| no-longer-reproducing | 1 |"), "{md}");
+    assert!(
+        md.contains(&second.id),
+        "the campaign that last saw it must be named in the artifact: {md}"
+    );
+    assert!(
+        md.contains("Retained, not deleted"),
+        "the report must say why the record is still there: {md}"
+    );
+
+    // And a later campaign that reproduces it revives it to `triaged`, KEEPING the
+    // classification — re-triaging a finding a reviewer already judged is wasted work.
+    let fourth = synthetic_campaign(&pinned, "0x5eed0014", 1, 0);
+    let mut revived = data.findings.clone();
+    assert_eq!(
+        queue::upsert_finding(
+            &mut revived,
+            signature,
+            synthetic_witness(&fourth, "cnd-00000004"),
+            &fourth.id
+        ),
+        queue::Upsert::WitnessAppended
+    );
+    assert_eq!(revived[0].state, queue::FindingState::Triaged);
+    assert_eq!(
+        revived[0].classification,
+        Some(queue::Classification::DeaconRegression)
+    );
+    assert_eq!(revived[0].last_observed, fourth.id);
+}
+
+/// **T066 / FR-029**: the untriaged count is visible, so "not yet looked at" can never read
+/// as "nothing found".
+///
+/// A status code cannot carry this distinction and neither can a bare list — the count has
+/// to be in the artifact, next to the total, where a reader who is skimming sees it. The
+/// three queues below are the three states that would otherwise be conflated: nothing
+/// found, nothing looked at, and everything looked at.
+#[test]
+fn the_untriaged_bucket_is_counted_so_nothing_looked_at_never_reads_as_nothing_found() {
+    let registry = load_registry();
+    let pins = discovery_report::CurrentPins::from_registry(&registry);
+    let paths = [
+        "configuration.remoteUser",
+        "configuration.workspaceFolder",
+        "configuration.userEnvProbe",
+    ];
+
+    let empty = discovery_report::build_queue_report(&DiscoveryData::default(), &pins);
+    let untouched = synthetic_queue(&registry, &paths);
+    let mut all_triaged = synthetic_queue(&registry, &paths);
+    for finding in &mut all_triaged.findings {
+        triage(finding, queue::Classification::DeaconRegression);
+    }
+    let untouched_report = discovery_report::build_queue_report(&untouched, &pins);
+    let triaged_report = discovery_report::build_queue_report(&all_triaged, &pins);
+
+    // Nothing found vs nothing looked at: the same total would be a lie, and the same
+    // untriaged count would hide the backlog.
+    assert_eq!((empty.total, empty.untriaged.len()), (0, 0));
+    assert_eq!(
+        (untouched_report.total, untouched_report.untriaged.len()),
+        (3, 3)
+    );
+    // Everything looked at: zero untriaged, and the total says the queue is NOT empty. A
+    // report that only carried the untriaged count would render this identically to the
+    // empty queue.
+    assert_eq!(
+        (triaged_report.total, triaged_report.untriaged.len()),
+        (3, 0)
+    );
+
+    for (label, report, untriaged) in [
+        ("empty", &empty, 0usize),
+        ("untouched", &untouched_report, 3),
+        ("all-triaged", &triaged_report, 0),
+    ] {
+        let md = discovery_report::render_md(report);
+        assert!(
+            md.contains(&format!("| untriaged | {untriaged} |")),
+            "the {label} report must COUNT the untriaged bucket, not merely list it: {md}"
+        );
+        assert!(
+            md.contains(&format!("| total | {} |", report.total)),
+            "the {label} report must carry the total beside it: {md}"
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&discovery_report::render_json(report)).expect("valid JSON");
+        assert_eq!(
+            json["untriaged"].as_array().map(Vec::len),
+            Some(untriaged),
+            "the {label} machine-readable artifact must carry the bucket too"
+        );
+    }
+
+    // Every untriaged finding is individually named, so the bucket is actionable rather
+    // than only a number.
+    for (summary, path) in untouched_report.untriaged.iter().zip(paths) {
+        assert_eq!(summary.path, path);
+        assert!(summary.id.starts_with("fnd-"));
+        assert_eq!(summary.classification, None);
+    }
+
+    // And an empty queue says what its emptiness does NOT mean.
+    let empty_md = discovery_report::render_md(&empty);
+    assert!(
+        empty_md.contains("it does not say the two implementations agree"),
+        "{empty_md}"
+    );
+}
+
+/// **T125 / FR-018**: no discovery source authors or extends an allowed-difference entry.
+///
+/// The allowed-difference mechanism records **reviewed** tolerances. A discovery program
+/// writing to it would let a difference disappear by being observed — the machinery would
+/// grow quieter exactly as it found more, and the growth would look like progress.
+///
+/// Note what is deliberately **not** forbidden: *reading* the mechanism. FR-017 requires a
+/// difference already covered by a case, waiver, or allowed difference to be reported as
+/// already-characterized rather than entering the queue as new, and that is exactly a read.
+/// The rule is about the write, so the guard is about the write — and it asserts the read
+/// still happens, because a scan that matched nothing would pass by checking nothing.
+#[test]
+fn no_discovery_source_writes_to_the_allowed_difference_mechanism() {
+    let sources = discovery_sources();
+    for required in [
+        "crates/conformance/src/discovery/queue.rs",
+        "crates/parity-harness/src/discovery/differential.rs",
+        "crates/parity-harness/src/discovery/campaign.rs",
+        "crates/conformance/src/bin/conformance.rs",
+    ] {
+        assert!(
+            sources.iter().any(|(p, _)| p == required),
+            "the scan must cover {required}; got {:?}",
+            sources.iter().map(|(p, _)| p).collect::<Vec<_>>()
+        );
+    }
+
+    /// Tokens that would AUTHOR or EXTEND a tolerance rather than read one.
+    ///
+    /// Constructing the record, pushing one onto a case, or emitting the JSON key — each
+    /// is a way to make a difference disappear by having observed it.
+    const FORBIDDEN: &[&str] = &[
+        "AllowedDifference {",
+        "AllowedDifference::",
+        "allowed_differences.push",
+        "allowed_differences.insert",
+        "allowed_differences.extend",
+        "allowed_differences.append",
+        "allowed_differences =",
+        "allowed_differences:",
+        "\"allowedDifferences\":",
+        "\"allowedDifferences\" :",
+    ];
+
+    let mut problems = Vec::new();
+    let mut reads = 0usize;
+    for (path, text) in &sources {
+        for (line_no, line) in text.lines().enumerate() {
+            let code = line.trim_start();
+            if code.starts_with("//") || code.starts_with("/*") || code.starts_with('*') {
+                continue;
+            }
+            for needle in FORBIDDEN {
+                if code.contains(needle) {
+                    problems.push(format!(
+                        "{path}:{}: `{needle}` authors or extends an allowed-difference \
+                         entry. That mechanism records REVIEWED tolerances; a discovery \
+                         program writing to it would let a difference disappear by being \
+                         observed (FR-018). Report the difference as a finding and let a \
+                         human decide whether it is tolerable.",
+                        line_no + 1
+                    ));
+                }
+            }
+            if code.contains("allowed_differences") {
+                reads += 1;
+            }
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "the discovery surface must never author a tolerance:\n{}",
+        problems.join("\n")
+    );
+    assert!(
+        reads > 0,
+        "the scan found no reference to `allowed_differences` at all. FR-017 requires \
+         discovery to READ the mechanism so an already-characterized difference does not \
+         enter the queue as new — so zero references means either that read was lost or \
+         this guard is matching nothing, and both are defects."
+    );
+}
+
+/// Every source file that makes up the discovery surface, hermetic **and** live.
+///
+/// The live half is the half that could plausibly author a tolerance: it is the side
+/// holding the registry it would have to write to. Scanning only the hermetic half would
+/// guard the place the mistake cannot happen.
+fn discovery_sources() -> Vec<(String, String)> {
+    /// This file. Excluded because it *is* the guard: its forbidden-token table contains
+    /// every pattern it searches for, so scanning itself would fail on its own definition.
+    /// Nothing is lost — a test file is not a discovery program, and the programs are all
+    /// scanned below.
+    const THE_GUARD_ITSELF: &str = "discovery_hermetic.rs";
+
+    let mut out = hermetic_discovery_sources();
+    // Whole directories: every module of the live discovery half, scanned without a name
+    // filter. The live half is the one that could plausibly author a tolerance — it is the
+    // side holding the registry — and a name filter there would have quietly skipped
+    // `differential.rs`, which is exactly where the mistake would live.
+    out.extend(rust_sources_in(
+        "crates/parity-harness/src/discovery",
+        |_| true,
+    ));
+    // Directories that hold unrelated programs too: take the discovery ones by name, plus
+    // `conformance.rs` in full — that binary hosts the whole dev CLI of which `discovery`
+    // is one command group, so a write anywhere in it is reachable from `discovery`
+    // regardless of which function holds it.
+    for dir in [
+        "crates/parity-harness/src/bin",
+        "crates/conformance/src/bin",
+        "crates/deacon/tests",
+    ] {
+        out.extend(rust_sources_in(dir, |name| {
+            name != THE_GUARD_ITSELF && (name.starts_with("discovery") || name == "conformance.rs")
+        }));
+    }
+    out.sort();
+    out
+}
+
+/// Every `.rs` file directly under `dir` (workspace-relative) whose file name `keep`
+/// accepts, as `(relative path, contents)`.
+fn rust_sources_in(dir: &str, keep: impl Fn(&str) -> bool) -> Vec<(String, String)> {
+    let root = workspace_root().join(dir);
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir(&root) else {
+        return out;
+    };
+    for entry in rd.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("rs") {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if !keep(&name) {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+        out.push((format!("{dir}/{name}"), text));
+    }
+    out
 }

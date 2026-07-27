@@ -793,7 +793,11 @@ fn discovery_report(registry_dir: &Path, out_dir: Option<PathBuf>) -> i32 {
     };
 
     let pins = discovery_report_mod::CurrentPins::from_registry(&registry);
-    let report = discovery_report_mod::build_queue_report(&data, &pins);
+    // The behavior index is what lets promoted findings be *reported* grouped under the
+    // behavior their case names (FR-031) — a reviewed mapping, never one the report
+    // invents, because a finding itself never names a behavior (FR-025).
+    let behaviors = discovery_report_mod::BehaviorIndex::from_registry(&registry);
+    let report = discovery_report_mod::build_queue_report_with_behaviors(&data, &pins, &behaviors);
     let dir = out_dir.unwrap_or_else(|| workspace_root().join("target").join("discovery"));
 
     match discovery_report_mod::write_queue_report(&dir, &report) {
@@ -803,16 +807,19 @@ fn discovery_report(registry_dir: &Path, out_dir: Option<PathBuf>) -> i32 {
             }
             eprintln!(
                 "wrote {} discovery artifact(s) to {} ({} finding(s): {} untriaged, {} triaged, \
-                 {} promoted, {} no-longer-reproducing, {} pin-stale; {} campaign(s))",
+                 {} split, {} promoted, {} no-longer-reproducing, {} pin-stale; {} campaign(s), \
+                 {} signature(s) suppressed)",
                 written.len(),
                 dir.display(),
                 report.total,
                 report.untriaged.len(),
                 report.triaged.len(),
+                report.split.len(),
                 report.promoted.len(),
                 report.no_longer_reproducing.len(),
                 report.pin_stale.len(),
                 report.campaigns.len(),
+                report.signatures_suppressed,
             );
             0
         }
@@ -865,35 +872,18 @@ fn discovery_triage(
         return 1;
     };
 
-    match finding.state {
-        // `promoted` is terminal, and `split` surrendered classification to its children
-        // — a parent that kept one would assert the judgement the split rejected (Q10).
-        queue::FindingState::Promoted | queue::FindingState::Split => {
-            eprintln!(
-                "error: finding `{finding_id}` is in terminal state `{}`; its classification \
-                 is not the reviewer's to change here",
-                finding.state.as_str()
-            );
+    // The state machine owns which states may be classified and which advance
+    // (`crates/conformance/src/discovery/queue.rs`, T069). Re-deciding that here would put
+    // the lifecycle in two places, and the copy the checker does not read is the one that
+    // drifts.
+    let previous_state = finding.state;
+    let new_state = match finding.triage(classification, notes) {
+        Ok(state) => state,
+        Err(e) => {
+            eprintln!("error: {e}");
             return 1;
         }
-        _ => {}
-    }
-
-    finding.classification = Some(classification);
-    // Advance the state ONLY out of `untriaged`. A `no-longer-reproducing` finding can
-    // legitimately be classified — a reviewer may well decide what it was after it stopped
-    // reproducing — but only a later campaign that actually reproduces it may move it back
-    // to `triaged` (contracts/findings-queue.md, "Reproduction lifecycle"). Setting the
-    // state here would assert an observation nothing made, and would silently empty the
-    // FR-033 bucket the report exists to show.
-    let previous_state = finding.state;
-    if finding.state == queue::FindingState::Untriaged {
-        finding.state = queue::FindingState::Triaged;
-    }
-    if let Some(notes) = notes {
-        finding.notes = notes.to_string();
-    }
-    let new_state = finding.state;
+    };
 
     match queue::write_findings(&discovery_dir, &data.findings) {
         Ok(()) => {
@@ -921,21 +911,19 @@ fn discovery_triage(
 /// `discovery split` (contracts/discovery-cli.md): split a signature-merged finding whose
 /// witnesses turn out to have different causes (FR-032).
 ///
-/// This performs the **parent-side** transition, which is the half the contract fully
-/// specifies (invariant Q10): the parent becomes an inert ancestor — it keeps its
-/// witnesses as historical record, stops accepting new ones (enforced by
-/// [`queue::upsert_finding`]), and **surrenders its classification to its children**,
-/// because a split exists precisely because one classification could not describe them
-/// all. A parent that kept a classification would assert the judgement the split rejected.
+/// The parent becomes an inert ancestor (invariant Q10): it keeps its witnesses as
+/// historical record, stops accepting new ones (enforced by [`queue::upsert_finding`], which
+/// refuses the whole lineage, not just this record), and **surrenders its classification to
+/// its children** — a split exists precisely because one classification could not describe
+/// them all, so a parent that kept one would assert the judgement the split rejected.
 ///
-/// Authoring the children is deliberately NOT done here yet: a child shares its parent's
-/// signature, so it cannot share the parent's *derived* id, and choosing that id rule is
-/// a substantive identity decision that belongs with the lineage work in **T070/T072**
-/// (which also relaxes `check`'s derived-id rule for split children). Inventing a rule
-/// here that T070 then had to change would silently re-key every child ever written.
+/// One child per witness, each keyed to `parent ‖ its own witness` and starting untriaged.
+/// See [`queue::split_finding`] for why the finest partition is the only one derivable from
+/// what the reviewer actually said.
 ///
-/// Exit `0` when the parent was marked; `1` on an unknown finding, a finding already
-/// terminal, or a finding with fewer than two witnesses (there is nothing to split).
+/// Exit `0` when the split was written; `1` on an unknown finding, a finding with fewer
+/// than two witnesses (there is nothing to split), or a finding in a state the lifecycle
+/// does not let a split leave.
 fn discovery_split(registry_dir: &Path, finding_id: &str) -> i32 {
     let discovery_dir = deacon_conformance::discovery_dir_for(registry_dir);
     let mut data = match load_discovery_data(&discovery_dir) {
@@ -943,43 +931,32 @@ fn discovery_split(registry_dir: &Path, finding_id: &str) -> i32 {
         Err(failure) => return report_discovery_load_failure(&failure, &discovery_dir),
     };
 
-    let Some(finding) = data.finding_mut(finding_id) else {
-        eprintln!(
-            "error: no finding `{finding_id}` in {}",
-            discovery_dir.display()
-        );
-        return 1;
+    let split = match queue::split_finding(&mut data.findings, finding_id) {
+        Ok(split) => split,
+        Err(e) => {
+            eprintln!("error: {e}");
+            if matches!(e, queue::TransitionError::UnknownFinding { .. }) {
+                eprintln!("       (searched {})", discovery_dir.display());
+            }
+            return 1;
+        }
     };
-
-    if matches!(
-        finding.state,
-        queue::FindingState::Promoted | queue::FindingState::Split
-    ) {
-        eprintln!(
-            "error: finding `{finding_id}` is already in state `{}`",
-            finding.state.as_str()
-        );
-        return 1;
-    }
-    if finding.witnesses.len() < 2 {
-        eprintln!(
-            "error: finding `{finding_id}` has {} witness(es); a split separates witnesses \
-             with different causes, so there is nothing to separate",
-            finding.witnesses.len()
-        );
-        return 1;
-    }
-
-    finding.state = queue::FindingState::Split;
-    finding.classification = None;
 
     match queue::write_findings(&discovery_dir, &data.findings) {
         Ok(()) => {
             eprintln!(
-                "marked {finding_id} as a split ancestor: it keeps its witnesses as historical \
-                 record, accepts no new ones, and carries no classification of its own. Author \
-                 its children (each naming `{finding_id}` in `splitFrom`) by hand until the \
-                 lineage tooling lands."
+                "split {finding_id} into {} child finding(s); it is now an inert ancestor \
+                 that keeps its witnesses as historical record, accepts no new ones, and \
+                 carries no classification of its own.",
+                split.children.len()
+            );
+            for child in &split.children {
+                eprintln!("  {child}");
+            }
+            eprintln!(
+                "Each child is untriaged: classify them separately with `discovery triage`. \
+                 The split is permanent — the deduplication rule never re-merges this \
+                 lineage, so your judgement is not reverted by the next campaign."
             );
             0
         }

@@ -23,8 +23,12 @@
 //! sorted. Two runs over the same data produce identical bytes, so the artifacts diff
 //! cleanly and a change in the report means a change in the queue.
 //!
-//! The campaign-level suppression detail and the per-behavior grouping view are extended
-//! by **T039**/**T073**; the five buckets below are the contract's own.
+//! ## Grouping is a view, never a merge
+//!
+//! Distinct signatures stay distinct findings even when they map to the same behavior
+//! (FR-031); they are *reported* grouped. Merging them would destroy the ability to tell
+//! whether a fix addressed one cause or all of them, so [`FindingGroup`] names the
+//! findings that relate and changes nothing about them.
 
 use std::path::{Path, PathBuf};
 
@@ -142,6 +146,75 @@ impl FindingSummary {
     }
 }
 
+/// Resolves a promoted finding to the behavior identities its case claims (**T073**).
+///
+/// Built from the registry rather than from the queue because a finding **never names a
+/// behavior**. That is not an omission: FR-025 forbids a discovery program inventing a
+/// behavior identity, so the only behavior a finding can honestly be grouped under is the
+/// one a human already attached to it — by promoting it into a case that names behaviors.
+/// Anything else would be the report asserting a mapping nobody reviewed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BehaviorIndex {
+    /// `case-<id>` → the behaviors that case claims, in the case's own declaration order.
+    case_behaviors: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+impl BehaviorIndex {
+    /// Index every registry case's behaviors.
+    pub fn from_registry(registry: &crate::load::Registry) -> BehaviorIndex {
+        BehaviorIndex {
+            case_behaviors: registry
+                .cases
+                .iter()
+                .map(|c| (c.id.clone(), c.behaviors.clone()))
+                .collect(),
+        }
+    }
+
+    /// The behaviors a finding is known to map to — empty unless it is promoted into a
+    /// case that resolves.
+    fn behaviors_of(&self, finding: &Finding) -> &[String] {
+        finding
+            .promoted_to
+            .as_deref()
+            .and_then(|case| self.case_behaviors.get(case))
+            .map_or(&[][..], Vec::as_slice)
+    }
+}
+
+/// How a [`FindingGroup`] was keyed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GroupKind {
+    /// A `bhv-` identity, resolved through a promoted finding's case. A *reviewed*
+    /// mapping.
+    Behavior,
+    /// `channel ‖ path` — the observable location the findings share. Explicitly **not** a
+    /// behavior claim: it is the strongest grouping available before a human has decided
+    /// what these differences mean.
+    ObservablePath,
+}
+
+/// Several distinct findings reported together (FR-031).
+///
+/// **Grouping is a view, never a merge.** FR-031 requires distinct signatures to stay
+/// distinct findings even when they map to the same behavior, and permits reporting them
+/// grouped. Merging would destroy the ability to tell whether a fix addressed one cause or
+/// all of them; grouping without merging keeps both facts — the reviewer sees the
+/// relationship, and each finding retains its own witnesses, its own classification, and
+/// its own promotion.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindingGroup {
+    /// The behavior id, or `channel ‖ path`.
+    pub key: String,
+    /// What the key is.
+    pub kind: GroupKind,
+    /// The findings sharing it — **≥ 2**, in the queue's own file order. A group of one is
+    /// the finding itself and would only pad the report.
+    pub findings: Vec<String>,
+}
+
 /// One campaign's volume line.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -208,17 +281,56 @@ pub struct QueueReport {
     pub no_longer_reproducing: Vec<FindingSummary>,
     /// Observed under pins that no longer match; awaiting re-evaluation.
     pub pin_stale: Vec<FindingSummary>,
+    /// Distinct findings that share a behavior or an observable path, reported together
+    /// and **never merged** (FR-031). Sorted by key, so the artifact is byte-stable.
+    pub groups: Vec<FindingGroup>,
     /// The campaign history, in file order.
     pub campaigns: Vec<CampaignSummary>,
+    /// Signatures the admission cap suppressed across every campaign (FR-034b).
+    ///
+    /// Surfaced as a queue-level total, not only per campaign, because that is the number
+    /// that tells a reviewer the queue is a *sample*: fifty untriaged findings beside a
+    /// suppression count of zero means "this is everything", and beside a count of three
+    /// hundred it means "this is what we could look at". A silent truncation would render
+    /// both identically.
+    pub signatures_suppressed: u64,
 }
 
-/// Build the report. Pure: no I/O, no clock, no environment.
+/// Build the report with no behavior mapping — grouping falls back to the observable path.
+///
+/// Pure: no I/O, no clock, no environment.
 pub fn build_queue_report(data: &DiscoveryData, pins: &CurrentPins) -> QueueReport {
+    build_queue_report_with_behaviors(data, pins, &BehaviorIndex::default())
+}
+
+/// Build the report, resolving promoted findings to the behaviors their cases claim
+/// (**T073**).
+///
+/// Pure: no I/O, no clock, no environment.
+pub fn build_queue_report_with_behaviors(
+    data: &DiscoveryData,
+    pins: &CurrentPins,
+    behaviors: &BehaviorIndex,
+) -> QueueReport {
     let mut report = QueueReport {
         total: data.findings.len(),
         campaigns: data.campaigns.iter().map(CampaignSummary::of).collect(),
+        signatures_suppressed: data
+            .campaigns
+            .iter()
+            .map(|c| c.outcome.signatures_suppressed)
+            .sum(),
         ..QueueReport::default()
     };
+
+    // Keyed collection for the FR-031 grouping view. A finding contributes to a behavior
+    // group for EVERY behavior its case claims — a case covering two behaviors relates its
+    // finding to both — and to its observable-path group regardless, so the relationship is
+    // visible before anything is promoted as well as after.
+    let mut behavior_groups: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let mut path_groups: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
 
     for finding in &data.findings {
         let summary = FindingSummary::of(finding);
@@ -238,6 +350,36 @@ pub fn build_queue_report(data: &DiscoveryData, pins: &CurrentPins) -> QueueRepo
             .is_some_and(|c| pins.differs_from(c))
         {
             report.pin_stale.push(summary);
+        }
+
+        for behavior in behaviors.behaviors_of(finding) {
+            behavior_groups
+                .entry(behavior.clone())
+                .or_default()
+                .push(finding.id.clone());
+        }
+        path_groups
+            .entry(format!(
+                "{} {}",
+                finding.signature.channel, finding.signature.path
+            ))
+            .or_default()
+            .push(finding.id.clone());
+    }
+
+    // Only groups of two or more: a group of one is the finding itself.
+    for (kind, source) in [
+        (GroupKind::Behavior, behavior_groups),
+        (GroupKind::ObservablePath, path_groups),
+    ] {
+        for (key, findings) in source {
+            if findings.len() >= 2 {
+                report.groups.push(FindingGroup {
+                    key,
+                    kind,
+                    findings,
+                });
+            }
         }
     }
 
@@ -281,7 +423,25 @@ pub fn render_md(report: &QueueReport) -> String {
         report.no_longer_reproducing.len()
     );
     let _ = writeln!(out, "| pin-stale | {} |", report.pin_stale.len());
-    let _ = writeln!(out, "| campaigns | {} |\n", report.campaigns.len());
+    let _ = writeln!(out, "| campaigns | {} |", report.campaigns.len());
+    let _ = writeln!(
+        out,
+        "| signatures suppressed | {} |\n",
+        report.signatures_suppressed
+    );
+
+    if report.signatures_suppressed > 0 {
+        let _ = writeln!(
+            out,
+            "**This queue is a sample.** {} distinct signature(s) were observed and not \
+             admitted, because their campaigns reached the admission cap. Read every count \
+             above against that number: suppression is reported precisely so \"we found 25 \
+             things\" can never be mistaken for \"we found many more than we can review\", \
+             and a campaign that keeps hitting its cap is itself a signal that something \
+             systemic is diverging (FR-034b).\n",
+            report.signatures_suppressed
+        );
+    }
 
     if report.total == 0 {
         let _ = writeln!(
@@ -358,6 +518,53 @@ pub fn render_md(report: &QueueReport) -> String {
                     .as_deref()
                     .map(|c| format!("`{c}`"))
                     .unwrap_or_else(|| "—".to_string()),
+            );
+        }
+        let _ = writeln!(out);
+    }
+
+    let _ = writeln!(out, "## Related findings ({})\n", report.groups.len());
+    let _ = writeln!(
+        out,
+        "Findings that share a behavior or an observable path. **Grouping is a view, never \
+         a merge** (FR-031): each finding below keeps its own witnesses, its own \
+         classification, and its own promotion, because merging them would destroy the \
+         ability to tell whether a fix addressed one cause or all of them.\n"
+    );
+    let _ = writeln!(
+        out,
+        "A `behavior` key is a *reviewed* mapping — it exists only because a human promoted \
+         a finding into a case naming that behavior. An `observable-path` key is not a \
+         behavior claim; it is the strongest relationship available before anyone has \
+         decided what these differences mean.\n"
+    );
+    let _ = writeln!(
+        out,
+        "One shape to read carefully: a **split lineage** appears as a group whose members \
+         share a single signature, because a split separates witnesses rather than \
+         signatures. That is the lineage, not several distinct causes — the causes are what \
+         the reviewer separated them to record, one classification per child.\n"
+    );
+    if report.groups.is_empty() {
+        let _ = writeln!(out, "_None._\n");
+    } else {
+        let _ = writeln!(out, "| key | kind | findings |");
+        let _ = writeln!(out, "|---|---|---|");
+        for group in &report.groups {
+            let _ = writeln!(
+                out,
+                "| `{}` | {} | {} |",
+                group.key,
+                match group.kind {
+                    GroupKind::Behavior => "behavior",
+                    GroupKind::ObservablePath => "observable-path",
+                },
+                group
+                    .findings
+                    .iter()
+                    .map(|f| format!("`{f}`"))
+                    .collect::<Vec<String>>()
+                    .join(", ")
             );
         }
         let _ = writeln!(out);

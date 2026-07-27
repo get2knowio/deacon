@@ -533,6 +533,134 @@ fn an_exhausted_budget_stops_the_campaign_and_reports_the_covered_fraction() {
 }
 
 // ---------------------------------------------------------------------------
+// T067 — the admission cap (FR-034b, SC-019)
+// ---------------------------------------------------------------------------
+
+/// A campaign that exceeds its admission cap admits at most the cap, reports a **non-zero**
+/// suppressed count, and still succeeds.
+///
+/// All three clauses carry weight and none implies the others:
+///
+/// - **At most the cap** is what keeps the queue reviewable. It is set from reviewer
+///   throughput, not machine capacity (research D10): a nightly run that admits more new
+///   signatures than anyone clears before the next run has produced a backlog, not
+///   coverage.
+/// - **A non-zero suppressed count** is what keeps the cap honest. Silent truncation would
+///   render "we found 25 things" and "we found many more than we can review" identically —
+///   and the second is itself a signal that something systemic is diverging, which is
+///   precisely the signal a discovery lane exists to raise.
+/// - **Still succeeds** is what keeps discovery from gating on its own output. A campaign
+///   that failed when it found too much would make green depend on finding little, and the
+///   quickest route to green would be to break the generator.
+///
+/// The cap is set to `1` rather than left at the default so the boundary is *reached*: at
+/// 25 this test would depend on the two implementations disagreeing two dozen ways, and a
+/// run that admitted 3 findings would pass while asserting nothing at all.
+#[test]
+fn exceeding_the_admission_cap_suppresses_visibly_and_still_succeeds() {
+    let scratch = Scratch::new();
+    let mut request = campaign_request("0x5eed0067", 0x5EED_0067, 60, &scratch);
+    request.budget.admission_cap = 1;
+
+    // `run_campaign` panics on any prerequisite failure, so reaching the next line IS the
+    // "still succeeds" clause: a campaign that found more than it could admit ran to
+    // completion rather than erroring.
+    let run = run_campaign(&request);
+
+    assert!(
+        run.report.signatures_admitted <= request.budget.admission_cap,
+        "the campaign admitted {} signature(s) against a cap of {}",
+        run.report.signatures_admitted,
+        request.budget.admission_cap
+    );
+    assert!(
+        run.report.signatures_suppressed > 0,
+        "the campaign observed {} distinct signature(s) and admitted {}, yet reported zero \
+         suppressed. Either the cap did not engage — in which case this test asserts \
+         nothing — or suppression is silent, which is the failure FR-034b exists to \
+         prevent. Volume: {} generated, {} executed.",
+        run.report.signatures_observed,
+        run.report.signatures_admitted,
+        run.report.candidates_generated,
+        run.report.candidates_executed
+    );
+    assert!(
+        run.report.signatures_admitted + run.report.signatures_suppressed
+            <= run.report.signatures_observed,
+        "admitted ({}) + suppressed ({}) cannot exceed observed ({}) — every suppressed \
+         signature was observed first",
+        run.report.signatures_admitted,
+        run.report.signatures_suppressed,
+        run.report.signatures_observed
+    );
+
+    // The persisted queue holds no more than the cap, so the truncation is real and not
+    // only reported.
+    let data = deacon_conformance::discovery::queue::DiscoveryData::load(scratch.path())
+        .expect("the written data root must load");
+    assert!(
+        data.findings.len() as u64 <= request.budget.admission_cap,
+        "the queue holds {} finding(s) against a cap of {}",
+        data.findings.len(),
+        request.budget.admission_cap
+    );
+
+    // And the suppression reaches the artifacts a reviewer actually reads — both the
+    // campaign's own report and the standing queue report, which totals suppression across
+    // every campaign so the queue is legible as a *sample*.
+    let json = deacon_conformance::discovery::report::render_campaign_json(&run.report);
+    let document: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(
+        document["signaturesSuppressed"],
+        serde_json::json!(run.report.signatures_suppressed),
+        "the emitted document must carry the suppressed count, not only the in-memory report"
+    );
+
+    let registry =
+        deacon_conformance::load::Registry::load(&default_registry_dir()).expect("registry loads");
+    let pins = deacon_conformance::discovery::report::CurrentPins::from_registry(&registry);
+    let queue_report = deacon_conformance::discovery::report::build_queue_report(&data, &pins);
+    assert_eq!(
+        queue_report.signatures_suppressed, run.report.signatures_suppressed,
+        "the standing queue report must total the campaign's suppression"
+    );
+    let markdown = deacon_conformance::discovery::report::render_md(&queue_report);
+    assert!(
+        markdown.contains("This queue is a sample"),
+        "the human report must say that the counts above it are not everything: {markdown}"
+    );
+
+    // The cap is a *cap*, not a fixed size: the same seed with a cap it cannot reach admits
+    // strictly more, so the numbers above are the cap engaging rather than the run simply
+    // finding one thing.
+    //
+    // The comparison cap is set far above the default, not left at it: the default of 25 is
+    // reviewer throughput, and this seed genuinely exceeds it (the first attempt at this
+    // test suppressed 4 signatures in the comparison run), which would have made the
+    // comparison itself truncated and the conclusion unsound.
+    let uncapped_scratch = Scratch::new();
+    let mut uncapped_request = campaign_request("0x5eed0067", 0x5EED_0067, 60, &uncapped_scratch);
+    uncapped_request.budget.admission_cap = 10_000;
+    assert!(
+        uncapped_request.budget.admission_cap > DEFAULT_ADMISSION_CAP,
+        "the comparison run must not be capped at reviewer throughput"
+    );
+    let uncapped = run_campaign(&uncapped_request);
+    assert!(
+        uncapped.report.signatures_admitted > run.report.signatures_admitted,
+        "the same seed uncapped admitted {} and capped admitted {} — if they are equal the \
+         cap never engaged",
+        uncapped.report.signatures_admitted,
+        run.report.signatures_admitted
+    );
+    assert_eq!(
+        uncapped.report.signatures_suppressed, 0,
+        "the comparison run must not itself be truncated, or it says nothing about what the \
+         capped run left out"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // T122 — outcomes and structured content, never message wording (FR-016)
 // ---------------------------------------------------------------------------
 

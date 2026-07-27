@@ -186,6 +186,109 @@ fn populated_queue() -> (String, String, String) {
     )
 }
 
+/// A queue holding one finding witnessed by **two** campaigns — the shape a split acts on.
+///
+/// Returns `(finding id, findings.json, campaigns.json)`, all ids derived so the fixture
+/// passes `check` before the command under test touches it. Built through the library's own
+/// `upsert_finding` rather than by hand-writing two witnesses: that is the function which
+/// decides a second campaign appends rather than inserts, and a fixture that bypassed it
+/// could assert a merge the real deduplication never performs.
+fn two_witness_queue() -> (String, String, String) {
+    use deacon_conformance::discovery::queue::{
+        self, Campaign, CampaignLane, CampaignTier, PinnedInputSet, Witness,
+    };
+    use deacon_conformance::discovery::signature::{Divergence, DivergenceKind, Signature};
+
+    let deacon = serde_json::json!("vscode");
+    let reference = serde_json::json!("root");
+    let signature = Signature::derive(
+        "chan-structured-output",
+        &Divergence {
+            kind: DivergenceKind::Value,
+            path: "configuration.remoteUser",
+            deacon: Some(&deacon),
+            reference: Some(&reference),
+        },
+    );
+    let finding_id = signature.finding_id();
+
+    let profile = "prof-linux-amd64-docker-0870";
+    let lane = CampaignLane::Scheduled;
+    let tier = CampaignTier::ConfigDifferential;
+    let pins = PinnedInputSet {
+        schema_pin: deacon_conformance::CURRENT_SCHEMA_PIN.to_string(),
+        prose_pin: deacon_conformance::CURRENT_SPEC_PIN.to_string(),
+        oracle_version: "0.87.0".to_string(),
+        normalizer_version: "6".to_string(),
+        grammar_version: "rev-schema-113500f4".to_string(),
+        mutation_catalog_version: "v1".to_string(),
+        generator_version: "splitmix64-seed+xoshiro256starstar/v1".to_string(),
+    };
+
+    let mut findings = Vec::new();
+    let mut campaign_records = Vec::new();
+    for (seed, candidate) in [
+        ("0x5eed1234", "cnd-11111111"),
+        ("0x5eed5678", "cnd-22222222"),
+    ] {
+        let campaign_id = Campaign::derive_id(seed, &pins, lane, profile, tier);
+        let witness: Witness = serde_json::from_value(serde_json::json!({
+            "id": Witness::derived_id(&campaign_id, candidate),
+            "campaignId": campaign_id,
+            "candidateId": candidate,
+            "minimalInput": { "image": "alpine:3.18" },
+            "isMinimal": true,
+            "reductionSteps": ["drop-optional-key"],
+            "observedValues": { "deacon": "vscode", "reference": "root" },
+            "mutationOperators": ["mop-wrong-type"]
+        }))
+        .expect("the synthetic witness must satisfy the strict loader");
+        queue::upsert_finding(&mut findings, signature.clone(), witness, &campaign_id);
+        campaign_records.push(serde_json::json!({
+            "id": campaign_id,
+            "seed": seed,
+            "lane": lane.as_str(),
+            "tier": tier.as_str(),
+            "profile": profile,
+            "pinnedInputSet": pins,
+            "budget": {
+                "wallClockSeconds": 1800,
+                "perCandidateSeconds": 60,
+                "shrinkStepsPerFinding": 64,
+                "admissionCap": 25
+            },
+            "outcome": {
+                "candidatesGenerated": 4820,
+                "candidatesExecuted": 4629,
+                "candidatesDiscardedUnsafe": 0,
+                "parseStageFailures": 191,
+                "budgetExhausted": false,
+                "spaceCoveredFraction": 0.0,
+                "mutationApplications": { "unknown-field": 512 },
+                "signaturesObserved": 1,
+                "signaturesAdmitted": 1,
+                "signaturesSuppressed": 0
+            }
+        }));
+    }
+    assert_eq!(findings.len(), 1, "equal signatures are one finding");
+    assert_eq!(findings[0].witnesses.len(), 2, "with two witnesses");
+
+    (
+        finding_id,
+        serde_json::to_string_pretty(&serde_json::json!({
+            "schemaVersion": 1,
+            "records": findings,
+        }))
+        .expect("render findings"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "schemaVersion": 1,
+            "records": campaign_records,
+        }))
+        .expect("render campaigns"),
+    )
+}
+
 fn code(output: &Output) -> i32 {
     output.status.code().unwrap_or(-1)
 }
@@ -465,6 +568,105 @@ fn split_requires_something_to_separate() {
 
     let unknown = scratch.run(&["discovery", "split", "fnd-nowhere"]);
     assert_eq!(code(&unknown), 1);
+}
+
+#[test]
+fn split_writes_a_lineage_the_checker_accepts_and_the_deduplication_never_re_merges() {
+    // The whole T070/T072 round trip through the real binary: triage, split, and the queue
+    // still validates. Asserted from outside the process because the lineage is only worth
+    // anything if it survives being *written* — an in-memory split that produced records
+    // the strict loader or `check` rejects would be a split nobody could commit.
+    let scratch = Scratch::new();
+    let (finding_id, findings, campaigns) = two_witness_queue();
+    scratch.write("findings.json", &findings);
+    scratch.write("campaigns.json", &campaigns);
+    assert_eq!(
+        code(&scratch.run(&["discovery", "check"])),
+        0,
+        "the fixture must start clean"
+    );
+
+    // A split leaves `triaged`, so the finding is classified first. That ordering is the
+    // lifecycle's, not this test's: a split separates witnesses one CLASSIFICATION could
+    // not describe, so there has to be one to find inadequate.
+    let triaged = scratch.run(&[
+        "discovery",
+        "triage",
+        &finding_id,
+        "--classification",
+        "deacon-regression",
+    ]);
+    assert_eq!(code(&triaged), 0, "stderr: {}", stderr(&triaged));
+
+    let split = scratch.run(&["discovery", "split", &finding_id]);
+    assert_eq!(code(&split), 0, "stderr: {}", stderr(&split));
+    assert!(
+        stderr(&split).contains("2 child finding(s)"),
+        "one child per witness: {}",
+        stderr(&split)
+    );
+    assert!(
+        stderr(&split).contains("never re-merges"),
+        "the reviewer must be told the split is permanent: {}",
+        stderr(&split)
+    );
+
+    // The written lineage validates: parent inert and unclassified, two children keyed to
+    // it, each untriaged with its own witness.
+    assert_eq!(
+        code(&scratch.run(&["discovery", "check"])),
+        0,
+        "stderr: {}",
+        stderr(&scratch.run(&["discovery", "check"]))
+    );
+    let written =
+        std::fs::read_to_string(scratch.dir.path().join("discovery").join("findings.json"))
+            .expect("read back");
+    let document: serde_json::Value = serde_json::from_str(&written).expect("valid JSON");
+    let records = document["records"].as_array().expect("records");
+    assert_eq!(
+        records.len(),
+        3,
+        "the ancestor plus two children: {written}"
+    );
+
+    let parent = &records[0];
+    assert_eq!(parent["id"], serde_json::json!(finding_id));
+    assert_eq!(parent["state"], serde_json::json!("split"));
+    assert_eq!(
+        parent["classification"],
+        serde_json::Value::Null,
+        "a parent that kept a classification would assert the judgement the split rejected"
+    );
+    assert_eq!(
+        parent["witnesses"].as_array().map(Vec::len),
+        Some(2),
+        "the ancestor keeps its witnesses as historical record"
+    );
+
+    for child in &records[1..] {
+        assert_eq!(child["splitFrom"], serde_json::json!(finding_id));
+        assert_eq!(child["state"], serde_json::json!("untriaged"));
+        assert_eq!(child["classification"], serde_json::Value::Null);
+        assert_eq!(child["witnesses"].as_array().map(Vec::len), Some(1));
+        assert_ne!(child["id"], serde_json::json!(finding_id));
+    }
+    assert_ne!(records[1]["id"], records[2]["id"]);
+
+    // A second split is refused: the ancestor is terminal.
+    let again = scratch.run(&["discovery", "split", &finding_id]);
+    assert_eq!(code(&again), 1);
+
+    // And the ancestor is no longer the reviewer's to classify — its judgement belongs to
+    // its children now.
+    let retriage = scratch.run(&[
+        "discovery",
+        "triage",
+        &finding_id,
+        "--classification",
+        "reference-quirk",
+    ]);
+    assert_eq!(code(&retriage), 1, "stderr: {}", stderr(&retriage));
 }
 
 #[test]

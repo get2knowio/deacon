@@ -228,9 +228,9 @@ pub fn discovery_dir_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
 /// imply the registry validator can see the queue, which is exactly what the discovery
 /// root's placement exists to prevent (research D6/D11).
 ///
-/// Variants for **D2** (classification arity), **D3** (`promotedTo` resolution), and
-/// **D4** (corpus immutability) land with the user stories that own those rules
-/// (T068 / T080 / T105); [`DiscoveryError::class`] already reserves their codes.
+/// Variants for **D3** (`promotedTo` resolution) and **D4** (corpus immutability) land
+/// with the user stories that own those rules (T080 / T105);
+/// [`DiscoveryError::class`] already reserves their codes.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DiscoveryError {
     /// **D1** — a record that does not parse, or that parses but is structurally
@@ -266,6 +266,28 @@ pub enum DiscoveryError {
     )]
     UnknownChannel { record: String, channel: String },
 
+    /// **D2** — a classification that is absent, present too early, or present where it
+    /// cannot lead anywhere.
+    ///
+    /// Three shapes, all one class because all three are the same defect — the queue
+    /// asserting a judgement nobody made, or making a judgement nobody can act on:
+    ///
+    /// - a finding in `triaged` / `promoted` / `no-longer-reproducing` with **no**
+    ///   classification (FR-028's "exactly one" reduced to zero);
+    /// - a finding in `untriaged` or `split` **carrying** one (an untriaged finding by
+    ///   definition has no judgement, and a split parent surrendered its judgement to its
+    ///   children — a parent that kept one would assert exactly what the split rejected);
+    /// - a `promoted` finding classified `normalizer-defect` or `fixture-defect`, which
+    ///   describe a defect in the discovery machinery rather than a behavior of either
+    ///   implementation and are therefore non-promotable (FR-035).
+    #[error(
+        "discovery finding `{record}` has a classification problem: {cause}. Remedy: \
+         record exactly one classification with `discovery triage` once the finding is \
+         triaged or later, and none while it is untriaged or a split ancestor — a queue \
+         that claims a judgement nobody made is worse than one that admits it has none."
+    )]
+    ClassificationArity { record: String, cause: String },
+
     /// **D5** — a pinned-input-set element naming a revision absent from
     /// `revisions.json`. A finding is a claim about a specific pinned pair of
     /// implementations; a pin nothing records is a claim nothing can be checked against.
@@ -289,6 +311,7 @@ impl DiscoveryError {
             DiscoveryError::MalformedRecord { .. }
             | DiscoveryError::UnresolvableReference { .. }
             | DiscoveryError::UnknownChannel { .. } => "D1",
+            DiscoveryError::ClassificationArity { .. } => "D2",
             DiscoveryError::StalePin { .. } => "D5",
         }
     }
@@ -300,6 +323,7 @@ impl DiscoveryError {
             DiscoveryError::MalformedRecord { record, .. }
             | DiscoveryError::UnresolvableReference { record, .. }
             | DiscoveryError::UnknownChannel { record, .. }
+            | DiscoveryError::ClassificationArity { record, .. }
             | DiscoveryError::StalePin { record, .. } => record,
         }
     }
