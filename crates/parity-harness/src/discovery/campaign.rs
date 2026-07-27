@@ -1028,6 +1028,23 @@ async fn run_corpus(
             queue,
             // The plan is the manifest — see this function's docs.
             planned,
+            // No reviewable candidate is packaged here (T103's own note: this needs a
+            // deliberate follow-up, not an assumption). The differential/metamorphic tiers'
+            // `candidate::write` and `minimize::DifferentialProbe` were both built around a
+            // candidate materialized from a single generated JSON document
+            // (`campaign::materialize`), which can freely reduce and re-synthesize because
+            // it owns the whole workspace tree it wrote. A corpus entry's workspace is a
+            // real third-party directory `corpus_fetch::materialize` fetched, which may
+            // contain a Dockerfile, a Compose file, local features, or other files the
+            // devcontainer.json references by relative path — content this tier does not
+            // own and must not vendor (FR-053). Reducing just the JSON portion through that
+            // machinery could silently break those references and misreport "no longer
+            // parses" as a reduction step rather than a broken reference. The witness
+            // already names the upstream provenance (repository/commit/path/digest), which
+            // is what FR-054 requires; packaging a six-part reviewable candidate for a
+            // real-world workspace is a separate design question this tier defers rather
+            // than answers by reusing machinery built for a different input shape.
+            candidates: Vec::new(),
         },
     )?;
     run.corpus_statuses = statuses;
