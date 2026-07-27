@@ -526,7 +526,24 @@ fn synthetic_queue(registry: &Registry, paths: &[&str]) -> DiscoveryData {
         .oracle_version
         .clone()
         .expect("the registry must record an oracle revision");
-    let campaign_id = "cmp-aaaaaaaa";
+    let profile = "prof-linux-amd64-docker-0870";
+    let pinned_input_set: queue::PinnedInputSet = serde_json::from_value(serde_json::json!({
+        "schemaPin": pins.schema_pin,
+        "prosePin": pins.prose_pin,
+        "oracleVersion": oracle,
+        "normalizerVersion": deacon_conformance::snapshot::NORMALIZER_VERSION,
+        "grammarVersion": Grammar::load_default()
+            .expect("grammar loads")
+            .revision()
+            .to_string(),
+        "mutationCatalogVersion": "v1",
+        "generatorVersion": deacon_conformance::discovery::rng::prng_identity()
+    }))
+    .expect("the synthetic pinned input set must parse");
+    let lane = queue::CampaignLane::Scheduled;
+    let tier = queue::CampaignTier::ConfigDifferential;
+    let campaign_id =
+        &queue::Campaign::derive_id("0x5eed1234", &pinned_input_set, lane, profile, tier);
 
     let mut records = Vec::new();
     for (index, path) in paths.iter().enumerate() {
@@ -578,18 +595,8 @@ fn synthetic_queue(registry: &Registry, paths: &[&str]) -> DiscoveryData {
             "seed": "0x5eed1234",
             "lane": "scheduled",
             "tier": "config-differential",
-            "pinnedInputSet": {
-                "schemaPin": pins.schema_pin,
-                "prosePin": pins.prose_pin,
-                "oracleVersion": oracle,
-                "normalizerVersion": deacon_conformance::snapshot::NORMALIZER_VERSION,
-                "grammarVersion": Grammar::load_default()
-                    .expect("grammar loads")
-                    .revision()
-                    .to_string(),
-                "mutationCatalogVersion": "v1",
-                "generatorVersion": deacon_conformance::discovery::rng::prng_identity()
-            },
+            "profile": profile,
+            "pinnedInputSet": pinned_input_set,
             "budget": {
                 "wallClockSeconds": queue::DEFAULT_WALL_CLOCK_SECONDS,
                 "perCandidateSeconds": queue::DEFAULT_PER_CANDIDATE_SECONDS_HERMETIC,
