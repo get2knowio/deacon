@@ -760,7 +760,7 @@ impl AdmissionQueue {
         }
         upsert_finding(&mut self.findings, signature, witness, &self.campaign_id);
         if !self.admitted.contains(&finding_id) {
-            self.admitted.push(finding_id);
+            self.admitted.push(finding_id.clone());
         }
         if !already_known {
             self.newly_admitted.insert(finding_id);
