@@ -10,8 +10,8 @@ scenario.json ─┐
 applicability ─┼─► coverage generate ─► obligations.json ─┐
 behaviors.json ┘        (machine)                          ├─► validate  (V26–V29, every PR)
                                                            ├─► certify   (release gate)
-obligation-dispositions/ ─────────────────────────────────┘└─► coverage report (4 reports)
-        (hand-authored)
+obligation-dispositions/ ─────────────────────────────────┘└─► coverage report (4 families,
+        (hand-authored)                                                          8 artifacts)
 ```
 
 **Machine-owned** files are regenerated and byte-compared; **hand-authored** files carry
@@ -51,16 +51,36 @@ The common task. It is a **pure data edit** — no new Rust function (SC-013).
    }
    ```
 
-3. **Point the disposition at it** in `registry/obligation-dispositions/<area>.json`.
-4. **Verify**:
+3. **Verify and see what it now covers**:
 
    ```bash
    cargo run -p deacon-conformance -- validate
    cargo run -p deacon-conformance -- coverage report
+   $PAGER target/conformance/coverage-pairwise.md      # which pairs the case now satisfies
+   $PAGER target/conformance/coverage-observables.md   # which channels it now covers
    ```
+
+4. **Flip every `odp-cmb-*` the case now covers from `gap` to `case`**, in
+   `registry/obligation-dispositions/<area>.json`, **in the same commit**. Add the
+   `odp-bhv-*` entry for any new behavior too.
+
+**Step 4 is the one that gets skipped, and skipping it is silent.** An explicit disposition
+takes precedence over the evidence — deliberately, so a reviewer can rule that a mechanical
+`scenarioContext` match is not real coverage — so a case that covers a pair whose record
+still says `gap` changes nothing anyone can see: `validate` passes, `certify` blocks on a
+gap that is genuinely gap-shaped, and the report under-counts. It happened during this
+feature's own build-out: 22 records across three areas, found by hand. See
+`conformance/RULES.md`, "Drift workflow (adding a case)".
 
 A partial `scenarioContext` is rejected (V26). Assigning every dimension is what lets one case
 cover `C(n,2)` pairs at once — which is why the pair space is fillable at all.
+
+**Assertions must be able to fail.** Before committing, perturb each new assertion and
+confirm the case DIVERGES. `jsonSubset: {}` matches any value and `contains` cannot see
+appended output; both shipped in committed cases and were found only by the injected run.
+And no channel may rest on fewer than three covering cases (SC-005,
+`summary.channelsBelowFloor`) — a channel carried by one case is one authoring mistake from
+being unobserved.
 
 ---
 
@@ -137,9 +157,14 @@ Needs Docker and the pinned oracle. Never runs in the fast or CI lanes — a gre
 not imply live coverage, by design.
 
 ```bash
-cargo nextest run --profile parity                      # both drivers
+cargo nextest run --profile parity                      # every live binary, not just these two
 cargo nextest run --profile parity -E 'binary(=parity_conformance_docker)'   # Docker tier only
+cargo nextest run --profile parity -E 'binary(=parity_conformance_runner)'   # config-only tier
 ```
+
+`--profile parity` selects the whole live allow-list — the two declarative drivers **and**
+the four surviving legacy carriers (`parity_build`, `parity_exec`, `parity_observable_state`,
+`parity_state_diff`). Filter by binary when you only want the tier you are working on.
 
 A missing oracle, a version mismatch, or an absent Docker daemon **fails loudly** with a
 cause-specific error. There is no skip. If you see a pass, it ran.
@@ -206,5 +231,8 @@ non-selection.
 | `V29: filler rationale` | `"out of scope"` without a ground. Name the principle or mechanism |
 | `V26: dead value` | A rule edit stranded a value. Remove it, or relax the rule |
 | Case covers no pairs | Partial or missing `scenarioContext` |
+| Pair still `gap` after adding a case | Its `odp-cmb-*` still says `gap`; explicit records outrank the evidence. Flip it |
+| `channelsBelowFloor` > 0 | A channel rests on fewer than three covering cases (SC-005). Add cases; do not lower the floor |
 | Channel reported `inert` | No case's comparison depends on it — add one; do not delete the regression |
+| Case reports `observed nothing` | Not an assertion failure: the operation failed, or the container was never inspected. Read the raw output under `target/parity/raw/` |
 | Docker tier over budget | Tighten applicability rules or split the tier. Do not widen the budget |
