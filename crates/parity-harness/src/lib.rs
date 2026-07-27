@@ -347,10 +347,28 @@ pub enum HarnessError {
          an entry that ran and found nothing."
     )]
     CorpusUnreachable { entry: String, cause: String },
+
+    /// A declared metamorphic relation could not be evaluated (025 US6, FR-048).
+    ///
+    /// The **anti-inert** guarantee, and the reason this is an error rather than a skipped
+    /// relation: a relation the harness cannot apply reports nothing, and "reported
+    /// nothing" is byte-identical to "held". SC-011 requires zero inert relations, so a
+    /// relation with no transformation implementation, an inapplicable base fixture, or an
+    /// unparseable configuration must fail the run **naming the relation**, never quietly
+    /// contribute a pass.
+    #[error(
+        "metamorphic relation `{relation}` cannot be evaluated: {cause}. Remedy: implement or \
+         repair its transformation — a relation that cannot be applied reports nothing, and \
+         reporting nothing is indistinguishable from holding (SC-011)."
+    )]
+    RelationUnevaluable { relation: String, cause: String },
 }
 
 /// Environment override for the report/artifact root (see [`report_root`]).
 pub const REPORT_DIR_ENV: &str = "DEACON_PARITY_REPORT_DIR";
+
+/// Environment override for the discovery artifact root (see [`discovery_report_root`]).
+pub const DISCOVERY_REPORT_DIR_ENV: &str = "DEACON_DISCOVERY_REPORT_DIR";
 
 /// Absolute path to the workspace root, derived from this crate's
 /// `CARGO_MANIFEST_DIR` (`<root>/crates/parity-harness`) so artifact paths are
@@ -380,6 +398,21 @@ pub fn report_root() -> PathBuf {
         return PathBuf::from(dir);
     }
     workspace_root().join("target").join("parity")
+}
+
+/// The discovery artifact root: `DEACON_DISCOVERY_REPORT_DIR` when set, else
+/// `<workspace_root>/target/discovery` (025-exploratory-parity-discovery).
+///
+/// Separate from [`report_root`] rather than a subdirectory of it, because the two roots
+/// answer to different rules. `target/parity` holds the evidence of a **gating** lane;
+/// `target/discovery` holds the output of a lane that gates nothing and whose contents are
+/// unreviewed candidates. Writing the second into the first would make a discovery artifact
+/// look, to anyone reading `target/parity`, like part of a certification run.
+pub fn discovery_report_root() -> PathBuf {
+    if let Some(dir) = std::env::var_os(DISCOVERY_REPORT_DIR_ENV) {
+        return PathBuf::from(dir);
+    }
+    workspace_root().join("target").join("discovery")
 }
 
 /// Process-unique suffix source for atomic temp files.
@@ -433,6 +466,24 @@ mod tests {
         // set_var is unsafe); we assert the default shape separately.
         let default = report_root();
         assert!(default.ends_with("target/parity") || std::env::var_os(REPORT_DIR_ENV).is_some());
+    }
+
+    #[test]
+    fn the_discovery_root_is_not_inside_the_parity_root() {
+        // `target/parity` holds the evidence of a gating lane; `target/discovery` holds
+        // unreviewed candidates from a lane that gates nothing. Nesting the second inside
+        // the first would make a discovery artifact read, to anyone looking at
+        // `target/parity`, as part of a certification run.
+        let discovery = discovery_report_root();
+        assert!(
+            discovery.ends_with("target/discovery")
+                || std::env::var_os(DISCOVERY_REPORT_DIR_ENV).is_some()
+        );
+        if std::env::var_os(REPORT_DIR_ENV).is_none()
+            && std::env::var_os(DISCOVERY_REPORT_DIR_ENV).is_none()
+        {
+            assert!(!discovery.starts_with(report_root()));
+        }
     }
 
     #[tokio::test]

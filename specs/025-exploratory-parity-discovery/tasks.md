@@ -245,25 +245,25 @@ without the devcontainer CLI installed can develop and test it locally.
 
 ### Tests for User Story 6
 
-- [ ] T084 [P] [US6] Invariance tests in `crates/deacon/tests/discovery_metamorphic.rs` for formatting, JSONC comments/trailing commas, and key order within unordered maps (FR-044)
-- [ ] T085 [P] [US6] Path-relocation test in `crates/deacon/tests/discovery_metamorphic.rs`: results equal modulo the declared tokenization, with any residual reported (FR-046)
-- [ ] T086 [P] [US6] Lifecycle-equivalence test in `crates/deacon/tests/discovery_metamorphic.rs` across the permitted string/array/object forms
-- [ ] T087 [P] [US6] Sensitivity test in `crates/deacon/tests/discovery_metamorphic.rs`: permuting a declaration-ordered collection MUST change the result, and a failure to change is reported as a finding (FR-043)
-- [ ] T088 [P] [US6] Ground-required test in `crates/conformance/src/validate.rs`: a relation with a missing or unresolvable `ground` is **V31** (SC-010)
-- [ ] T089 [P] [US6] Mandated-family test in `crates/conformance/src/validate.rs`: a family from data-model.md § 7 with no record is **V32**
-- [ ] T090 [P] [US6] Inert-relation test in `crates/deacon/tests/discovery_metamorphic.rs`: deliberately breaking each relation causes exactly that relation to fail and be named — zero relations are inert (SC-011)
+- [X] T084 [P] [US6] Invariance tests in `crates/deacon/tests/discovery_metamorphic.rs` for formatting, JSONC comments/trailing commas, and key order within unordered maps (FR-044)
+- [X] T085 [P] [US6] Path-relocation test in `crates/deacon/tests/discovery_metamorphic.rs`: results equal modulo the declared tokenization, with any residual reported (FR-046)
+- [X] T086 [P] [US6] Lifecycle-equivalence test in `crates/deacon/tests/discovery_metamorphic.rs` across the permitted string/array/object forms
+- [X] T087 [P] [US6] Sensitivity test in `crates/deacon/tests/discovery_metamorphic.rs`: permuting a declaration-ordered collection MUST change the result, and a failure to change is reported as a finding (FR-043)
+- [X] T088 [P] [US6] Ground-required test in `crates/conformance/src/validate.rs`: a relation with a missing or unresolvable `ground` is **V31** (SC-010)
+- [X] T089 [P] [US6] Mandated-family test in `crates/conformance/src/validate.rs`: a family from data-model.md § 7 with no record is **V32**
+- [X] T090 [P] [US6] Inert-relation test in `crates/deacon/tests/discovery_metamorphic.rs`: deliberately breaking each relation causes exactly that relation to fail and be named — zero relations are inert (SC-011)
 
 ### Implementation for User Story 6
 
-- [ ] T091 [US6] Implement the `MetamorphicRelation` model in `crates/conformance/src/discovery/metamorphic.rs` per contracts/metamorphic-catalogue.md
-- [ ] T092 [US6] Author `conformance/registry/metamorphic.json` with the seven mandated relations, each naming a resolvable `clu-` or `bhv-` ground and a rationale
-- [ ] T093 [US6] Extend the registry loader in `crates/conformance/src/load.rs` to read `metamorphic.json`
-- [ ] T094 [US6] Implement violation classes **V31** and **V32** in `crates/conformance/src/validate.rs`
-- [ ] T095 [US6] Implement deacon-only relation evaluation in `crates/parity-harness/src/discovery/metamorphic_run.rs`
+- [X] T091 [US6] Implement the `MetamorphicRelation` model in `crates/conformance/src/discovery/metamorphic.rs` per contracts/metamorphic-catalogue.md
+- [X] T092 [US6] Author `conformance/registry/metamorphic.json` with the seven mandated relations, each naming a resolvable `clu-` or `bhv-` ground and a rationale
+- [X] T093 [US6] Extend the registry loader in `crates/conformance/src/load.rs` to read `metamorphic.json`
+- [X] T094 [US6] Implement violation classes **V31** and **V32** in `crates/conformance/src/validate.rs`
+- [X] T095 [US6] Implement deacon-only relation evaluation in `crates/parity-harness/src/discovery/metamorphic_run.rs`
 - [ ] T096 [US6] Add the `metamorphic` tier to the campaign driver in `crates/parity-harness/src/discovery/campaign.rs`, requiring no external prerequisite
-- [ ] T097 [US6] Create the live test binary `crates/deacon/tests/discovery_metamorphic.rs` and verify it is selected by `[profile.discovery]` and excluded from all six other profiles (the allow-list entry itself lands in T006)
-- [ ] T127 [US6] Implement metamorphic failure-candidate emission in `crates/parity-harness/src/discovery/metamorphic_run.rs` and test in `crates/deacon/tests/discovery_metamorphic.rs` that the candidate names the relation, the transformation applied, both inputs, and both normalized outputs (FR-047)
-- [ ] T098 [US6] Add the **V31** and **V32** rows to the violation-class index in `conformance/RULES.md`, keeping `validate.rs`/`RULES.md` lockstep
+- [X] T097 [US6] Create the live test binary `crates/deacon/tests/discovery_metamorphic.rs` and verify it is selected by `[profile.discovery]` and excluded from all six other profiles (the allow-list entry itself lands in T006)
+- [X] T127 [US6] Implement metamorphic failure-candidate emission in `crates/parity-harness/src/discovery/metamorphic_run.rs` and test in `crates/deacon/tests/discovery_metamorphic.rs` that the candidate names the relation, the transformation applied, both inputs, and both normalized outputs (FR-047)
+- [X] T098 [US6] Add the **V31** and **V32** rows to the violation-class index in `conformance/RULES.md`, keeping `validate.rs`/`RULES.md` lockstep
 
 **Checkpoint**: The project can now catch deacon and the reference being *consistently* wrong —
 which the differential cannot see, because both sides agree.

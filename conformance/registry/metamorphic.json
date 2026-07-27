@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "mrl-formatting-invariance",
+      "transformation": "reindent the configuration document and rewrap its whitespace between tokens, changing no token",
+      "effect": "invariance",
+      "ground": "bhv-readconfig-basic-parse",
+      "channels": ["chan-exit-code", "chan-structured-output"],
+      "rationale": "The grounding behavior records that a well-formed devcontainer.json resolves to a configuration document, so the configuration is the JSON value the file denotes and not the bytes that spell it. JSON's grammar makes whitespace between tokens non-significant, so reindenting produces the same value; a resolved configuration that changes under reindentation is reading layout, which no clause makes meaningful. The contract's mandated-family table nominates a clause here, but the pinned prose states the on-disk format only in passing and no clause unit carries that sentence, so the recorded behavior is cited instead of stretching a discovery-locations clause into a statement about syntax."
+    },
+    {
+      "id": "mrl-comment-invariance",
+      "transformation": "insert JSONC line and block comments and a trailing comma in every non-empty object and array",
+      "effect": "invariance",
+      "ground": "bhv-readconfig-malformed-jsonc-rejected",
+      "channels": ["chan-exit-code", "chan-structured-output"],
+      "rationale": "The grounding behavior fixes the parse dialect as JSON with Comments and records that only a hard syntax error is rejected. A comment and a trailing comma are well-formed in that dialect and denote no member, so neither can alter the value the document describes. This relation therefore fails in two directions that both matter: rejecting a commented document, and silently changing the resolved configuration when one is accepted."
+    },
+    {
+      "id": "mrl-key-order-invariance",
+      "transformation": "reverse the member order of every JSON object in the configuration document",
+      "effect": "invariance",
+      "ground": "clu-json-reference-this-property-allows-you-to-override-the-feature-desc-bebdddcd",
+      "channels": ["chan-exit-code", "chan-structured-output"],
+      "rationale": "The cited clause exists precisely because the order Features are written in does not decide the order they install in: install order is resolved from installsAfter and overridden by overrideFeatureInstallOrder. That is the specification saying, about the one object where ordering would most plausibly matter, that the object's member order carries no meaning. A resolved configuration that changes under member permutation is reading an order the specification says is not there."
+    },
+    {
+      "id": "mrl-path-relocation",
+      "transformation": "materialize the identical workspace tree at a different absolute path, keeping its directory basename",
+      "effect": "invariance",
+      "ground": "bhv-readconfig-discovery-locations",
+      "channels": ["chan-exit-code", "chan-structured-output"],
+      "rationale": "The grounding behavior records that discovery searches locations relative to the workspace folder, so relocating the workspace relocates every input identically and the host path enters the result only through the declared localWorkspaceFolder substitutions. Comparison is therefore modulo the declared path tokenization, and any residual the tokenization does not absorb is reported rather than tolerated: such a residual is as likely to be a normalizer defect as a deacon regression, and misfiling it as the latter sends someone to fix code that is correct."
+    },
+    {
+      "id": "mrl-lifecycle-equivalence",
+      "transformation": "rewrite a lifecycle command from its bare form into the single-entry named-object form denoting the same command",
+      "effect": "invariance",
+      "ground": "clu-parallel-lifecycle-the-key-of-the-object-will-be-a-unique-name-for-io-e2509dfa",
+      "channels": ["chan-exit-code", "chan-structured-output"],
+      "rationale": "The cited clause says the object form's key is a name for the command and its value is the same string or array command the bare form carries, so a single-entry object naming one command denotes exactly that command. Both spellings must therefore resolve, and switching between them must change nothing outside the lifecycle property itself; a difference anywhere else means the form of a command is leaking into unrelated resolution."
+    },
+    {
+      "id": "mrl-extends-flattening",
+      "transformation": "replace a two-link extends chain with its hand-flattened single-document equal",
+      "effect": "invariance",
+      "ground": "bhv-readconfig-extends-merged",
+      "channels": ["chan-exit-code", "chan-structured-output"],
+      "rationale": "The grounding behavior records that the full extends chain is resolved into the merged configuration, which is the claim that a chain is a way of spelling a configuration rather than a different configuration. The merged block a chain produces must therefore equal the merged block its hand-flattened equal produces; a difference means the resolution is either losing a parent's contribution or letting the chain contribute something the flattened document does not."
+    },
+    {
+      "id": "mrl-declaration-order-sensitivity",
+      "transformation": "reverse a declaration-ordered array, the dockerComposeFile overlay list",
+      "effect": "sensitivity",
+      "ground": "clu-json-reference-the-order-of-the-array-matters-since-the-content-io-bdf2bf4c",
+      "channels": ["chan-structured-output"],
+      "rationale": "The cited clause states outright that the order of this array matters, because later files override earlier ones. Reversing it therefore describes a different configuration and the result must change. This is the assertion the differential structurally cannot make: if deacon and the reference both canonicalized the list, the two sides would agree and the comparison would be clean, so the defect would be invisible to it. A sensitivity relation fails on that consistent wrongness."
+    }
+  ]
+}
