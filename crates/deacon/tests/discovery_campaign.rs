@@ -28,21 +28,24 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use deacon_conformance::default_registry_dir;
+use deacon_conformance::discovery::corpus::{self, CorpusEntry};
 use deacon_conformance::discovery::generate::Generator;
 use deacon_conformance::discovery::grammar::Grammar;
 use deacon_conformance::discovery::mutate;
 use deacon_conformance::discovery::queue::{
-    Budget, CampaignLane, CampaignTier, DEFAULT_ADMISSION_CAP,
-    DEFAULT_PER_CANDIDATE_SECONDS_HERMETIC,
+    self, Budget, CampaignLane, CampaignTier, Classification, DEFAULT_ADMISSION_CAP,
+    DEFAULT_PER_CANDIDATE_SECONDS_HERMETIC, DiscoveryData, FindingState,
 };
 use deacon_conformance::discovery::report::{
     TRIVIAL_FAILURE_CEILING, build_campaign_outcome_report,
 };
+use deacon_conformance::load::Registry;
+use deacon_conformance::{default_discovery_dir, default_registry_dir};
 
 use parity_harness::HarnessError;
 use parity_harness::discovery::campaign::{self, CampaignRequest, CampaignRun};
 use parity_harness::discovery::candidate;
+use parity_harness::discovery::corpus_fetch::EntryStatus;
 use parity_harness::discovery::differential::{
     self, Characterization, DifferentialInput, OutcomeClass,
 };
@@ -110,9 +113,86 @@ impl Scratch {
         Scratch { dir }
     }
 
+    /// Replace the scratch root's corpus manifest with `entries` (US7).
+    ///
+    /// Routed through the production writer rather than a hand-rolled `serde_json` dump,
+    /// so a fixture can never hold a manifest the real writer would refuse — and so a
+    /// digest recorded by the campaign lands in the byte-identical rendering a reviewer
+    /// would commit.
+    fn with_corpus(self, entries: &[CorpusEntry]) -> Scratch {
+        corpus::write(self.dir.path(), entries).expect("seed the scratch corpus manifest");
+        self
+    }
+
     fn path(&self) -> &Path {
         self.dir.path()
     }
+}
+
+/// The committed 33-entry manifest, as the campaign would load it.
+fn committed_corpus() -> Vec<CorpusEntry> {
+    DiscoveryData::load(&default_discovery_dir())
+        .expect("the committed discovery data root must load")
+        .corpus
+}
+
+/// The first `n` committed entries.
+///
+/// A prefix rather than a hand-picked selection: any subset exercises the same code path,
+/// and hand-picking would invite choosing the entries that behave, which is how a canary
+/// stops being one. Kept small because each entry costs a network round trip plus two CLI
+/// invocations, and a test that takes four minutes is a test people start skipping.
+fn corpus_prefix(n: usize) -> Vec<CorpusEntry> {
+    let mut entries = committed_corpus();
+    entries.truncate(n);
+    assert_eq!(
+        entries.len(),
+        n,
+        "the committed manifest must hold at least {n} entries"
+    );
+    entries
+}
+
+/// A `corpus`-tier campaign request over an isolated data root.
+fn corpus_request(seed_hex: &str, seed: u64, scratch: &Scratch) -> CampaignRequest {
+    CampaignRequest {
+        seed_hex: seed_hex.to_string(),
+        seed,
+        tier: CampaignTier::Corpus,
+        lane: CampaignLane::Invoked,
+        profile: TEST_PROFILE.to_string(),
+        budget: Budget {
+            wall_clock_seconds: 1800,
+            per_candidate_seconds: DEFAULT_PER_CANDIDATE_SECONDS_HERMETIC,
+            shrink_steps_per_finding: 64,
+            admission_cap: DEFAULT_ADMISSION_CAP,
+        },
+        // Ignored by the corpus driver — the plan is the manifest's own size, because a
+        // generator denominator has nothing to denominate for a tier that draws nothing.
+        planned_candidates: 0,
+        registry_dir: default_registry_dir(),
+        discovery_dir: scratch.path().to_path_buf(),
+        report_root: scratch.path().join("artifacts"),
+        deacon_binary: deacon_binary(),
+        oracle_override: None,
+        persist: true,
+    }
+}
+
+/// The status the run recorded for `entry_id`.
+fn status_of<'a>(run: &'a CampaignRun, entry_id: &str) -> &'a EntryStatus {
+    run.corpus_statuses
+        .iter()
+        .find(|s| s.entry_id() == entry_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "no status recorded for corpus entry `{entry_id}`; got {:?}",
+                run.corpus_statuses
+                    .iter()
+                    .map(EntryStatus::summary)
+                    .collect::<Vec<_>>()
+            )
+        })
 }
 
 /// The deacon binary under test — the artifact cargo just built for this test binary,
@@ -1616,4 +1696,396 @@ fn an_unverifiable_oracle_exits_one() {
         output.stdout.is_empty(),
         "a campaign that never compared anything must not emit an outcome document"
     );
+}
+
+// ---------------------------------------------------------------------------
+// T101/T102/T103 (US7) — the network-backed real-world corpus canary
+// ---------------------------------------------------------------------------
+//
+// These three need the network as well as the verified oracle. That is not a widening of
+// this binary's requirements so much as the point of the tier: the corpus is an ecological
+// canary, and the ecosystem is not in this repository. They still never skip — an
+// unreachable *lane* fails loudly, exactly as a missing oracle does, because "the ecosystem
+// agrees with us" and "we never reached the ecosystem" must not look alike.
+
+/// **T101 / FR-051**: a fetched entry whose digest disagrees fails loudly **for that
+/// entry**, and is not compared.
+///
+/// Two halves, and the second is the one that is easy to get wrong. Detecting the
+/// disagreement is necessary; *refusing to compare* is what makes it useful. A tolerant
+/// fetch would hand the unexpected content to the differential, and every difference it
+/// found would be attributed to deacon-versus-reference when its real cause is that the
+/// upstream workspace is not what was recorded — a wrong conclusion, arrived at
+/// confidently.
+///
+/// The third half, which has no assertion of its own anywhere else: the mismatch must not
+/// **re-baseline** the manifest. Writing the fetched digest over the recorded one would
+/// make every FR-051 failure self-healing, so the check would report a problem exactly once
+/// and then never again.
+#[test]
+fn a_corpus_entry_whose_digest_disagrees_fails_loudly_for_that_entry() {
+    // A real, reachable entry — carrying a well-formed digest that is deliberately not its
+    // own. Well-formed matters: a malformed digest is refused hermetically by D4 and would
+    // never reach the fetch, so it would test the wrong rule.
+    let wrong_digest = format!("sha256:{}", "b".repeat(64));
+    let mut entries = corpus_prefix(2);
+    entries[0].content_digest = Some(wrong_digest.clone());
+    let mismatched_id = entries[0].id.clone();
+    let honest_id = entries[1].id.clone();
+
+    let scratch = Scratch::new().with_corpus(&entries);
+    let run = run_campaign(&corpus_request("0x5eed0101", 0x5EED_0101, &scratch));
+
+    match status_of(&run, &mismatched_id) {
+        EntryStatus::DigestMismatch {
+            expected, actual, ..
+        } => {
+            assert_eq!(
+                expected, &wrong_digest,
+                "the diagnosis must name the digest the manifest RECORDED"
+            );
+            assert_ne!(
+                actual, &wrong_digest,
+                "the diagnosis must name the digest that was actually materialized, or a \
+                 reviewer cannot tell a re-pin from a compromise"
+            );
+            assert!(
+                corpus::is_well_formed_digest(actual),
+                "the materialized digest must be `sha256:<64 hex>`, got {actual}"
+            );
+        }
+        other => panic!("expected a digest mismatch, got {}", other.summary()),
+    }
+
+    // The honest entry ran. Without it this test could pass on a campaign that compared
+    // nothing at all, which is the failure mode it is supposed to distinguish from.
+    assert!(
+        matches!(status_of(&run, &honest_id), EntryStatus::Materialized(_)),
+        "the entry with no recorded digest must materialize and be compared: {}",
+        status_of(&run, &honest_id).summary()
+    );
+    assert_eq!(
+        run.report.candidates_generated, 2,
+        "both entries were attempted"
+    );
+    assert_eq!(
+        run.report.candidates_executed, 1,
+        "exactly one entry was COMPARED — the mismatched one must never reach the \
+         differential"
+    );
+    assert_eq!(
+        run.report.candidates_discarded_unsafe, 1,
+        "the entry that was attempted but deliberately not executed is counted, never \
+         silently dropped"
+    );
+
+    // And the manifest was not re-baselined behind the failure.
+    let reloaded = DiscoveryData::load(scratch.path()).expect("the scratch manifest reloads");
+    let after = reloaded
+        .corpus_entry(&mismatched_id)
+        .expect("the mismatched entry survives");
+    assert_eq!(
+        after.content_digest.as_deref(),
+        Some(wrong_digest.as_str()),
+        "a mismatch must never overwrite the recorded digest: a self-healing check reports \
+         a problem once and then never again"
+    );
+
+    // The honest entry's digest WAS recorded, because that is a first materialization —
+    // the behavior the mismatch path must not be confused with.
+    let honest = reloaded
+        .corpus_entry(&honest_id)
+        .expect("the honest entry survives");
+    let honest_digest = honest
+        .content_digest
+        .as_deref()
+        .expect("a first materialization records its digest");
+    assert!(corpus::is_well_formed_digest(honest_digest));
+    assert!(
+        corpus::check(&reloaded.corpus).is_empty(),
+        "recording a digest must leave the manifest D4-clean"
+    );
+}
+
+/// **T102 / FR-052**: an unreachable entry is distinguished from one that ran and found
+/// nothing.
+///
+/// These two are the most confusable pair in the whole tier, and confusing them is the
+/// comfortable direction: "nothing to report" is what both look like from a distance, and
+/// one of them means the canary never went down the mine. The run therefore reports them as
+/// different *kinds* of outcome, not as a smaller number.
+#[test]
+fn an_unreachable_corpus_entry_is_not_an_entry_that_found_nothing() {
+    let mut entries = corpus_prefix(1);
+    let reachable_id = entries[0].id.clone();
+
+    // A repository that does not exist, at a syntactically valid immutable commit. The
+    // commit must be well formed: an unresolvable *reference* is D4 and never reaches the
+    // network, so using one would test the hermetic rule instead of the fetch.
+    let unreachable = {
+        let repository = "deacon-nonexistent-org/deacon-nonexistent-repo";
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        CorpusEntry {
+            id: CorpusEntry::derive_id(repository, commit, ""),
+            name: "synthetic-unreachable".to_string(),
+            repository: repository.to_string(),
+            commit: commit.to_string(),
+            path: String::new(),
+            content_digest: None,
+            notes: "deliberately unreachable, to prove the distinction FR-052 draws".to_string(),
+        }
+    };
+    let unreachable_id = unreachable.id.clone();
+    entries.push(unreachable);
+
+    let scratch = Scratch::new().with_corpus(&entries);
+    let run = run_campaign(&corpus_request("0x5eed0102", 0x5EED_0102, &scratch));
+
+    match status_of(&run, &unreachable_id) {
+        EntryStatus::Unreachable { cause, .. } => assert!(
+            !cause.trim().is_empty(),
+            "an unreachable entry must carry the cause it failed for; \"unreachable\" with \
+             no reason is a shrug, and a reviewer cannot tell a deleted repository from a \
+             dropped network"
+        ),
+        other => panic!("expected Unreachable, got {}", other.summary()),
+    }
+
+    let reachable = status_of(&run, &reachable_id);
+    assert!(
+        matches!(reachable, EntryStatus::Materialized(_)),
+        "the reachable entry must materialize: {}",
+        reachable.summary()
+    );
+
+    // The distinction, stated three ways — because a single tally cannot carry it.
+    assert_eq!(run.report.candidates_generated, 2, "both were attempted");
+    assert_eq!(
+        run.report.candidates_executed, 1,
+        "only the reachable entry was compared; an unreachable one contributes no \
+         comparison, and must not be counted as one that agreed"
+    );
+    assert_eq!(
+        run.corpus_statuses.len(),
+        2,
+        "every attempted entry gets a status, including the ones that produced no finding"
+    );
+    assert!(
+        !matches!(reachable, EntryStatus::Unreachable { .. }),
+        "an entry that ran and found nothing is NOT unreachable — that conflation is the \
+         one FR-052 exists to prevent"
+    );
+
+    // The run still exits cleanly: an unreachable entry is a fact about the ecosystem, not
+    // a machinery failure, and the exit-status contract says a campaign reports what it
+    // ran, never what it found (FR-058).
+    assert!(
+        !run.campaign.outcome.budget_exhausted,
+        "the plan is the manifest, and both entries were reached"
+    );
+
+    // The unreachable entry recorded no digest. Recording one would claim a verification of
+    // content nobody retrieved.
+    let reloaded = DiscoveryData::load(scratch.path()).expect("the scratch manifest reloads");
+    assert_eq!(
+        reloaded
+            .corpus_entry(&unreachable_id)
+            .expect("the entry survives")
+            .content_digest,
+        None,
+        "an unreachable entry must not record a digest"
+    );
+}
+
+/// **T103 / FR-054**: a corpus finding enters the same minimization, classification,
+/// deduplication, and promotion pipeline as a generated one, and names its upstream
+/// provenance.
+///
+/// "The same pipeline" is asserted as sameness of *mechanism*, not of outcome: the corpus
+/// driver calls the same `differential::compare`, the same tolerance index, the same
+/// signature derivation, and the same admission queue, and this test checks the observable
+/// consequences of that — a corpus finding validates under the same D-classes, deduplicates
+/// against a second campaign, and is accepted by the same triage and promotion API.
+///
+/// **On the provenance:** a generated finding's witness carries the document that
+/// reproduces it. A corpus finding's cannot — corpus content is never vendored (FR-053) —
+/// so it carries the pin instead: repository, commit, path, and the verified digest. That
+/// is the same claim in the only form available, because a witness whose input nobody can
+/// retrieve names nothing.
+///
+/// **On vacuity, stated plainly:** the per-finding assertions below are conditional,
+/// because two implementations agreeing on a real-world workspace is a legitimate and
+/// welcome outcome, and a test that *failed* when they agreed would be a gate on findings —
+/// the one thing FR-058 forbids this machinery to become. What is unconditional is the part
+/// that would catch the pipeline being wired up wrong at all: the tier ran, entries were
+/// compared, the campaign record and queue validate under the same D-classes, and a second
+/// campaign over the same standing queue admits nothing new.
+///
+/// **Note on minimization (US2):** reduction is not implemented at the time of writing —
+/// `shrink.rs` declares the ordered catalogue and `minimize.rs` is a stub — so "the same
+/// minimization" is asserted here as the same *state*: a corpus witness reports
+/// `isMinimal: false` with no reduction steps, exactly as a generated one does (FR-022
+/// forbids presenting an unreduced input as minimal). When T047–T052 land, re-run this to
+/// confirm a corpus witness is reduced by the same catalogue rather than exempted from it.
+#[test]
+fn a_corpus_finding_enters_the_same_pipeline_and_names_its_provenance() {
+    let entries = corpus_prefix(6);
+    let by_id: std::collections::BTreeMap<&str, &CorpusEntry> =
+        entries.iter().map(|e| (e.id.as_str(), e)).collect();
+
+    let scratch = Scratch::new().with_corpus(&entries);
+    let first = run_campaign(&corpus_request("0x5eed0103", 0x5EED_0103, &scratch));
+
+    // --- Unconditional: the tier ran, and its record is the ordinary record ------------
+    assert_eq!(
+        first.campaign.tier,
+        CampaignTier::Corpus,
+        "the record names the tier that wrote it"
+    );
+    assert!(
+        first.report.candidates_executed > 0,
+        "no corpus entry was compared, so this test would assert nothing about a \
+         pipeline: {:?}",
+        first
+            .corpus_statuses
+            .iter()
+            .map(EntryStatus::summary)
+            .collect::<Vec<_>>()
+    );
+    // The plan is the manifest, not the request's generator denominator.
+    assert_eq!(
+        first.report.candidates_generated,
+        entries.len() as u64,
+        "the corpus tier plans its manifest, so a full sweep is a complete run rather than \
+         a fraction of a plan it never had"
+    );
+
+    let registry = Registry::load(&default_registry_dir()).expect("the registry loads");
+    let data = DiscoveryData::load(scratch.path()).expect("the written data root reloads");
+    let violations = queue::check(&data, &queue::RegistryView::from_registry(&registry));
+    assert!(
+        violations.is_empty(),
+        "a corpus campaign's own record must satisfy the same D-classes as a generated \
+         one:\n{}",
+        violations
+            .iter()
+            .map(|v| format!("  {} {}: {v}", v.class(), v.record()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    // --- Per finding: provenance, minimization state, classification, promotion --------
+    for finding in &data.findings {
+        for witness in &finding.witnesses {
+            if witness.campaign_id != first.campaign.id {
+                continue;
+            }
+            let entry = by_id.get(witness.candidate_id.as_str()).unwrap_or_else(|| {
+                panic!(
+                    "a corpus witness's candidateId must BE the `cor-` entry id — the \
+                         one thing that reproduces the observation — got {:?}",
+                    witness.candidate_id
+                )
+            });
+
+            let provenance = &witness.minimal_input;
+            for (field, expected) in [
+                ("corpusEntry", entry.id.as_str()),
+                ("repository", entry.repository.as_str()),
+                ("commit", entry.commit.as_str()),
+                ("path", entry.path.as_str()),
+            ] {
+                assert_eq!(
+                    provenance.get(field).and_then(|v| v.as_str()),
+                    Some(expected),
+                    "the witness must name its upstream {field} (FR-054): {provenance}"
+                );
+            }
+            let digest = provenance
+                .get("contentDigest")
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| {
+                    panic!("the witness must name the verified digest: {provenance}")
+                });
+            assert!(
+                corpus::is_well_formed_digest(digest),
+                "the recorded provenance digest must be `sha256:<64 hex>`, got {digest}"
+            );
+
+            // The same minimization STATE a generated witness carries. See the note above.
+            assert!(
+                !witness.is_minimal,
+                "no reduction has run, so a corpus witness must not claim minimality \
+                 (FR-022) — a real-world workspace is the least minimal input this feature \
+                 has"
+            );
+            assert!(
+                witness.reduction_steps.is_empty(),
+                "an unreduced witness must record no reduction steps"
+            );
+            assert!(
+                witness.mutation_operators.is_empty(),
+                "no mutation operator produced a corpus input; a third party did"
+            );
+        }
+
+        // Classification and promotion: the same API a generated finding goes through.
+        // Exercised on a clone so the written queue is left exactly as the campaign wrote
+        // it — a test that promoted the real record would be authoring the review it is
+        // supposed to be checking.
+        let mut candidate = finding.clone();
+        assert_eq!(
+            candidate.state,
+            FindingState::Untriaged,
+            "a newly admitted finding is untriaged whatever tier admitted it"
+        );
+        candidate
+            .triage(Classification::DeaconRegression, None)
+            .expect("a corpus finding is triaged by the same API as a generated one");
+        candidate
+            .promote("case-tier1-decl-go-minimal")
+            .expect("a triaged corpus finding is promotable by the same API");
+    }
+
+    // --- Deduplication across campaigns ------------------------------------------------
+    // A second campaign with a different seed over the SAME standing queue. The corpus tier
+    // draws nothing, so a different seed changes only the campaign id — which is exactly
+    // what makes this a deduplication test rather than a reproducibility one: a signature
+    // already in the queue must be re-witnessed, never admitted again.
+    let before: std::collections::BTreeSet<String> =
+        data.findings.iter().map(|f| f.id.clone()).collect();
+    let second = run_campaign(&corpus_request("0x5eed0104", 0x5EED_0104, &scratch));
+    assert_ne!(
+        second.campaign.id, first.campaign.id,
+        "a different seed is a different campaign"
+    );
+
+    let after = DiscoveryData::load(scratch.path()).expect("the data root reloads");
+    let after_ids: std::collections::BTreeSet<String> =
+        after.findings.iter().map(|f| f.id.clone()).collect();
+    assert_eq!(
+        before, after_ids,
+        "re-running the corpus tier over an unchanged manifest must admit no NEW finding — \
+         the same signature is one defect observed twice, not two defects"
+    );
+
+    let violations = queue::check(&after, &queue::RegistryView::from_registry(&registry));
+    assert!(
+        violations.is_empty(),
+        "the queue must stay clean after a second campaign:\n{violations:?}"
+    );
+
+    // Every entry's digest was RECORDED by the first run and VERIFIED by the second — the
+    // FR-051 lifecycle, end to end. A `recorded: true` on the second run would mean the
+    // digest went missing between them, which is D4's second clause.
+    for status in &second.corpus_statuses {
+        if let EntryStatus::Materialized(m) = status {
+            assert!(
+                !m.recorded,
+                "the second fetch must VERIFY the digest recorded by the first, not record \
+                 it again: {}",
+                status.summary()
+            );
+        }
+    }
 }

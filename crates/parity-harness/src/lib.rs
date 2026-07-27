@@ -182,6 +182,23 @@ pub enum HarnessError {
     )]
     DockerUnavailable { cause: String },
 
+    /// The **network-backed** corpus tier could not reach the network at all
+    /// (025-exploratory-parity-discovery, US7).
+    ///
+    /// Distinct from an *unreachable entry*, which is a per-entry status the campaign
+    /// counts and reports (FR-052). This is the tier's prerequisite failing before any
+    /// entry was attempted, and it is the same fail-loud discipline
+    /// [`DockerMissing`](Self::DockerMissing) applies: a corpus campaign that quietly
+    /// reported zero entries because it had no network would be byte-identical to one in
+    /// which the whole ecosystem agreed with deacon.
+    #[error(
+        "the corpus tier requires network access and a working `git`, and neither could be \
+         established: {cause}. Remedy: run this tier in the network-backed lane (or provide a \
+         working `git` via DEACON_DISCOVERY_GIT) — a corpus campaign with no network reports \
+         the same thing as one in which every entry agreed."
+    )]
+    NetworkUnavailable { cause: String },
+
     /// The runner requires Node (for the pinned oracle) but it is unavailable.
     #[error(
         "Node is unavailable for the conformance runner: {cause}. Remedy: install the Node \

@@ -750,10 +750,15 @@ fn discovery_check(registry_dir: &Path, json: bool) -> i32 {
 
     if violations.is_empty() {
         eprintln!(
-            "ok: {} validates clean ({} finding(s), {} campaign(s))",
+            // The corpus count is named alongside the queue's: a run that validated 33
+            // pinned entries and reported only "0 findings, 0 campaigns" would understate
+            // what it checked, and the D4 immutable-reference clause is the one thing here
+            // that must visibly run on every pull request.
+            "ok: {} validates clean ({} finding(s), {} campaign(s), {} corpus entr(ies))",
             discovery_dir.display(),
             data.findings.len(),
-            data.campaigns.len()
+            data.campaigns.len(),
+            data.corpus.len()
         );
         0
     } else {

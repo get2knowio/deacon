@@ -196,9 +196,9 @@
         "realworld::try-python",
         "realworld::try-rust"
       ],
-      "missingCapability": "vendored fixtures for the pinned third-party workspaces: the manifest fetches 33 public workspace snapshots over the network on demand, and vendoring third-party content into this repository is deliberately out of scope, so no case can materialize them",
+      "missingCapability": "vendored fixtures for the pinned third-party workspaces: the manifest fetches 33 public workspace snapshots over the network on demand, and vendoring third-party content into this repository is deliberately out of scope, so no declarative case can materialize them",
       "disposition": "permanent",
-      "outOfScopeRationale": "Vendoring third-party content into this repository is out of scope by decision (research D8): the manifest names 33 public workspace snapshots fetched over the network on demand, and a declarative fixture must be committed, content-hashed input. These entries are inventoried as a recorded coverage SOURCE, never executed, so there is no capability to add \u2014 only a decision already taken.",
+      "outOfScopeRationale": "Vendoring third-party content into this repository is out of scope by decision (research D8): the manifest names 33 public workspace snapshots fetched over the network on demand, and a declarative fixture must be committed, content-hashed input. The residual is therefore about REPRESENTATION as a declarative case, and it stays permanent \u2014 not about whether the entries are exercised. Since 025-exploratory-parity-discovery (US7) they are: the manifest moved out of the retired fixtures/parity-corpus/fetch_realworld_corpus.py into the Rust-owned conformance/discovery/corpus.json, where violation class D4 rejects any non-immutable reference hermetically on every pull request, and the weekly network-backed `corpus` campaign tier fetches each entry with content-digest verification and compares it against the pinned oracle. What no case can do is carry the workspace as committed input; that has not changed and is not going to.",
       "behaviors": []
     },
     {

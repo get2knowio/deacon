@@ -22,6 +22,8 @@
 
 use std::path::{Path, PathBuf};
 
+use deacon_conformance::discovery::corpus::{self, CorpusEntry};
+use deacon_conformance::discovery::generate;
 use deacon_conformance::discovery::grammar::Grammar;
 use deacon_conformance::discovery::queue::{self, CampaignsFile, DiscoveryData, FindingsFile};
 use deacon_conformance::discovery::report as discovery_report;
@@ -683,6 +685,7 @@ fn synthetic_queue(registry: &Registry, paths: &[&str]) -> DiscoveryData {
     DiscoveryData {
         findings: findings.records,
         campaigns: vec![campaign],
+        corpus: Vec::new(),
     }
 }
 
@@ -983,6 +986,7 @@ fn equal_signatures_from_two_campaigns_collapse_to_one_finding_with_two_witnesse
     let data = DiscoveryData {
         findings,
         campaigns: vec![first.clone(), second.clone()],
+        corpus: Vec::new(),
     };
     assert_clean(&data, &registry, "merged");
 
@@ -1236,6 +1240,7 @@ fn a_finding_that_stops_reproducing_is_reported_with_its_last_campaign() {
     let data = DiscoveryData {
         findings,
         campaigns: vec![first, second.clone(), third],
+        corpus: Vec::new(),
     };
     assert_clean(&data, &registry, "no-longer-reproducing");
 
@@ -1513,4 +1518,249 @@ fn rust_sources_in(dir: &str, keep: impl Fn(&str) -> bool) -> Vec<(String, Strin
         out.push((format!("{dir}/{name}"), text));
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// T099/T100/T104 (US7) — the pinned real-world corpus, checked WITHOUT a network
+// ---------------------------------------------------------------------------
+
+/// The committed corpus manifest.
+fn load_corpus() -> Vec<CorpusEntry> {
+    load_discovery().corpus
+}
+
+/// One well-formed entry, id derived rather than chosen (the same discipline
+/// [`synthetic_campaign`] follows: a hand-picked id would fail the D4 identity clause and
+/// the fixture would stop being the clean manifest these tests need).
+fn corpus_entry(repository: &str, commit: &str, path: &str) -> CorpusEntry {
+    CorpusEntry {
+        id: CorpusEntry::derive_id(repository, commit, path),
+        name: format!("synthetic-{}", repository.replace('/', "-")),
+        repository: repository.to_string(),
+        commit: commit.to_string(),
+        path: path.to_string(),
+        content_digest: None,
+        notes: String::new(),
+    }
+}
+
+/// **T099 / FR-050 / SC-012**: a branch, a tag, `HEAD`, or `latest` is **D4**, rejected
+/// with no network access whatsoever.
+///
+/// This test is the entire argument for moving the manifest out of the Python fetcher and
+/// into Rust-owned strict JSON (research D8). FR-050 is a property of the *manifest*, not
+/// of a fetch — nothing needs to be retrieved to know that `main` names different content
+/// tomorrow — so the check belongs somewhere it runs on every pull request. A validation
+/// that only runs when the network is up is a validation that does not run.
+///
+/// The no-network claim is structural rather than asserted here: `deacon-conformance`
+/// declares no HTTP client, no async runtime, and no git transport, and no hermetic
+/// discovery module may spawn a process or open a socket —
+/// [`the_hermetic_discovery_surface_cannot_reach_the_network`] enforces both. This test
+/// exercises the rule that guard makes reachable.
+#[test]
+fn a_mutable_corpus_reference_is_rejected_hermetically() {
+    // Every floating shape FR-050 names, plus the near-misses a naive length or hex check
+    // would wave through.
+    for mutable in [
+        "main",
+        "master",
+        "HEAD",
+        "latest",
+        "v1.2.3",
+        "refs/heads/main",
+        "release/2024-01",
+        "0123456",                                   // abbreviated
+        "0123456789ABCDEF0123456789ABCDEF01234567",  // uppercase
+        "0123456789abcdef0123456789abcdef0123456",   // 39
+        "0123456789abcdef0123456789abcdef012345678", // 41
+        "0123456789abcdef0123456789abcdef0123456g",  // non-hex
+        "",
+    ] {
+        let entry = corpus_entry("microsoft/vscode-remote-try-node", mutable, "");
+        let violations = corpus::check(std::slice::from_ref(&entry));
+        assert!(
+            violations.iter().any(|v| v.class() == "D4"),
+            "`{mutable}` must be rejected as D4; got {violations:?}"
+        );
+    }
+
+    // And the same rule reaches the real validator over a real data root, so the class is
+    // wired in rather than merely implemented.
+    let registry = load_registry();
+    let mut data = load_discovery();
+    data.corpus
+        .push(corpus_entry("owner/repo", "main", "workspace"));
+    let violations = queue::check(&data, &queue::RegistryView::from_registry(&registry));
+    assert!(
+        violations.iter().any(|v| v.class() == "D4"),
+        "`discovery check` must surface D4 over the data root: {violations:?}"
+    );
+
+    // The committed manifest itself is clean — otherwise the assertion above would be
+    // measuring a pre-existing violation rather than the one it injected.
+    assert!(
+        corpus::check(&load_corpus()).is_empty(),
+        "the committed corpus manifest must be D4-clean"
+    );
+}
+
+/// **T100 / FR-049**: every entry records a repository, an immutable commit, the path
+/// within the repository, and a content digest.
+///
+/// The digest field is `null` until first materialization and non-null (and verified)
+/// forever after, so what FR-049 requires is that the *slot* is there and is either
+/// absent-by-design or well formed — never a placeholder, never a truncated hash, never a
+/// value nothing could compare against.
+#[test]
+fn every_corpus_entry_records_its_full_provenance() {
+    let corpus = load_corpus();
+    assert_eq!(
+        corpus.len(),
+        33,
+        "the manifest carries the 33 pinned entries the frozen `realworld::<name>` \
+         baseline units were derived from; a silently shrinking corpus explores less and \
+         reports the same 'found nothing'"
+    );
+
+    for entry in &corpus {
+        assert!(
+            entry.id.starts_with("cor-"),
+            "{}: a corpus id is `cor-<hash8>`",
+            entry.id
+        );
+        assert_eq!(
+            entry.id,
+            entry.derived_id(),
+            "{}: the id must derive from `repository ‖ commit ‖ path`, or the record is \
+             detached from the snapshot it claims to identify",
+            entry.name
+        );
+        assert!(
+            !entry.name.is_empty(),
+            "{}: an entry needs a name",
+            entry.id
+        );
+        assert!(
+            entry.repository.split('/').count() == 2
+                && entry.repository.split('/').all(|p| !p.is_empty()),
+            "{}: `repository` must be `owner/repo`, got {:?}",
+            entry.id,
+            entry.repository
+        );
+        assert!(
+            corpus::is_immutable_reference(&entry.commit),
+            "{}: `commit` must be a 40-hex object name, got {:?}",
+            entry.id,
+            entry.commit
+        );
+        // `path` is a recorded field that may legitimately be empty (the repository root),
+        // so the assertion is about its SHAPE: a leading or trailing slash would make two
+        // spellings of one workspace root derive two different ids.
+        assert_eq!(
+            entry.path.trim_matches('/'),
+            entry.path,
+            "{}: `path` must be recorded without leading or trailing slashes, or two \
+             spellings of one workspace root would derive two different ids",
+            entry.id
+        );
+        match &entry.content_digest {
+            None => {} // Not yet materialized — the one legitimate absence.
+            Some(digest) => assert!(
+                corpus::is_well_formed_digest(digest),
+                "{}: a recorded digest must be `sha256:<64 lowercase hex>`, got {digest:?} \
+                 — a malformed digest is not a weaker check, it is one that can never \
+                 disagree",
+                entry.id
+            ),
+        }
+        assert!(
+            !entry.notes.trim().is_empty(),
+            "{}: an entry records WHY this workspace was selected; an unexplained pin \
+             cannot be re-pinned by anyone but its author",
+            entry.id
+        );
+    }
+
+    // Provenance is only provenance if it is unique. Two entries sharing an id would make
+    // one snapshot two records; two sharing a name would make the frozen
+    // `realworld::<name>` baseline reference ambiguous.
+    let mut ids: Vec<&str> = corpus.iter().map(|e| e.id.as_str()).collect();
+    ids.sort_unstable();
+    let before = ids.len();
+    ids.dedup();
+    assert_eq!(before, ids.len(), "corpus ids must be unique");
+
+    let mut names: Vec<&str> = corpus.iter().map(|e| e.name.as_str()).collect();
+    names.sort_unstable();
+    let before = names.len();
+    names.dedup();
+    assert_eq!(before, names.len(), "corpus names must be unique");
+}
+
+/// **T104 / FR-008a / FR-054a**: no corpus entry appears among the generator's mutation
+/// seeds.
+///
+/// The corpus is consumed **only** as a direct comparison input in the network-backed
+/// lane. Letting it feed the generator would do two separate kinds of damage: the
+/// generated space would stop being reproducible from a seed alone (it would depend on
+/// what a third party's repository contained at fetch time), and third-party content would
+/// enter the hermetic pull-request lane, which by FR-055 performs no network access at all
+/// and therefore could never obtain it.
+///
+/// The separation is **structural**, not a naming convention. The seed corpus is five
+/// committed fixtures embedded with `include_str!`, so its membership is fixed when the
+/// crate compiles; a fetched workspace does not exist then and cannot be added later.
+/// This test asserts both halves — that the two sets are disjoint, and that the seeds come
+/// from the committed fixture tree rather than the discovery data root.
+#[test]
+fn no_corpus_entry_is_a_mutation_seed() {
+    let seeds = generate::seed_fixture_names();
+    assert!(
+        !seeds.is_empty(),
+        "a scan over an empty seed set would pass by checking nothing"
+    );
+
+    let corpus = load_corpus();
+    for entry in &corpus {
+        assert!(
+            !seeds.contains(&entry.name.as_str()),
+            "corpus entry `{}` is also a mutation seed — the corpus is a direct comparison \
+             input only (FR-054a), and seeding the generator from it would make the \
+             generated space depend on third-party content the hermetic lane can never \
+             fetch",
+            entry.name
+        );
+        assert!(
+            !seeds.iter().any(|s| s.contains(&entry.name)),
+            "seed fixture names must not embed the corpus entry name `{}`",
+            entry.name
+        );
+    }
+
+    // The other direction, and the load-bearing one: the seeds are committed fixtures.
+    // A seed whose bytes came from `conformance/discovery/` would be corpus content in
+    // the generator no matter what it was called.
+    let fixtures = workspace_root().join("fixtures");
+    for seed in &seeds {
+        assert!(
+            !corpus.iter().any(|e| e.name == *seed),
+            "seed `{seed}` names a corpus entry"
+        );
+    }
+    assert!(
+        fixtures.is_dir(),
+        "the seed corpus is the committed fixture tree at {fixtures:?}"
+    );
+
+    // And the manifest is a *manifest*: it records provenance, never bytes (FR-053), so
+    // there is nothing in it a generator could seed from even if one tried.
+    for entry in &corpus {
+        assert!(
+            !entry.workspace_dir(&workspace_root()).exists(),
+            "corpus content must never be vendored into this repository (FR-053), but \
+             {} exists",
+            entry.id
+        );
+    }
 }

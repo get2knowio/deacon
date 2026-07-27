@@ -29,8 +29,11 @@
 //!   function drifts the baseline and must be acknowledged;
 //! - the declarative runner's units come from the registry's declarative cases, with
 //!   their channels, fixtures and difference classes derived from the case record;
-//! - the external manifest's units come from `fetch_realworld_corpus.py`'s pinned
-//!   entries (research D8).
+//! - the external manifest's units come from the pinned entries of the real-world corpus
+//!   manifest (research D8). That manifest moved from `fetch_realworld_corpus.py` to the
+//!   Rust-owned `conformance/discovery/corpus.json` in 025 US7 (T109); the same 33 names
+//!   in the same order, so the frozen file still regenerates byte-for-byte, now read from
+//!   a record whose pins this repository validates on every pull request.
 //!
 //! `assertion`, and the per-case `channels` / `errorPath` / `fixtures` / `diffClasses`
 //! for the scenario and guard programs, are **authored once, here, at freeze**. They
@@ -71,7 +74,14 @@ pub const UNFROZEN_REVISION: &str = "unfrozen";
 const PARITY_REGISTRY_REL: &str = "fixtures/parity-corpus/registry.json";
 
 /// Repo-relative location of the pinned external real-world corpus manifest (D8).
-const REALWORLD_MANIFEST_REL: &str = "fixtures/parity-corpus/fetch_realworld_corpus.py";
+///
+/// **Re-pointed at the Rust-owned manifest** when `fetch_realworld_corpus.py` was retired
+/// (025 US7, T109). The enumeration is unchanged in substance: the same 33 entry *names*
+/// in the same order, so `baseline generate` still reproduces the frozen file
+/// byte-for-byte. What changed is where the names are read from — a strict-JSON record
+/// this repository validates on every pull request, rather than a Python tuple nothing
+/// checked.
+const REALWORLD_MANIFEST_REL: &str = "conformance/discovery/corpus.json";
 
 /// Repo-relative directory holding the parity test binaries' sources.
 const TESTS_DIR_REL: &str = "crates/deacon/tests";
@@ -1580,23 +1590,19 @@ fn scan_test_functions(source: &str) -> Vec<String> {
     out
 }
 
-/// Scan the external corpus manifest for its pinned entry names — the `name="…"`
-/// field of each `CorpusEntry(…)`, in declaration order.
+/// Scan the external corpus manifest for its pinned entry names, in declaration order.
+///
+/// Since T109 the manifest is `conformance/discovery/corpus.json` and the scan is a strict
+/// deserialization rather than a line-oriented grep over Python source. A malformed
+/// manifest therefore yields **no** names, which [`realworld_units`] turns into a hard
+/// [`BaselineError::NoManifestEntries`]: a manifest that stopped parsing must never be
+/// indistinguishable from one that lists nothing, because the second reads as "these 33
+/// recorded coverage sources were retired" and nobody decided that.
 fn scan_manifest_entry_names(source: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for line in source.lines() {
-        let trimmed = line.trim();
-        let Some(rest) = trimmed.strip_prefix("name=\"") else {
-            continue;
-        };
-        let Some(name) = rest.split('"').next() else {
-            continue;
-        };
-        if !name.is_empty() {
-            out.push(name.to_string());
-        }
-    }
-    out
+    let Ok(file) = serde_json::from_str::<crate::discovery::corpus::CorpusFile>(source) else {
+        return Vec::new();
+    };
+    file.records.into_iter().map(|entry| entry.name).collect()
 }
 
 fn to_strings(values: &[&str]) -> Vec<String> {
@@ -1822,22 +1828,44 @@ mod tests {
     }
 
     #[test]
-    fn scan_manifest_entry_names_reads_pinned_entries() {
-        let src = r#"
-ENTRIES = (
-    CorpusEntry(
-        name="images-python",
-        repo="devcontainers/images",
-    ),
-    CorpusEntry(
-        name="try-node",
-    ),
-)
-"#;
+    fn scan_manifest_entry_names_reads_pinned_entries_in_declaration_order() {
+        let src = r#"{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "cor-eb074204",
+      "name": "images-python",
+      "repository": "devcontainers/images",
+      "commit": "31b61b521d55926d62c748b659f24ae71774c0e3",
+      "path": "src/python",
+      "contentDigest": null,
+      "notes": "n"
+    },
+    {
+      "id": "cor-e0e0c8be",
+      "name": "try-node",
+      "repository": "microsoft/vscode-remote-try-node",
+      "commit": "45f5e33e47f4b113804ea808b7ce4c90a6823867",
+      "path": "",
+      "contentDigest": null,
+      "notes": "n"
+    }
+  ]
+}"#;
         assert_eq!(
             scan_manifest_entry_names(src),
             vec!["images-python", "try-node"]
         );
+    }
+
+    #[test]
+    fn a_manifest_that_stopped_parsing_yields_no_names_rather_than_a_partial_list() {
+        // The caller turns an empty list into a hard error. A lenient scan that recovered
+        // *some* names would silently retire the rest — and a retired coverage source is
+        // exactly the claim nobody made.
+        assert!(scan_manifest_entry_names("not json at all").is_empty());
+        assert!(scan_manifest_entry_names(r#"{"schemaVersion": 99, "records": []}"#).is_empty());
+        assert!(scan_manifest_entry_names(r#"{"records": []}"#).is_empty());
     }
 
     #[test]
