@@ -351,6 +351,20 @@ async fn the_error_path_tier_reclaims_every_resource_it_creates() {
         leaked_named.is_empty(),
         "the tier left harness-named network(s)/volume(s) behind: {leaked_named:?}"
     );
+
+    let leaked_compose: Vec<&String> = after
+        .orphaned_compose
+        .difference(&before.orphaned_compose)
+        .collect();
+    assert!(
+        leaked_compose.is_empty(),
+        "the tier left Compose network(s)/volume(s) behind, each named for an isolated \
+         workspace that no longer exists: {leaked_compose:?}. These outlive both `deacon \
+         down` (which computes a different project name) and the container label sweep \
+         (only containers carry `devcontainer.local_folder`), and they accumulate until the \
+         daemon answers a compose `up` with \"all predefined address pools have been fully \
+         subnetted\" — a leak that surfaces as a flake in an unrelated case"
+    );
 }
 
 /// T099 (US4 scenario 4, FR-045): two concurrent cases observe none of each other's
@@ -425,6 +439,14 @@ struct Residual {
     orphaned_containers: std::collections::BTreeSet<String>,
     /// Networks and volumes named by `DockerWorkspace::resource_name` (`dcr-<pid>-<seq>-…`).
     harness_named: std::collections::BTreeSet<String>,
+    /// Networks and volumes a COMPOSE project rooted in an isolated workspace created,
+    /// where that workspace no longer exists — orphaned by the same rule the containers
+    /// use. Compose names every resource `<project>_<resource>` and the reference derives
+    /// its project from the workspace DIRECTORY, so the workspace basename is the leading
+    /// segment. These are invisible to `harness_named` (the harness did not name them) and
+    /// to the container sweep (only containers carry `devcontainer.local_folder`), which is
+    /// how 28 of them accumulated before anything noticed.
+    orphaned_compose: std::collections::BTreeSet<String>,
 }
 
 /// The prefix `workspace.rs` gives every isolated workspace directory.
@@ -454,6 +476,8 @@ fn residual_snapshot() -> Residual {
     }
 
     let mut harness_named = std::collections::BTreeSet::new();
+    let mut orphaned_compose = std::collections::BTreeSet::new();
+    let live_workspaces = live_isolated_workspaces();
     for (kind, args) in [
         ("network", vec!["network", "ls", "--format", "{{.Name}}"]),
         ("volume", vec!["volume", "ls", "--format", "{{.Name}}"]),
@@ -462,13 +486,53 @@ fn residual_snapshot() -> Residual {
             if name.starts_with(HARNESS_RESOURCE_PREFIX) {
                 harness_named.insert(format!("{kind}:{name}"));
             }
+            if let Some(workspace) = compose_workspace_of(&name) {
+                // An isolated workspace that still exists is a SIBLING driver's in-flight
+                // run, not a leak — the same attribution rule the container sweep uses.
+                if !live_workspaces.contains(&workspace) {
+                    orphaned_compose.insert(format!("{kind}:{name}"));
+                }
+            }
         }
     }
 
     Residual {
         orphaned_containers,
         harness_named,
+        orphaned_compose,
     }
+}
+
+/// The isolated-workspace directory name a Compose resource name carries, if any,
+/// LOWERCASED for comparison against [`live_isolated_workspaces`].
+///
+/// Compose names every resource `<project>_<resource>`, and a project rooted in an isolated
+/// workspace takes its name from that workspace's directory, so the leading `deacon-conf-…`
+/// segment names the workspace. Returns `None` for anything else.
+///
+/// The case fold matters: a Compose project name is lowercased and `tempfile`'s suffix is
+/// not, so comparing the raw segment to a directory name reports every in-flight sibling as
+/// an orphan.
+fn compose_workspace_of(name: &str) -> Option<String> {
+    let (head, _) = name.split_once('_')?;
+    head.starts_with(WORKSPACE_PREFIX)
+        .then(|| head.to_ascii_lowercase())
+}
+
+/// The lowercased basenames of the isolated workspace directories that currently exist —
+/// each one a run that is still in flight, whose Compose resources are not leaks.
+fn live_isolated_workspaces() -> std::collections::BTreeSet<String> {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return std::collections::BTreeSet::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.starts_with(WORKSPACE_PREFIX)
+                .then(|| name.to_ascii_lowercase())
+        })
+        .collect()
 }
 
 /// The non-empty lines `docker <args>` printed. A probe that cannot run yields nothing on
