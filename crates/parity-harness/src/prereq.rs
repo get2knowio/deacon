@@ -83,7 +83,11 @@ pub const DEACON_BIN_ENV: &str = "DEACON_PARITY_DEACON_BIN";
 /// Lives here rather than in one bin because it is now shared by BOTH bins that run deacon
 /// outside a test harness (`equivalence-report` and `coverage-regressions`). A second copy
 /// of a "do not guess the binary" rule is the copy that rots (Constitution VIII).
-pub fn deacon_binary() -> Result<PathBuf, HarnessError> {
+/// Async because the build it shells out to can take minutes on a cold `target/`, and
+/// both callers reach it from inside `runtime.block_on`. A `std::process::Command` here
+/// blocked a tokio worker thread for the whole compile (constitution V) — the same
+/// pattern the docker probe above already avoids.
+pub async fn deacon_binary() -> Result<PathBuf, HarnessError> {
     if let Some(path) = std::env::var_os(DEACON_BIN_ENV) {
         let path = PathBuf::from(path);
         if path.is_file() {
@@ -96,10 +100,12 @@ pub fn deacon_binary() -> Result<PathBuf, HarnessError> {
         return Err(HarnessError::FixtureMissing { path });
     }
 
-    let output = std::process::Command::new("cargo")
+    let output = tokio::process::Command::new("cargo")
         .args(["build", "-p", "deacon", "--message-format", "json"])
         .current_dir(crate::workspace_root())
+        .kill_on_drop(true)
         .output()
+        .await
         .map_err(|e| HarnessError::Report {
             cause: format!("could not build the deacon binary under test: {e}"),
         })?;

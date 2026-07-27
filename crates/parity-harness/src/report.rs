@@ -55,7 +55,16 @@ pub enum Outcome {
 pub enum Cause {
     Divergence,
     OracleFailure,
+    /// One oracle CLI invocation exceeded its per-invocation bound.
     OracleTimeout,
+    /// A whole case exceeded its per-case wall-clock bound (024 FR-077b).
+    ///
+    /// Distinct from [`OracleTimeout`](Self::OracleTimeout) on purpose: the per-case
+    /// bound wraps deacon, the oracle, observation, AND teardown, so a wedged
+    /// `deacon up` or a hung `docker inspect` lands here. Reporting those as
+    /// `OracleTimeout` blamed the pinned reference for stalls it had no part in —
+    /// exactly the unattributable signal the explicit per-case bound was added to fix.
+    CaseTimeout,
     MalformedOutput,
     Normalization,
     FixtureMissing,

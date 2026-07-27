@@ -399,6 +399,32 @@ pub(crate) async fn execute_compose_up(
         .await?
     };
 
+    // Fold feature-contributed `containerEnv` into the compose service environment,
+    // BELOW the configuration's own and the CLI's (already inserted above).
+    //
+    // The compose path never read `feature_build.combined_env` at all, so a Feature
+    // declaring `containerEnv` had it baked into the feature-extended image but never
+    // into the service's `environment:` block — while the single-container path applies
+    // it in `up/container.rs`. `bhv-up-container-env-merge-precedence` is stated over
+    // "the created container", not over one container shape, so the two paths disagreeing
+    // is a nonconformance on this one. Must run here (after `feature_build`), the same
+    // constraint the feature-`mounts` merge below is placed for.
+    //
+    // `or_insert` (never `insert`) is the precedence: configuration and CLI values
+    // already present win the conflict, matching the single-container fix from 024 US5.
+    // Keys are applied in sorted order so the rendered override block stays
+    // deterministic run-to-run, as with `config.container_env` above.
+    if let Some(ref fb) = feature_build {
+        let mut feature_env_keys: Vec<&String> = fb.combined_env.keys().collect();
+        feature_env_keys.sort();
+        for key in feature_env_keys {
+            project
+                .additional_env
+                .entry(key.clone())
+                .or_insert_with(|| fb.combined_env[key].clone());
+        }
+    }
+
     // Lockfile graduation (PR-4b): mirror the single-container flow — write
     // the lockfile to disk, or byte-compare it in `--frozen-lockfile` mode.
     // Only runs when features were actually built (the compose path returns

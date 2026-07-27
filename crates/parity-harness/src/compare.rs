@@ -64,8 +64,13 @@ pub fn verdict_differential(
         diverging.push(channel.to_string());
     } else if deacon.present {
         diff_paths(channel, &deacon.value, &reference.value, &mut diverging);
-        name_the_scalar_observable(channel, &mut diverging);
     }
+    // Applied to BOTH branches. A bare channel id is un-tolerable by construction:
+    // `AllowedDifference::is_global_ignore` rejects one at load (FR-032), so a
+    // divergence reported under it can never be covered by a legal scoped tolerance.
+    // Naming only the scalar-diff branch left the presence-mismatch branch emitting
+    // exactly the un-expressible path this function exists to eliminate.
+    name_the_scalar_observable(channel, &mut diverging);
     if diverging.is_empty() {
         return agree(channel);
     }
@@ -544,6 +549,40 @@ mod tests {
             present: true,
             value,
         }
+    }
+
+    /// A presence mismatch must name the scalar observable too. It reported the bare
+    /// channel id, and `AllowedDifference::is_global_ignore` rejects a bare channel id at
+    /// load (FR-032) — so no loadable tolerance could ever cover it.
+    #[test]
+    fn presence_mismatch_names_the_scalar_observable() {
+        let present = norm(CHAN_EXIT_CODE, json!(0));
+        let absent = NormalizedChannelEvidence {
+            channel: CHAN_EXIT_CODE.to_string(),
+            operation: "op".to_string(),
+            present: false,
+            value: Value::Null,
+        };
+        let tolerances = Tolerances::new(&[], &[]);
+        let mut consumed = std::collections::HashSet::new();
+        let verdict = verdict_differential(
+            CHAN_EXIT_CODE,
+            &present,
+            &absent,
+            &tolerances,
+            &mut consumed,
+        );
+
+        assert_eq!(verdict.outcome, Outcome::Diverge);
+        let paths = verdict.detail.as_ref().unwrap()["divergingPaths"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            paths,
+            vec![json!(format!("{CHAN_EXIT_CODE}.exitCode"))],
+            "a bare channel id here is un-tolerable by construction"
+        );
     }
 
     #[test]

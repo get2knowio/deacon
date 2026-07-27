@@ -782,6 +782,13 @@ fn denormalized_fields_for(paths: &BTreeSet<String>) -> BTreeSet<String> {
 fn build_observables(registry: &Registry) -> ObservablesReport {
     let mut channels = Vec::new();
     let mut field_cases: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    // Only cases something actually RUNS count toward the SC-005 three-case floor, the
+    // same population `coverage::evaluate_obligations` gates on. Counting every registry
+    // record let a legacy case whose residual has been closed — and whose carrier binary
+    // is therefore deleted — satisfy the floor. That inverts the floor's entire purpose:
+    // it exists because a channel carried by one case is one authoring mistake from
+    // unobserved, and a case nothing executes observes nothing at all.
+    let executable = crate::coverage::executable_case_ids(registry);
     for channel in &registry.channels {
         let mut cases = 0usize;
         let mut fields: BTreeSet<String> = BTreeSet::new();
@@ -789,7 +796,7 @@ fn build_observables(registry: &Registry) -> ObservablesReport {
         for case in &registry.cases {
             let observes = case.expected.iter().any(|e| e.channel == channel.id)
                 || case.outcomes.iter().any(|o| o.channel == channel.id);
-            if !observes {
+            if !observes || !executable.contains(case.id.as_str()) {
                 continue;
             }
             cases += 1;

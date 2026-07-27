@@ -90,14 +90,17 @@ pub async fn execute_down(
         }
     };
 
-    // A configuration was FOUND but could not be read. That is a developer
-    // mistake, not an absent configuration, so it fails here rather than falling
-    // through to auto-discovery (constitution IV, "strict on mistakes"). Tolerating
-    // it was worse than merely quiet: auto-discovery re-derives the identity from a
-    // DEFAULT config, so a `down` over an unparseable document silently scoped the
-    // teardown differently from the `up` that created the container and then exited
-    // 0 having removed nothing. `up` and `exec` already reject the same document;
-    // `down` was the one subcommand that did not.
+    // A configuration was NAMED but could not be loaded — either discovery found a
+    // document that will not parse, or `--config-path` names a file that is missing or
+    // unreadable. Both are developer mistakes, not an absent configuration (that case
+    // took the `DiscoveryResult::None` branch above), so it fails here rather than
+    // falling through to auto-discovery (constitution IV, "strict on mistakes").
+    // Tolerating it was worse than merely quiet: auto-discovery re-derives the identity
+    // from a DEFAULT config, so a `down` over an unparseable document silently scoped
+    // the teardown differently from the `up` that created the container and then exited
+    // 0 having removed nothing. This matches `up`/`exec`, which pass an explicit
+    // `--config` straight to the loader and surface the same `NotFound`/parse errors
+    // (`commands/shared/config_loader.rs`); `down` was the one subcommand that did not.
     let config = config_result?;
 
     debug!("Loaded configuration: {:?}", config.name);

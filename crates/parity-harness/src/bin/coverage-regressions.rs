@@ -186,7 +186,7 @@ async fn run(selection: &Selection) -> Result<RegressionReport, HarnessError> {
     // regression-harness.md, "Isolation and safety").
     let oracle = Oracle::acquire().await?;
     require_docker().await?;
-    let deacon = deacon_binary()?;
+    let deacon = deacon_binary().await?;
 
     // Take out the injection capability. Everything below this line may perturb evidence;
     // nothing above it — and nothing in any other program — can (FR-070).

@@ -328,7 +328,7 @@ pub async fn drive_group(
                 let detail = format!("exceeded the {bound:?} per-case bound");
                 results.push(CaseResult::fail(
                     case.clone(),
-                    Cause::OracleTimeout,
+                    Cause::CaseTimeout,
                     Some(detail.clone()),
                     raw_paths(&case, &first_op),
                 ));

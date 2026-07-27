@@ -41,15 +41,16 @@ impl CliProcessObserver {
     /// separate from the trait so the runner can also call it directly (and unit tests
     /// can exercise the mapping without a `RunContext`).
     ///
-    /// `workspace` is the run's workspace, needed only by `chan-structured-output` to
-    /// derive the FR-055 `nullEmptyOmitted` classification against the properties the
-    /// fixture actually authored. `None` skips the derivation (the field is then absent
-    /// on BOTH sides, never one-sided).
+    /// `authored` is the run's AUTHORED configuration property names — snapshotted once
+    /// by [`RunContext::for_side`] before any operation ran — needed only by
+    /// `chan-structured-output` to derive the FR-055 `nullEmptyOmitted` classification.
+    /// `None` skips the derivation (the field is then absent on BOTH sides, never
+    /// one-sided).
     pub fn evidence_from(
         &self,
         op_id: &str,
         outcome: &ProcessOutcome,
-        workspace: Option<&std::path::Path>,
+        authored: Option<&std::collections::BTreeSet<String>>,
     ) -> RawChannelEvidence {
         match self.channel {
             CHAN_EXIT_CODE => RawChannelEvidence {
@@ -75,7 +76,7 @@ impl CliProcessObserver {
                 present: true,
                 value: serde_json::Value::String(String::from_utf8_lossy(&outcome.stderr).into()),
             },
-            CHAN_STRUCTURED_OUTPUT => structured_output_evidence(op_id, outcome, workspace),
+            CHAN_STRUCTURED_OUTPUT => structured_output_evidence(op_id, outcome, authored),
             // `for_channel` only ever constructs one of the four above.
             other => RawChannelEvidence {
                 channel: other.to_string(),
@@ -98,7 +99,9 @@ impl ChannelObserver for CliProcessObserver {
         op: &Operation,
     ) -> Result<RawChannelEvidence, HarnessError> {
         match ctx.outcome(&op.id) {
-            Some(outcome) => Ok(self.evidence_from(&op.id, outcome, Some(&ctx.workspace))),
+            Some(outcome) => {
+                Ok(self.evidence_from(&op.id, outcome, Some(&ctx.authored_properties)))
+            }
             // The operation did not run (or its outcome was not recorded): the channel
             // was not captured for this op (FR-018), NOT a captured-empty value.
             None => Ok(RawChannelEvidence {
@@ -128,15 +131,13 @@ impl ChannelObserver for CliProcessObserver {
 fn structured_output_evidence(
     op_id: &str,
     outcome: &ProcessOutcome,
-    workspace: Option<&std::path::Path>,
+    authored: Option<&std::collections::BTreeSet<String>>,
 ) -> RawChannelEvidence {
     let text = String::from_utf8_lossy(&outcome.stdout);
     match serde_json::from_str::<serde_json::Value>(text.trim()) {
         Ok(mut value) => {
-            if let (Some(workspace), true) = (workspace, derived::is_configuration_document(&value))
-            {
-                let authored = derived::authored_properties(workspace);
-                let classified = derived::null_empty_omitted(&value, &authored);
+            if let (Some(authored), true) = (authored, derived::is_configuration_document(&value)) {
+                let classified = derived::null_empty_omitted(&value, authored);
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("nullEmptyOmitted".to_string(), classified);
                 }

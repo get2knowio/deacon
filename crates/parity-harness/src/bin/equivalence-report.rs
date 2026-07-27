@@ -186,7 +186,7 @@ fn legacy_outcome_name(result: &CaseResult) -> &'static str {
 async fn produce(carrier_filter: Option<&str>) -> Result<EquivalenceLedger, HarnessError> {
     // Fail loud on every precondition BEFORE any comparison runs.
     let oracle = Oracle::acquire().await?;
-    let deacon = deacon_binary()?;
+    let deacon = deacon_binary().await?;
     let baseline: BaselineFile = load_baseline(&default_baseline_file())
         .map_err(|e| HarnessError::NormalizationFailed {
             channel: "baseline".to_string(),

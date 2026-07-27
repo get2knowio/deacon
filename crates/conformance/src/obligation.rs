@@ -35,6 +35,17 @@ use crate::scenario::{HighRiskTriple, OPERATION_DIMENSION, ScenarioModel, is_inv
 /// can never hash as `("a", "bc")`.
 const HASH_SEPARATOR: char = '\u{1f}';
 
+/// Separator BETWEEN the values inside one condition's value set: ASCII Record
+/// Separator, distinct from [`HASH_SEPARATOR`].
+///
+/// A distinct byte is what makes [`canonical_context`] injective. With one separator
+/// everywhere, `dim ‖ v₁ ‖ … ‖ vₙ` has no arity marker, so
+/// `[{a: [b]}, {c: [d]}]` and `[{a: [b, c, d]}]` both render `a␟b␟c␟d␟` — two
+/// semantically distinct behavior obligations colliding on one `obl-bhv-<hash8>` id,
+/// silently transferring one behavior's hand-authored `odp-` disposition to the other.
+/// Using `␞` within a value set makes the `␟` that closes it unambiguous.
+const VALUE_SEPARATOR: char = '\u{1e}';
+
 /// The first 8 lowercase-hex chars of SHA-256 over `parts`, joined by
 /// [`HASH_SEPARATOR`].
 ///
@@ -67,6 +78,10 @@ fn hash8(parts: &[&str]) -> String {
 /// Both sorts are semantic, not cosmetic tolerance for its own sake: a context is a
 /// conjunction of conditions and each condition pins a value *set*, so neither order
 /// carries meaning and neither may perturb the id.
+///
+/// The encoding is injective: values are joined by [`VALUE_SEPARATOR`] and each
+/// condition is closed by [`HASH_SEPARATOR`], so a value set's extent is unambiguous
+/// regardless of arity (see [`VALUE_SEPARATOR`] for the collision this avoids).
 fn canonical_context(context: &[Condition]) -> String {
     let mut conditions: Vec<(String, Vec<String>)> = context
         .iter()
@@ -82,7 +97,7 @@ fn canonical_context(context: &[Condition]) -> String {
     for (dimension, values) in conditions {
         out.push_str(&dimension);
         out.push(HASH_SEPARATOR);
-        out.push_str(&values.join(&HASH_SEPARATOR.to_string()));
+        out.push_str(&values.join(&VALUE_SEPARATOR.to_string()));
         out.push(HASH_SEPARATOR);
     }
     out
@@ -911,6 +926,21 @@ mod tests {
             dimension: dimension.to_string(),
             values: values.iter().map(|v| v.to_string()).collect(),
         }
+    }
+
+    /// The context encoding must be INJECTIVE across condition arity. With a single
+    /// separator everywhere, `[{a:[b]}, {c:[d]}]` and `[{a:[b,c,d]}]` both rendered
+    /// `a␟b␟c␟d␟` — two distinct behavior obligations collapsing onto one id, silently
+    /// transferring one behavior's hand-authored `odp-` disposition to the other.
+    #[test]
+    fn context_encoding_does_not_collide_across_arity() {
+        let split = [condition("a", &["b"]), condition("c", &["d"])];
+        let joined = [condition("a", &["b", "c", "d"])];
+        assert_ne!(canonical_context(&split), canonical_context(&joined));
+        assert_ne!(
+            behavior_obligation_id("bhv-x", &split),
+            behavior_obligation_id("bhv-x", &joined)
+        );
     }
 
     /// T013: the id must not depend on the order the author happened to write the pairs

@@ -24,6 +24,18 @@ const INDEX_LOCK_FILE: &str = "index.lock";
 /// Name of the published index.
 const INDEX_FILE: &str = "index.json";
 
+/// How long [`DiskCache::lock_index`] waits for a contended index lock.
+///
+/// The wait is BOUNDED on purpose. A plain `flock(LOCK_EX)` blocks forever, and these
+/// calls are reached from `async fn` command paths (`up`, `down`, `exec`) whose futures
+/// run on tokio worker threads — a peer holding the lock would stall every other future
+/// on that runtime, exactly the blocking-in-async pattern the constitution forbids. The
+/// bound converts an indefinite stall into a loud, attributable error.
+const INDEX_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Poll interval while the index lock is contended.
+const INDEX_LOCK_POLL: Duration = Duration::from_millis(20);
+
 fn cache_io<S: Into<String>>(message: S) -> impl FnOnce(std::io::Error) -> CacheError {
     let message = message.into();
     move |source| CacheError::Io { message, source }
@@ -96,21 +108,55 @@ where
         Ok(cache)
     }
 
-    /// Acquire the advisory lock guarding the index read-modify-write.
+    /// Acquire the advisory lock guarding the index read-modify-write, waiting at most
+    /// [`INDEX_LOCK_TIMEOUT`].
     ///
     /// The lock auto-releases when the returned handle is dropped (or the holder
     /// dies), which is the crash-safety a host-shared index needs.
+    ///
+    /// Deliberately `try_lock` + bounded poll rather than the blocking
+    /// `FileExt::lock_exclusive`: see [`INDEX_LOCK_TIMEOUT`].
     fn lock_index(&self) -> Result<fs::File> {
         let lock_path = self.cache_dir.join(INDEX_LOCK_FILE);
-        let file = fs::File::create(&lock_path).map_err(cache_io(format!(
-            "Failed to create cache index lock: {:?}",
-            lock_path
-        )))?;
-        FileExt::lock_exclusive(&file).map_err(cache_io(format!(
-            "Failed to acquire cache index lock: {:?}",
-            lock_path
-        )))?;
-        Ok(file)
+        // `create_new(false)` + `truncate(false)`: the lock file carries no content, and
+        // truncating it would be a pointless write on a directory that may be shared.
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(cache_io(format!(
+                "Failed to create cache index lock: {:?}",
+                lock_path
+            )))?;
+
+        let deadline = std::time::Instant::now() + INDEX_LOCK_TIMEOUT;
+        loop {
+            match FileExt::try_lock_exclusive(&file) {
+                Ok(()) => return Ok(file),
+                Err(e) if e.kind() == fs2::lock_contended_error().kind() => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(CacheError::Io {
+                            message: format!(
+                                "Timed out after {:?} waiting for the cache index lock: {:?}",
+                                INDEX_LOCK_TIMEOUT, lock_path
+                            ),
+                            source: std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "cache index lock contended",
+                            ),
+                        });
+                    }
+                    std::thread::sleep(INDEX_LOCK_POLL);
+                }
+                Err(e) => {
+                    return Err(cache_io(format!(
+                        "Failed to acquire cache index lock: {:?}",
+                        lock_path
+                    ))(e));
+                }
+            }
+        }
     }
 
     /// Read the published index from disk. Absent (or empty) means "no entries".
@@ -130,20 +176,49 @@ where
 
     /// Adopt the on-disk index, discarding this instance's in-memory copy.
     ///
-    /// MUST be called while holding [`Self::lock_index`]. Every mutation re-reads
+    /// SHOULD be called while holding [`Self::lock_index`]. Every mutation re-reads
     /// first, because the in-memory map is a snapshot taken at construction and
     /// republishing it wholesale would delete every key another process has
-    /// written since.
-    fn refresh_index_locked(&mut self) -> Result<()> {
+    /// written since. Re-reading is what makes the read-modify-write correct; the lock
+    /// only makes it *atomic*, so a caller that cannot take the lock still re-reads
+    /// (a narrowed race beats a guaranteed lost update).
+    ///
+    /// Note this does NOT sweep expired entries: the sweep is a whole-map pass that
+    /// stats and unlinks files, and paying it on every `set` would serialize N
+    /// independent cache writes behind N full sweeps. It runs once, at construction.
+    fn adopt_index(&mut self) -> Result<()> {
         self.index = self.read_index()?;
-        self.cleanup_expired_entries()?;
         Ok(())
     }
 
-    /// Load the index of existing cache entries
+    /// Load the index of existing cache entries, sweeping expired ones.
+    ///
+    /// The lock is best-effort here, unlike on the mutation paths: a cache directory we
+    /// cannot create a lock file in (read-only mount, another uid's `~/.deacon/state`)
+    /// is a legitimate read-only cache, and failing construction would take `up`/`down`/
+    /// `exec` down with it. Reads are safe unlocked regardless — [`Self::save_index`]
+    /// publishes by rename, so a reader always observes a whole index. Only the
+    /// destructive sweep needs the lock, and it is skipped when the lock is unavailable.
     fn load_index(&mut self) -> Result<()> {
-        let _guard = self.lock_index()?;
-        self.refresh_index_locked()?;
+        match self.lock_index() {
+            Ok(_guard) => {
+                self.adopt_index()?;
+                // Publish under the SAME lock that performed the sweep. The sweep
+                // unlinks each expired entry's data file; leaving the index naming
+                // those files makes every later reader log "Cache data file missing"
+                // until some unrelated `set` happens to republish.
+                if self.cleanup_expired_entries()? {
+                    self.save_index()?;
+                }
+            }
+            Err(e) => {
+                debug!(
+                    ?e,
+                    "Cache index lock unavailable; loading read-only without the expiry sweep"
+                );
+                self.adopt_index()?;
+            }
+        }
         debug!(entries = self.index.len(), "Loaded cache index");
         Ok(())
     }
@@ -186,8 +261,12 @@ where
         Ok(())
     }
 
-    /// Remove expired entries from disk and index
-    fn cleanup_expired_entries(&mut self) -> Result<()> {
+    /// Remove expired entries from disk and index.
+    ///
+    /// Returns whether anything was removed, so the caller can republish the index it
+    /// just invalidated (the sweep unlinks data files; an unpublished sweep leaves the
+    /// index naming paths that no longer exist).
+    fn cleanup_expired_entries(&mut self) -> Result<bool> {
         let mut expired_keys = Vec::new();
 
         for (key_hash, metadata) in &self.index {
@@ -196,6 +275,7 @@ where
             }
         }
 
+        let swept = !expired_keys.is_empty();
         for key_hash in expired_keys {
             if let Some(metadata) = self.index.remove(&key_hash) {
                 // Remove the data file
@@ -208,7 +288,7 @@ where
             }
         }
 
-        Ok(())
+        Ok(swept)
     }
 
     /// Check if metadata indicates an expired entry
@@ -259,7 +339,7 @@ where
         // in-memory snapshot instead would silently drop every entry written since
         // this instance was constructed.
         let _guard = self.lock_index()?;
-        self.refresh_index_locked()?;
+        self.adopt_index()?;
         self.index.insert(key_hash.clone(), metadata);
         self.save_index()?;
 
@@ -333,11 +413,14 @@ where
     fn remove(&mut self, key: &K) -> Option<V> {
         let key_hash = hash_key(key);
 
-        // Serialize the whole read-modify-write (see `set_with_ttl`). A lock or
-        // re-read failure degrades to the in-memory snapshot with a warning rather
-        // than dropping the removal — the `Cache` trait has no fallible removal —
-        // but it is never silent.
-        let guard = match self.lock_index() {
+        // Serialize the whole read-modify-write (see `set_with_ttl`). The `Cache` trait
+        // has no fallible removal, so a lock failure degrades rather than aborting —
+        // but it degrades to an UNLOCKED re-read, never to the construction-time
+        // in-memory snapshot. Skipping the re-read and still reaching `save_index`
+        // below would republish that snapshot over the live index, deleting every key
+        // another process has written since: the exact lost update the lock exists to
+        // prevent, on the failure path.
+        let _guard = match self.lock_index() {
             Ok(g) => Some(g),
             Err(e) => {
                 warn!(
@@ -347,9 +430,7 @@ where
                 None
             }
         };
-        if guard.is_some()
-            && let Err(e) = self.refresh_index_locked()
-        {
+        if let Err(e) = self.adopt_index() {
             warn!(?e, "Failed to re-read cache index before removal");
         }
 
@@ -379,8 +460,10 @@ where
 
     fn clear(&mut self) {
         // Clearing must see every writer's entries, or the data files another
-        // process published outlive the index that named them.
-        let guard = match self.lock_index() {
+        // process published outlive the index that named them. As in `remove`, a lock
+        // failure degrades to an unlocked re-read — never to republishing the stale
+        // in-memory snapshot.
+        let _guard = match self.lock_index() {
             Ok(g) => Some(g),
             Err(e) => {
                 warn!(
@@ -390,9 +473,7 @@ where
                 None
             }
         };
-        if guard.is_some()
-            && let Err(e) = self.refresh_index_locked()
-        {
+        if let Err(e) = self.adopt_index() {
             warn!(?e, "Failed to re-read cache index before clear");
         }
 
@@ -644,6 +725,110 @@ mod tests {
         assert_eq!(cache.len(), 0);
         assert_eq!(cache.get(&"key1".to_string()), None);
         assert_eq!(cache.get(&"key2".to_string()), None);
+    }
+
+    /// A cache directory we cannot create the lock file in is a legitimate READ-ONLY
+    /// cache (a read-only mount, another uid's `~/.deacon/state`), not a fatal error.
+    /// `lock_index` unconditionally created the lock file, so construction failed and
+    /// took `up`/`down`/`exec` down with it via `StateManager::new()?`.
+    #[cfg(unix)]
+    #[test]
+    fn read_only_cache_dir_still_constructs_and_reads() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        {
+            let mut cache: DiskCache<String, String> = DiskCache::new(temp_dir.path()).unwrap();
+            cache.set("key1".to_string(), "value1".to_string()).unwrap();
+        }
+        // Drop write permission on the directory: the lock file can no longer be created.
+        let mut perms = fs::metadata(temp_dir.path()).unwrap().permissions();
+        let original = perms.mode();
+        perms.set_mode(0o555);
+        fs::set_permissions(temp_dir.path(), perms).unwrap();
+
+        let constructed: Result<DiskCache<String, String>> = DiskCache::new(temp_dir.path());
+
+        // Restore before asserting so the TempDir can always clean itself up.
+        let mut perms = fs::metadata(temp_dir.path()).unwrap().permissions();
+        perms.set_mode(original);
+        fs::set_permissions(temp_dir.path(), perms).unwrap();
+
+        let mut cache = constructed.expect("a read-only cache dir must not fail construction");
+        assert_eq!(cache.get(&"key1".to_string()), Some("value1".to_string()));
+    }
+
+    /// The construction-time sweep unlinks expired data files; leaving the index naming
+    /// them made every later reader log "Cache data file missing" until some unrelated
+    /// `set` happened to republish. The sweep must be published under the same lock that
+    /// performed it.
+    #[test]
+    fn expiry_sweep_is_published_to_the_index() {
+        let temp_dir = TempDir::new().unwrap();
+        {
+            let mut cache: DiskCache<String, String> = DiskCache::new(temp_dir.path()).unwrap();
+            cache
+                .set_with_ttl(
+                    "gone".to_string(),
+                    "value".to_string(),
+                    Some(Duration::from_secs(1)),
+                )
+                .unwrap();
+            cache.set("kept".to_string(), "value".to_string()).unwrap();
+        }
+        // Age the TTL'd entry deterministically rather than sleeping past it: TTLs have
+        // one-second resolution, so a real sleep would have to exceed a second to be
+        // reliable.
+        {
+            let index_path = temp_dir.path().join(INDEX_FILE);
+            let mut index: HashMap<String, CacheMetadata> =
+                serde_json::from_str(&fs::read_to_string(&index_path).unwrap()).unwrap();
+            for metadata in index.values_mut() {
+                if metadata.ttl_seconds.is_some() {
+                    metadata.created_at -= 3600;
+                }
+            }
+            fs::write(&index_path, serde_json::to_string(&index).unwrap()).unwrap();
+        }
+
+        // Constructing sweeps the expired entry...
+        let _cache: DiskCache<String, String> = DiskCache::new(temp_dir.path()).unwrap();
+
+        // ...and the PUBLISHED index must no longer name it.
+        let published: HashMap<String, CacheMetadata> =
+            serde_json::from_str(&fs::read_to_string(temp_dir.path().join(INDEX_FILE)).unwrap())
+                .unwrap();
+        assert_eq!(
+            published.len(),
+            1,
+            "the expired entry must be swept from the published index, not just from memory"
+        );
+    }
+
+    /// `remove`/`clear` degrade to an UNLOCKED re-read, never to republishing the
+    /// construction-time in-memory snapshot. Skipping the re-read and still saving would
+    /// delete every key another writer published since — the exact lost update the lock
+    /// exists to prevent, on the failure path.
+    #[test]
+    fn remove_preserves_entries_another_writer_published() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut first: DiskCache<String, String> = DiskCache::new(temp_dir.path()).unwrap();
+        first.set("a".to_string(), "1".to_string()).unwrap();
+
+        // A second handle (standing in for another process) publishes a key the first
+        // handle's in-memory snapshot has never seen.
+        let mut second: DiskCache<String, String> = DiskCache::new(temp_dir.path()).unwrap();
+        second.set("b".to_string(), "2".to_string()).unwrap();
+
+        first.remove(&"a".to_string());
+
+        let mut reader: DiskCache<String, String> = DiskCache::new(temp_dir.path()).unwrap();
+        assert_eq!(reader.get(&"a".to_string()), None, "the removal must apply");
+        assert_eq!(
+            reader.get(&"b".to_string()),
+            Some("2".to_string()),
+            "the concurrent writer's key must survive the removal"
+        );
     }
 
     #[test]

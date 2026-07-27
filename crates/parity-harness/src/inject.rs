@@ -419,7 +419,17 @@ fn perturb<S: EvidenceSource + ?Sized>(
             // what keeps the injection upstream of the observer.
             let mut applied = 0usize;
             let mut failure: Option<String> = None;
+            let mut index = 0usize;
             source.visit_outcomes(&mut |outcome| {
+                let op = index;
+                index += 1;
+                // Stop at the FIRST failure. Continuing let a later operation overwrite
+                // `failure`, so the record reported a cause from a different operation
+                // than the one it corrupted — while every operation perturbed before the
+                // failure stayed mutated in the run context.
+                if failure.is_some() {
+                    return;
+                }
                 let text = String::from_utf8_lossy(&outcome.stdout).into_owned();
                 let Ok(mut doc) = serde_json::from_str::<Value>(text.trim()) else {
                     return; // not a structured-output operation; nothing to perturb here
@@ -431,10 +441,13 @@ fn perturb<S: EvidenceSource + ?Sized>(
                                 outcome.stdout = bytes;
                                 applied += 1;
                             }
-                            Err(e) => failure = Some(format!("could not re-serialize: {e}")),
+                            Err(e) => {
+                                failure =
+                                    Some(format!("operation {op}: could not re-serialize: {e}"))
+                            }
                         };
                     }
-                    Err(cause) => failure = Some(cause),
+                    Err(cause) => failure = Some(format!("operation {op}: {cause}")),
                 }
             });
             if let Some(cause) = failure {

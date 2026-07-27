@@ -88,6 +88,17 @@ pub struct RunContext {
     /// scoped to (clarify Q1: allowlist-scoped, never a full-tree diff). Empty for cases
     /// with no filesystem expectation.
     pub fs_allowlist: Vec<String>,
+    /// The AUTHORED configuration property names, read from the workspace ONCE at context
+    /// construction — i.e. before any operation runs.
+    ///
+    /// Same rationale as [`RunContext::container_inspect`]: an observer must not perform
+    /// its own filesystem reads on every capture. Beyond the repeated I/O (up to three
+    /// file opens per operation, per side, per case), reading at OBSERVE time reads the
+    /// workspace at the wrong moment — an operation that rewrites the configuration
+    /// (`templates apply`, or a `workspace-file` injected regression) would change the
+    /// authored set out from under the document being classified, and deacon's and the
+    /// reference's temp workspaces would be read at different instants.
+    pub authored_properties: std::collections::BTreeSet<String>,
     /// Per-operation process outcomes, keyed by `Operation::id`, populated by the runner
     /// before observers run.
     outcomes: HashMap<String, ProcessOutcome>,
@@ -122,13 +133,18 @@ impl RunContext {
     }
 
     /// A context for a run rooted at `workspace` and produced by `side`.
+    ///
+    /// Snapshots the authored configuration property names HERE, before any operation
+    /// runs — see [`RunContext::authored_properties`].
     pub fn for_side(workspace: PathBuf, side: crate::exec::Side) -> RunContext {
+        let authored_properties = crate::observe::derived::authored_properties(&workspace);
         RunContext {
             workspace,
             side,
             container_id: None,
             container_inspect: None,
             fs_allowlist: Vec::new(),
+            authored_properties,
             outcomes: HashMap::new(),
             op_snapshots: HashMap::new(),
         }
