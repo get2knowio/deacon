@@ -22,6 +22,7 @@ use std::time::Duration;
 
 pub mod aggregate;
 pub mod compare;
+pub mod discovery;
 pub mod driver;
 pub mod equivalence;
 pub mod evidence;
@@ -272,6 +273,80 @@ pub enum HarnessError {
          budget and report as an unattributable lane failure."
     )]
     CaseTimeout { case: String, bound: Duration },
+
+    // --- Exploratory parity discovery (025-exploratory-parity-discovery, T005) ------
+    // Every variant below is a MACHINERY failure, never a finding. That distinction is
+    // the whole exit-status contract (contracts/discovery-cli.md): a campaign that finds
+    // forty differences exits `0`; a campaign that could not verify its oracle exits
+    // non-zero. Anything that would make the status depend on WHAT was found is a defect,
+    // because a stochastic gate makes green non-reproducible.
+    /// A campaign that needs the pinned reference could not verify it (FR-003).
+    ///
+    /// Deliberately DISTINCT from [`OracleMissing`](Self::OracleMissing) /
+    /// [`OracleVersionMismatch`](Self::OracleVersionMismatch), which name *which* check
+    /// failed: this names the CONSEQUENCE for the campaign — no findings were produced
+    /// and none may be attributed to this run. Collapsing the two would let "we compared
+    /// against an unverified reference" read as "we compared and found nothing", which is
+    /// the exact confusion a discovery run must never create.
+    #[error(
+        "discovery campaign cannot run: the pinned oracle is unverified ({cause}). Remedy: \
+         install the pinned `@devcontainers/cli` version — a campaign never reports findings \
+         against an unverified reference, and never silently skips."
+    )]
+    OracleUnverified { cause: String },
+
+    /// One candidate exceeded its per-candidate bound and was discarded and counted
+    /// (60 s hermetic / 5 min container-backed).
+    ///
+    /// Discarding rather than failing the campaign is deliberate: one pathological
+    /// generated input must not consume the tier's whole budget, and the count is
+    /// reported so a *rising* discard rate is visible rather than silent.
+    #[error(
+        "discovery candidate `{candidate}` exceeded its {bound:?} bound and was discarded. \
+         Remedy: none required — the candidate is counted in the campaign outcome; \
+         investigate only if the discard rate rises."
+    )]
+    CandidateTimeout { candidate: String, bound: Duration },
+
+    /// Minimization ran out of shrink steps before reaching a minimal input (FR-022).
+    ///
+    /// The best reduction found is still emitted, with `isMinimal: false` and this
+    /// reason — never silently presented as minimal. A reviewer who believes an input is
+    /// minimal when it is not will look for the defect in the wrong place.
+    #[error(
+        "shrink budget exhausted for finding `{finding}` after {steps} step(s); the best \
+         reduction is reported with `isMinimal: false`. Remedy: raise the per-finding shrink \
+         budget if the input warrants it — a partially reduced input is never presented as \
+         minimal."
+    )]
+    ShrinkBudgetExhausted { finding: String, steps: usize },
+
+    /// A fetched corpus entry's content digest disagrees with the recorded one (FR-051).
+    ///
+    /// Fails that entry loudly rather than comparing against unexpected content: an
+    /// unverified fetch means comparing against content nobody checked, and "expected to
+    /// be stable" is not "verified".
+    #[error(
+        "corpus entry `{entry}` content digest mismatch: recorded {expected}, fetched {actual}. \
+         Remedy: investigate the upstream change and re-pin the entry deliberately — never \
+         compare against content that does not match its recorded digest."
+    )]
+    CorpusDigestMismatch {
+        entry: String,
+        expected: String,
+        actual: String,
+    },
+
+    /// A corpus entry could not be fetched (FR-052).
+    ///
+    /// Reported as unreachable, NOT as "ran and found nothing" — the two are different
+    /// facts about the ecosystem and collapsing them makes the canary useless.
+    #[error(
+        "corpus entry `{entry}` is unreachable: {cause}. Remedy: check the network lane and the \
+         pinned repository/commit — an unreachable entry is reported as unreachable, never as \
+         an entry that ran and found nothing."
+    )]
+    CorpusUnreachable { entry: String, cause: String },
 }
 
 /// Environment override for the report/artifact root (see [`report_root`]).

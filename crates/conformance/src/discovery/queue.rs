@@ -1,0 +1,1923 @@
+//! The findings queue — records, strict loader, atomic writer, signature-keyed upsert,
+//! and the **D1**/**D5** violation classes
+//! (025-exploratory-parity-discovery, data-model.md §§ 3–4,
+//! contracts/findings-queue.md, T016–T021).
+//!
+//! ## Where this lives, and why it matters
+//!
+//! `conformance/discovery/` is a **sibling** of `conformance/registry/`, not a child.
+//! [`crate::load::Registry::load`] enumerates *named* subdirectories under the registry
+//! root and has no wildcard walk, so nothing here can be reached by the registry loader
+//! or, transitively, by `certify`. The guarantee that an unreviewed finding can never
+//! influence a release gate is therefore a property of the directory layout rather than
+//! a rule someone must remember — which matters precisely because the failure mode is
+//! silent: a finding quietly joining the certification denominator (research D6).
+//!
+//! Exactly one reference crosses the boundary, and it points **out**:
+//! [`Finding::promoted_to`] → `case-<id>`. Nothing in the registry points back.
+//!
+//! ## Duplicate findings are unrepresentable
+//!
+//! A finding's `id` is *derived* from its signature ([`Signature::finding_id`]), so
+//! FR-030's "two findings with the same signature are one finding" is a property of the
+//! identity function rather than an invariant the merge logic has to maintain — and can
+//! therefore violate. [`upsert_finding`] appends a witness to the existing record; it
+//! cannot create a second one.
+
+use indexmap::IndexMap;
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+
+use crate::DiscoveryError;
+use crate::load::{LoadError, SchemaError, deserialize_located, read_file};
+use crate::model::{RevisionKind, SourceRevision};
+
+use super::signature::Signature;
+
+// ---------------------------------------------------------------------------
+// T016 — Finding, Witness, FindingState, Classification (data-model.md § 3)
+// ---------------------------------------------------------------------------
+
+/// The closed classification set (FR-028). Exactly one, once a finding is triaged.
+///
+/// The last two are **non-promotable** (FR-035) because they describe a defect in the
+/// discovery machinery, not a behavior of either implementation: resolving them changes
+/// the normalizer or the generator, and promoting one would record a claim about deacon
+/// or the reference that the evidence does not support.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Classification {
+    /// deacon is wrong; the reference and/or the spec is right. Promotes to a behavior
+    /// plus a fix.
+    DeaconRegression,
+    /// The reference diverges from the spec; deacon is right. Promotes to a behavior
+    /// plus a waiver.
+    ReferenceQuirk,
+    /// The spec does not decide the question. Promotes to a behavior with
+    /// `spec: unspecified`.
+    SpecAmbiguity,
+    /// deacon lacks the capability entirely. Promotes to a `gap-` record.
+    UnsupportedBehavior,
+    /// The comparison machinery manufactured or hid the difference. **Not promotable.**
+    NormalizerDefect,
+    /// The generated input was invalid in a way the harness cannot express.
+    /// **Not promotable.**
+    FixtureDefect,
+}
+
+impl Classification {
+    /// The stable wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Classification::DeaconRegression => "deacon-regression",
+            Classification::ReferenceQuirk => "reference-quirk",
+            Classification::SpecAmbiguity => "spec-ambiguity",
+            Classification::UnsupportedBehavior => "unsupported-behavior",
+            Classification::NormalizerDefect => "normalizer-defect",
+            Classification::FixtureDefect => "fixture-defect",
+        }
+    }
+
+    /// Whether a finding carrying this classification may ever reach
+    /// [`FindingState::Promoted`] (FR-035).
+    pub fn is_promotable(self) -> bool {
+        !matches!(
+            self,
+            Classification::NormalizerDefect | Classification::FixtureDefect
+        )
+    }
+
+    /// Every classification, in declaration order — the CLI's `--classification` value
+    /// set and the report's bucket order.
+    pub fn all() -> &'static [Classification] {
+        &[
+            Classification::DeaconRegression,
+            Classification::ReferenceQuirk,
+            Classification::SpecAmbiguity,
+            Classification::UnsupportedBehavior,
+            Classification::NormalizerDefect,
+            Classification::FixtureDefect,
+        ]
+    }
+
+    /// Parse a wire spelling, returning `None` on anything else — never a default.
+    pub fn parse(s: &str) -> Option<Classification> {
+        Classification::all()
+            .iter()
+            .copied()
+            .find(|c| c.as_str() == s)
+    }
+}
+
+/// The finding lifecycle (data-model.md § 3's state machine).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FindingState {
+    /// Admitted by a campaign, nobody has looked yet. **Counted, never implicit**
+    /// (FR-029) — "not yet looked at" must never read as "nothing found".
+    Untriaged,
+    /// A reviewer assigned a classification.
+    Triaged,
+    /// A reviewer split a signature-merged finding whose witnesses had different causes.
+    /// The parent becomes an inert ancestor: it keeps its witnesses as historical record,
+    /// stops accepting new ones, and surrenders classification to its children — a split
+    /// exists precisely because one classification could not describe them all
+    /// (invariant Q10).
+    Split,
+    /// Carried by a real registry case. Terminal; `promotedTo` is set and must resolve.
+    Promoted,
+    /// Stopped reproducing. **A state, not a deletion** (FR-033): the disappearance is
+    /// information — it may mean a fix landed, or it may mean the generator stopped
+    /// reaching the input, and deleting the record destroys the ability to tell those
+    /// apart. A later campaign that reproduces it moves it back to `triaged`, keeping
+    /// its classification.
+    NoLongerReproducing,
+}
+
+impl FindingState {
+    /// The stable wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FindingState::Untriaged => "untriaged",
+            FindingState::Triaged => "triaged",
+            FindingState::Split => "split",
+            FindingState::Promoted => "promoted",
+            FindingState::NoLongerReproducing => "no-longer-reproducing",
+        }
+    }
+
+    /// Every state, in lifecycle order — the report's bucket order.
+    pub fn all() -> &'static [FindingState] {
+        &[
+            FindingState::Untriaged,
+            FindingState::Triaged,
+            FindingState::Split,
+            FindingState::Promoted,
+            FindingState::NoLongerReproducing,
+        ]
+    }
+}
+
+/// The two sides' concrete observed values for one witness.
+///
+/// **Evidence, not identity.** Concrete values never enter the signature — including
+/// them would split one defect across every generated value and make deduplication do
+/// nothing (research D3) — so they live here, where a reviewer can read them.
+///
+/// A `null` in either field means *the side produced nothing at this path*. An observed
+/// JSON `null` renders identically, which is a deliberate and harmless conflation: the
+/// presence distinction is carried by the signature's `valueShapeClass`
+/// (`present-absent` versus `type-changed`), so nothing that matters is lost here.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ObservedValues {
+    /// What deacon produced at the signature's path.
+    #[serde(default)]
+    pub deacon: Option<Value>,
+    /// What the reference produced at the signature's path.
+    #[serde(default)]
+    pub reference: Option<Value>,
+}
+
+/// One observation of a finding (data-model.md § 3).
+///
+/// Witnesses are retained per finding (FR-032) so a merge can be reviewed and, if the
+/// reviewer disagrees, reversed by a split.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Witness {
+    /// `wit-<hash8>` over `campaignId ‖ candidateId`.
+    pub id: String,
+    /// The campaign that observed it — must resolve in `campaigns.json` (**D1**).
+    pub campaign_id: String,
+    /// The candidate input that produced it (`cnd-<hash8>`).
+    pub candidate_id: String,
+    /// The reduced fixture.
+    pub minimal_input: Value,
+    /// `false` when the shrink budget was exhausted (FR-022) — a partially reduced input
+    /// is **never** silently presented as minimal.
+    pub is_minimal: bool,
+    /// The ordered catalogue step names applied during reduction.
+    #[serde(default)]
+    pub reduction_steps: Vec<String>,
+    /// The concrete values each side produced.
+    #[serde(default)]
+    pub observed_values: ObservedValues,
+    /// The `mop-` operators that produced the candidate (FR-009 attribution).
+    #[serde(default)]
+    pub mutation_operators: Vec<String>,
+}
+
+impl Witness {
+    /// Derive the `wit-<hash8>` id from `campaignId ‖ candidateId`.
+    pub fn derived_id(campaign_id: &str, candidate_id: &str) -> String {
+        format!("wit-{}", super::hash8(&[campaign_id, candidate_id]))
+    }
+}
+
+/// One distinct signature and everything known about it (data-model.md § 3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Finding {
+    /// `fnd-<hash8>`, derived from `signature.id` — 1:1 with the signature, which is
+    /// what makes a duplicate finding unrepresentable (data-model.md § 1).
+    pub id: String,
+    /// The deduplication key.
+    pub signature: Signature,
+    /// At least one, declaration-ordered by first observation (**D1** otherwise).
+    #[serde(deserialize_with = "non_empty_witnesses")]
+    pub witnesses: Vec<Witness>,
+    /// `null` while untriaged — the visible bucket (FR-029).
+    #[serde(default)]
+    pub classification: Option<Classification>,
+    /// The lifecycle state.
+    pub state: FindingState,
+    /// The campaign that first admitted it — must resolve (**D1**).
+    pub first_observed: String,
+    /// The most recent campaign that reproduced it — must resolve (**D1**).
+    pub last_observed: String,
+    /// The registry case carrying it; set only in state `promoted` (**D3**).
+    #[serde(default)]
+    pub promoted_to: Option<String>,
+    /// Provenance when a reviewer split a merged finding. The deduplication rule must
+    /// never re-merge a split lineage (FR-032), or a reviewer's judgement is silently
+    /// reverted by the next campaign and the split becomes unrepeatable work.
+    #[serde(default)]
+    pub split_from: Option<String>,
+    /// Reviewer prose. Excluded from every hash — annotating a finding must never
+    /// re-key it.
+    #[serde(default)]
+    pub notes: String,
+}
+
+impl Finding {
+    /// A newly admitted finding: untriaged, unclassified, one witness.
+    pub fn newly_admitted(signature: Signature, witness: Witness, campaign_id: &str) -> Finding {
+        Finding {
+            id: signature.finding_id(),
+            signature,
+            witnesses: vec![witness],
+            classification: None,
+            state: FindingState::Untriaged,
+            first_observed: campaign_id.to_string(),
+            last_observed: campaign_id.to_string(),
+            promoted_to: None,
+            split_from: None,
+            notes: String::new(),
+        }
+    }
+
+    /// Whether this finding is in a state that requires a classification (`triaged` or
+    /// later, excluding `split`, whose classification belongs to its children — Q10).
+    pub fn requires_classification(&self) -> bool {
+        matches!(
+            self.state,
+            FindingState::Triaged | FindingState::Promoted | FindingState::NoLongerReproducing
+        )
+    }
+}
+
+/// Reject an empty witness list at deserialize time (invariant Q2).
+///
+/// Enforced here, at the shape that reads the file, rather than only in `check`: a
+/// finding with no witness is a claim with no evidence, and it should not be
+/// representable in memory at all.
+fn non_empty_witnesses<'de, D>(de: D) -> Result<Vec<Witness>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Vec::<Witness>::deserialize(de)?;
+    if value.is_empty() {
+        return Err(serde::de::Error::custom(
+            "a finding must carry at least one witness — a finding with no witness is a \
+             claim with no evidence behind it",
+        ));
+    }
+    Ok(value)
+}
+
+// ---------------------------------------------------------------------------
+// T017 — Campaign, PinnedInputSet, Budget, CampaignOutcome (data-model.md § 4)
+// ---------------------------------------------------------------------------
+
+/// Which lane ran a campaign.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CampaignLane {
+    /// A scheduled (nightly or weekly) run.
+    Scheduled,
+    /// An explicitly invoked run.
+    Invoked,
+}
+
+impl CampaignLane {
+    /// The stable wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CampaignLane::Scheduled => "scheduled",
+            CampaignLane::Invoked => "invoked",
+        }
+    }
+}
+
+/// The four campaign tiers and, implicitly, their prerequisites (research D10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CampaignTier {
+    /// Deacon-only relation evaluation. Needs **no** oracle, Docker, or network.
+    Metamorphic,
+    /// deacon vs the pinned oracle over configuration resolution. The **nightly**
+    /// scheduled tier.
+    ConfigDifferential,
+    /// The same comparison with containers brought up. Invoked-only: at the 5-minute
+    /// per-candidate ceiling a handful of candidates would consume the whole scheduled
+    /// window, so it gets its own budget rather than starving the fast tier.
+    ContainerDifferential,
+    /// The pinned real-world workspace corpus. The **weekly** network-backed tier — an
+    /// ecological canary that runs only on request cannot warn anyone.
+    Corpus,
+}
+
+impl CampaignTier {
+    /// The stable wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CampaignTier::Metamorphic => "metamorphic",
+            CampaignTier::ConfigDifferential => "config-differential",
+            CampaignTier::ContainerDifferential => "container-differential",
+            CampaignTier::Corpus => "corpus",
+        }
+    }
+
+    /// Every tier, in declaration order.
+    pub fn all() -> &'static [CampaignTier] {
+        &[
+            CampaignTier::Metamorphic,
+            CampaignTier::ConfigDifferential,
+            CampaignTier::ContainerDifferential,
+            CampaignTier::Corpus,
+        ]
+    }
+
+    /// Whether this tier requires the verified pinned oracle.
+    pub fn requires_oracle(self) -> bool {
+        !matches!(self, CampaignTier::Metamorphic)
+    }
+}
+
+/// All **seven** elements of the pinned input set (FR-002, data-model.md § 4).
+///
+/// Every element is mandatory. A finding is a claim about a specific pinned pair of
+/// implementations, and an element left unrecorded is a dimension along which the claim
+/// silently stops being checkable.
+///
+/// The last three are not registry revisions but properties of this repository's own
+/// code, and they are separate fields for a reason:
+///
+/// - **`grammarVersion`** binds the campaign to the constraint inventory. A re-vendored
+///   schema pin regenerates the inventory, which changes this string, which correctly
+///   invalidates every finding bound to the old value with no separate bookkeeping.
+/// - **`generatorVersion`** covers the two things that determine output but are neither
+///   a grammar nor a mutation: the pseudorandom stream's algorithm identity (FR-001
+///   depends on it) and the reduction catalogue's *order* (FR-020 depends on it).
+/// - **`mutationCatalogVersion`** names the mutation **operator set** and nothing else.
+///   Folding either of the above into it would name them for something they are not, so
+///   a deliberate change to reduction order would look like a change to the operators.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PinnedInputSet {
+    /// The vendored schema revision pin (`conformance/schemas/<pin>`) — **D5**.
+    pub schema_pin: String,
+    /// The vendored spec-prose revision pin (`conformance/spec/<pin>`) — **D5**.
+    pub prose_pin: String,
+    /// The exact, verified oracle version (FR-003) — **D5**.
+    pub oracle_version: String,
+    /// `NORMALIZER_VERSION` at the time of the run.
+    pub normalizer_version: String,
+    /// The constraint inventory's `revision` (research D1).
+    pub grammar_version: String,
+    /// The mutation operator set's identity.
+    pub mutation_catalog_version: String,
+    /// The PRNG algorithm identity plus the reduction-catalogue order (research D2/D5).
+    pub generator_version: String,
+}
+
+/// The default scheduled wall-clock budget, in seconds (research D10).
+pub const DEFAULT_WALL_CLOCK_SECONDS: u64 = 1800;
+/// The default per-candidate ceiling for the hermetic tiers, in seconds.
+pub const DEFAULT_PER_CANDIDATE_SECONDS_HERMETIC: u64 = 60;
+/// The default per-candidate ceiling for the container-backed tier, in seconds.
+pub const DEFAULT_PER_CANDIDATE_SECONDS_CONTAINER: u64 = 300;
+/// The default admission cap: newly distinct signatures admitted per campaign.
+///
+/// Set from **reviewer throughput**, not machine capacity (research D10): a nightly run
+/// that admits more than a couple of dozen genuinely new signatures has produced a
+/// backlog nobody clears before the next run. The excess is *reported*
+/// ([`CampaignOutcome::signatures_suppressed`]), never discarded silently — so a
+/// campaign that keeps hitting the cap is itself a visible signal that something
+/// systemic is diverging.
+pub const DEFAULT_ADMISSION_CAP: u64 = 25;
+
+/// A campaign's declared budget (data-model.md § 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Budget {
+    /// Wall-clock ceiling for the whole campaign.
+    pub wall_clock_seconds: u64,
+    /// Ceiling for one candidate; a candidate that exceeds it is discarded **and
+    /// counted**, never left to hang the run.
+    pub per_candidate_seconds: u64,
+    /// Shrink steps allowed per finding before the best reduction is emitted with
+    /// `isMinimal: false`.
+    pub shrink_steps_per_finding: u64,
+    /// Newly distinct signatures admitted per campaign; the excess is reported.
+    pub admission_cap: u64,
+}
+
+/// What a campaign did (data-model.md § 4).
+///
+/// **Volume is reported even when nothing was found** (FR-062). A campaign that found
+/// nothing and a campaign that never ran are completely different facts, and without
+/// `candidatesGenerated` / `candidatesExecuted` they are indistinguishable from the
+/// outside — which would make "no findings" the most comfortable possible way for the
+/// machinery to be broken.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CampaignOutcome {
+    /// Candidates the generator produced.
+    pub candidates_generated: u64,
+    /// Candidates actually executed against an implementation.
+    pub candidates_executed: u64,
+    /// Candidates discarded as unsafe before execution (FR-011).
+    pub candidates_discarded_unsafe: u64,
+    /// Candidates that failed at document parsing — the SC-002 numerator. Above 10% of
+    /// `candidatesGenerated`, the campaign explored the parser rather than the tool.
+    pub parse_stage_failures: u64,
+    /// Whether the wall-clock budget ran out (FR-005).
+    pub budget_exhausted: bool,
+    /// The fraction of the declared space covered, reported when the budget was
+    /// exhausted (FR-005).
+    pub space_covered_fraction: f64,
+    /// Applications per mutation category. **All eleven keys are always present**,
+    /// including zeroes (FR-010): a category absent from the map is indistinguishable
+    /// from a category that was never applied, and FR-010 requires zero to be reported
+    /// as an explicit generation deficiency — which needs the key there. `IndexMap`
+    /// keeps the catalogue's declaration order (constitution VI).
+    pub mutation_applications: IndexMap<String, u64>,
+    /// Distinct signatures observed.
+    pub signatures_observed: u64,
+    /// Distinct signatures admitted to the queue.
+    pub signatures_admitted: u64,
+    /// Distinct signatures the admission cap suppressed (FR-034b) — **never silent**.
+    pub signatures_suppressed: u64,
+}
+
+/// Provenance for one run (data-model.md § 4). Append-only: a campaign record is never
+/// rewritten, because a finding names the campaign that observed it and a rewritten
+/// campaign would retroactively change what that finding claims.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Campaign {
+    /// `cmp-<hash8>` over `seed ‖ canonical(pinnedInputSet) ‖ lane ‖ profile`.
+    pub id: String,
+    /// The recorded seed, hex (FR-001). **Never defaulted** at the CLI: a defaulted seed
+    /// would let a campaign run without its reproducibility input being a conscious
+    /// choice.
+    pub seed: String,
+    /// Which lane ran it.
+    pub lane: CampaignLane,
+    /// Which tier it ran.
+    pub tier: CampaignTier,
+    /// The seven pinned inputs.
+    pub pinned_input_set: PinnedInputSet,
+    /// The declared budget.
+    pub budget: Budget,
+    /// What it did.
+    pub outcome: CampaignOutcome,
+}
+
+// ---------------------------------------------------------------------------
+// T018 — the strict-JSON loader
+// ---------------------------------------------------------------------------
+
+/// The `findings.json` envelope.
+///
+/// `records` is **mandatory**, not `#[serde(default)]`. The writer always emits it, so
+/// defaulting buys nothing and costs exactly the failure mode FR-029 exists to prevent: a
+/// truncated file would load as an empty queue and validate clean, and "the data was
+/// lost" would read as "nothing was found".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FindingsFile {
+    /// Schema version of the file format — rejected at load unless it is
+    /// [`SCHEMA_VERSION`], so a future v2 file can never be read under v1 semantics and
+    /// silently rewritten as v1.
+    #[serde(deserialize_with = "supported_schema_version")]
+    pub schema_version: u32,
+    /// The findings, in admission order.
+    pub records: Vec<Finding>,
+}
+
+impl Default for FindingsFile {
+    fn default() -> Self {
+        FindingsFile {
+            schema_version: SCHEMA_VERSION,
+            records: Vec::new(),
+        }
+    }
+}
+
+/// The `campaigns.json` envelope. `records` is mandatory for the same reason as
+/// [`FindingsFile::records`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CampaignsFile {
+    /// Schema version of the file format — see [`FindingsFile::schema_version`].
+    #[serde(deserialize_with = "supported_schema_version")]
+    pub schema_version: u32,
+    /// The campaigns, append-only in run order.
+    pub records: Vec<Campaign>,
+}
+
+impl Default for CampaignsFile {
+    fn default() -> Self {
+        CampaignsFile {
+            schema_version: SCHEMA_VERSION,
+            records: Vec::new(),
+        }
+    }
+}
+
+/// The current discovery data-root schema version.
+pub const SCHEMA_VERSION: u32 = 1;
+
+/// Reject a `schemaVersion` this build does not understand.
+///
+/// Loading a future version under today's semantics would be bad enough on its own; the
+/// real hazard is the *write* that follows, because every writer stamps
+/// [`SCHEMA_VERSION`]. A `triage` against a v2 file would therefore silently downgrade
+/// it, discarding whatever v2 added. Refusing to read is the only way to guarantee not
+/// destroying it.
+fn supported_schema_version<'de, D>(de: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u32::deserialize(de)?;
+    if value != SCHEMA_VERSION {
+        return Err(serde::de::Error::custom(format!(
+            "unsupported schemaVersion {value}: this build reads and writes version \
+             {SCHEMA_VERSION}, and writing would stamp {SCHEMA_VERSION} over it"
+        )));
+    }
+    Ok(value)
+}
+
+/// The loaded discovery data root.
+///
+/// `corpus.json` is deliberately **not** loaded here: its [`CorpusEntry`] model and the
+/// **D4** immutable-reference class land with US7 (`corpus.rs`, T105/T106). The file
+/// exists in the data root from T003 so the layout is complete, and wiring it into this
+/// aggregate is a one-line addition once the model exists.
+///
+/// [`CorpusEntry`]: super::corpus
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DiscoveryData {
+    /// The findings queue, in file order.
+    pub findings: Vec<Finding>,
+    /// The campaign history, in file order.
+    pub campaigns: Vec<Campaign>,
+}
+
+/// Paths of the three discovery data files under `dir`.
+pub fn findings_path(dir: &Path) -> PathBuf {
+    dir.join("findings.json")
+}
+
+/// Path of the campaign history under `dir`.
+pub fn campaigns_path(dir: &Path) -> PathBuf {
+    dir.join("campaigns.json")
+}
+
+/// Path of the corpus manifest under `dir` (loaded by US7).
+pub fn corpus_path(dir: &Path) -> PathBuf {
+    dir.join("corpus.json")
+}
+
+impl DiscoveryData {
+    /// Load the discovery data root at `dir`, collecting **all** file errors in one pass
+    /// (the same discipline as [`crate::load::Registry::load`] — a validator that stops
+    /// at the first bad file makes fixing a batch an iterative guessing game).
+    ///
+    /// A missing file is an EMPTY collection, not an error: a fixture root, or a
+    /// repository before the first campaign, legitimately has none. A file that is
+    /// **present but malformed** is a located [`LoadError::Schema`] — never silently
+    /// empty (constitution IV).
+    pub fn load(dir: &Path) -> Result<DiscoveryData, LoadError> {
+        let mut errors: Vec<SchemaError> = Vec::new();
+
+        let findings_file = findings_path(dir);
+        let campaigns_file = campaigns_path(dir);
+        let findings = load_file::<FindingsFile>(&findings_file, &mut errors)
+            .map(|f| f.records)
+            .unwrap_or_default();
+        let campaigns = load_file::<CampaignsFile>(&campaigns_file, &mut errors)
+            .map(|f| f.records)
+            .unwrap_or_default();
+
+        // Duplicate ids are rejected HERE, not only by `check`. Every by-id lookup
+        // ([`DiscoveryData::finding_mut`], the CLI's triage/split/scaffold) takes the
+        // FIRST match, so a duplicate would let `triage` mutate one record while the
+        // other survives untouched — a write that appears to succeed and silently does
+        // not. A checker that catches it after the fact is too late.
+        errors.extend(duplicate_id_errors(
+            &findings_file,
+            "finding",
+            findings.iter().map(|f| f.id.as_str()),
+        ));
+        errors.extend(duplicate_id_errors(
+            &campaigns_file,
+            "campaign",
+            campaigns.iter().map(|c| c.id.as_str()),
+        ));
+
+        if !errors.is_empty() {
+            return Err(LoadError::Schema(errors));
+        }
+        Ok(DiscoveryData {
+            findings,
+            campaigns,
+        })
+    }
+
+    /// Load the workspace's default discovery data root.
+    pub fn load_default() -> Result<DiscoveryData, LoadError> {
+        DiscoveryData::load(&crate::default_discovery_dir())
+    }
+
+    /// Find a finding by id.
+    pub fn finding(&self, id: &str) -> Option<&Finding> {
+        self.findings.iter().find(|f| f.id == id)
+    }
+
+    /// Find a finding by id, mutably.
+    pub fn finding_mut(&mut self, id: &str) -> Option<&mut Finding> {
+        self.findings.iter_mut().find(|f| f.id == id)
+    }
+
+    /// Find a campaign by id.
+    pub fn campaign(&self, id: &str) -> Option<&Campaign> {
+        self.campaigns.iter().find(|c| c.id == id)
+    }
+}
+
+/// Collect duplicate-id records as located schema errors.
+fn duplicate_id_errors<'a>(
+    path: &Path,
+    kind: &str,
+    ids: impl Iterator<Item = &'a str>,
+) -> Vec<SchemaError> {
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for id in ids {
+        if !seen.insert(id) {
+            out.push(SchemaError {
+                file: path.to_path_buf(),
+                location: Some(id.to_string()),
+                message: format!(
+                    "duplicate {kind} id `{id}` — every by-id lookup takes the first \
+                     match, so a duplicate makes a write appear to succeed while the \
+                     other record survives untouched"
+                ),
+            });
+        }
+    }
+    out
+}
+
+/// Read and strictly deserialize one collection file.
+///
+/// Only a genuine `NotFound` yields `None`. `Path::exists` was the wrong test: it returns
+/// `false` for **any** error, so a present-but-unreadable file (a permission problem, a
+/// broken symlink) would read as "this repository has not run a campaign yet" instead of
+/// as the located error this function promises (constitution IV — no silent fallback).
+fn load_file<T: serde::de::DeserializeOwned>(
+    path: &Path,
+    errors: &mut Vec<SchemaError>,
+) -> Option<T> {
+    match std::fs::metadata(path) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            errors.push(SchemaError {
+                file: path.to_path_buf(),
+                location: None,
+                message: format!("could not stat file: {e}"),
+            });
+            return None;
+        }
+    }
+    match read_file(path).and_then(|raw| deserialize_located::<T>(path, &raw)) {
+        Ok(value) => Some(value),
+        Err(e) => {
+            errors.push(e);
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T019 — the atomic writer
+// ---------------------------------------------------------------------------
+
+/// Render a findings file in its canonical, byte-stable form (2-space pretty JSON,
+/// trailing newline) — the same rendering every machine-owned artifact in this crate
+/// uses, so a queue update produces a reviewable git diff rather than a reformat.
+pub fn render_findings(file: &FindingsFile) -> String {
+    render(file)
+}
+
+/// Render a campaigns file in its canonical, byte-stable form.
+pub fn render_campaigns(file: &CampaignsFile) -> String {
+    render(file)
+}
+
+fn render<T: Serialize>(value: &T) -> String {
+    let mut out = serde_json::to_string_pretty(value)
+        .unwrap_or_else(|e| unreachable!("discovery record serialization is infallible: {e}"));
+    out.push('\n');
+    out
+}
+
+/// Atomically write the findings queue to `dir/findings.json`.
+///
+/// Delegates to the single [`crate::atomic_write`] primitive (unique temp file +
+/// `fs::rename`), so a shorter payload over a longer one can never leave trailing
+/// bytes — the flaky-JSON failure mode a plain `fs::write` has.
+pub fn write_findings(dir: &Path, findings: &[Finding]) -> std::io::Result<()> {
+    let file = FindingsFile {
+        schema_version: SCHEMA_VERSION,
+        records: findings.to_vec(),
+    };
+    crate::atomic_write(&findings_path(dir), &render_findings(&file))
+}
+
+/// Atomically write the campaign history to `dir/campaigns.json`.
+///
+/// Refuses to write a campaign whose `spaceCoveredFraction` is not finite. `serde_json`
+/// renders NaN and ±Infinity as **bare `null`** and does **not** error, and `null` is not
+/// a valid `f64` on the way back in — so a single division by a zero
+/// `candidatesGenerated` (an aborted campaign is exactly that shape) would produce a
+/// `campaigns.json` that writes cleanly and can never be loaded again, taking the whole
+/// queue's provenance with it. Failing the write is recoverable; writing the file is not.
+pub fn write_campaigns(dir: &Path, campaigns: &[Campaign]) -> std::io::Result<()> {
+    if let Some(bad) = campaigns
+        .iter()
+        .find(|c| !c.outcome.space_covered_fraction.is_finite())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "campaign `{}` has a non-finite spaceCoveredFraction ({}); refusing to \
+                 write. serde_json renders it as bare `null`, which never loads back — \
+                 the file would be permanently unreadable. Report 0.0 for an unmeasurable \
+                 fraction, or fix the divisor.",
+                bad.id, bad.outcome.space_covered_fraction
+            ),
+        ));
+    }
+    let file = CampaignsFile {
+        schema_version: SCHEMA_VERSION,
+        records: campaigns.to_vec(),
+    };
+    crate::atomic_write(&campaigns_path(dir), &render_campaigns(&file))
+}
+
+// ---------------------------------------------------------------------------
+// T020 — signature-keyed upsert
+// ---------------------------------------------------------------------------
+
+/// What an [`upsert_finding`] call did — reported so a campaign can distinguish "we
+/// found something new" from "we re-observed something known", which is the difference
+/// between a queue that reflects distinct problems and one that reflects campaign volume.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Upsert {
+    /// A new finding was inserted.
+    Inserted,
+    /// A witness was appended to an existing finding.
+    WitnessAppended,
+    /// The finding already carried this exact witness (the same campaign re-observing
+    /// the same candidate); nothing changed.
+    AlreadyWitnessed,
+}
+
+/// Insert a new finding for `signature`, or append `witness` to the existing one
+/// (FR-030).
+///
+/// The merge key is the **signature**, and the finding id is derived from it, so a
+/// second record for the same signature is unrepresentable rather than merely
+/// discouraged.
+///
+/// Two non-merge rules are honored here because both are load-bearing:
+///
+/// - **A split lineage is never re-merged** (FR-032). A finding in state
+///   [`FindingState::Split`] is an inert ancestor; a new observation of that signature
+///   must not append to it, or the next campaign silently reverts the reviewer's
+///   judgement and the split becomes unrepeatable work. Such an observation is reported
+///   as [`Upsert::AlreadyWitnessed`] against the ancestor — it is genuinely not new, and
+///   attributing it to one of the children is a judgement only a reviewer can make.
+/// - **Distinct signatures stay distinct** even when they map to the same behavior
+///   (FR-031). Nothing here consults behaviors, which is what guarantees it.
+///
+/// Re-observing a finding also refreshes [`Finding::last_observed`] and revives a
+/// [`FindingState::NoLongerReproducing`] record to `triaged` **keeping its
+/// classification** — re-triaging a finding a reviewer already judged would be wasted
+/// work (contracts/findings-queue.md, "Reproduction lifecycle").
+pub fn upsert_finding(
+    findings: &mut Vec<Finding>,
+    signature: Signature,
+    witness: Witness,
+    campaign_id: &str,
+) -> Upsert {
+    let id = signature.finding_id();
+
+    let Some(existing) = findings.iter_mut().find(|f| f.id == id) else {
+        findings.push(Finding::newly_admitted(signature, witness, campaign_id));
+        return Upsert::Inserted;
+    };
+
+    if existing.state == FindingState::Split {
+        // An inert ancestor accepts no new witnesses (invariant Q10).
+        return Upsert::AlreadyWitnessed;
+    }
+    if existing.witnesses.iter().any(|w| w.id == witness.id) {
+        return Upsert::AlreadyWitnessed;
+    }
+
+    existing.witnesses.push(witness);
+    existing.last_observed = campaign_id.to_string();
+    if existing.state == FindingState::NoLongerReproducing {
+        existing.state = FindingState::Triaged;
+    }
+    Upsert::WitnessAppended
+}
+
+// ---------------------------------------------------------------------------
+// T021 — violation classes D1 and D5
+// ---------------------------------------------------------------------------
+
+/// Everything `discovery check` needs from the **registry** to resolve the queue's
+/// outward references.
+///
+/// A borrowed view rather than a whole [`crate::load::Registry`] so the check is
+/// explicit about the only two things it reads — the declared channel set and the
+/// recorded revisions — and so a test can supply them without building a registry.
+///
+/// Note the direction: the discovery check reads the registry, never the reverse. That
+/// asymmetry is what makes the queue unreachable from `certify`.
+#[derive(Debug, Clone, Default)]
+pub struct RegistryView<'a> {
+    /// Declared observable channel ids (`channels.json`).
+    pub channels: Vec<&'a str>,
+    /// Recorded source revisions (`revisions.json`).
+    pub revisions: Vec<&'a SourceRevision>,
+}
+
+impl<'a> RegistryView<'a> {
+    /// Build the view from a loaded registry.
+    pub fn from_registry(registry: &'a crate::load::Registry) -> RegistryView<'a> {
+        RegistryView {
+            channels: registry.channels.iter().map(|c| c.id.as_str()).collect(),
+            revisions: registry.revisions.iter().collect(),
+        }
+    }
+
+    fn declares_channel(&self, channel: &str) -> bool {
+        self.channels.contains(&channel)
+    }
+
+    /// Whether a revision of `kind` with this `pin` is recorded.
+    ///
+    /// Matched on the **pin**, not the id, because a `pinnedInputSet` element records
+    /// the pin (`113500f4`, `0.87.0`) rather than the `rev-` id. Accepting the id too
+    /// would let two spellings of the same claim diverge.
+    fn records_pin(&self, kind: RevisionKind, pin: &str) -> bool {
+        self.revisions
+            .iter()
+            .any(|r| r.kind == kind && r.pin == pin)
+    }
+}
+
+/// Run the discovery-side violation classes over a loaded data root.
+///
+/// Reports **all** violations in one pass, matching `validate` — a checker that stops at
+/// the first problem makes fixing a batch an iterative guessing game.
+///
+/// Currently emits **D1** and **D5**, which is this phase's scope (T021):
+///
+/// | Class | Checked here |
+/// |---|---|
+/// | **D1** | derived-id mismatch (signature, finding, witness); duplicate id; empty `witnesses`; a signature naming an undeclared channel; a `firstObserved`/`lastObserved` that does not resolve **or is not backed by a witness**; a witness naming an unresolvable campaign; a `splitFrom` that is self-referential or unresolvable; a non-finite `spaceCoveredFraction`; an empty seed; an empty repo-owned pinned-input element |
+/// | **D5** | a `schemaPin` / `prosePin` / `oracleVersion` naming a revision absent from `revisions.json` |
+///
+/// **D2** (classification arity), **D3** (`promotedTo` resolution), and **D4** (corpus
+/// immutability) are added by the user stories that own those rules (T068 / T080 / T105);
+/// each is an independent pass over the same loaded data, so adding one changes no
+/// existing call site. Until then a hand-edited `state: promoted` is NOT caught here —
+/// which is why the promotion path itself refuses a non-promotable classification rather
+/// than relying on the checker.
+///
+/// Empty `witnesses` is listed under D1 above and is *also* rejected at deserialize time
+/// ([`non_empty_witnesses`]). That is deliberate belt-and-braces: the loader rejection
+/// makes the state unrepresentable in memory, and the D1 clause makes a
+/// programmatically-built queue (a campaign in flight) fail the same way rather than
+/// only failing on the next load.
+pub fn check(data: &DiscoveryData, registry: &RegistryView<'_>) -> Vec<DiscoveryError> {
+    let mut violations = Vec::new();
+    check_findings(data, registry, &mut violations);
+    check_campaigns(data, registry, &mut violations);
+    violations
+}
+
+/// D1 over the findings queue.
+fn check_findings(
+    data: &DiscoveryData,
+    registry: &RegistryView<'_>,
+    out: &mut Vec<DiscoveryError>,
+) {
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+
+    for finding in &data.findings {
+        // Identity: the id must be derivable from the signature, and the signature's id
+        // from its own fields. A hand-edited record that broke either would silently
+        // stop deduplicating — two records for one signature, which the derived id
+        // exists to make impossible.
+        let derived_signature_id = finding.signature.derived_id();
+        if finding.signature.id != derived_signature_id {
+            out.push(DiscoveryError::MalformedRecord {
+                record: finding.id.clone(),
+                cause: format!(
+                    "signature id `{}` does not match its substance (expected `{derived_signature_id}`)",
+                    finding.signature.id
+                ),
+            });
+        }
+        // The derived-finding-id rule applies to findings the DEDUPLICATION owns, which
+        // is every finding except a split child. A child shares its parent's signature by
+        // construction (a split separates witnesses, not signatures), so it cannot also
+        // share the parent's derived id — the two requirements are incompatible, and the
+        // rule that has to give is this one. The child's own id rule is a substantive
+        // identity decision that belongs with the lineage work (T070/T072); what matters
+        // here is that the check does not demand something no valid child could satisfy.
+        if finding.split_from.is_none() {
+            let derived_finding_id = finding.signature.finding_id();
+            if finding.id != derived_finding_id {
+                out.push(DiscoveryError::MalformedRecord {
+                    record: finding.id.clone(),
+                    cause: format!(
+                        "finding id does not match its signature (expected \
+                         `{derived_finding_id}`) — the id is derived precisely so two \
+                         findings cannot share a signature"
+                    ),
+                });
+            }
+        }
+        if !seen.insert(finding.id.as_str()) {
+            out.push(DiscoveryError::MalformedRecord {
+                record: finding.id.clone(),
+                cause: "duplicate finding id".to_string(),
+            });
+        }
+
+        // Q2: at least one witness.
+        if finding.witnesses.is_empty() {
+            out.push(DiscoveryError::MalformedRecord {
+                record: finding.id.clone(),
+                cause: "no witnesses — a finding with no witness is a claim with no evidence"
+                    .to_string(),
+            });
+        }
+
+        // Q3: the signature's channel is declared.
+        if !registry.declares_channel(&finding.signature.channel) {
+            out.push(DiscoveryError::UnknownChannel {
+                record: finding.id.clone(),
+                channel: finding.signature.channel.clone(),
+            });
+        }
+
+        // Q8: firstObserved / lastObserved resolve — and are actually WITNESSED.
+        //
+        // Existence alone is too weak. `firstObserved` is "the campaign that first
+        // admitted it" and `lastObserved` is "the most recent campaign that reproduced
+        // it": both descriptions entail a witness from that campaign. A record naming a
+        // real but unwitnessed campaign is precisely the "claims provenance it does not
+        // have" the error text describes, and it is the shape a careless hand edit
+        // produces (bump `lastObserved`, forget the witness).
+        for (field, campaign_id) in [
+            ("firstObserved", &finding.first_observed),
+            ("lastObserved", &finding.last_observed),
+        ] {
+            if data.campaign(campaign_id).is_none() {
+                out.push(DiscoveryError::UnresolvableReference {
+                    record: finding.id.clone(),
+                    kind: format!("{field} campaign"),
+                    reference: campaign_id.clone(),
+                });
+            } else if !finding
+                .witnesses
+                .iter()
+                .any(|w| &w.campaign_id == campaign_id)
+            {
+                out.push(DiscoveryError::MalformedRecord {
+                    record: finding.id.clone(),
+                    cause: format!(
+                        "`{field}` names campaign `{campaign_id}`, which witnessed nothing \
+                         for this finding — the field asserts an observation, so it must be \
+                         backed by a witness"
+                    ),
+                });
+            }
+        }
+
+        // Each witness's campaign resolves, and its id matches its substance.
+        for witness in &finding.witnesses {
+            if data.campaign(&witness.campaign_id).is_none() {
+                out.push(DiscoveryError::UnresolvableReference {
+                    record: format!("{}/{}", finding.id, witness.id),
+                    kind: "witness campaign".to_string(),
+                    reference: witness.campaign_id.clone(),
+                });
+            }
+            let derived = Witness::derived_id(&witness.campaign_id, &witness.candidate_id);
+            if witness.id != derived {
+                out.push(DiscoveryError::MalformedRecord {
+                    record: format!("{}/{}", finding.id, witness.id),
+                    cause: format!(
+                        "witness id does not match `campaignId ‖ candidateId` (expected `{derived}`)"
+                    ),
+                });
+            }
+        }
+
+        // splitFrom, when set, must name a real OTHER finding. A self-reference resolves
+        // trivially and would otherwise pass, leaving a finding that is its own ancestor
+        // — a lineage the deduplication rule would then refuse to merge into itself.
+        if let Some(parent) = &finding.split_from {
+            if parent == &finding.id {
+                out.push(DiscoveryError::MalformedRecord {
+                    record: finding.id.clone(),
+                    cause: "`splitFrom` names the finding itself — a split lineage has a \
+                            parent and children, never one record that is both"
+                        .to_string(),
+                });
+            } else if data.finding(parent).is_none() {
+                out.push(DiscoveryError::UnresolvableReference {
+                    record: finding.id.clone(),
+                    kind: "splitFrom finding".to_string(),
+                    reference: parent.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// D1 + D5 over the campaign history.
+fn check_campaigns(
+    data: &DiscoveryData,
+    registry: &RegistryView<'_>,
+    out: &mut Vec<DiscoveryError>,
+) {
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+
+    for campaign in &data.campaigns {
+        if !seen.insert(campaign.id.as_str()) {
+            out.push(DiscoveryError::MalformedRecord {
+                record: campaign.id.clone(),
+                cause: "duplicate campaign id".to_string(),
+            });
+        }
+        if campaign.seed.trim().is_empty() {
+            out.push(DiscoveryError::MalformedRecord {
+                record: campaign.id.clone(),
+                cause: "empty seed — the seed is the reproducibility input and is never \
+                        defaulted or inferred (FR-001)"
+                    .to_string(),
+            });
+        }
+        // Caught here as well as at the write (see `write_campaigns`), so a record built
+        // in memory by a campaign in flight fails the same way a committed one would.
+        if !campaign.outcome.space_covered_fraction.is_finite() {
+            out.push(DiscoveryError::MalformedRecord {
+                record: campaign.id.clone(),
+                cause: format!(
+                    "non-finite spaceCoveredFraction ({}) — it serializes as bare `null`, \
+                     which never loads back",
+                    campaign.outcome.space_covered_fraction
+                ),
+            });
+        }
+        out.extend(check_pinned_input_set(
+            &campaign.id,
+            &campaign.pinned_input_set,
+            registry,
+        ));
+    }
+}
+
+/// **D5** — every pinned-input-set element that names a *registry revision* must resolve
+/// in `revisions.json`.
+///
+/// Three of the seven elements name revisions: the schema pin, the prose pin, and the
+/// oracle version. The other four (`normalizerVersion`, `grammarVersion`,
+/// `mutationCatalogVersion`, `generatorVersion`) are properties of this repository's own
+/// code rather than upstream revisions, so they are *required to be non-empty* here but
+/// are not looked up — inventing a `rev-` record for them would claim an upstream
+/// provenance they do not have.
+pub fn check_pinned_input_set(
+    record: &str,
+    pins: &PinnedInputSet,
+    registry: &RegistryView<'_>,
+) -> Vec<DiscoveryError> {
+    let mut out = Vec::new();
+
+    for (element, value, kind) in [
+        ("schemaPin", &pins.schema_pin, RevisionKind::Schema),
+        ("prosePin", &pins.prose_pin, RevisionKind::Spec),
+        ("oracleVersion", &pins.oracle_version, RevisionKind::Oracle),
+    ] {
+        if !registry.records_pin(kind, value) {
+            out.push(DiscoveryError::StalePin {
+                record: record.to_string(),
+                element: element.to_string(),
+                value: value.clone(),
+            });
+        }
+    }
+
+    for (element, value) in [
+        ("normalizerVersion", &pins.normalizer_version),
+        ("grammarVersion", &pins.grammar_version),
+        ("mutationCatalogVersion", &pins.mutation_catalog_version),
+        ("generatorVersion", &pins.generator_version),
+    ] {
+        if value.trim().is_empty() {
+            out.push(DiscoveryError::MalformedRecord {
+                record: record.to_string(),
+                cause: format!(
+                    "pinned input `{element}` is empty — all seven elements are mandatory \
+                     (FR-002); an unrecorded element is a dimension along which the finding \
+                     silently stops being checkable"
+                ),
+            });
+        }
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discovery::signature::{Divergence, DivergenceKind};
+    use serde_json::json;
+
+    fn revisions() -> Vec<SourceRevision> {
+        vec![
+            SourceRevision {
+                id: "rev-schema-113500f4".into(),
+                kind: RevisionKind::Schema,
+                pin: "113500f4".into(),
+                url: String::new(),
+                verified_against: None,
+            },
+            SourceRevision {
+                id: "rev-spec-113500f4".into(),
+                kind: RevisionKind::Spec,
+                pin: "113500f4".into(),
+                url: String::new(),
+                verified_against: None,
+            },
+            SourceRevision {
+                id: "rev-oracle-0-87-0".into(),
+                kind: RevisionKind::Oracle,
+                pin: "0.87.0".into(),
+                url: String::new(),
+                verified_against: None,
+            },
+        ]
+    }
+
+    fn view<'a>(revisions: &'a [SourceRevision]) -> RegistryView<'a> {
+        RegistryView {
+            channels: vec!["chan-structured-output", "chan-exit-code"],
+            revisions: revisions.iter().collect(),
+        }
+    }
+
+    fn pins() -> PinnedInputSet {
+        PinnedInputSet {
+            schema_pin: "113500f4".into(),
+            prose_pin: "113500f4".into(),
+            oracle_version: "0.87.0".into(),
+            normalizer_version: "6".into(),
+            grammar_version: "rev-schema-113500f4".into(),
+            mutation_catalog_version: "v1".into(),
+            generator_version: "splitmix64-seed+xoshiro256starstar/v1".into(),
+        }
+    }
+
+    fn campaign(id: &str) -> Campaign {
+        Campaign {
+            id: id.into(),
+            seed: "0x5eed1234".into(),
+            lane: CampaignLane::Invoked,
+            tier: CampaignTier::ConfigDifferential,
+            pinned_input_set: pins(),
+            budget: Budget {
+                wall_clock_seconds: DEFAULT_WALL_CLOCK_SECONDS,
+                per_candidate_seconds: DEFAULT_PER_CANDIDATE_SECONDS_HERMETIC,
+                shrink_steps_per_finding: 64,
+                admission_cap: DEFAULT_ADMISSION_CAP,
+            },
+            outcome: CampaignOutcome {
+                candidates_generated: 10,
+                candidates_executed: 10,
+                candidates_discarded_unsafe: 0,
+                parse_stage_failures: 0,
+                budget_exhausted: false,
+                space_covered_fraction: 0.0,
+                mutation_applications: IndexMap::new(),
+                signatures_observed: 1,
+                signatures_admitted: 1,
+                signatures_suppressed: 0,
+            },
+        }
+    }
+
+    fn signature(path: &str) -> Signature {
+        let d = json!("vscode");
+        let r = json!("root");
+        Signature::derive(
+            "chan-structured-output",
+            &Divergence {
+                kind: DivergenceKind::Value,
+                path,
+                deacon: Some(&d),
+                reference: Some(&r),
+            },
+        )
+    }
+
+    fn witness(campaign_id: &str, candidate_id: &str) -> Witness {
+        Witness {
+            id: Witness::derived_id(campaign_id, candidate_id),
+            campaign_id: campaign_id.into(),
+            candidate_id: candidate_id.into(),
+            minimal_input: json!({ "image": "alpine:3.18" }),
+            is_minimal: true,
+            reduction_steps: vec!["drop-optional-key".into()],
+            observed_values: ObservedValues {
+                deacon: Some(json!("vscode")),
+                reference: Some(json!("root")),
+            },
+            mutation_operators: vec!["mop-wrong-type".into()],
+        }
+    }
+
+    fn clean_data() -> DiscoveryData {
+        let sig = signature("configuration.remoteUser");
+        let w = witness("cmp-aaaaaaaa", "cnd-11111111");
+        DiscoveryData {
+            findings: vec![Finding::newly_admitted(sig, w, "cmp-aaaaaaaa")],
+            campaigns: vec![campaign("cmp-aaaaaaaa")],
+        }
+    }
+
+    // --- T016/T017 record models ------------------------------------------
+
+    #[test]
+    fn the_contract_example_record_loads() {
+        // contracts/findings-queue.md § Record schema, with ids made self-consistent.
+        let sig = signature("configuration.remoteUser");
+        let w = witness("cmp-aaaaaaaa", "cnd-11111111");
+        let raw = format!(
+            r#"{{
+              "schemaVersion": 1,
+              "records": [
+                {{
+                  "id": "{}",
+                  "signature": {},
+                  "witnesses": [{}],
+                  "classification": "deacon-regression",
+                  "state": "triaged",
+                  "firstObserved": "cmp-aaaaaaaa",
+                  "lastObserved": "cmp-aaaaaaaa",
+                  "promotedTo": null,
+                  "splitFrom": null,
+                  "notes": ""
+                }}
+              ]
+            }}"#,
+            sig.finding_id(),
+            serde_json::to_string(&sig).unwrap(),
+            serde_json::to_string(&w).unwrap(),
+        );
+        let file: FindingsFile = serde_json::from_str(&raw).expect("the contract example loads");
+        let finding = &file.records[0];
+        assert_eq!(finding.state, FindingState::Triaged);
+        assert_eq!(
+            finding.classification,
+            Some(Classification::DeaconRegression)
+        );
+        assert_eq!(finding.witnesses.len(), 1);
+    }
+
+    #[test]
+    fn unknown_fields_are_rejected_at_load() {
+        for raw in [
+            r#"{"schemaVersion":1,"records":[],"extra":1}"#,
+            r#"{"schemaVersion":1,"records":[{"id":"fnd-1","typo":true}]}"#,
+        ] {
+            let err = serde_json::from_str::<FindingsFile>(raw)
+                .expect_err("strict JSON must reject unknown fields");
+            let msg = err.to_string();
+            assert!(
+                msg.contains("extra") || msg.contains("typo") || msg.contains("unknown field"),
+                "the diagnosis must name the offending field, got: {msg}"
+            );
+        }
+        let err = serde_json::from_str::<CampaignsFile>(
+            r#"{"schemaVersion":1,"records":[],"surprise":true}"#,
+        )
+        .expect_err("strict JSON must reject unknown fields");
+        assert!(err.to_string().contains("surprise"));
+    }
+
+    #[test]
+    fn a_truncated_file_does_not_load_as_an_empty_queue() {
+        // The failure mode FR-029 exists to prevent: "the data was lost" must never read
+        // as "nothing was found". The writer always emits `records`, so its absence is
+        // damage, not a default.
+        let err = serde_json::from_str::<FindingsFile>(r#"{"schemaVersion":1}"#)
+            .expect_err("a records-less findings file must not load");
+        assert!(err.to_string().contains("records"), "got: {err}");
+        let err = serde_json::from_str::<CampaignsFile>(r#"{"schemaVersion":1}"#)
+            .expect_err("a records-less campaigns file must not load");
+        assert!(err.to_string().contains("records"), "got: {err}");
+    }
+
+    #[test]
+    fn an_unsupported_schema_version_is_refused_rather_than_downgraded() {
+        // Reading a v2 file under v1 semantics would be bad; the real hazard is the write
+        // that follows, since every writer stamps SCHEMA_VERSION and would silently
+        // downgrade the file. Refusing to read is the only way to guarantee not
+        // destroying it.
+        let err = serde_json::from_str::<FindingsFile>(r#"{"schemaVersion":2,"records":[]}"#)
+            .expect_err("a future schema version must not load");
+        let msg = err.to_string();
+        assert!(msg.contains("unsupported schemaVersion 2"), "got: {msg}");
+        assert!(msg.contains("writing would stamp"), "got: {msg}");
+    }
+
+    #[test]
+    fn duplicate_ids_are_rejected_at_load_not_only_by_check() {
+        // Every by-id lookup takes the FIRST match, so a duplicate makes `triage` mutate
+        // one record while the other survives untouched — a write that appears to succeed
+        // and silently does not. Catching it only in `check` is too late.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let data = clean_data();
+        let mut findings = data.findings.clone();
+        findings.push(findings[0].clone());
+        write_findings(dir.path(), &findings).expect("write");
+        write_campaigns(dir.path(), &data.campaigns).expect("write");
+
+        let err = DiscoveryData::load(dir.path()).expect_err("duplicates must not load");
+        let msg = err.to_string();
+        assert!(msg.contains("duplicate finding id"), "got: {msg}");
+        assert!(
+            msg.contains("first match"),
+            "the message must name the consequence"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_file_is_not_mistaken_for_an_absent_one() {
+        // `Path::exists` returns false for ANY error, so a present-but-unreadable file
+        // would read as "this repository has not run a campaign yet". Simulate the
+        // stat failure with a path whose parent is a FILE, which yields ENOTDIR.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, "not a directory").expect("write");
+        let err = DiscoveryData::load(&blocker).expect_err("an unusable root must not load empty");
+        let msg = err.to_string();
+        assert!(msg.contains("findings.json"), "got: {msg}");
+    }
+
+    #[test]
+    fn an_empty_witness_list_is_rejected_at_deserialize_time() {
+        let sig = signature("p");
+        let raw = format!(
+            r#"{{"schemaVersion":1,"records":[{{"id":"{}","signature":{},"witnesses":[],
+                "state":"untriaged","firstObserved":"cmp-a","lastObserved":"cmp-a"}}]}}"#,
+            sig.finding_id(),
+            serde_json::to_string(&sig).unwrap()
+        );
+        let err = serde_json::from_str::<FindingsFile>(&raw)
+            .expect_err("a witness-less finding must not be representable");
+        assert!(err.to_string().contains("at least one witness"));
+    }
+
+    #[test]
+    fn classification_promotability_is_a_closed_property() {
+        assert!(Classification::DeaconRegression.is_promotable());
+        assert!(Classification::ReferenceQuirk.is_promotable());
+        assert!(Classification::SpecAmbiguity.is_promotable());
+        assert!(Classification::UnsupportedBehavior.is_promotable());
+        assert!(
+            !Classification::NormalizerDefect.is_promotable(),
+            "a normalizer defect is a defect in the machinery, not a behavior"
+        );
+        assert!(!Classification::FixtureDefect.is_promotable());
+        for c in Classification::all() {
+            assert_eq!(Classification::parse(c.as_str()), Some(*c));
+        }
+        assert_eq!(Classification::parse("probably-fine"), None);
+    }
+
+    #[test]
+    fn campaign_records_round_trip_through_strict_json() {
+        let c = campaign("cmp-aaaaaaaa");
+        let raw = serde_json::to_string_pretty(&c).expect("serializes");
+        assert!(raw.contains("\"tier\": \"config-differential\""));
+        assert!(raw.contains("\"lane\": \"invoked\""));
+        assert!(raw.contains("\"perCandidateSeconds\": 60"));
+        let back: Campaign = serde_json::from_str(&raw).expect("round-trips");
+        assert_eq!(back, c);
+        assert!(CampaignTier::ConfigDifferential.requires_oracle());
+        assert!(
+            !CampaignTier::Metamorphic.requires_oracle(),
+            "the metamorphic tier needs no oracle, Docker, or network (research D12)"
+        );
+    }
+
+    // --- T018 loader -------------------------------------------------------
+
+    #[test]
+    fn the_committed_data_root_loads_and_is_empty() {
+        let data = DiscoveryData::load_default().expect("the committed discovery root must load");
+        assert!(data.findings.is_empty());
+        assert!(data.campaigns.is_empty());
+    }
+
+    #[test]
+    fn a_missing_root_is_empty_but_a_malformed_file_is_a_located_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let empty = DiscoveryData::load(dir.path()).expect("a missing file is an empty collection");
+        assert_eq!(empty, DiscoveryData::default());
+
+        std::fs::write(findings_path(dir.path()), "{ not json").expect("write");
+        let err =
+            DiscoveryData::load(dir.path()).expect_err("a malformed file must not load empty");
+        let msg = err.to_string();
+        assert!(msg.contains("findings.json"), "got: {msg}");
+    }
+
+    #[test]
+    fn every_malformed_file_is_reported_in_one_pass() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(findings_path(dir.path()), "{ nope").expect("write");
+        std::fs::write(campaigns_path(dir.path()), "[ also nope").expect("write");
+        let err = DiscoveryData::load(dir.path()).expect_err("both files are malformed");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("findings.json") && msg.contains("campaigns.json"),
+            "a checker that stops at the first bad file makes fixing a batch a guessing \
+             game; got: {msg}"
+        );
+    }
+
+    // --- T019 atomic writer -----------------------------------------------
+
+    #[test]
+    fn the_writer_is_atomic_byte_stable_and_round_trips() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let data = clean_data();
+
+        write_findings(dir.path(), &data.findings).expect("write findings");
+        write_campaigns(dir.path(), &data.campaigns).expect("write campaigns");
+
+        let back = DiscoveryData::load(dir.path()).expect("re-loads");
+        assert_eq!(back, data, "the write/read round trip must be lossless");
+
+        // Byte-stable: writing the same content twice produces identical bytes, and a
+        // shorter payload leaves no trailing bytes from the longer one.
+        let first = std::fs::read_to_string(findings_path(dir.path())).expect("read");
+        write_findings(dir.path(), &data.findings).expect("rewrite");
+        assert_eq!(
+            first,
+            std::fs::read_to_string(findings_path(dir.path())).unwrap()
+        );
+        write_findings(dir.path(), &[]).expect("truncate");
+        let short = std::fs::read_to_string(findings_path(dir.path())).expect("read");
+        assert_eq!(short, "{\n  \"schemaVersion\": 1,\n  \"records\": []\n}\n");
+
+        // No temp files survive a successful write.
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files must be renamed away");
+    }
+
+    #[test]
+    fn the_rendered_empty_file_matches_the_committed_data_root() {
+        // The T003 seed files were hand-written; assert the writer reproduces them
+        // byte-for-byte, so the first campaign's write is a content diff and not a
+        // whole-file reformat.
+        let rendered = render_findings(&FindingsFile::default());
+        for name in ["findings.json", "campaigns.json", "corpus.json"] {
+            let committed =
+                std::fs::read_to_string(crate::default_discovery_dir().join(name)).expect(name);
+            assert_eq!(
+                committed, rendered,
+                "{name} must match the canonical rendering"
+            );
+        }
+    }
+
+    // --- T020 upsert -------------------------------------------------------
+
+    #[test]
+    fn upsert_inserts_once_and_then_appends_witnesses() {
+        let mut findings: Vec<Finding> = Vec::new();
+        let sig = signature("configuration.remoteUser");
+
+        assert_eq!(
+            upsert_finding(
+                &mut findings,
+                sig.clone(),
+                witness("cmp-aaaaaaaa", "cnd-1"),
+                "cmp-aaaaaaaa"
+            ),
+            Upsert::Inserted
+        );
+        assert_eq!(findings.len(), 1);
+
+        // A different campaign observing the SAME signature appends rather than
+        // inserting — the queue reflects distinct problems, not campaign volume.
+        assert_eq!(
+            upsert_finding(
+                &mut findings,
+                sig.clone(),
+                witness("cmp-bbbbbbbb", "cnd-2"),
+                "cmp-bbbbbbbb"
+            ),
+            Upsert::WitnessAppended
+        );
+        assert_eq!(findings.len(), 1, "a duplicate finding is unrepresentable");
+        assert_eq!(findings[0].witnesses.len(), 2);
+        assert_eq!(findings[0].first_observed, "cmp-aaaaaaaa");
+        assert_eq!(findings[0].last_observed, "cmp-bbbbbbbb");
+
+        // Re-observing the exact same (campaign, candidate) changes nothing.
+        assert_eq!(
+            upsert_finding(
+                &mut findings,
+                sig.clone(),
+                witness("cmp-bbbbbbbb", "cnd-2"),
+                "cmp-bbbbbbbb"
+            ),
+            Upsert::AlreadyWitnessed
+        );
+        assert_eq!(findings[0].witnesses.len(), 2);
+
+        // A DIFFERENT signature stays a different finding.
+        assert_eq!(
+            upsert_finding(
+                &mut findings,
+                signature("configuration.remoteEnv"),
+                witness("cmp-bbbbbbbb", "cnd-3"),
+                "cmp-bbbbbbbb"
+            ),
+            Upsert::Inserted
+        );
+        assert_eq!(findings.len(), 2);
+    }
+
+    #[test]
+    fn re_observation_revives_a_no_longer_reproducing_finding_keeping_its_classification() {
+        let mut findings = vec![Finding::newly_admitted(
+            signature("p"),
+            witness("cmp-aaaaaaaa", "cnd-1"),
+            "cmp-aaaaaaaa",
+        )];
+        findings[0].state = FindingState::NoLongerReproducing;
+        findings[0].classification = Some(Classification::DeaconRegression);
+
+        upsert_finding(
+            &mut findings,
+            signature("p"),
+            witness("cmp-bbbbbbbb", "cnd-2"),
+            "cmp-bbbbbbbb",
+        );
+        assert_eq!(findings[0].state, FindingState::Triaged);
+        assert_eq!(
+            findings[0].classification,
+            Some(Classification::DeaconRegression),
+            "re-triaging a finding a reviewer already judged would be wasted work"
+        );
+    }
+
+    #[test]
+    fn a_split_ancestor_never_accepts_a_new_witness() {
+        let mut findings = vec![Finding::newly_admitted(
+            signature("p"),
+            witness("cmp-aaaaaaaa", "cnd-1"),
+            "cmp-aaaaaaaa",
+        )];
+        findings[0].state = FindingState::Split;
+
+        assert_eq!(
+            upsert_finding(
+                &mut findings,
+                signature("p"),
+                witness("cmp-bbbbbbbb", "cnd-2"),
+                "cmp-bbbbbbbb"
+            ),
+            Upsert::AlreadyWitnessed,
+            "re-merging a split lineage silently reverts a reviewer's judgement (FR-032)"
+        );
+        assert_eq!(findings[0].witnesses.len(), 1);
+        assert_eq!(findings[0].last_observed, "cmp-aaaaaaaa");
+    }
+
+    // --- T021 D1 / D5 ------------------------------------------------------
+
+    #[test]
+    fn a_clean_data_root_reports_no_violations() {
+        let revs = revisions();
+        assert_eq!(check(&clean_data(), &view(&revs)), Vec::new());
+    }
+
+    #[test]
+    fn the_committed_data_root_validates_clean() {
+        let registry = crate::load::Registry::load(&crate::default_registry_dir())
+            .expect("the committed registry must load");
+        let data = DiscoveryData::load_default().expect("the committed discovery root must load");
+        let violations = check(&data, &RegistryView::from_registry(&registry));
+        assert!(violations.is_empty(), "{violations:?}");
+    }
+
+    #[test]
+    fn d1_undeclared_channel() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.findings[0].signature.channel = "chan-invented".into();
+        // Re-derive so the identity checks do not also fire and mask the point.
+        data.findings[0].signature.id = data.findings[0].signature.derived_id();
+        data.findings[0].id = data.findings[0].signature.finding_id();
+
+        let violations = check(&data, &view(&revs));
+        assert_eq!(violations.len(), 1, "{violations:?}");
+        assert_eq!(violations[0].class(), "D1");
+        assert!(violations[0].to_string().contains("chan-invented"));
+    }
+
+    #[test]
+    fn d1_unresolvable_campaign_reference() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.findings[0].last_observed = "cmp-ghost".into();
+
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.class() == "D1" && v.to_string().contains("cmp-ghost")),
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn d1_empty_witnesses_and_broken_identity() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.findings[0].witnesses.clear();
+        data.findings[0].id = "fnd-deadbeef".into();
+
+        let violations = check(&data, &view(&revs));
+        let text: Vec<String> = violations.iter().map(|v| v.to_string()).collect();
+        assert!(
+            text.iter().any(|m| m.contains("no witnesses")),
+            "expected the empty-witness violation in {text:?}"
+        );
+        assert!(
+            text.iter()
+                .any(|m| m.contains("does not match its signature")),
+            "expected the derived-id violation in {text:?}"
+        );
+        assert!(violations.iter().all(|v| v.class() == "D1"));
+    }
+
+    #[test]
+    fn d1_duplicate_ids_and_dangling_split_parent() {
+        let revs = revisions();
+        let mut data = clean_data();
+        let dup = data.findings[0].clone();
+        data.findings.push(dup);
+        data.findings[1].split_from = Some("fnd-nowhere".into());
+        data.campaigns.push(campaign("cmp-aaaaaaaa"));
+
+        let text: Vec<String> = check(&data, &view(&revs))
+            .iter()
+            .map(|v| v.to_string())
+            .collect();
+        assert!(
+            text.iter().any(|m| m.contains("duplicate finding id")),
+            "{text:?}"
+        );
+        assert!(
+            text.iter().any(|m| m.contains("duplicate campaign id")),
+            "{text:?}"
+        );
+        assert!(text.iter().any(|m| m.contains("fnd-nowhere")), "{text:?}");
+    }
+
+    #[test]
+    fn d1_witness_id_must_match_its_substance() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.findings[0].witnesses[0].id = "wit-00000000".into();
+
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.to_string().contains("witness id does not match")),
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn d5_pins_absent_from_revisions_json() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.campaigns[0].pinned_input_set.schema_pin = "deadbeef".into();
+        data.campaigns[0].pinned_input_set.oracle_version = "9.9.9".into();
+
+        let violations = check(&data, &view(&revs));
+        let stale: Vec<&DiscoveryError> = violations.iter().filter(|v| v.class() == "D5").collect();
+        assert_eq!(stale.len(), 2, "{violations:?}");
+        assert!(stale.iter().any(|v| v.to_string().contains("deadbeef")));
+        assert!(stale.iter().any(|v| v.to_string().contains("9.9.9")));
+        assert!(
+            stale[0].to_string().contains("revisions.json"),
+            "the remedy must name where the revision belongs"
+        );
+    }
+
+    #[test]
+    fn d5_matches_on_the_pin_not_the_revision_id() {
+        // A campaign records the PIN (`113500f4`), not the `rev-` id. Accepting the id
+        // too would let two spellings of the same claim diverge.
+        let revs = revisions();
+        let mut data = clean_data();
+        data.campaigns[0].pinned_input_set.schema_pin = "rev-schema-113500f4".into();
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations.iter().any(|v| v.class() == "D5"),
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn a_repo_owned_pin_element_may_not_be_empty() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.campaigns[0].pinned_input_set.generator_version = "  ".into();
+
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.to_string().contains("generatorVersion") && v.class() == "D1"),
+            "all seven elements are mandatory; {violations:?}"
+        );
+    }
+
+    #[test]
+    fn a_non_finite_space_covered_fraction_is_refused_by_both_the_writer_and_check() {
+        // serde_json renders NaN/±Inf as bare `null` and does NOT error, and `null` is not
+        // a valid f64 coming back — so writing one produces a campaigns.json that can
+        // never be loaded again, taking the queue's whole provenance with it. A zero
+        // `candidatesGenerated` on an aborted campaign is exactly that shape.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut data = clean_data();
+        data.campaigns[0].outcome.space_covered_fraction = f64::NAN;
+
+        let err = write_campaigns(dir.path(), &data.campaigns)
+            .expect_err("a non-finite fraction must not be written");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("non-finite"), "got: {err}");
+        assert!(
+            !campaigns_path(dir.path()).exists(),
+            "the refusal must leave no file behind"
+        );
+
+        // And the in-memory record fails the same way, so a campaign in flight is caught
+        // before it ever reaches the writer.
+        let revs = revisions();
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.to_string().contains("non-finite spaceCoveredFraction")),
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn d1_last_observed_must_be_backed_by_a_witness() {
+        // Existence alone is too weak: `lastObserved` asserts an OBSERVATION, and a
+        // record naming a real but unwitnessed campaign claims provenance it does not
+        // have — the shape a careless hand edit produces.
+        let revs = revisions();
+        let mut data = clean_data();
+        data.campaigns.push(campaign("cmp-bbbbbbbb"));
+        data.findings[0].last_observed = "cmp-bbbbbbbb".into();
+
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.to_string().contains("witnessed nothing for this finding")),
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn d1_split_from_may_not_name_the_finding_itself() {
+        let revs = revisions();
+        let mut data = clean_data();
+        let id = data.findings[0].id.clone();
+        data.findings[0].split_from = Some(id);
+
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.to_string().contains("names the finding itself")),
+            "a self-reference resolves trivially and would otherwise pass: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn a_split_child_is_exempt_from_the_derived_finding_id_rule() {
+        // A child shares its parent's signature by construction (a split separates
+        // witnesses, not signatures), so it cannot also share the parent's derived id.
+        // Demanding both would make every valid child a violation.
+        let revs = revisions();
+        let mut data = clean_data();
+        let parent_id = data.findings[0].id.clone();
+        data.findings[0].state = FindingState::Split;
+
+        let mut child = data.findings[0].clone();
+        child.id = "fnd-child001".into();
+        child.state = FindingState::Untriaged;
+        child.classification = None;
+        child.split_from = Some(parent_id);
+        data.findings.push(child);
+
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations.is_empty(),
+            "a split child with its own id must not be a violation: {violations:?}"
+        );
+
+        // The exemption is scoped: a NON-child with a wrong id is still caught.
+        data.findings[1].split_from = None;
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.to_string().contains("does not match its signature")),
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_seed_is_a_violation() {
+        let revs = revisions();
+        let mut data = clean_data();
+        data.campaigns[0].seed = String::new();
+        let violations = check(&data, &view(&revs));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.to_string().contains("empty seed")),
+            "{violations:?}"
+        );
+    }
+}

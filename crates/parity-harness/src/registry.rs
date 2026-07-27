@@ -126,28 +126,51 @@ pub fn check_test_files(registry: &ParityRegistry, tests_dir: &Path) -> Vec<Stri
 /// Cross-check a nextest `[profile.parity]` default-filter expression: it must
 /// select EXACTLY the live binaries and NONE of the internal-consistency
 /// binaries (FR-013, FR-014). Returns problems (empty = OK).
+///
+/// Every verdict is reached by **evaluating** the expression with [`filter_selects`],
+/// not by token-matching it. The two differ the moment the filter names a binary in
+/// order to EXCLUDE it — which the parity filter now does for the discovery campaign
+/// binaries (025 T007), and which any future exclusion would do again. Token matching
+/// would read `… & not (binary(=discovery_campaign))` as "the parity profile selects
+/// `discovery_campaign`" and fail a correct file, so the check has to understand the
+/// operator it is reading. [`extract_binary_eq_tokens`] still supplies the *candidate*
+/// set — the names worth asking about — because there is no other way to discover a
+/// binary the filter mentions but the registry does not know.
 pub fn check_parity_profile_filter(registry: &ParityRegistry, filter_expr: &str) -> Vec<String> {
     let mut problems = Vec::new();
-    let selected: std::collections::HashSet<String> =
-        extract_binary_eq_tokens(filter_expr).into_iter().collect();
+
+    let selects = |name: &str, problems: &mut Vec<String>| -> Option<bool> {
+        match filter_selects(filter_expr, name) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                problems.push(format!(
+                    "[profile.parity] default-filter could not be evaluated for `{name}`: {e}"
+                ));
+                None
+            }
+        }
+    };
 
     for name in registry.live_names() {
-        if !selected.contains(name) {
+        if selects(name, &mut problems) == Some(false) {
             problems.push(format!(
                 "[profile.parity] filter does not select live binary `{name}`"
             ));
         }
     }
     for name in &registry.internal_consistency_binaries {
-        if selected.contains(name.as_str()) {
+        if selects(name, &mut problems) == Some(true) {
             problems.push(format!(
                 "[profile.parity] filter selects internal-consistency binary `{name}` (it must not)"
             ));
         }
     }
+
     let live: std::collections::HashSet<&str> = registry.live_names().into_iter().collect();
-    for name in &selected {
-        if !live.contains(name.as_str()) {
+    let mentioned: std::collections::BTreeSet<String> =
+        extract_binary_eq_tokens(filter_expr).into_iter().collect();
+    for name in &mentioned {
+        if !live.contains(name.as_str()) && selects(name, &mut problems) == Some(true) {
             problems.push(format!(
                 "[profile.parity] filter selects `{name}`, which is not a registered live binary"
             ));
@@ -159,9 +182,10 @@ pub fn check_parity_profile_filter(registry: &ParityRegistry, filter_expr: &str)
 /// Full `.config/nextest.toml` cross-check (research D5; FR-013, FR-014):
 ///
 /// - `[profile.parity]` selects EXACTLY the live set and none of the
-///   internal-consistency binaries (delegates to [`check_parity_profile_filter`],
-///   valid because the parity profile's `default-filter` is a pure `binary(=…)`
-///   allow-list);
+///   internal-consistency binaries (delegates to [`check_parity_profile_filter`], which
+///   EVALUATES the expression — the parity filter is an allow-list with an explicit
+///   exclusion group appended, not a pure `binary(=…)` union, so a token-matching check
+///   would misread the exclusion as a selection);
 /// - NO OTHER profile's `default-filter` selects any live parity binary — the
 ///   truthful-by-non-selection invariant (FR-014). This is evaluated by
 ///   [`filter_selects`] over each profile's filter expression, so an exclusion
@@ -533,6 +557,50 @@ mod tests {
             problems
                 .iter()
                 .any(|p| p.contains("consistency_env_probe_flag"))
+        );
+    }
+
+    #[test]
+    fn naming_a_binary_in_order_to_exclude_it_is_not_selecting_it() {
+        // 025 T007 puts the discovery campaign binaries in the parity filter's `not`
+        // group, so the parity lane's non-selection of them is structural rather than
+        // incidental. A token-matching check would read that as "the parity profile
+        // selects `discovery_campaign`" and fail a correct file — the check has to
+        // understand the operator it is reading.
+        let reg = ParityRegistry::load().expect("embedded registry must parse");
+        let good = reg
+            .live_names()
+            .iter()
+            .map(|n| format!("binary(={n})"))
+            .collect::<Vec<_>>()
+            .join(" | ");
+
+        let excluding = format!(
+            "({good}) & not (binary(=discovery_campaign) | binary(=discovery_metamorphic))"
+        );
+        assert!(
+            check_parity_profile_filter(&reg, &excluding).is_empty(),
+            "an explicit exclusion must not read as a selection: {:?}",
+            check_parity_profile_filter(&reg, &excluding)
+        );
+
+        // Positively selecting an unregistered binary is still flagged — the exclusion
+        // tolerance must not become a blanket amnesty for unknown names.
+        let selecting = format!("{good} | binary(=discovery_campaign)");
+        let problems = check_parity_profile_filter(&reg, &selecting);
+        assert!(
+            problems.iter().any(|p| p.contains("discovery_campaign")),
+            "got: {problems:?}"
+        );
+
+        // An exclusion must not hide a MISSING live binary either.
+        let missing_live = format!("({good}) & not (binary(={}))", reg.live_names()[0]);
+        let problems = check_parity_profile_filter(&reg, &missing_live);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("does not select live binary")),
+            "got: {problems:?}"
         );
     }
 
