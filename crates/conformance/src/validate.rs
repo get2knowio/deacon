@@ -3417,11 +3417,22 @@ pub fn check_obligations(registry: &Registry, obligations_file: &Path) -> Vec<Vi
         let drift = compare_obligations(&committed, &regenerated);
         let detail = match drift.first_difference() {
             Some((id, how)) => format!(
-                "first difference: `{id}` was {how} (+{} added, -{} removed, ~{} changed)",
+                "run `coverage generate`; first difference: `{id}` was {how} \
+                 (+{} added, -{} removed, ~{} changed)",
                 drift.added.len(),
                 drift.removed.len(),
                 drift.changed.len()
             ),
+            // Identical units, different bytes: not drift, an ENCODING difference. The
+            // usual cause is a checkout that translated line endings (JSON parses CRLF
+            // away, so the records still compare equal), and `coverage generate` cannot
+            // fix that — it writes LF and the checkout rewrites it back. Say so instead
+            // of sending the reader after drift that does not exist.
+            None if raw.contains('\r') => "the unit sets agree and the committed file \
+                 contains CR bytes — this is a line-ending difference, not drift; \
+                 `coverage generate` will not fix it, ensure `.gitattributes` marks \
+                 `conformance/obligations/**` as `-text`"
+                .to_string(),
             None => "the unit sets agree, so the difference is in formatting or the revision pin"
                 .to_string(),
         };
@@ -3429,8 +3440,7 @@ pub fn check_obligations(registry: &Registry, obligations_file: &Path) -> Vec<Vi
             "V27",
             obligations_file.display().to_string(),
             format!(
-                "committed obligation inventory does not byte-match a fresh regeneration \
-                 (run `coverage generate`); {detail}"
+                "committed obligation inventory does not byte-match a fresh regeneration; {detail}"
             ),
         ));
     }

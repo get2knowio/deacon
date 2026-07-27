@@ -170,6 +170,23 @@ fn committed_obligations_match_a_fresh_regeneration() {
         )
     });
     let drift = compare_obligations(&parsed, &regenerated);
+    // An EMPTY semantic diff with differing bytes is not drift at all — the records are
+    // identical and only the encoding differs. That is a re-encoded checkout (a Windows
+    // CRLF translation, which JSON parses away), and `coverage generate` cannot fix it:
+    // regeneration writes LF and the checkout rewrites it right back. Name the real cause
+    // rather than sending the reader after phantom drift. `.gitattributes` pins
+    // `conformance/obligations/** -text` to prevent it.
+    assert!(
+        !drift.is_empty(),
+        "{} parses to EXACTLY the regenerated records but does not byte-match \
+         (committed {} bytes, regenerated {} bytes; committed contains CR: {}). This is a \
+         line-ending / encoding difference, NOT obligation drift — `coverage generate` \
+         will not fix it. Check that `.gitattributes` marks the path `-text`.",
+        obligations_file.display(),
+        committed.len(),
+        render_obligations(&regenerated).len(),
+        committed.contains('\r'),
+    );
     panic!(
         "{} does not byte-match a fresh regeneration (V27): first difference {:?}; \
          +{} added, -{} removed, ~{} changed. Run `cargo run -p deacon-conformance -- \
