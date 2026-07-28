@@ -79,56 +79,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. A Dockerfile-based workspace with one Feature. Version resolution reads the Feature set, not the image, so the configuration source must not change what is reported — and both CLIs must agree that it does not."
-    },
-    {
-      "id": "case-outdated-extends-chain-differential",
-      "behaviors": [
-        "bhv-outdated-extends-chain-features"
-      ],
-      "context": [],
-      "scenarioContext": {
-        "sdim-operation": "outdated",
-        "sdim-config-source": "image",
-        "sdim-container-state": "none",
-        "sdim-features": "single",
-        "sdim-layering": "extends-chain",
-        "sdim-output-mode": "human"
-      },
-      "inputClass": "reference-lenient",
-      "oracleType": "live-differential",
-      "operations": [
-        {
-          "id": "op-outdated",
-          "subcommand": "outdated",
-          "argv": [
-            "--workspace-folder",
-            "${WORKSPACE}"
-          ],
-          "fixtures": [
-            "fx-outdated-extends-feature"
-          ]
-        }
-      ],
-      "expected": [
-        {
-          "channel": "chan-stdout",
-          "operation": "op-outdated"
-        }
-      ],
-      "allowedDifferences": [
-        {
-          "behavior": "bhv-outdated-extends-chain-features",
-          "context": [],
-          "observablePath": "chan-stdout.table",
-          "rationale": "deacon resolves the extends chain before reporting Feature versions, so it lists the Feature the base link declares; the reference does not resolve `extends` and reports an empty table.",
-          "waiverId": "wvr-outdated-extends-chain-features"
-        }
-      ],
-      "cleanup": {
-        "tempdir": true
-      },
-      "notes": "The differential half: the pinned reference does not resolve `extends`, so it reports an EMPTY table for a workspace whose Feature is declared one link up, while deacon reports the Feature. Both exit 0 — the difference is only visible on stdout, which is why that is the compared channel here and the exit code is not."
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. A Dockerfile-based workspace with one Feature. Version resolution reads the Feature set, not the image, so the configuration source must not change what is reported \u2014 and both CLIs must agree that it does not."
     },
     {
       "id": "case-outdated-extends-chain-features",
@@ -178,7 +129,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-outdated-extends-chain-image-single-feature`. The chain's BASE link contributes the only Feature, so an implementation that reads the top document alone reports an empty table and exits 0 — a silent miss, not an error. The regex pins the row's identifier and both pinned columns while leaving `latest` free."
+      "notes": "Covers the high-risk triple `hrt-outdated-extends-chain-image-single-feature`. The chain's BASE link contributes the only Feature, so an implementation that reads the top document alone reports an empty table and exits 0 \u2014 a silent miss, not an error. The regex pins the row's identifier and both pinned columns while leaving `latest` free."
     },
     {
       "id": "case-outdated-malformed-config-rejected",
@@ -262,7 +213,56 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-039 / FR-033: a configuration with no Features produces an empty version report and a successful exit on both sides. The human output mode is what a differential can compare here — deacon spells the structured flag `--output json` and the reference `--output-format json`, so only the default rendering is invocable with one argv."
+      "notes": "FR-039 / FR-033: a configuration with no Features produces an empty version report and a successful exit on both sides. The human output mode is what a differential can compare here \u2014 deacon spells the structured flag `--output json` and the reference `--output-format json`, so only the default rendering is invocable with one argv."
+    },
+    {
+      "id": "case-outdated-reference-lenient-wrong-type-features",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-features-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "reference-lenient",
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-wrong-type-features"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-wrong-type-features-rejected",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "`features` is a bare string where the schema says object. deacon fails the run (exit 1) before it can report Feature versions; the reference keeps the raw JSON, finds no Feature map to inspect, and exits 0. Measured on this fixture: deacon 1, reference 0.",
+          "waiverId": "wvr-wrong-type-features"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The `reference-lenient` input class for `outdated` (FR-040): an input the reference accepts and deacon rejects, run through a subcommand other than `read-configuration` to show that deacon's type-strictness is a property of configuration loading rather than of one command's output path.\n\nThe divergence is deliberately observed on `chan-exit-code` rather than `chan-stdout`. An exit code is addressable as `chan-exit-code.exitCode`, so the tolerance above can actually be consumed; `chan-stdout`'s diverging path is the bare channel id by design (its evidence is arbitrary text, so a whole-channel tolerance would be a wildcard, FR-032), which is what made the previous `reference-lenient` case here unrunnable."
     },
     {
       "id": "case-outdated-structured-report",
