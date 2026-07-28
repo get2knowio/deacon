@@ -62,6 +62,14 @@ fn main() -> ExitCode {
         }
     };
 
+    let rendered = match render_proposal_json(&proposal) {
+        Ok(text) => text,
+        Err(e) => {
+            eprintln!("error: could not serialize the upgrade proposal: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
     let dir = root.join("target").join("drift");
     let json_path: PathBuf = dir.join("upgrade-proposal.json");
     let md_path: PathBuf = dir.join("upgrade-proposal.md");
@@ -69,7 +77,7 @@ fn main() -> ExitCode {
     // Both writes go through the checked primitive. Even here — where the targets are
     // obviously in scope — routing through it is what keeps "there is no second way in"
     // true rather than hoped for.
-    if let Err(e) = write_drift_artifact(&root, &json_path, &render_proposal_json(&proposal)) {
+    if let Err(e) = write_drift_artifact(&root, &json_path, &rendered) {
         eprintln!("error: {e}");
         return ExitCode::from(1);
     }

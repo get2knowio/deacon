@@ -409,7 +409,12 @@ pub struct EvidenceInputs {
     pub recorded_oracles: Vec<(String, String)>,
     /// The applicable unit ids the runner had to account for (FR-041(d)).
     pub applicable_units: std::collections::BTreeSet<String>,
-    /// The unit ids the runner actually accounted for.
+    /// Unit ids accounted for by sources **other than the execution manifest** — the
+    /// hermetic replay lane's results.
+    ///
+    /// The manifest's own cases are folded in by [`certify_with_evidence`], which already
+    /// holds the parsed document. A caller that also had to parse the manifest to populate
+    /// this field would be the second reader of one file, and two readers can disagree.
     pub accounted_units: std::collections::BTreeSet<String>,
     /// Whether the profile under certification is active. `false` triggers FR-045's
     /// refusal rather than a vacuous pass over zero applicable units.
@@ -471,6 +476,12 @@ pub fn certify_with_evidence(
     // is unaccounted whether or not a container lane owed anything — so short-circuiting
     // the whole evidence block here would silently disarm two conditions that have nothing
     // to do with containers.
+    // Read ONCE. Certification asks the manifest three questions — is it well formed,
+    // which cases failed, and which units did the runner account for — and each used to
+    // re-read and re-parse the file. Three reads of one document are not merely wasteful:
+    // they admit a window in which the three answers describe different bytes, which for a
+    // release gate is the worse problem.
+    let mut accounted = evidence.accounted_units.clone();
     if !evidence.required_cases.is_empty() {
         let expectation = crate::manifest::ManifestExpectation {
             revision: evidence.revision.clone(),
@@ -481,27 +492,53 @@ pub fn certify_with_evidence(
         let manifest_path = evidence.manifest_path.clone().unwrap_or_else(|| {
             std::path::PathBuf::from("target/conformance/execution-manifest.json")
         });
-        for defect in crate::manifest::verify_manifest(&manifest_path, &expectation) {
-            let kind = match defect {
-                crate::manifest::ManifestDefect::Unaccounted { .. } => {
-                    BlockingKind::SilentlySkippedCase
+
+        match crate::manifest::load_manifest(&manifest_path) {
+            Ok(manifest) => {
+                for defect in crate::manifest::verify_loaded(&manifest, &expectation) {
+                    let kind = match defect {
+                        crate::manifest::ManifestDefect::Unaccounted { .. } => {
+                            BlockingKind::SilentlySkippedCase
+                        }
+                        _ => BlockingKind::MissingExecution,
+                    };
+                    certification.blocking.push(Blocking {
+                        kind,
+                        id: defect.record(),
+                        code: Some(defect.code().to_string()),
+                    });
                 }
-                _ => BlockingKind::MissingExecution,
-            };
-            certification.blocking.push(Blocking {
-                kind,
-                id: defect.record(),
-                code: Some(defect.code().to_string()),
-            });
+                // A failing case blocks as a failing case, NOT as a manifest-integrity
+                // defect — the two need different fixes and a reader must be able to tell
+                // which they have.
+                for case_id in crate::manifest::failing_cases(&manifest) {
+                    certification.blocking.push(Blocking {
+                        kind: BlockingKind::FailingCase,
+                        id: case_id,
+                        code: Some("recorded outcome `fail`".to_string()),
+                    });
+                }
+                // The manifest's own cases join the accounted set. `accounted_units` on
+                // the inputs carries what OTHER sources (the hermetic replay) accounted
+                // for, so the caller no longer has to parse the manifest to populate it.
+                accounted.extend(crate::manifest::accounted_cases(&manifest));
+            }
+            Err(defect) => {
+                // An unreadable manifest is a missing-execution blocker and NOTHING else.
+                // It yields no failing cases — inventing divergences out of an unparseable
+                // file would attribute a failure to a case nothing measured — and no
+                // accounted units, so its required cases correctly surface as omissions.
+                certification.blocking.push(Blocking {
+                    kind: BlockingKind::MissingExecution,
+                    id: defect.record(),
+                    code: Some(defect.code().to_string()),
+                });
+            }
         }
-        push_failing_cases(&mut certification, &manifest_path);
     }
     // (d) unknown runner omission — the executed set must reconcile with the applicable
     // set. An unaccounted unit is the failure; silence is not evidence of absence.
-    for unit in evidence
-        .applicable_units
-        .difference(&evidence.accounted_units)
-    {
+    for unit in evidence.applicable_units.difference(&accounted) {
         certification.blocking.push(Blocking {
             kind: BlockingKind::RunnerOmission,
             id: unit.clone(),
@@ -523,29 +560,6 @@ pub fn certify_with_evidence(
         .sort_by(|a, b| (block_rank(a.kind), &a.id).cmp(&(block_rank(b.kind), &b.id)));
     certification.certified = certification.blocking.is_empty();
     certification
-}
-
-/// Record every case the manifest reported as failing.
-///
-/// Separated from manifest *integrity* deliberately: "the evidence is malformed" and "the
-/// evidence says deacon diverged" need different fixes, and a maintainer reading a blocked
-/// release must be able to tell which they have. A malformed manifest yields no failing
-/// cases here — it has already blocked as `V35-malformed`, and inventing failures out of an
-/// unparseable file would attribute a divergence to a case nothing measured.
-fn push_failing_cases(certification: &mut Certification, manifest_path: &Path) {
-    let Ok(raw) = std::fs::read_to_string(manifest_path) else {
-        return;
-    };
-    let Ok(manifest) = serde_json::from_str::<crate::manifest::ExecutionManifest>(&raw) else {
-        return;
-    };
-    for case_id in crate::manifest::failing_cases(&manifest) {
-        certification.blocking.push(Blocking {
-            kind: BlockingKind::FailingCase,
-            id: case_id,
-            code: Some("recorded outcome `fail`".to_string()),
-        });
-    }
 }
 
 /// Deterministic ordering rank for a blocking kind, so the report is byte-stable.

@@ -172,3 +172,32 @@ fn an_empty_pin_set_is_a_legitimate_state_not_a_failure() {
     }
     assert!(!pins.is_empty());
 }
+
+#[test]
+fn a_branch_that_merely_contains_a_version_is_rejected() {
+    use deacon_conformance::discovery::queue::{CanaryPin, check_canary_pins, derive_canary_id};
+    // `release-1.2.3` splits into `release-1`, `2`, `3` — three dot-separated parts, which a
+    // looser test accepted. It is a branch name, and a branch is exactly the mutable target
+    // this check exists to reject.
+    for branch in [
+        "release-1.2.3",
+        "v1.2.3-branch",
+        "feature.a.b",
+        "1.2",
+        "1.2.3.4",
+    ] {
+        let pin = CanaryPin {
+            id: derive_canary_id(CanaryTarget::ReferenceCli, branch),
+            target: CanaryTarget::ReferenceCli,
+            revision: branch.to_string(),
+            url: "https://example.invalid".into(),
+            added: "2026-07-28".into(),
+        };
+        assert!(
+            check_canary_pins(std::slice::from_ref(&pin))
+                .iter()
+                .any(|v| v.to_string().contains("mutable")),
+            "`{branch}` must be rejected as mutable"
+        );
+    }
+}

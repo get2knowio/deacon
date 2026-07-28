@@ -43,6 +43,26 @@ pub const PERMITTED_WRITE_PREFIXES: &[&str] = &["conformance/drift/", "target/dr
 pub fn check_write_target(root: &Path, target: &Path) -> Result<(), HarnessError> {
     let relative = target.strip_prefix(root).unwrap_or(target);
     let as_posix = relative.to_string_lossy().replace('\\', "/");
+
+    // Traversal is refused outright rather than resolved. `target/drift/../../conformance/
+    // registry/x.json` starts with a permitted prefix and lands on a registry record, so a
+    // prefix test alone is not a containment test. Resolving the path first would work, but
+    // refusing the segment is stronger: an allow-list that has to reason about `..` is one
+    // normalization bug away from being wrong, and no legitimate artifact path needs it.
+    if relative
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(HarnessError::Report {
+            cause: format!(
+                "drift automation attempted to write `{as_posix}`, which contains a `..` \
+                 traversal segment. Refused without resolving it: a prefix test is not a \
+                 containment test, and no artifact path legitimately needs to climb out of \
+                 its own directory."
+            ),
+        });
+    }
+
     if PERMITTED_WRITE_PREFIXES
         .iter()
         .any(|prefix| as_posix.starts_with(prefix))
@@ -132,6 +152,24 @@ mod tests {
         assert!(
             check_write_target(&root(), &root().join("conformance/registry/drift.json")).is_err()
         );
+    }
+
+    #[test]
+    fn a_traversal_out_of_a_permitted_prefix_is_refused() {
+        // The prefix test alone would accept this: it starts with `target/drift/` and ends
+        // on a registry record.
+        for escape in [
+            "target/drift/../../conformance/registry/revisions.json",
+            "conformance/drift/../registry/cases/up.json",
+            "target/drift/../../../etc/passwd",
+        ] {
+            let err = check_write_target(&root(), &root().join(escape))
+                .expect_err("traversal must be refused");
+            assert!(
+                err.to_string().contains("traversal"),
+                "the refusal must name the cause, got: {err}"
+            );
+        }
     }
 
     #[test]

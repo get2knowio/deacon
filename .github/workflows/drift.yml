@@ -60,19 +60,28 @@ jobs:
       - name: Validate committed drift records
         run: cargo run -p deacon-conformance -- drift check
 
-      # `--today` is injected rather than read from the clock so the artifact is
-      # byte-stable across reruns on the same day.
+      # NOT on pull requests. The scan needs the network, and this lane gates nothing
+      # (FR-026) — so a transient upstream outage reddening someone's pull request would be
+      # precisely the finding-independent-status rule being violated by the schedule rather
+      # than by the code. On a pull request the hermetic `drift check` above is the whole
+      # job; the scan runs on the schedule and on demand, where a machinery failure is
+      # actionable rather than merely in the way.
+      #
+      # `--today` is injected rather than read from the clock so the artifact is byte-stable
+      # across reruns on the same day.
       - name: Scan upstream
+        if: ${{ github.event_name != 'pull_request' }}
         run: |
           cargo run -p parity-harness --bin drift-scan -- --today "$(date -u +%Y-%m-%d)"
 
       - name: Render the observation report
+        if: ${{ github.event_name != 'pull_request' }}
         run: cargo run -p deacon-conformance -- drift report
 
       # Uploaded on every run, including ones that found nothing: "no drift" and "did not
       # run" are different states, and the artifact is where a reader tells them apart.
       - name: Upload drift artifacts
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v7
         with:
           name: drift

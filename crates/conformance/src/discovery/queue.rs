@@ -1476,12 +1476,33 @@ pub fn check_canary_pins(pins: &[CanaryPin]) -> Vec<DiscoveryError> {
 /// Whether a canary revision is immutable: a 40-hex commit, or an exact published version
 /// (`major.minor.patch`, optionally with a pre-release or build suffix).
 fn revision_is_immutable(revision: &str) -> bool {
-    let is_commit = revision.len() == 40 && revision.chars().all(|c| c.is_ascii_hexdigit());
-    let looks_versioned = revision.split('.').filter(|p| !p.is_empty()).count() >= 3;
-    let all_alphanumeric_parts = revision
-        .split(['.', '-', '+'])
-        .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric()));
-    is_commit || (looks_versioned && all_alphanumeric_parts)
+    is_full_commit(revision) || is_exact_version(revision)
+}
+
+/// A full 40-hex commit identifier. Nothing shorter: an abbreviated hash is not guaranteed
+/// unique in perpetuity, so it is not an immutable name for a revision.
+fn is_full_commit(revision: &str) -> bool {
+    revision.len() == 40 && revision.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// An exact published version: `MAJOR.MINOR.PATCH`, optionally with a pre-release or build
+/// suffix (`0.88.0-rc.1`, `0.88.0+build.5`).
+///
+/// The three core parts MUST be numeric. A looser "three dot-separated parts" test accepted
+/// a branch named `release-1.2.3` — which splits into `release-1`, `2`, `3` — and a branch
+/// is exactly the mutable target this check exists to reject.
+fn is_exact_version(revision: &str) -> bool {
+    let core = revision
+        .split_once('-')
+        .map(|(core, _pre)| core)
+        .unwrap_or(revision);
+    let core = core.split_once('+').map(|(c, _build)| c).unwrap_or(core);
+
+    let parts: Vec<&str> = core.split('.').collect();
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// One canary pin: an upstream **development** revision the non-blocking canary lane

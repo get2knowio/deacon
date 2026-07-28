@@ -332,7 +332,10 @@ fn a_section_with_no_entries_is_clean_and_a_missing_one_is_not() {
 fn the_bundle_regenerates_byte_identically() {
     // FR-031 / SC-007.
     let bundle = proposal(clean_sections(), true);
-    assert_eq!(render_proposal_json(&bundle), render_proposal_json(&bundle));
+    assert_eq!(
+        render_proposal_json(&bundle).expect("renders"),
+        render_proposal_json(&bundle).expect("renders")
+    );
     assert_eq!(render_proposal_md(&bundle), render_proposal_md(&bundle));
     assert!(
         !render_proposal_md(&bundle).contains("/workspaces"),

@@ -21,33 +21,14 @@
 
 use std::path::Path;
 
-use serde::Serialize;
+use deacon_conformance::manifest::{ExecutionManifest, ManifestEnvironment};
 
 use crate::HarnessError;
 
-/// What a run recorded for one case.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Outcome {
-    Pass,
-    Fail,
-    AllowedDifference,
-    Excluded,
-}
-
-/// One case's recorded result.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CaseRun {
-    pub case_id: String,
-    pub case_hash: String,
-    pub fixture_hash: String,
-    pub outcome: Outcome,
-    /// Required iff `outcome` is [`Outcome::Excluded`]; the hermetic verifier rejects an
-    /// exclusion that names nothing, because an unattributed skip is exactly FR-041(i).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub excluded_by: Option<String>,
-}
+/// The manifest's own closed outcome set, re-exported so a producer never re-declares it.
+pub use deacon_conformance::manifest::CaseOutcome as Outcome;
+/// The manifest's own case record, re-exported for the same reason.
+pub use deacon_conformance::manifest::ManifestCase as CaseRun;
 
 /// Everything the manifest needs beyond the per-case results.
 #[derive(Debug, Clone)]
@@ -60,39 +41,18 @@ pub struct ManifestInputs {
     pub runs: Vec<CaseRun>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ManifestDocument<'a> {
-    schema_version: u32,
-    revision: &'a str,
-    profile: &'a str,
-    environment: Environment,
-    required_case_count: usize,
-    cases: &'a [CaseRun],
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Environment {
-    platform: String,
-    arch: String,
-    container_engine: String,
-    container_engine_version: String,
-    compose_version: String,
-}
-
 /// The environment identity of the running host.
 ///
 /// Probed here — unlike in the certifier, which must run with no engine at all. This is
 /// the right side of that split: the lane that ran the containers is the only one that can
 /// truthfully say which engine ran them.
-fn probe_environment() -> Environment {
+fn probe_environment() -> ManifestEnvironment {
     // Both versions are probed through the SAME engine the manifest names. Hard-coding
     // `docker` here recorded `containerEngine: podman` alongside a Docker version string —
     // or `"unknown"` on a host with no Docker at all — which is a receipt that describes a
     // combination the run never used.
     let engine = std::env::var("DEACON_CONTAINER_RUNTIME").unwrap_or_else(|_| "docker".to_string());
-    Environment {
+    ManifestEnvironment {
         platform: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         container_engine_version: probe_version(&[&engine, "--version"]),
@@ -118,13 +78,18 @@ fn probe_version(argv: &[&str]) -> String {
 
 /// Write the execution manifest atomically.
 pub fn emit_manifest(path: &Path, inputs: &ManifestInputs) -> Result<(), HarnessError> {
-    let document = ManifestDocument {
+    // The SHARED type, serialized directly. This module used to declare a parallel
+    // producer shape field-for-field; that arrangement had no compile-time safety at all,
+    // because the consumer carries `deny_unknown_fields` — a renamed field on either side
+    // would have broken the release gate at PARSE time, in CI, with nothing failing at
+    // build time to catch it. Sharing the type makes the mismatch unrepresentable.
+    let document = ExecutionManifest {
         schema_version: 1,
-        revision: &inputs.revision,
-        profile: &inputs.profile,
+        revision: inputs.revision.clone(),
+        profile: inputs.profile.clone(),
         environment: probe_environment(),
         required_case_count: inputs.required_case_count,
-        cases: &inputs.runs,
+        cases: inputs.runs.clone(),
     };
     let mut rendered =
         serde_json::to_string_pretty(&document).map_err(|e| HarnessError::Report {
@@ -195,6 +160,40 @@ mod tests {
         let doc: serde_json::Value = serde_json::from_str(&raw).expect("parse");
         assert_eq!(doc["cases"].as_array().expect("array").len(), 3);
         assert_eq!(doc["requiredCaseCount"], 3);
+    }
+
+    #[test]
+    fn what_the_producer_writes_is_what_the_consumer_reads() {
+        // The property the shared type buys, asserted rather than assumed: a manifest this
+        // module emits must round-trip through the hermetic consumer, which carries
+        // `deny_unknown_fields`. When the two shapes were separate declarations a renamed
+        // field broke the release gate at parse time in CI with nothing failing at build
+        // time — this is the test that would have caught it.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("execution-manifest.json");
+        emit_manifest(
+            &path,
+            &ManifestInputs {
+                revision: "abc".into(),
+                profile: "prof".into(),
+                required_case_count: 1,
+                runs: vec![CaseRun {
+                    case_id: "case-a".into(),
+                    case_hash: "h".into(),
+                    fixture_hash: "f".into(),
+                    outcome: Outcome::Pass,
+                    excluded_by: None,
+                }],
+            },
+        )
+        .expect("write");
+
+        let raw = std::fs::read_to_string(&path).expect("read");
+        let parsed: ExecutionManifest =
+            serde_json::from_str(&raw).expect("the consumer must accept what the producer emits");
+        assert_eq!(parsed.revision, "abc");
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(parsed.cases[0].outcome, Outcome::Pass);
     }
 
     #[test]

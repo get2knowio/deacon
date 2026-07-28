@@ -395,8 +395,8 @@ mod tests {
         let a = build_proposal(&inputs(dir.path())).expect("builds");
         let b = build_proposal(&inputs(dir.path())).expect("builds");
         assert_eq!(
-            deacon_conformance::drift::render_proposal_json(&a),
-            deacon_conformance::drift::render_proposal_json(&b)
+            deacon_conformance::drift::render_proposal_json(&a).expect("renders"),
+            deacon_conformance::drift::render_proposal_json(&b).expect("renders")
         );
     }
 }

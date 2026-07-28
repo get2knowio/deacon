@@ -292,10 +292,15 @@ pub struct ProposalLoadError {
 
 /// Render the proposal as deterministic JSON — stable key order, no timestamps, no
 /// absolute paths (FR-031).
-pub fn render_proposal_json(proposal: &UpgradeProposal) -> String {
-    let mut out = serde_json::to_string_pretty(proposal).unwrap_or_else(|_| "{}".to_string());
+///
+/// Fallible for the same reason as the certification report: a `"{}"` fallback would write
+/// a bundle with no sections at all, which the completeness check would then reject as
+/// incomplete — sending a reviewer after a missing analysis when the real failure was a
+/// serialization error.
+pub fn render_proposal_json(proposal: &UpgradeProposal) -> Result<String, serde_json::Error> {
+    let mut out = serde_json::to_string_pretty(proposal)?;
     out.push('\n');
-    out
+    Ok(out)
 }
 
 /// Render the proposal as deterministic Markdown for review.

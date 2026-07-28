@@ -525,8 +525,8 @@ fn the_report_carries_all_sixteen_fr034_fields() {
     assert_eq!(FR034_FIELDS.len(), FR034_FIELD_COUNT);
 
     let report = sample_report();
-    let doc: serde_json::Value =
-        serde_json::from_str(&render_json(&report)).expect("report is valid JSON");
+    let doc: serde_json::Value = serde_json::from_str(&render_json(&report).expect("renders"))
+        .expect("report is valid JSON");
 
     for field in FR034_FIELDS {
         let mut cursor = &doc;
@@ -542,7 +542,8 @@ fn the_report_carries_all_sixteen_fr034_fields() {
 #[test]
 fn the_four_required_but_non_fr034_fields_are_also_present() {
     let report = sample_report();
-    let doc: serde_json::Value = serde_json::from_str(&render_json(&report)).expect("valid JSON");
+    let doc: serde_json::Value =
+        serde_json::from_str(&render_json(&report).expect("renders")).expect("valid JSON");
     for field in ["evaluationDate", "notCertified"] {
         assert!(doc.get(field).is_some(), "missing `{field}`");
     }
@@ -580,7 +581,10 @@ fn the_report_is_byte_reproducible() {
     // FR-054 / SC-005. Generated twice from identical inputs, compared byte for byte.
     let a = sample_report();
     let b = sample_report();
-    assert_eq!(render_json(&a), render_json(&b));
+    assert_eq!(
+        render_json(&a).expect("renders"),
+        render_json(&b).expect("renders")
+    );
     assert_eq!(render_md(&a), render_md(&b));
 }
 
@@ -588,7 +592,7 @@ fn the_report_is_byte_reproducible() {
 fn the_report_contains_no_timestamp_hostname_or_absolute_path() {
     let rendered = format!(
         "{}{}",
-        render_json(&sample_report()),
+        render_json(&sample_report()).expect("renders"),
         render_md(&sample_report())
     );
     assert!(
@@ -896,7 +900,8 @@ fn admitted_non_deterministic_inputs_default_to_none_and_are_recorded_when_prese
     let report = sample_report();
     assert!(report.admitted_non_deterministic_inputs.is_empty());
 
-    let doc: serde_json::Value = serde_json::from_str(&render_json(&report)).expect("valid JSON");
+    let doc: serde_json::Value =
+        serde_json::from_str(&render_json(&report).expect("renders")).expect("valid JSON");
     assert!(
         doc.get("admittedNonDeterministicInputs").is_some(),
         "the field must be present even when empty, so its emptiness is a claim rather \

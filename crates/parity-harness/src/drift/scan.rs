@@ -104,6 +104,20 @@ async fn probe_head(
     today: &str,
     affected: Vec<String>,
 ) -> Result<ProbeResult, HarnessError> {
+    // An empty pin is a machinery failure, not "unchanged". `starts_with("")` is true for
+    // every string, so a blank pin would silently report every upstream revision as
+    // matching — a probe that can only ever say "nothing changed" is worse than an absent
+    // one, because it looks like evidence.
+    if pinned.trim().is_empty() {
+        return Err(HarnessError::NetworkUnavailable {
+            cause: format!(
+                "the {} probe has no pinned revision to compare against. Remedy: restore \
+                 the revision record in `conformance/registry/revisions.json` — a probe \
+                 with no pin cannot say what it is measuring drift from.",
+                kind.as_str()
+            ),
+        });
+    }
     let head = ls_remote_head(repo).await?;
     if head.starts_with(pinned) || pinned.starts_with(&head[..pinned.len().min(head.len())]) {
         return Ok(ProbeResult::Unchanged);
@@ -177,6 +191,11 @@ async fn probe_schema(
     repo_root: &Path,
     today: &str,
 ) -> Result<ProbeResult, HarnessError> {
+    if pins.schema.trim().is_empty() {
+        return Err(HarnessError::NetworkUnavailable {
+            cause: "the schema-change probe has no pinned revision to compare against".to_string(),
+        });
+    }
     let head = ls_remote_head(SPEC_REPO).await?;
     if head.starts_with(&pins.schema) {
         return Ok(ProbeResult::Unchanged);
@@ -299,6 +318,18 @@ fn observation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn an_empty_pin_is_a_machinery_failure_not_unchanged() {
+        // `starts_with("")` is true for every string, so a blank pin would report every
+        // upstream revision as matching. A probe that can only say "nothing changed" is
+        // worse than an absent one — it looks like evidence.
+        let result = probe_head(DriftKind::SpecCommit, SPEC_REPO, "", "2026-07-28", vec![]).await;
+        assert!(
+            matches!(result, Err(HarnessError::NetworkUnavailable { .. })),
+            "an empty pin must fail as machinery, got {result:?}"
+        );
+    }
 
     #[test]
     fn an_observation_carries_its_derived_id() {

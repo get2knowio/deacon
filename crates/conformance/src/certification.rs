@@ -497,10 +497,15 @@ fn blocking(certification: &Certification) -> Vec<BlockingEntry> {
 }
 
 /// Render the report as deterministic JSON.
-pub fn render_json(report: &CertificationReport) -> String {
-    let mut out = serde_json::to_string_pretty(report).unwrap_or_else(|_| "{}".to_string());
+///
+/// Fallible on purpose. This previously fell back to `"{}"`, which would have written an
+/// EMPTY certification report to the artifact path and exited successfully — a fabricated
+/// artifact asserting nothing, indistinguishable from a real one at a glance. A release
+/// gate must not be able to emit a document it failed to produce.
+pub fn render_json(report: &CertificationReport) -> Result<String, serde_json::Error> {
+    let mut out = serde_json::to_string_pretty(report)?;
     out.push('\n');
-    out
+    Ok(out)
 }
 
 /// Render the report as deterministic Markdown — stable ordering, no timestamps, no
@@ -702,7 +707,10 @@ mod tests {
             blocking: vec![],
         };
         assert_eq!(render_md(&report), render_md(&report));
-        assert_eq!(render_json(&report), render_json(&report));
+        assert_eq!(
+            render_json(&report).expect("renders"),
+            render_json(&report).expect("renders")
+        );
         // No clock, no host, no absolute path can appear in the output.
         let md = render_md(&report);
         assert!(!md.contains("/workspaces"));

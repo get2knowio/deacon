@@ -238,35 +238,41 @@ pub struct RequiredCase {
     pub fixture_hash: String,
 }
 
+/// Read and parse the manifest at `path` — **once per certification run**.
+///
+/// Returns the loaded document, or the defect that stands in its place. Certification needs
+/// the manifest for three separate questions (is it well formed? which cases failed? which
+/// units did the runner account for?), and each used to re-read and re-parse the file.
+/// Three reads of one document are not merely wasteful: they admit a window in which the
+/// three answers describe different bytes, which for a release gate is the worse problem.
+pub fn load_manifest(path: &Path) -> Result<ExecutionManifest, ManifestDefect> {
+    let display = path.display().to_string();
+    if !path.is_file() {
+        return Err(ManifestDefect::Absent { path: display });
+    }
+    let raw = std::fs::read_to_string(path).map_err(|e| ManifestDefect::Malformed {
+        path: display.clone(),
+        cause: e.to_string(),
+    })?;
+    serde_json::from_str(&raw).map_err(|e| ManifestDefect::Malformed {
+        path: display,
+        cause: e.to_string(),
+    })
+}
+
 /// Load and verify an execution manifest.
 ///
 /// **Evaluates every check rather than short-circuiting** (FR-043): a maintainer reading a
 /// blocked release must see the whole list, not the first line. The only early return is
 /// when there is no manifest to check at all.
+///
+/// Prefer [`load_manifest`] + [`verify_loaded`] when the caller also needs the document
+/// itself; this wrapper exists for callers that only want the verdict.
 pub fn verify_manifest(path: &Path, expected: &ManifestExpectation) -> Vec<ManifestDefect> {
-    let display = path.display().to_string();
-    if !path.is_file() {
-        return vec![ManifestDefect::Absent { path: display }];
+    match load_manifest(path) {
+        Ok(manifest) => verify_loaded(&manifest, expected),
+        Err(defect) => vec![defect],
     }
-    let raw = match std::fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(e) => {
-            return vec![ManifestDefect::Malformed {
-                path: display,
-                cause: e.to_string(),
-            }];
-        }
-    };
-    let manifest: ExecutionManifest = match serde_json::from_str(&raw) {
-        Ok(m) => m,
-        Err(e) => {
-            return vec![ManifestDefect::Malformed {
-                path: display,
-                cause: e.to_string(),
-            }];
-        }
-    };
-    verify_loaded(&manifest, expected)
 }
 
 /// Verify an already-parsed manifest. Split out so tests can construct one directly.

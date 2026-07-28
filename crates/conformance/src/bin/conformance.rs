@@ -2967,17 +2967,12 @@ fn build_evidence_inputs(
         applicable_units.insert(case.id.clone());
     }
 
-    // What the manifest accounted for. An unreadable manifest yields an empty set, which
-    // surfaces as runner omissions ON TOP OF the V35-absent blocker — deliberately, since
-    // both facts are true and FR-043 wants every one reported.
-    let mut accounted_units = std::collections::BTreeSet::new();
+    // The manifest's own cases are folded into the accounted set by
+    // `certify_with_evidence`, which already holds the parsed document — so this stays
+    // empty rather than becoming a second reader of one file. It would carry the hermetic
+    // replay lane's results if this command drove that lane too.
+    let accounted_units = std::collections::BTreeSet::new();
     let mut recorded_oracles = Vec::new();
-    if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
-        if let Ok(m) = serde_json::from_str::<deacon_conformance::manifest::ExecutionManifest>(&raw)
-        {
-            accounted_units = deacon_conformance::manifest::accounted_cases(&m);
-        }
-    }
 
     // Oracle identity recorded in committed snapshot provenance (FR-041(g)). Reading the
     // provenance is the whole check: certification never runs the reference to find out.
@@ -3073,7 +3068,14 @@ fn write_certification_report(
     let report = build_report(result, registry, &inputs);
     let json_path = dir.join("certification.json");
     let md_path = dir.join("certification.md");
-    if let Err(e) = atomic_write(&json_path, &render_certification_json(&report)) {
+    let rendered = match render_certification_json(&report) {
+        Ok(text) => text,
+        Err(e) => {
+            eprintln!("error: could not serialize the certification report: {e}");
+            return Err(2);
+        }
+    };
+    if let Err(e) = atomic_write(&json_path, &rendered) {
         eprintln!("error: could not write {}: {e}", json_path.display());
         return Err(2);
     }
