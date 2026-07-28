@@ -886,6 +886,9 @@ pub struct DiscoveryData {
     pub campaigns: Vec<Campaign>,
     /// The pinned real-world corpus manifest, in file order.
     pub corpus: Vec<super::corpus::CorpusEntry>,
+    /// The canary pins (026, US5), in file order. A sibling of the queue rather than a
+    /// registry record, so no loader path from `certify` can reach them (FR-017a).
+    pub canary: Vec<CanaryPin>,
 }
 
 /// Paths of the three discovery data files under `dir`.
@@ -952,10 +955,21 @@ impl DiscoveryData {
         if !errors.is_empty() {
             return Err(LoadError::Schema(errors));
         }
+        // Canary pins load alongside the queue because they share its root and its
+        // isolation guarantee. A load failure here is a D-class error, not a registry
+        // one — the same reason the checker is D6 rather than a V-class.
+        let canary = load_canary(dir).map_err(|e| {
+            LoadError::Schema(vec![crate::load::SchemaError {
+                file: canary_path(dir),
+                location: None,
+                message: e.to_string(),
+            }])
+        })?;
         Ok(DiscoveryData {
             findings,
             campaigns,
             corpus,
+            canary,
         })
     }
 
@@ -1407,7 +1421,172 @@ pub fn check(data: &DiscoveryData, registry: &RegistryView<'_>) -> Vec<Discovery
     check_promotions(data, registry, &mut violations);
     check_campaigns(data, registry, &mut violations);
     violations.extend(super::corpus::check(&data.corpus));
+    violations.extend(check_canary_pins(&data.canary));
     violations
+}
+
+/// **D6 — canary-pin integrity** (026-continuous-conformance-certification, US5).
+///
+/// A **D**-class, not a V-class, and the numbering is the point: D-classes police the
+/// discovery root and block a pull request only on the integrity of the queue itself;
+/// V-classes police the registry and several feed `certify`. A V-numbered canary check
+/// would put canary state on a code path that reaches the release gate, which is exactly
+/// what FR-017a forbids. The class boundary follows the root boundary (research D7).
+///
+/// | Sub-case | Guards |
+/// |---|---|
+/// | mutable revision | a branch name, moving tag, or distribution tag — a canary run against a moving target cannot be re-observed, so its findings can never be triaged |
+/// | duplicate id | two pins sharing one identity |
+/// | derived id | an id that disagrees with its `target ‖ revision` substance |
+/// | unknown target | a pin naming something neither implementation nor specification |
+pub fn check_canary_pins(pins: &[CanaryPin]) -> Vec<DiscoveryError> {
+    let mut violations = Vec::new();
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+
+    for pin in pins {
+        if !seen.insert(pin.id.as_str()) {
+            violations.push(DiscoveryError::MalformedRecord {
+                record: pin.id.clone(),
+                cause: "duplicate canary-pin id — two pins cannot share one identity".to_string(),
+            });
+        }
+        let derived = pin.derived_id();
+        if pin.id != derived {
+            violations.push(DiscoveryError::MalformedRecord {
+                record: pin.id.clone(),
+                cause: format!("id is not derived from its substance (expected `{derived}`)"),
+            });
+        }
+        if !revision_is_immutable(&pin.revision) {
+            violations.push(DiscoveryError::MalformedRecord {
+                record: pin.id.clone(),
+                cause: format!(
+                    "revision `{}` is mutable. Only a full 40-hex commit identifier or an \
+                     exact published version is acceptable (FR-018): a canary run against a \
+                     moving target cannot be re-observed, so anything it finds can never be \
+                     triaged into a durable record.",
+                    pin.revision
+                ),
+            });
+        }
+    }
+    violations
+}
+
+/// Whether a canary revision is immutable: a 40-hex commit, or an exact published version
+/// (`major.minor.patch`, optionally with a pre-release or build suffix).
+fn revision_is_immutable(revision: &str) -> bool {
+    is_full_commit(revision) || is_exact_version(revision)
+}
+
+/// A full 40-hex commit identifier. Nothing shorter: an abbreviated hash is not guaranteed
+/// unique in perpetuity, so it is not an immutable name for a revision.
+fn is_full_commit(revision: &str) -> bool {
+    revision.len() == 40 && revision.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// An exact published version: `MAJOR.MINOR.PATCH`, optionally with a pre-release or build
+/// suffix (`0.88.0-rc.1`, `0.88.0+build.5`).
+///
+/// The three core parts MUST be numeric. A looser "three dot-separated parts" test accepted
+/// a branch named `release-1.2.3` — which splits into `release-1`, `2`, `3` — and a branch
+/// is exactly the mutable target this check exists to reject.
+fn is_exact_version(revision: &str) -> bool {
+    let core = revision
+        .split_once('-')
+        .map(|(core, _pre)| core)
+        .unwrap_or(revision);
+    let core = core.split_once('+').map(|(c, _build)| c).unwrap_or(core);
+
+    let parts: Vec<&str> = core.split('.').collect();
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// One canary pin: an upstream **development** revision the non-blocking canary lane
+/// compares against (data-model.md §6).
+///
+/// Lives in the discovery root, never in `revisions.json`. A `rev-canary-*` record there
+/// would be loaded by `certify`, and canary state would then be able to change a release
+/// verdict (FR-017a).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanaryPin {
+    pub id: String,
+    pub target: CanaryTarget,
+    pub revision: String,
+    pub url: String,
+    pub added: String,
+}
+
+impl CanaryPin {
+    /// The substance-anchored id this record must carry.
+    pub fn derived_id(&self) -> String {
+        derive_canary_id(self.target, &self.revision)
+    }
+}
+
+/// What a canary pin points at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CanaryTarget {
+    ReferenceCli,
+    Spec,
+}
+
+impl CanaryTarget {
+    /// The wire name, used in derived ids.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CanaryTarget::ReferenceCli => "cli",
+            CanaryTarget::Spec => "spec",
+        }
+    }
+}
+
+/// Compute a canary pin's derived id.
+pub fn derive_canary_id(target: CanaryTarget, revision: &str) -> String {
+    format!(
+        "cnr-{}-{}",
+        target.as_str(),
+        super::hash8(&[target.as_str(), revision])
+    )
+}
+
+/// The `canary.json` document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanaryFile {
+    #[serde(default)]
+    pub schema_version: u32,
+    #[serde(default)]
+    pub records: Vec<CanaryPin>,
+}
+
+/// Path of the canary pins under `dir`.
+pub fn canary_path(dir: &Path) -> PathBuf {
+    dir.join("canary.json")
+}
+
+/// Load the canary pins from a discovery root. A missing file yields none, so a fixture
+/// root validates without one.
+pub fn load_canary(dir: &Path) -> Result<Vec<CanaryPin>, DiscoveryError> {
+    let path = canary_path(dir);
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| DiscoveryError::MalformedRecord {
+        record: path.display().to_string(),
+        cause: e.to_string(),
+    })?;
+    let file: CanaryFile =
+        serde_json::from_str(&raw).map_err(|e| DiscoveryError::MalformedRecord {
+            record: path.display().to_string(),
+            cause: e.to_string(),
+        })?;
+    Ok(file.records)
 }
 
 /// D1 over the findings queue.
@@ -2000,6 +2179,7 @@ mod tests {
             findings: vec![Finding::newly_admitted(sig, w, &cid("a"))],
             campaigns: vec![campaign("a")],
             corpus: Vec::new(),
+            canary: Vec::new(),
         }
     }
 

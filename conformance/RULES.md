@@ -76,6 +76,9 @@ checkable at a glance rather than by reading every section.
 | **V30** | injected-regression integrity: a declared channel with no regression record; a regression targeting a channel with no observer | [Injected-regression harness](#injected-regression-harness-v30) |
 | **V31** | metamorphic relation integrity: a missing or unresolvable `ground`; an empty `channels`, or one naming an undeclared channel; a duplicated `transformation`; a `rationale` that is a label rather than an argument | [Metamorphic relation catalogue](#metamorphic-relation-catalogue-v31--v32) |
 | **V32** | a mandated metamorphic relation family (FR-044) with no record | [Metamorphic relation catalogue](#metamorphic-relation-catalogue-v31--v32) |
+| **V34** | lane integrity: a derived execution unit assigned to zero lanes; a lane naming an unknown class, program, or profile; case predicates that overlap or leave a remainder; a lane declaring `blocking: true` where FR-015/FR-019 forbid it; any lane declaring `mayWriteRecord: true`; a declared nextest profile whose filter does not select the lane's programs | [Lanes and execution units](#lanes-and-execution-units-v34) |
+| **V35** | execution-manifest integrity: absent, malformed, incomplete, produced for a different revision, stale against current hashes, or carrying an unaccounted outcome | [Execution manifest](#execution-manifest-v35) |
+| **V36** | drift-record integrity: an observation whose id is not derived from its substance; a duplicate; a `lastCompletedRun` omitting a probed kind; an upgrade-proposal section marked absent or unsorted | [Drift observations and upgrade proposals](#drift-observations-and-upgrade-proposals-v36) |
 
 **Three distinctions this file keeps apart**, because conflating any pair makes a status
 unfalsifiable:
@@ -1135,3 +1138,96 @@ the queue — it is promoted, classified away, or observed to stop reproducing.
 untriaged bucket explicitly so that "nothing has been looked at" can never render as "nothing
 was found" (the same failure mode `certify` avoids by counting `non-testable` separately from
 `covered`).
+
+
+## Lanes and execution units (V34)
+
+`conformance/lanes/lanes.json` declares the five continuous-integration lanes
+(026-continuous-conformance-certification). It is a **third sibling** of `registry/`,
+alongside `discovery/`, and the placement is the point: a lane record is operational
+configuration — *which checks run where* — not a claim about deacon's conformance. Inside
+`registry/` it would sit on a path `certify` reaches, so an edit to continuous-integration
+configuration could change a release verdict.
+
+**The denominator is derived, never authored.** `derive_execution_units` enumerates the
+unit set from four of the system's own enumerations: the registry violation classes, the
+discovery `D`-classes, the declarative cases, the conformance-owned test programs, and the
+committed snapshot replay targets. A hand-authored list would let a unit omitted from it
+satisfy "every unit is assigned to a lane" while being covered by nothing — the check
+inverted into a rubber stamp. The only way to remove a unit from the denominator is to
+delete the unit.
+
+**Two selection rules, for two different failure modes.**
+
+| Unit kind | Selected by | Because |
+|---|---|---|
+| validation class, program | an explicit allow-list | a glob silently captures a new binary or silently drops a renamed one — the mistake the parity and discovery nextest profiles have each documented making |
+| case | a derived predicate over `oracleType` × `resourceGroup` | an id list would need editing on every added case, and a forgotten edit leaves the case selected by nothing |
+
+The asymmetry is not an inconsistency. A predicate may silently *capture* a new case, which
+is intended; what it must never do is silently *drop* one, and the partition proof — every
+case matches exactly one lane's `includes`, no overlap and no remainder — is what rules
+that out.
+
+## Execution manifest (V35)
+
+The receipt proving container-backed execution occurred. Produced by the container lane,
+consumed by `certify`, and the reason a **hermetic** certifier can enforce "missing
+required Docker execution blocks a release".
+
+Certification never installs, resolves, or invokes the reference implementation and needs
+no engine or network. A hermetic process cannot *observe* whether Docker ran — it can
+verify a receipt. Two fields do the work: `revision` pins the manifest to the commit it was
+produced for, and per-case `caseHash`/`fixtureHash` pin it to the case definitions actually
+executed, so a manifest from another revision or one predating a case edit is *stale*
+rather than silently accepted.
+
+**A failing case is not a manifest defect.** `outcome: "fail"` blocks certification as an
+ordinary failing case, reported against the case. "The evidence is malformed" and "the
+evidence says deacon diverged" need different fixes, and a maintainer reading a blocked
+release must be able to tell which they have.
+
+**A manifest is not committed evidence, and not a substitute for one.** Snapshots are
+reviewed artifacts under `conformance/snapshots/`; a manifest is a per-run receipt. Both
+obligations hold independently — a fresh manifest cannot excuse a stale snapshot, and a
+fresh snapshot cannot excuse an absent manifest.
+
+## Drift observations and upgrade proposals (V36)
+
+`conformance/drift/observations.json` records *what upstream currently looks like*. The
+pin — *what deacon is pinned to* — stays in `registry/revisions.json` and remains a human
+decision. That separation is the whole reason drift automation may write anything: writing
+an observation blesses nothing, because nothing consumes an observation as a claim about
+deacon.
+
+**`lastCompletedRun` is what makes "no drift" checkable.** Without it, "nothing changed"
+and "nothing ran" are the same empty array, and an empty array reads as reassurance. Empty
+`records` *plus* a `lastCompletedRun` covering all five source kinds means clean; a missing
+or partial one means unknown.
+
+**Present-but-empty versus missing, in the upgrade proposal.** `"entries": []` means
+investigated and clean. A **missing section key** means not investigated, and is rejected —
+enforced at the type level, so a bundle missing any of the seven sections does not parse.
+Collapsing the two would let an analysis that never ran read as a clean result, which is
+the same defect the coverage model found twice (a `jsonSubset: {}` that matched anything,
+and a `contains` that could not see appended output).
+
+**Drift gates nothing.** A scan surfacing all five kinds exits `0`; only an inability to
+run is non-zero. A finding-dependent status becomes a gate the moment someone wires it into
+a required check, and upstream moving is not a defect in this repository.
+
+## Canary pins (D6)
+
+`conformance/discovery/canary.json` holds the upstream **development** revisions the
+non-blocking canary lane compares against.
+
+**A D-class, not a V-class, and the numbering follows the root boundary.** D-classes police
+the discovery root and block a pull request only on the integrity of the queue; V-classes
+police the registry and several feed `certify`. A V-numbered canary check would put canary
+state on a code path that reaches the release gate — exactly what the placement exists to
+prevent. The certification verdict is byte-identical whether the pin surface is populated
+or absent.
+
+**Only immutable revisions.** A branch name, moving tag, or distribution tag is rejected at
+load: a canary run against a moving target cannot be re-observed, so anything it finds can
+never be triaged into a durable record.

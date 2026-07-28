@@ -518,14 +518,41 @@ fn the_real_registry_blocks_only_on_declared_coverage_gaps() {
     assert_eq!(doc["certified"], false);
     let blocking = doc["blocking"].as_array().expect("blocking array");
     assert!(!blocking.is_empty(), "the declared gaps must be listed");
-    let non_gap: Vec<&serde_json::Value> = blocking.iter().filter(|b| b["kind"] != "gap").collect();
+    // 026-continuous-conformance-certification adds a second, orthogonal gate: the
+    // execution-evidence conditions (FR-041 c/d/g/h/i). Those block whenever the
+    // container-backed lane has not run on this revision, which is the normal state on a
+    // developer machine and in every non-release lane — so they are expected here and are
+    // NOT evidence that something broke behind the gaps.
+    //
+    // Keeping the two sets separate is the point of the assertion. Folding them together
+    // would make this test either permanently red (every local run lacks a manifest) or
+    // permanently silent about the data gate it exists to protect.
+    //
+    // The list is exactly the conditions that follow from "no manifest exists", and no
+    // wider. `stalesnapshot`, `incorrectoracle`, and `failingcase` are NOT among them: a
+    // stale committed snapshot or a provenance recording the wrong oracle is a defect in
+    // the data this test exists to protect, and a recorded failure means the evidence says
+    // deacon diverged. Tolerating those would let exactly the breakage-behind-the-gaps this
+    // assertion guards against pass unnoticed.
+    const EVIDENCE_GATE_KINDS: &[&str] =
+        &["missingexecution", "runneromission", "silentlyskippedcase"];
+    let unexpected: Vec<&serde_json::Value> = blocking
+        .iter()
+        .filter(|b| {
+            let kind = b["kind"].as_str().unwrap_or_default();
+            kind != "gap" && !EVIDENCE_GATE_KINDS.contains(&kind)
+        })
+        .collect();
     assert!(
-        non_gap.is_empty(),
-        "nothing but a declared gap may block the real registry — an uncovered behavior, \
-         a constraint/clause join violation, or an undispositioned obligation would mean \
-         something broke behind the gaps: {non_gap:#?}"
+        unexpected.is_empty(),
+        "nothing but a declared gap or an execution-evidence condition may block the real \
+         registry — an uncovered behavior, a constraint/clause join violation, or an \
+         undispositioned obligation would mean something broke behind the gaps: {unexpected:#?}"
     );
-    for entry in blocking {
+    for entry in blocking
+        .iter()
+        .filter(|b| b["kind"].as_str() == Some("gap"))
+    {
         let id = entry["id"].as_str().unwrap_or_default();
         assert!(
             id.starts_with("gap-pairwise-"),

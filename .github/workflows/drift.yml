@@ -1,0 +1,88 @@
+# Upstream source-drift detection (026-continuous-conformance-certification, US4).
+#
+# **This lane gates nothing.** Its status reflects whether it RAN, never what it found
+# (FR-026): a scan surfacing all five drift kinds exits 0, and only an unreachable
+# upstream, an unresolvable pin, an unwritable artifact location, or an attempted
+# out-of-scope write is non-zero.
+#
+# That rule is not a convenience. A finding-dependent status becomes a gate the moment
+# someone wires it into a required check, and upstream moving is not a defect in this
+# repository — a lane that went red whenever the specification advanced would be a gate on
+# someone else's release schedule.
+#
+# **It blesses nothing.** The scan's only permitted writes are `conformance/drift/` and
+# `target/drift/`, enforced before anything is published. A pin, a disposition, a waiver,
+# or a committed snapshot is a human decision (FR-024, FR-028); this lane prepares the
+# review artifact and stops there.
+name: drift
+
+on:
+  schedule:
+    # Daily, matching the cadence `lastCompletedRun` is read against.
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'crates/parity-harness/src/drift/**'
+      - 'crates/conformance/src/drift/**'
+      - 'conformance/drift/**'
+      - '.github/workflows/drift.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-drift-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-drift-
+
+      # Hermetic validation of what is already committed. This DOES gate the pull request
+      # — a malformed observation record is a defect in the queue, distinct from anything
+      # the scan might find upstream.
+      - name: Validate committed drift records
+        run: cargo run -p deacon-conformance -- drift check
+
+      # NOT on pull requests. The scan needs the network, and this lane gates nothing
+      # (FR-026) — so a transient upstream outage reddening someone's pull request would be
+      # precisely the finding-independent-status rule being violated by the schedule rather
+      # than by the code. On a pull request the hermetic `drift check` above is the whole
+      # job; the scan runs on the schedule and on demand, where a machinery failure is
+      # actionable rather than merely in the way.
+      #
+      # `--today` is injected rather than read from the clock so the artifact is byte-stable
+      # across reruns on the same day.
+      - name: Scan upstream
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          cargo run -p parity-harness --bin drift-scan -- --today "$(date -u +%Y-%m-%d)"
+
+      - name: Render the observation report
+        if: ${{ github.event_name != 'pull_request' }}
+        run: cargo run -p deacon-conformance -- drift report
+
+      # Uploaded on every run, including ones that found nothing: "no drift" and "did not
+      # run" are different states, and the artifact is where a reader tells them apart.
+      - name: Upload drift artifacts
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: drift
+          path: target/drift/

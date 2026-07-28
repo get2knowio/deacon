@@ -1045,6 +1045,7 @@ mod tests {
             ],
             campaigns: vec![campaign("cmp-1", "0.87.0")],
             corpus: Vec::new(),
+            canary: Vec::new(),
         };
         let report = build_queue_report(&data, &pins());
         assert_eq!(report.total, 5);
@@ -1066,6 +1067,7 @@ mod tests {
             findings: vec![finding("a", FindingState::Triaged, "cmp-old")],
             campaigns: vec![campaign("cmp-old", "0.86.0")],
             corpus: Vec::new(),
+            canary: Vec::new(),
         };
         let report = build_queue_report(&data, &pins());
         assert_eq!(report.pin_stale.len(), 1);
@@ -1090,6 +1092,7 @@ mod tests {
             findings: vec![finding("a", FindingState::Triaged, "cmp-1")],
             campaigns: vec![campaign("cmp-1", "0.87.0")],
             corpus: Vec::new(),
+            canary: Vec::new(),
         };
         assert!(build_queue_report(&data, &undecidable).pin_stale.is_empty());
 
@@ -1108,6 +1111,7 @@ mod tests {
             findings: Vec::new(),
             campaigns: vec![campaign("cmp-1", "0.87.0")],
             corpus: Vec::new(),
+            canary: Vec::new(),
         };
         let report = build_queue_report(&data, &pins());
         assert_eq!(report.total, 0);
@@ -1125,6 +1129,7 @@ mod tests {
             findings: vec![finding("a", FindingState::Untriaged, "cmp-1")],
             campaigns: vec![campaign("cmp-1", "0.87.0")],
             corpus: Vec::new(),
+            canary: Vec::new(),
         };
         let report = build_queue_report(&data, &pins());
         assert_eq!(render_json(&report), render_json(&report));
@@ -1341,6 +1346,7 @@ mod tests {
             findings: vec![finding("a", FindingState::Triaged, "cmp-ghost")],
             campaigns: Vec::new(),
             corpus: Vec::new(),
+            canary: Vec::new(),
         };
         let report = build_queue_report(&data, &pins());
         assert!(report.pin_stale.is_empty());

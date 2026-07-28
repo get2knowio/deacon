@@ -104,6 +104,26 @@ impl Violation {
         Violation::new("V24", rule, message)
     }
 
+    /// A **V34** violation naming the offending lane or unassigned execution unit
+    /// (026-continuous-conformance-certification, US3). Exposed so [`crate::lane`] — which
+    /// owns the lane model and the derived denominator — constructs violations without a
+    /// parallel type, exactly as `v24` does for the normalization-rule registry.
+    pub fn v34(record: impl Into<String>, message: impl Into<String>) -> Violation {
+        Violation::new("V34", record, message)
+    }
+
+    /// A **V35** violation naming the offending execution-manifest case or the manifest
+    /// itself (026, US2). Constructed by [`crate::manifest`].
+    pub fn v35(record: impl Into<String>, message: impl Into<String>) -> Violation {
+        Violation::new("V35", record, message)
+    }
+
+    /// A **V36** violation naming the offending drift observation or proposal section
+    /// (026, US4/US6). Constructed by [`crate::drift::check`].
+    pub fn v36(record: impl Into<String>, message: impl Into<String>) -> Violation {
+        Violation::new("V36", record, message)
+    }
+
     fn new(code: &str, record: impl Into<String>, message: impl Into<String>) -> Violation {
         Violation {
             code: code.to_string(),
@@ -233,11 +253,154 @@ pub fn validate_path_with_inventory(
             violations.extend(crate::conservation::check_normalization_rules(
                 crate::conservation::NORMALIZATION_RULES,
             ));
+            // V34: lane integrity (026, US3). The lane root is a SIBLING of the registry
+            // dir, resolved exactly as the inventory/clause/snapshot roots are — so a
+            // fixture registry with no `lanes/` naturally validates without one. Lanes are
+            // deliberately not reachable from `certify`: a continuous-integration
+            // configuration edit must not be able to change a release verdict (research D1).
+            violations.extend(check_lanes_at(&registry, root, repo_root));
+            // V36: drift-observation integrity (026, US4). Same sibling resolution.
+            violations.extend(check_drift_at(root));
             sort_violations(&mut violations);
             Ok(violations)
         }
         Err(LoadError::Schema(errors)) => Ok(schema_violations(&errors)),
         Err(other) => Err(other),
+    }
+}
+
+/// **V34** over the lane root that belongs to `registry_root`.
+///
+/// `repo_root` locates the test-program tree the denominator is derived from and the
+/// `.config/nextest.toml` the profile-drift sub-case reads. When either is absent — as in
+/// a fixture tree — the corresponding sub-case simply contributes nothing rather than
+/// manufacturing a violation out of a missing file.
+fn check_lanes_at(registry: &Registry, registry_root: &Path, repo_root: &Path) -> Vec<Violation> {
+    let lanes_dir = crate::lanes_dir_for(registry_root);
+    let lanes = match crate::lane::load_lanes(&lanes_dir) {
+        Ok(lanes) => lanes,
+        Err(e) => {
+            return vec![Violation::v34("lanes.json", e.to_string())];
+        }
+    };
+    if lanes.is_empty() {
+        return Vec::new();
+    }
+    let tests_dir = repo_root.join("crates").join("deacon").join("tests");
+    let snapshots_dir = registry_root
+        .parent()
+        .map(|p| p.join("snapshots"))
+        .unwrap_or_else(|| registry_root.join("snapshots"));
+    let units = crate::lane::derive_execution_units(registry, &tests_dir, &snapshots_dir);
+    let memberships = crate::lane::case_memberships(registry);
+    let profiles = parse_nextest_profiles(&repo_root.join(".config").join("nextest.toml"));
+    crate::lane::check_lanes(&lanes, &units, &memberships, profiles.as_ref())
+}
+
+/// **V36** over the drift root that belongs to `registry_root`.
+fn check_drift_at(registry_root: &Path) -> Vec<Violation> {
+    let drift_dir = crate::drift_dir_for(registry_root);
+    match crate::drift::load_drift(&drift_dir) {
+        Ok(file) => crate::drift::check::check_drift(&file),
+        Err(e) => vec![Violation::v36("observations.json", e.to_string())],
+    }
+}
+
+/// Parse each profile's `default-filter` into the binaries it names, and whether the
+/// filter is an allow-list or an exclusion list.
+///
+/// **The two forms mean opposite things**, and conflating them was a real defect while
+/// building this: `[profile.default]`'s filter is `not (binary(=a) | binary(=b) | …)`, so a
+/// `binary(=…)` clause there marks a binary the profile *refuses*; `[profile.parity]`'s is
+/// a bare disjunction, so the same clause marks one it *selects*. A parser that returned
+/// only "the names mentioned" reports every hermetic binary as unselected by the very
+/// profile that runs it.
+///
+/// **Textual, and it does not need a TOML parser.** The property being checked is that a
+/// lane names its programs *explicitly* (FR-002); a filter that reaches a binary only
+/// through a `binary(#glob_*)` clause must NOT satisfy it, so evaluating the filter
+/// expression would give the wrong answer — it would report a glob-captured binary as
+/// covered, which is exactly the silent capture the requirement forbids.
+///
+/// A missing or unreadable file yields `None`, which skips only the profile-drift sub-case.
+///
+/// Public so `lane check` runs the SAME sub-case `validate` does. It was private, and the
+/// CLI passed `None` — so `make test-lanes` reported clean while `validate` failed on the
+/// identical data, which is the worst possible split between two checkers of one rule.
+pub fn parse_nextest_profiles(path: &Path) -> Option<BTreeMap<String, ProfileFilter>> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let mut out: BTreeMap<String, ProfileFilter> = BTreeMap::new();
+    let mut current: Option<String> = None;
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("[profile.") {
+            if let Some(name) = rest.strip_suffix(']') {
+                if !name.contains('.') && !name.contains('[') {
+                    current = Some(name.to_string());
+                    out.entry(name.to_string()).or_default();
+                    continue;
+                }
+            }
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            if !trimmed.starts_with("[[profile.") {
+                current = None;
+            }
+            continue;
+        }
+        let Some(profile) = current.as_deref() else {
+            continue;
+        };
+        if !trimmed.starts_with("default-filter") {
+            continue;
+        }
+        let entry = out.entry(profile.to_string()).or_default();
+        // `not (…)` at the head of the expression makes the whole clause an exclusion.
+        entry.is_exclusion = trimmed
+            .split_once('=')
+            .map(|(_, rhs)| {
+                rhs.trim()
+                    .trim_start_matches(['\'', '"'])
+                    .starts_with("not ")
+            })
+            .unwrap_or(false);
+        let mut rest = trimmed;
+        while let Some(idx) = rest.find("binary(=") {
+            rest = &rest[idx + "binary(=".len()..];
+            if let Some(end) = rest.find(')') {
+                entry.named.insert(rest[..end].trim().to_string());
+                rest = &rest[end..];
+            } else {
+                break;
+            }
+        }
+    }
+    Some(out)
+}
+
+/// One profile's `default-filter`, reduced to the question V34 asks of it.
+#[derive(Debug, Default, Clone)]
+pub struct ProfileFilter {
+    /// The binaries the filter names explicitly.
+    pub named: BTreeSet<String>,
+    /// `true` when the filter is `not (…)`, so `named` are the binaries it REFUSES.
+    pub is_exclusion: bool,
+}
+
+impl ProfileFilter {
+    /// Whether this profile runs `binary`.
+    ///
+    /// An exclusion filter runs everything it does not name; an allow-list runs only what
+    /// it names. Both answers are conservative in the right direction — a glob-captured
+    /// binary counts as *not* explicitly selected, which is what FR-002 wants.
+    pub fn selects(&self, binary: &str) -> bool {
+        if self.is_exclusion {
+            !self.named.contains(binary)
+        } else {
+            self.named.contains(binary)
+        }
     }
 }
 

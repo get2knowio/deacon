@@ -886,6 +886,79 @@ gap is missing coverage and always blocks — do not conflate them (`conformance
 
 See `specs/025-exploratory-parity-discovery/quickstart.md`.
 
+## Continuous Conformance Operation (026-continuous-conformance-certification)
+
+The registry says whether each behavior is covered; the coverage model says whether the
+scenario space is; discovery searches for what nobody curated. This **operates** all of it:
+five explicit lanes, upstream drift detection, and a release-grade certification report.
+All commands are dev-only; `parity_registry_check` asserts `deacon --help` gains nothing.
+
+**Five lanes, declared as data** (`conformance/lanes/lanes.json` — a THIRD sibling of
+`registry/`, alongside `discovery/`, so a CI-config edit can never change a release
+verdict):
+
+| Lane | Profile | Blocks? | Needs |
+|---|---|---|---|
+| `lane-pr-hermetic` | `default`/`dev-fast` | yes | nothing |
+| `lane-pr-docker` | `pr-docker` | yes | container engine (**never the oracle**) |
+| `lane-nightly-stable` | `parity`, `discovery` | **no** | engine + pinned oracle + network |
+| `lane-canary` | `canary` | **no** | engine + network |
+| `lane-release-certification` | — (runs no binary) | yes | nothing |
+
+**The denominator is DERIVED, never authored** (`lane.rs::derive_execution_units`): the two
+class enumerations (registry `V*` **and** discovery `D*`), the declarative cases, the
+conformance-owned test programs (those referencing `deacon_conformance`/`parity_harness`),
+and the committed snapshot replay targets. A hand-authored list would let an omitted unit
+satisfy "every unit is assigned" while being covered by nothing — **V34** would become a
+rubber stamp. Programs and classes are selected by an explicit allow-list (a glob captures
+a new binary silently); **cases** are selected by a derived predicate over `oracleType` ×
+`resourceGroup` and validated to PARTITION the case space, so a predicate may capture a new
+case but can never drop one.
+
+**Certification is hermetic and reads a receipt.** `certify` never installs, resolves, or
+invokes the reference implementation and needs no engine or network (SC-013). It learns
+that container-backed execution happened from the **execution manifest** the container lane
+emits (`target/conformance/execution-manifest.json`), which carries the revision and
+per-case hashes so a manifest from another revision — or one predating a case edit — is
+rejected rather than accepted. `certify --report-dir` emits `certification.{json,md}` on
+**both** verdicts, so a blocked release still ships the artifact explaining why.
+
+**Nine blocking conditions** (FR-041), all reported in one run, each naming its record, and
+**no flag downgrades any of them**: unclassified source change · uncovered behavior · stale
+snapshot · unknown runner omission · expired waiver · unresolved gap · incorrect oracle ·
+missing required execution · silently skipped case.
+
+**Two refinements worth not re-deriving:**
+- *Snapshot staleness blocks; snapshot coverage blocks only for the profile under
+  certification.* 022 made coverage non-blocking because "a snapshot is a reviewed artifact,
+  not a release gate", and that still holds for platforms nobody certifies — blocking on
+  every missing snapshot would pressure maintainers to record snapshots to go green, the
+  blessing pressure this feature removes.
+- *The manifest is required exactly when execution was required.* A registry declaring no
+  container-backed case owes no receipt. Not an escape hatch: the required set is derived
+  from the registry's own cases, so adding one re-arms the gate immediately.
+
+**Drift and canary gate NOTHING.** A `drift-scan` that surfaces all five source kinds exits
+`0`; only an unreachable upstream, an unresolvable pin, an unwritable location, or an
+attempted out-of-scope write is non-zero. Automation's permitted writes are exactly
+`conformance/drift/` and `target/drift/`; a proposed diff touching a registry record,
+snapshot, or pin **aborts** rather than being narrowed and committed. Observations are NOT
+pins — the pin stays in `revisions.json` and stays human-only.
+
+`lastCompletedRun` in `observations.json` is what makes "no drift" distinguishable from
+"did not run"; without it both are the same empty array, and an empty array reads as
+reassurance. Same shape in the upgrade proposal: `"entries": []` is investigated-and-clean,
+a **missing section key** is not-investigated and does not parse.
+
+**New classes**: **V34** lane integrity · **V35** execution-manifest integrity · **V36**
+drift-record integrity · **D6** canary-pin integrity. D6 is a D-class, not a V-class,
+because the class boundary follows the root boundary — a V-numbered canary check would put
+canary state on a path reaching `certify`. See `conformance/RULES.md` and
+`specs/026-continuous-conformance-certification/quickstart.md`.
+
+**Gotcha**: V31/V32 were already taken by 025's metamorphic relation catalogue. This
+feature's classes are V34–V36; check `RULES.md`'s class table before claiming a number.
+
 ## Pre-Implementation Checklist
 
 Before implementing any new subcommand or feature:
@@ -1255,6 +1328,8 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - strict-JSON, version-controlled. New hand-authored: `conformance/registry/scenario.json` (`sdim-` scenario dimensions), `conformance/registry/applicability.json` (`rule-` exclusions + `hrt-` high-risk triples), `conformance/registry/obligation-dispositions/<area>.json` (`odp-` records), `conformance/registry/regressions.json` (`reg-` records). New machine-owned: `conformance/obligations/obligations.json` (`obl-`, sole output of `coverage generate`). Migrated: `cases.json` → `cases/<area>.json`. Generated (git-ignored): `target/conformance/coverage-{pairwise,triples,operations,observables}.{json,md}`, `target/conformance/regressions.json`. All writes atomic. (024-deterministic-conformance-coverage)
 - Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json` (strict-JSON records), `indexmap` (declaration order), `sha2` (`hash8` signature/fixture ids), `tokio` (bounded async exec), `thiserror` (domain errors), `tracing`, `tempfile` (dev-dep, isolated workspaces). **No new crates** — including no RNG crate (research D2). (025-exploratory-parity-discovery)
 - strict-JSON, version-controlled. New root `conformance/discovery/` (queue, campaigns, corpus manifest) — a sibling of `registry/`, deliberately outside it. New registry file `conformance/registry/metamorphic.json` (`mrl-` relation records). Generated artifacts under `target/discovery/` (git-ignored, byte-stable). All writes atomic (temp file + `fs::rename`). (025-exploratory-parity-discovery)
+- Rust, Edition 2024, MSRV 1.95 + existing workspace deps only — **no new crates**; network reuses the 025 precedent of driving `git` (blob-filtered partial clone) and `npm` as bounded subprocesses, so there is no HTTP client, no API token, and no rate limit. (026-continuous-conformance-certification)
+- strict-JSON, version-controlled. New roots `conformance/lanes/` (hand-authored `lane-` records) and `conformance/drift/` (machine-owned upstream observations) — both siblings of `registry/`, unreachable by any registry loader. New `conformance/discovery/canary.json` (`cnr-` canary pins, in the DISCOVERY root so canary state cannot reach `certify`). Generated (git-ignored): `target/conformance/{execution-manifest,certification}.{json,md}`, `target/drift/{scan,upgrade-proposal}.{json,md}`. All writes atomic. (026-continuous-conformance-certification)
 
 ## Recent Changes
 - 024-deterministic-conformance-coverage: Filled the coverage gaps the migration froze in

@@ -383,15 +383,26 @@ pub fn emit(run: &GroupRun) -> Result<(), HarnessError> {
 /// aggregator's execution-completeness gate, and that must mean "it never ran", not "its
 /// groups happened to be empty".
 async fn write_fragment(cfg: &DriverConfig, results: Vec<CaseResult>) -> Result<(), HarnessError> {
-    let oracle =
-        cfg.oracle
-            .as_ref()
-            .map(OracleInfo::from)
-            .ok_or_else(|| HarnessError::OracleMissing {
-                hint: "the conformance drivers report against the verified pinned oracle; none \
-                   was supplied"
-                    .to_string(),
-            })?;
+    // A fragment is the PARITY AGGREGATOR's input, and its identity is the oracle the run
+    // compared against — that is what makes two fragments comparable at all. A lane that
+    // resolves no reference (026's container pull-request lane, `oracle: None`) has no such
+    // identity, and is deliberately absent from `fixtures/parity-corpus/registry.json`, so
+    // no execution-completeness gate is waiting on a fragment from it.
+    //
+    // Skipping is therefore correct, but it is announced rather than silent: a lane that
+    // stopped writing a fragment it OWED would otherwise look identical to one that never
+    // owed one, and the aggregator's whole value is that a missing fragment means "it never
+    // ran". The `oracle: None` in the caller's `DriverConfig` is the declaration; this note
+    // is the receipt.
+    let Some(oracle) = cfg.oracle.as_ref().map(OracleInfo::from) else {
+        eprintln!(
+            "note: `{}` resolved no reference oracle, so it writes no parity report \
+             fragment — it is not a registered parity binary and no aggregator gate awaits \
+             one. Its evidence is the execution manifest instead.",
+            cfg.binary
+        );
+        return Ok(());
+    };
     let now = now_rfc3339();
     let fragment = ReportFragment::new(
         cfg.binary.clone(),

@@ -448,6 +448,19 @@ fn no_coverage_or_regression_command_reaches_the_shipped_cli() {
         "obligation",
         "scenario",
         "applicability",
+        // 026-continuous-conformance-certification (T118). The lane, drift, and
+        // upgrade-proposal surfaces are contributor tooling: a consumer running `deacon`
+        // has no use for a continuous-integration lane model or an upstream drift scan, and
+        // shipping them would widen the consumer surface the constitution's Principle II
+        // deliberately bounds.
+        "lane",
+        "lanes",
+        "drift",
+        "drift-scan",
+        "oracle-upgrade-propose",
+        "proposal",
+        "certification",
+        "manifest",
     ];
 
     fn subcommands_of(args: &[&str]) -> Vec<String> {
