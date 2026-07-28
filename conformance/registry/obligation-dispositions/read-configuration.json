@@ -2,6 +2,15 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "odp-bhv-075e4cd7",
+      "obligation": "obl-bhv-075e4cd7",
+      "disposition": "case",
+      "cases": [
+        "case-tier1-decl-ports-mixed",
+        "case-tier1-decl-universal-jsonc"
+      ]
+    },
+    {
       "id": "odp-bhv-0a410770",
       "obligation": "obl-bhv-0a410770",
       "disposition": "case",
@@ -93,6 +102,15 @@
         "case-readconfig-unsupported-enum-differential",
         "case-readconfig-unsupported-enum-rejected",
         "case-upgrade-unsupported-values-rejected"
+      ]
+    },
+    {
+      "id": "odp-bhv-6aebfb3a",
+      "obligation": "obl-bhv-6aebfb3a",
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-lifecycle-arrays",
+        "case-merged-decl-lifecycle-mixed"
       ]
     },
     {

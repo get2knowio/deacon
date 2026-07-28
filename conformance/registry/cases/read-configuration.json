@@ -1034,7 +1034,8 @@
     {
       "id": "case-merged-decl-lifecycle-arrays",
       "behaviors": [
-        "bhv-readconfig-merged-configuration"
+        "bhv-readconfig-merged-configuration",
+        "bhv-readconfig-merged-lifecycle-slots"
       ],
       "context": [],
       "scenarioContext": {
@@ -1078,7 +1079,8 @@
     {
       "id": "case-merged-decl-lifecycle-mixed",
       "behaviors": [
-        "bhv-readconfig-merged-configuration"
+        "bhv-readconfig-merged-configuration",
+        "bhv-readconfig-merged-lifecycle-slots"
       ],
       "context": [],
       "scenarioContext": {
@@ -3566,6 +3568,7 @@
     {
       "id": "case-tier1-decl-ports-mixed",
       "behaviors": [
+        "bhv-readconfig-port-attributes-authored-keys",
         "bhv-readconfig-tier1-corpus"
       ],
       "context": [],
@@ -3695,6 +3698,7 @@
     {
       "id": "case-tier1-decl-universal-jsonc",
       "behaviors": [
+        "bhv-readconfig-port-attributes-authored-keys",
         "bhv-readconfig-tier1-corpus"
       ],
       "context": [],

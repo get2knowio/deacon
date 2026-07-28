@@ -121,6 +121,16 @@
       "notes": "Backed by case-merged-corpus (parity_corpus_merged over the tier1 corpus) and by the 24 declarative merged-mode variants case-merged-decl-* (023 T039). Retiring the blanket `prune` normalizer (023 T062, research D3) surfaced previously hidden divergences against the pinned reference. Re-measured at 023 T102 over the FULL declarative run (71 cases: 20 agree, 51 diverge), counted as cases affected: (1) `configuration.configFilePath` reference-only (51 cases; also `mergedConfiguration.configFilePath`, 23); (2) `workspace.configFolderPath` and `workspace.rootFolderPath` deacon-only (51); (3) `workspace.workspaceFolder` VALUE-divergent (43); (4) the reference's merged configuration carries PLURAL command arrays (`onCreateCommands` / `postCreateCommands` / `postStartCommands` / `postAttachCommands` / `updateContentCommands`) where deacon emits only the singular forms (7-21 cases each); (5) the `featuresConfiguration` block differs in shape (`dstFolder` reference-only, `featureSets` value-divergent, 11-12); (6) `workspace.workspaceMount` VALUE-divergent (2). Families (3) and (6) were identified at T102 and are the two VALUE divergences: when the workspace folder is a SUBDIRECTORY of a git root \u2014 every in-repo fixture and every CI checkout \u2014 deacon reports `workspace.workspaceFolder` as the git ROOT's container path while the reference reports the subdirectory inside that mount, and with an explicit config `workspaceFolder` deacon renders `workspaceMount` with `target=<that folder>` where the reference uses `target=<source path>`. Both CLIs agree on the mount SOURCE, so the reference is self-consistent and deacon loses the subdirectory. This is adjacent to the documented `--mount-workspace-git-root` default, but that default governs what is MOUNTED; deriving the reported `workspaceFolder` from the mount root is a separate unintended consequence. All six are deacon-behind-reference and are tracked for FIX, not tolerated \u2014 no blanket rule was reinstated and no tolerance was authored (FR-036). See specs/023-migrate-parity-to-conformance/tasks.md#T113. STATUS: families (2), (3) and (6) are FIXED \u2014 the `workspace` section now routes through the same shared helpers `up` uses, so the host-path fields are gone, the subdirectory survives in `workspaceFolder`, and the default mount target no longer follows an explicit `workspaceFolder` (#383, and see bhv-readconfig-workspace-folder-subpath / bhv-readconfig-workspace-section-shape, which record those two claims in their own right). Families (1), (4) and (5) remain open and keep this behavior's `reference: divergent` status honest; they are tracked in #376. The separate absent-optional-serialization difference (deacon emits explicit nulls where the reference omits keys) is handled by the named, enumerated `drop_absent_optional` rule and tracked at tasks.md#T111. Encoded as `spec: conformant` + `reference: divergent` + `decision: follow-spec`: deacon's RESOLUTION follows containers.dev (which does not define the read-configuration output document at all), while its output SHAPE diverges from the reference CLI's. This is not an accepted divergence \u2014 R6 forbids `align-with-reference` while actually divergent, and `intentional-divergence` would claim a deliberate choice nobody made, so the intent to align is carried here and in the tracked follow-up rather than in the decision axis."
     },
     {
+      "id": "bhv-readconfig-merged-lifecycle-slots",
+      "area": "read-configuration",
+      "statement": "`mergedConfiguration` reports all five plural lifecycle hook arrays (`onCreateCommands`, `updateContentCommands`, `postCreateCommands`, `postStartCommands`, `postAttachCommands`), as `[]` when no layer contributed one; `entrypoints` is omitted when empty.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "aligned",
+      "decision": "align-with-reference",
+      "notes": "The asymmetry is the whole content of this behavior and is measured, not assumed: on a config declaring three of the five hooks the reference emitted `updateContentCommands: []` and `postAttachCommands: []` and no `entrypoints` at all. deacon emitted a plural key only when some layer contributed a value, so an absent hook was indistinguishable from a hook the merge dropped. A single \"always emit\" rule would have been wrong in the other direction, which is why the flag is per-property. Recorded by src-obs-merged-lifecycle-slots."
+    },
+    {
       "id": "bhv-readconfig-missing-config",
       "area": "read-configuration",
       "statement": "A workspace folder with no devcontainer configuration at all is rejected rather than resolved to an invented empty config.",
@@ -129,6 +139,16 @@
       "reference": "aligned",
       "decision": "follow-spec",
       "notes": "both-reject agreement case. Backed by case-errors-missing-config and wvr-missing-config."
+    },
+    {
+      "id": "bhv-readconfig-port-attributes-authored-keys",
+      "area": "read-configuration",
+      "statement": "A `portsAttributes` / `otherPortsAttributes` entry reports the keys the author wrote and no others; an unset attribute is absent rather than explicitly null.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "aligned",
+      "decision": "align-with-reference",
+      "notes": "deacon serialized the whole `PortAttributes` struct, so a one-key entry came back with six extra explicit nulls and diverged on six paths at once. Distinct from the top-level absent-optional family (tasks.md#T111), which the harness's `drop_absent_optional` rule absorbs: that rule does not reach INTO a nested object, so this one could only be fixed at the source. Recorded by src-obs-port-attributes-authored-keys."
     },
     {
       "id": "bhv-readconfig-substitution-object-fields",

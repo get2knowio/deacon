@@ -110,6 +110,24 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      than a variant of the scalar one.",
     ),
     (
+        "bhv-readconfig-merged-lifecycle-slots",
+        "Which lifecycle hook SLOTS the merged document reports, as opposed to what any of \
+     them contains. Falsifiable on its own: an implementation that merges every declared \
+     hook correctly can still omit the undeclared slots, which makes \"no layer set this \
+     hook\" indistinguishable from \"the merge dropped it\" for a reader. Nothing \
+     pre-migration described the merged document's key set, only the values under the keys \
+     that happened to be present.",
+    ),
+    (
+        "bhv-readconfig-port-attributes-authored-keys",
+        "Which attribute keys a port entry reports. A distinct claim from the port \
+     attribute VALUES and from the top-level absent-optional serialization already tracked \
+     at tasks.md#T111: this one is nested inside an object, where the harness's \
+     `drop_absent_optional` rule does not reach, so it was neither described by a behavior \
+     nor absorbed by normalization — it was simply invisible until the blanket `prune` \
+     rule retired.",
+    ),
+    (
         "bhv-readconfig-config-file-path",
         "WHICH configuration file the resolution actually used, reported as a path rather \
      than inferred from the values. Separately falsifiable from every content behavior: an \

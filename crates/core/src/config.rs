@@ -257,28 +257,44 @@ pub enum OnAutoForward {
 ///
 /// Defines how ports should be handled when forwarded, including
 /// labeling, auto-forward behavior, and preview options.
+///
+/// Unset fields are NOT serialized. The reference echoes back exactly the keys the author
+/// wrote, so emitting `"protocol": null` for a field nobody mentioned made every
+/// `portsAttributes` / `otherPortsAttributes` comparison diverge on six paths at once
+/// (#376). The top-level analogue — deacon serializing explicit nulls across
+/// `DevContainerConfig` — is a separate, much larger change tracked at
+/// specs/023-migrate-parity-to-conformance/tasks.md#T111 and absorbed meanwhile by the
+/// harness's `drop_absent_optional` rule; that rule does not reach INTO a nested object,
+/// which is why this one had to be fixed at the source.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortAttributes {
     /// Human-readable label for the port
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 
     /// Action to take when the port is auto-forwarded
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub on_auto_forward: Option<OnAutoForward>,
 
     /// Protocol hint for forwarded ports (`http` or `https`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
 
     /// Whether to open a preview of the port automatically
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub open_preview: Option<bool>,
 
     /// Whether to require a specific local port for forwarding
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub require_local_port: Option<bool>,
 
     /// Whether tools should try to elevate privileges for low local ports.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub elevate_if_needed: Option<bool>,
 
     /// Description of what this port is used for
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
