@@ -142,6 +142,16 @@
       ]
     },
     {
+      "id": "src-obs-features-configuration-empty",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration `featuresConfiguration`, configuration declaring no Features",
+      "summary": "With no Features declared the reference emits no `featuresConfiguration` key under either flag; with Features declared it emits the block under `--include-merged-configuration` alone, so the flags are not exclusive on either side. Observed 2026-07-28.",
+      "behaviors": [
+        "bhv-readconfig-features-configuration-omitted-when-none"
+      ]
+    },
+    {
       "id": "src-obs-malformed-json",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",

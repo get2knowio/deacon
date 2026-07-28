@@ -249,6 +249,15 @@
       ]
     },
     {
+      "id": "odp-bhv-d584165f",
+      "obligation": "obl-bhv-d584165f",
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-ports-mixed",
+        "case-tier1-decl-ports-mixed"
+      ]
+    },
+    {
       "id": "odp-bhv-d8b2b5e7",
       "obligation": "obl-bhv-d8b2b5e7",
       "disposition": "case",

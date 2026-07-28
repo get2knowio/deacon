@@ -1907,6 +1907,14 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         }
     }
 
+    // A resolution that found no Features reports nothing, rather than an empty container.
+    // The reference omits `featuresConfiguration` entirely in that case; deacon emitted
+    // `{"featureSets": []}`, which reads as "resolution ran and produced none" where the
+    // reference says nothing at all (#376). The value is still computed above — the merged
+    // configuration needs it — so this filters only what is REPORTED.
+    let features_configuration_for_output =
+        features_configuration_for_output.filter(|fc| !fc.feature_sets.is_empty());
+
     let output_payload = ReadConfigurationOutput {
         configuration: configuration_document,
         workspace: workspace_config,

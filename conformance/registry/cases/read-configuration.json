@@ -1300,6 +1300,7 @@
     {
       "id": "case-merged-decl-ports-mixed",
       "behaviors": [
+        "bhv-readconfig-features-configuration-omitted-when-none",
         "bhv-readconfig-merged-configuration"
       ],
       "context": [],
@@ -3568,6 +3569,7 @@
     {
       "id": "case-tier1-decl-ports-mixed",
       "behaviors": [
+        "bhv-readconfig-features-configuration-omitted-when-none",
         "bhv-readconfig-port-attributes-authored-keys",
         "bhv-readconfig-tier1-corpus"
       ],
