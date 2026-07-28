@@ -42,6 +42,16 @@
       ]
     },
     {
+      "id": "src-obs-config-file-path",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration `configuration.configFilePath` / `mergedConfiguration.configFilePath`",
+      "summary": "The reference emits `{\"$mid\": 1, \"fsPath\": <abs>, \"path\": <abs>, \"scheme\": \"vscode-fileHost\"}` on both documents, with `fsPath` and `path` identical and always absolute regardless of how the workspace folder was named on the command line. Observed 2026-07-28 over all 80 comparable conformance fixtures.",
+      "behaviors": [
+        "bhv-readconfig-config-file-path"
+      ]
+    },
+    {
       "id": "src-obs-container-identity-labels",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",

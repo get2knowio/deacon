@@ -207,6 +207,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-83f69534",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-config-file-path",
+      "context": []
+    },
+    {
       "id": "obl-bhv-9077557c",
       "kind": "behavior",
       "behavior": "bhv-readconfig-feature-resolution-order",

@@ -31,6 +31,16 @@
       "decision": "follow-spec"
     },
     {
+      "id": "bhv-readconfig-config-file-path",
+      "area": "read-configuration",
+      "statement": "Both the `configuration` and `mergedConfiguration` documents carry `configFilePath`, an absolute VS Code URI object (`$mid`, `fsPath`, `path`, `scheme: vscode-fileHost`) naming the resolved config file; container-only mode, which resolves no file, carries none.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "aligned",
+      "decision": "align-with-reference",
+      "notes": "The field is a consumer-facing contract, not spec prose: a tool reading `read-configuration` output already knows how to unmarshal a VS Code URI and knows nothing about a deacon-specific alternative, so the shape is reproduced rather than reinvented. deacon emitted nothing at all, leaving every structured-output comparison reference-only on this path (75 occurrences, #376). The `fsPath`/`path` split VS Code makes on Windows is deliberately NOT reproduced: it has not been observed against the pinned reference, and a guess would be a silent untested divergence rather than a visible omission. Recorded by src-obs-config-file-path."
+    },
+    {
       "id": "bhv-readconfig-discovery-locations",
       "area": "read-configuration",
       "statement": "Configuration discovery searches exactly the three locations the spec names \u2014 `.devcontainer/devcontainer.json`, `.devcontainer.json`, and `.devcontainer/<folder>/devcontainer.json` one level deep \u2014 and a plain `devcontainer.json` at the workspace root is not one of them.",

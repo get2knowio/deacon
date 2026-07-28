@@ -434,3 +434,63 @@ fn test_workspace_field_structure() -> Result<()> {
 
     Ok(())
 }
+
+/// `configFilePath` is emitted on both documents as the reference's VS Code URI object.
+///
+/// Shape and absoluteness are both asserted. The absolute check is the one that would have
+/// caught the original slip: the field was first emitted verbatim from the resolved path,
+/// so a relative `--workspace-folder` produced a relative `fsPath` while the reference
+/// always reports the real location. The parity harness always passes absolute paths, so
+/// no live comparison would have surfaced it.
+#[test]
+fn test_config_file_path_is_the_reference_uri_object() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let devcontainer_dir = temp_dir.path().join(".devcontainer");
+    fs::create_dir_all(&devcontainer_dir)?;
+    fs::write(
+        devcontainer_dir.join("devcontainer.json"),
+        r#"{ "name": "test-container", "image": "ubuntu:22.04" }"#,
+    )?;
+
+    // Deliberately relative: `current_dir` is the workspace, so "." names it.
+    let output = Command::cargo_bin("deacon")?
+        .current_dir(&temp_dir)
+        .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(".")
+        .arg("--include-merged-configuration")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_str(String::from_utf8_lossy(&output.stdout).trim())?;
+
+    for document in ["configuration", "mergedConfiguration"] {
+        let value = &parsed[document]["configFilePath"];
+        assert_eq!(value["$mid"], 1, "{document}: $mid marks a VS Code URI");
+        assert_eq!(
+            value["scheme"], "vscode-fileHost",
+            "{document}: scheme must match the reference"
+        );
+
+        let fs_path = value["fsPath"].as_str().expect("fsPath is a string");
+        let path = value["path"].as_str().expect("path is a string");
+        assert_eq!(
+            fs_path, path,
+            "{document}: the two renderings agree on POSIX"
+        );
+        assert!(
+            std::path::Path::new(fs_path).is_absolute(),
+            "{document}: configFilePath must be absolute even when --workspace-folder is \
+             relative, got {fs_path:?}"
+        );
+        assert!(
+            fs_path.ends_with("devcontainer.json"),
+            "{document}: must name the config file, got {fs_path:?}"
+        );
+    }
+
+    Ok(())
+}
