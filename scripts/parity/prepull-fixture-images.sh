@@ -53,6 +53,25 @@ config_image() {
   sed -nE 's/.*"image"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$1" | head -n1
 }
 
+# A compose fixture names its base in the COMPOSE file, not in devcontainer.json — that
+# config carries `dockerComposeFile` + `service` and no `image` key at all. Warming only
+# the JSON-declared images therefore left every compose base cold, which is the same
+# "discovery that matches nothing is not an error" failure this script's header describes,
+# one file format down: `fx-tier1-compose-array` pulls
+# `mcr.microsoft.com/devcontainers/base:bookworm` on the merged-configuration read, blows
+# the harness's 120s bound, and the runner reports a HANG naming the case rather than the
+# download. Because that abort is fail-loud, it also takes the whole run with it — no other
+# case gets to report.
+#
+# ALL images are read, not the first: a compose project legitimately has several services
+# (`fx-tier1-compose-postgres` has an app and a database), and warming one of them is the
+# same cold-cache stall on the other. `${VAR}` interpolation is skipped — it is not a
+# resolvable reference here, and a fixture that needed one would be unpinned (V18).
+compose_images() {
+  sed -nE 's/^[[:space:]]+image:[[:space:]]*"?([^"[:space:]#]+)"?.*/\1/p' "$1" \
+    | grep -v '\$' || true
+}
+
 for df in "${fixtures}"/*/image/Dockerfile; do
   [ -e "${df}" ] || continue
   dir="$(dirname "${df}")"
@@ -67,16 +86,32 @@ for df in "${fixtures}"/*/image/Dockerfile; do
     || echo "prepull: WARN could not build ${tag} (the parity run will report its own cause)" >&2
 done
 
-images="$(printf '%s\n' "${configs}" \
-          | while read -r cfg; do config_image "${cfg}"; done \
-          | sort -u \
-          | grep -v ':local$' || true)"
+config_images="$(printf '%s\n' "${configs}" \
+                 | while read -r cfg; do config_image "${cfg}"; done)"
 
-if [ -z "${images}" ]; then
+if [ -z "${config_images}" ]; then
   echo "prepull: FATAL no image reference found in any of these configs:" >&2
   printf '%s\n' "${configs}" >&2
   exit 1
 fi
+
+# Compose files are discovered the same way the configs are — by search at any depth, both
+# extensions — never by a fixed relative path. Finding none is NOT fatal: a fixture tree
+# with no compose fixture is legitimate, unlike a tree with no devcontainer config at all.
+compose_files="$(find "${fixtures}" \
+                   \( -name '*.yml' -o -name '*.yaml' \) \
+                   -type f 2>/dev/null | sort)"
+
+compose_declared="$(printf '%s\n' "${compose_files}" \
+                    | while read -r yml; do
+                        [ -n "${yml}" ] || continue
+                        compose_images "${yml}"
+                      done)"
+
+images="$(printf '%s\n%s\n' "${config_images}" "${compose_declared}" \
+          | sed '/^$/d' \
+          | sort -u \
+          | grep -v ':local$' || true)"
 
 while read -r img; do
   [ -n "${img}" ] || continue
