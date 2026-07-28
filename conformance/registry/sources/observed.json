@@ -46,7 +46,7 @@
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",
       "locator": "read-configuration `configuration.configFilePath` / `mergedConfiguration.configFilePath`",
-      "summary": "The reference emits `{\"$mid\": 1, \"fsPath\": <abs>, \"path\": <abs>, \"scheme\": \"vscode-fileHost\"}` on both documents, with `fsPath` and `path` identical and always absolute regardless of how the workspace folder was named on the command line. Observed 2026-07-28 over all 80 comparable conformance fixtures.",
+      "summary": "The reference emits `{\"$mid\": 1, \"fsPath\": <abs>, \"path\": <abs>, \"scheme\": <scheme>}` on both documents, with `fsPath` and `path` identical and always absolute regardless of how the workspace folder was named on the command line. `scheme` is `vscode-fileHost` for a discovered config and `file` for one named with `--config` \u2014 verified on the SAME path both ways, so the distinction is the lookup mode and nothing else. Observed 2026-07-28 over all 80 comparable conformance fixtures plus the two `--config` cases.",
       "behaviors": [
         "bhv-readconfig-config-file-path"
       ]

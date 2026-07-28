@@ -221,7 +221,12 @@ pub struct ReadConfigurationOutput {
 /// keeps `\`, `path` uses `/` with a leading slash before the drive letter); that case is
 /// NOT reproduced here because it has not been observed against the pinned reference, and
 /// a guess would be a silent, untested divergence rather than an omission.
-fn config_file_path_value(config_path: &Path) -> serde_json::Value {
+///
+/// `scheme` records HOW the file was located, not where it is. The reference emits
+/// `vscode-fileHost` for a config it discovered and plain `file` for one the caller named
+/// with `--config` — the same path yields different schemes depending only on that, which
+/// is why `explicitly_named` is a parameter rather than something derivable from the path.
+fn config_file_path_value(config_path: &Path, explicitly_named: bool) -> serde_json::Value {
     // Always absolute. The reference reports the real location of the file regardless of
     // how the workspace was named on the command line, so a relative `--workspace-folder`
     // must not leak a relative path into the output. Canonicalization is best-effort:
@@ -237,7 +242,7 @@ fn config_file_path_value(config_path: &Path) -> serde_json::Value {
         "$mid": 1,
         "fsPath": rendered,
         "path": rendered,
-        "scheme": "vscode-fileHost",
+        "scheme": if explicitly_named { "file" } else { "vscode-fileHost" },
     })
 }
 
@@ -245,11 +250,15 @@ fn config_file_path_value(config_path: &Path) -> serde_json::Value {
 ///
 /// A non-object document is left alone rather than coerced: the only way it is not an
 /// object is a bug elsewhere, and quietly wrapping it would hide that.
-fn insert_config_file_path(document: &mut serde_json::Value, config_path: &Path) {
+fn insert_config_file_path(
+    document: &mut serde_json::Value,
+    config_path: &Path,
+    explicitly_named: bool,
+) {
     if let Some(obj) = document.as_object_mut() {
         obj.insert(
             "configFilePath".to_string(),
-            config_file_path_value(config_path),
+            config_file_path_value(config_path, explicitly_named),
         );
     }
 }
@@ -1870,9 +1879,10 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     // no such field, and neither does the reference.
     let mut merged_configuration = merged_configuration;
     if let Some(cfg_path) = resolved_config_path.as_deref() {
-        insert_config_file_path(&mut configuration_document, cfg_path);
+        let explicitly_named = args.config_path.is_some();
+        insert_config_file_path(&mut configuration_document, cfg_path, explicitly_named);
         if let Some(merged) = merged_configuration.as_mut() {
-            insert_config_file_path(merged, cfg_path);
+            insert_config_file_path(merged, cfg_path, explicitly_named);
         }
     }
 
