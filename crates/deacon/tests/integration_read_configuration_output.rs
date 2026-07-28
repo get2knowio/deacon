@@ -54,13 +54,16 @@ fn test_workspace_field_included() -> Result<()> {
         workspace.get("workspaceFolder").is_some(),
         "workspaceFolder should be present"
     );
+    // The reference CLI's `workspace` section carries exactly `workspaceFolder` and
+    // `workspaceMount`. The host-path fields were removed for parity (#376); asserting
+    // their ABSENCE keeps the shape from silently regrowing.
     assert!(
-        workspace.get("configFolderPath").is_some(),
-        "configFolderPath should be present"
+        workspace.get("configFolderPath").is_none(),
+        "configFolderPath must not be emitted — the reference has no such field"
     );
     assert!(
-        workspace.get("rootFolderPath").is_some(),
-        "rootFolderPath should be present"
+        workspace.get("rootFolderPath").is_none(),
+        "rootFolderPath must not be emitted — the reference has no such field"
     );
 
     // workspaceMount is optional, but if present should be a string
@@ -413,19 +416,21 @@ fn test_workspace_field_structure() -> Result<()> {
         );
     }
 
-    // configFolderPath: string (required)
-    let config_folder = workspace["configFolderPath"].as_str().unwrap();
-    assert!(
-        !config_folder.is_empty(),
-        "configFolderPath should not be empty"
-    );
-
-    // rootFolderPath: string (required)
-    let root_folder = workspace["rootFolderPath"].as_str().unwrap();
-    assert!(
-        !root_folder.is_empty(),
-        "rootFolderPath should not be empty"
-    );
+    // The section carries EXACTLY the reference's two fields — no more. Checking the key
+    // set, not just the two absences, is what catches a third field being added later.
+    let keys: Vec<&str> = workspace
+        .as_object()
+        .expect("workspace must be an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    for key in &keys {
+        assert!(
+            matches!(*key, "workspaceFolder" | "workspaceMount"),
+            "unexpected `workspace` field {key:?} — the reference emits only \
+             workspaceFolder and workspaceMount (#376)"
+        );
+    }
 
     Ok(())
 }

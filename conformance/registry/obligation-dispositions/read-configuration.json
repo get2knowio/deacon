@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "odp-bhv-0a410770",
+      "obligation": "obl-bhv-0a410770",
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-go-minimal",
+        "case-tier1-decl-compose-array",
+        "case-tier1-decl-go-minimal"
+      ]
+    },
+    {
       "id": "odp-bhv-2730f76b",
       "obligation": "obl-bhv-2730f76b",
       "disposition": "case",
@@ -198,6 +208,15 @@
       "disposition": "case",
       "cases": [
         "case-errors-decl-duplicate-keys"
+      ]
+    },
+    {
+      "id": "odp-bhv-d0efee14",
+      "obligation": "obl-bhv-d0efee14",
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-go-minimal",
+        "case-tier1-decl-go-minimal"
       ]
     },
     {

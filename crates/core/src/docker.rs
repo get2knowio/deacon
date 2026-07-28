@@ -450,7 +450,12 @@ pub fn derive_container_workspace_folder(mounts: &[Mount]) -> Option<String> {
 /// uses `workspaceFolder` as the mount target. `workspaceFolder` is the working
 /// directory / `${containerWorkspaceFolder}`, resolved separately. Aligning here
 /// closes issue #273.
-fn default_workspace_mount_target(workspace_path: &Path) -> String {
+///
+/// Public because `read-configuration` must REPORT the same target `up` actually
+/// creates. It previously reported `workspaceFolder` as the target, so a config with
+/// an explicit `workspaceFolder` had its mount described one way and mounted another
+/// (#376) — the report/reality split the shared-helper rule exists to prevent (#309).
+pub fn default_workspace_mount_target(workspace_path: &Path) -> String {
     format!(
         "/workspaces/{}",
         workspace_path

@@ -21,6 +21,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-0a410770",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-workspace-section-shape",
+      "context": []
+    },
+    {
       "id": "obl-bhv-0b062cbf",
       "kind": "behavior",
       "behavior": "bhv-up-lifecycle-command-cwd",
@@ -318,6 +324,12 @@
       "id": "obl-bhv-cd232792",
       "kind": "behavior",
       "behavior": "bhv-outdated-extends-chain-features",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-d0efee14",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-workspace-folder-subpath",
       "context": []
     },
     {

@@ -46,7 +46,7 @@
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",
       "locator": "up/container-labels",
-      "summary": "On the same fixture (fx-up-basic, image alpine:3.19), `docker inspect .Config.Labels` shows the reference CLI setting exactly three labels — devcontainer.metadata, devcontainer.local_folder, devcontainer.config_file — while deacon sets those three plus five it alone defines: devcontainer.configHash, devcontainer.config_name, devcontainer.name, devcontainer.source (value \"deacon\"), devcontainer.workspaceHash. devcontainer.metadata is byte-identical between the two; local_folder and config_file differ only by each side's own workspace path.",
+      "summary": "On the same fixture (fx-up-basic, image alpine:3.19), `docker inspect .Config.Labels` shows the reference CLI setting exactly three labels \u2014 devcontainer.metadata, devcontainer.local_folder, devcontainer.config_file \u2014 while deacon sets those three plus five it alone defines: devcontainer.configHash, devcontainer.config_name, devcontainer.name, devcontainer.source (value \"deacon\"), devcontainer.workspaceHash. devcontainer.metadata is byte-identical between the two; local_folder and config_file differ only by each side's own workspace path.",
       "behaviors": [
         "bhv-container-identity-labels"
       ]
@@ -209,6 +209,17 @@
       "summary": "Both CLIs resolve the same pinned Feature reference to the same digest and integrity and emit the same lockfile document (observed 2026-07-26).",
       "behaviors": [
         "bhv-upgrade-regenerates-lockfile"
+      ]
+    },
+    {
+      "id": "src-obs-workspace-section-shape",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration `workspace` section, four workspace shapes",
+      "summary": "The reference emits exactly `workspaceFolder` and `workspaceMount`. Observed 2026-07-28 across a plain workspace, a git-subdirectory workspace, a git-subdirectory workspace with an explicit `workspaceFolder`, and a compose workspace; the mount target stayed `/workspaces/<basename(source)>` in every case, including the one whose `workspaceFolder` was `/opt/app`.",
+      "behaviors": [
+        "bhv-readconfig-workspace-folder-subpath",
+        "bhv-readconfig-workspace-section-shape"
       ]
     },
     {

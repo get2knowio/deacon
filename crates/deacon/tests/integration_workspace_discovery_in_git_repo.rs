@@ -82,21 +82,22 @@ fn read_configuration_in_subdir_loads_inner_config_not_git_root() {
 
     let json = run_read_configuration(&sub, &[]);
 
-    // The example's config should win, not the parent repo's. The
-    // `configuration.name` and `workspace.configFolderPath` fields both
-    // surface the regression cleanly if the bug returns.
+    // The example's config should win, not the parent repo's. `configuration.name`
+    // surfaces the discovery regression, and `workspace.workspaceFolder` surfaces it
+    // again from the other side: the reported container path must carry the `sub`
+    // segment, not collapse to the git root (#383).
     assert_eq!(
         json["configuration"]["name"], "inner-config",
         "discovery must use the user's --workspace-folder (#67)"
     );
-    let config_folder = json["workspace"]["configFolderPath"]
+    let workspace_folder = json["workspace"]["workspaceFolder"]
         .as_str()
-        .expect("configFolderPath must be a string")
+        .expect("workspaceFolder must be a string")
         .replace('\\', "/"); // normalize Windows separators for the path check
     assert!(
-        config_folder.contains("/sub/.devcontainer")
-            || config_folder.ends_with("sub/.devcontainer"),
-        "configFolderPath must point at the sub-project's .devcontainer, got: {config_folder}"
+        workspace_folder.ends_with("/sub"),
+        "workspaceFolder must carry the path from the git root down to the workspace \
+         folder, got: {workspace_folder}"
     );
 }
 
