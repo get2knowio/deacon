@@ -65,3 +65,12 @@ conformance/migration/** -text
 # V27 deliberately cannot distinguish a hand edit from a stale regeneration; it equally
 # cannot distinguish either from a re-encoded checkout, so the bytes must be pinned.
 conformance/obligations/** -text
+
+# The exploratory discovery data root (025-exploratory-parity-discovery) is written by the
+# campaign driver through the same canonical renderer every machine-owned artifact here
+# uses (2-space pretty JSON, trailing newline), and both `discovery check` and the
+# hermetic guard byte-compare the committed files against a fresh rendering. A Windows
+# autocrlf checkout rewrites LF to CRLF, so `raw.ends_with("}\n")` sees `}\r\n` and the
+# canonical-rendering comparison fails on bytes git introduced — pointing the reader at a
+# renderer that is working correctly. Same discipline, same pin.
+conformance/discovery/** -text

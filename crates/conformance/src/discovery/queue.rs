@@ -2112,6 +2112,14 @@ mod tests {
         );
     }
 
+    // Unix-only: the simulation depends on `ENOTDIR`, which has no Windows equivalent —
+    // Windows maps a stat under a non-directory to `ErrorKind::NotFound`, so the probe
+    // takes `load_file`'s legitimate "the file is absent" branch and never reaches the
+    // error path this test is about. The PRODUCTION guarantee is platform-independent
+    // (`load_file` treats only `NotFound` as absent and turns every other stat error into
+    // a `SchemaError`); it is the way of provoking a non-`NotFound` stat error that is
+    // Unix-specific.
+    #[cfg(unix)]
     #[test]
     fn an_unreadable_file_is_not_mistaken_for_an_absent_one() {
         // `Path::exists` returns false for ANY error, so a present-but-unreadable file
