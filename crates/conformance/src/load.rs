@@ -5,7 +5,8 @@
 //!
 //! - collection files (`{ schemaVersion, records }`): `revisions.json`,
 //!   `dimensions.json`, `channels.json`, `profiles.json`, `gaps.json`,
-//!   `extensions.json`, and `sources/{schema,spec,cli,observed}.json`;
+//!   `extensions.json`, `metamorphic.json`, and
+//!   `sources/{schema,spec,cli,observed}.json`;
 //! - per-area behavior files: `behaviors/*.json` (each a collection);
 //! - per-area case files: `cases/*.json` (each a collection);
 //! - per-waiver files: `waivers/*.json` (each a single record object).
@@ -24,6 +25,7 @@ use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
 use crate::baseline::BaselineFile;
+use crate::discovery::metamorphic::{MetamorphicFile, MetamorphicRelation};
 use crate::mapping::{ExceptionMapping, MappingFile, MigrationMapping};
 use crate::model::{
     BehaviorUnit, CertificationProfile, Classification, ClauseClassification, ClauseInventory,
@@ -256,6 +258,14 @@ pub struct Registry {
     /// scenario model, because "no regression declared" and "the channel is live" are
     /// not the same claim.
     pub regressions: Vec<RegressionRecord>,
+    /// Hand-authored metamorphic relations — `metamorphic.json`
+    /// (025-exploratory-parity-discovery, US6). The ONE piece of discovery data that lives
+    /// inside the registry, because a relation is an assertion the project makes and names
+    /// `clu-`/`bhv-` ids only this loader resolves (research D11). The findings queue —
+    /// machine-produced, unreviewed — stays a sibling of the registry root, structurally
+    /// unreachable from here. A missing file is empty; **V32** is what refuses an
+    /// incomplete set.
+    pub metamorphic: Vec<MetamorphicRelation>,
 }
 
 impl Registry {
@@ -339,6 +349,10 @@ impl Registry {
             // regressions.json — the injected-regression records that prove each channel
             // is live (024 US6). Single-file collection at the registry root.
             regressions: load_regressions_collection(&root.join("regressions.json"), &mut errors),
+            // metamorphic.json — the hand-authored `mrl-` relation catalogue (025 US6).
+            // Single-file collection at the registry root, read exactly like
+            // `regressions.json`: same envelope, same duplicate-id rejection.
+            metamorphic: load_metamorphic_collection(&root.join("metamorphic.json"), &mut errors),
         };
 
         // 022-conformance-runner (T007, FR-003): every case record MUST be exactly one
@@ -509,6 +523,30 @@ fn load_regressions_collection(
             }
         };
     errors.extend(crate::regression::duplicate_id_errors(path, &records));
+    records
+}
+
+/// Load `metamorphic.json` (025 US6). A missing file yields an empty vector; a malformed
+/// one pushes a located [`SchemaError`]. Duplicate ids are reported per record so two
+/// records can never silently claim the same identity.
+fn load_metamorphic_collection(
+    path: &Path,
+    errors: &mut Vec<SchemaError>,
+) -> Vec<MetamorphicRelation> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    let records =
+        match read_file(path).and_then(|raw| deserialize_located::<MetamorphicFile>(path, &raw)) {
+            Ok(file) => file.records,
+            Err(err) => {
+                errors.push(err);
+                return Vec::new();
+            }
+        };
+    errors.extend(crate::discovery::metamorphic::duplicate_id_errors(
+        path, &records,
+    ));
     records
 }
 
@@ -1280,6 +1318,56 @@ mod tests {
             reg.clause_classifications[0].clause.as_deref(),
             Some("clu-reference-x-must-a1b2c3d4")
         );
+    }
+
+    #[test]
+    fn loads_metamorphic_relations_and_rejects_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "metamorphic.json",
+            r#"{ "schemaVersion": 1, "records": [
+                { "id": "mrl-key-order-invariance",
+                  "transformation": "permute the key order within an unordered JSON object",
+                  "effect": "invariance",
+                  "ground": "clu-a1b2c3d4",
+                  "channels": ["chan-structured-output"],
+                  "rationale": "Object member order carries no meaning in JSON." }
+            ] }"#,
+        );
+        let reg = Registry::load(dir.path()).expect("loads");
+        assert_eq!(reg.metamorphic.len(), 1);
+        assert_eq!(reg.metamorphic[0].ground, "clu-a1b2c3d4");
+
+        // A missing file is empty, never an error (a fixture registry ships none).
+        let empty = tempfile::tempdir().unwrap();
+        assert!(
+            Registry::load(empty.path())
+                .expect("loads")
+                .metamorphic
+                .is_empty()
+        );
+
+        // Two records claiming one identity is a located schema error, not a silent
+        // first-match-wins.
+        write(
+            dir.path(),
+            "metamorphic.json",
+            r#"{ "schemaVersion": 1, "records": [
+                { "id": "mrl-x", "transformation": "t1", "effect": "invariance",
+                  "ground": "bhv-a", "channels": ["chan-stdout"], "rationale": "r" },
+                { "id": "mrl-x", "transformation": "t2", "effect": "sensitivity",
+                  "ground": "bhv-a", "channels": ["chan-stdout"], "rationale": "r" }
+            ] }"#,
+        );
+        let err = Registry::load(dir.path()).unwrap_err();
+        match err {
+            LoadError::Schema(errors) => assert!(
+                errors.iter().any(|e| e.message.contains("mrl-x")),
+                "the duplicate must be named, got {errors:?}"
+            ),
+            other => panic!("expected schema errors, got {other:?}"),
+        }
     }
 
     #[test]

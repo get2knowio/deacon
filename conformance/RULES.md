@@ -74,6 +74,8 @@ checkable at a glance rather than by reading every section.
 | **V28** | an applicable obligation with zero dispositions, or with more than one | [Obligation dispositions](#obligation-dispositions-v28--v29) |
 | **V29** | malformed disposition: filler rationale; a high-risk triple dispositioned by rationale/waiver rather than a case; a disposition whose obligation no longer resolves (stale) | [Obligation dispositions](#obligation-dispositions-v28--v29) |
 | **V30** | injected-regression integrity: a declared channel with no regression record; a regression targeting a channel with no observer | [Injected-regression harness](#injected-regression-harness-v30) |
+| **V31** | metamorphic relation integrity: a missing or unresolvable `ground`; an empty `channels`, or one naming an undeclared channel; a duplicated `transformation`; a `rationale` that is a label rather than an argument | [Metamorphic relation catalogue](#metamorphic-relation-catalogue-v31--v32) |
+| **V32** | a mandated metamorphic relation family (FR-044) with no record | [Metamorphic relation catalogue](#metamorphic-relation-catalogue-v31--v32) |
 
 **Three distinctions this file keeps apart**, because conflating any pair makes a status
 unfalsifiable:
@@ -992,3 +994,144 @@ this way, and both were channels the registry believed it was covering.
 | An ordinary run can never inject (FR-070) | injection needs a process-level capability only the `coverage-regressions` bin takes out; the one hook the runner calls is inert without it |
 | A perturbation is never left applied (FR-066) | an RAII guard reverts on success **and** on unwind, mirroring the Docker workspace guard; the tree is verified unmodified afterwards |
 | The classification is reproducible (FR-069) | perturbations are data, applied in a deterministic order, and the report is byte-stable |
+
+---
+
+## Metamorphic relation catalogue (V31 – V32)
+
+`registry/metamorphic.json` is the one piece of the exploratory-discovery machinery that
+lives **inside** the registry (025-exploratory-parity-discovery, research D11). Everything
+else discovery produces — findings, campaigns, the corpus manifest — sits in
+`conformance/discovery/`, a sibling of `registry/` that no loader path reaches, and is
+policed by the separately numbered **D1 – D5** classes.
+
+The split follows from what each thing *is*. A metamorphic relation is an **assertion the
+project makes**: "reordering these keys must not change the result, and here is the clause
+that says so." That is the same kind of object as an applicability rule — hand-authored,
+reviewed, stable, and naming `clu-`/`bhv-` ids only the registry loader resolves. A finding
+is a **candidate** for an assertion: machine-produced, unreviewed, possibly wrong, and it
+must never reach `certify`.
+
+### The two effects, and why sensitivity is mandatory
+
+| `effect` | Assertion | Catches |
+|---|---|---|
+| `invariance` | the transformation MUST NOT change the normalized result | a tool reading meaning that is not there |
+| `sensitivity` | the transformation MUST change the normalized result | a tool ignoring meaning that *is* there |
+
+**A sensitivity relation is the one thing the differential structurally cannot replace.**
+If deacon and the reference *both* wrongly ignore declaration order, the differential is
+clean and the defect is invisible to it — both sides agree, and agreeing is exactly what
+the differential checks. A sensitivity relation asserts the result *must* change, so
+consistent-wrongness fails it. That is why FR-043 mandates both kinds rather than treating
+sensitivity as an optional extra, and why `mrl-declaration-order-sensitivity` is in the
+mandated set rather than left to judgement.
+
+### The ground must resolve, and the rationale must argue
+
+Every relation names a `ground` resolving to a normative clause (`clu-`) or a recorded
+behavior (`bhv-`). Without one, a relation records an author's intuition about what *ought*
+to be irrelevant — and the failure mode is the quiet one: **an ungrounded invariance
+relation that happens to be wrong does not fail, it passes**, silently, while asserting
+something the specification never said. A grounded one can be checked by reading the clause.
+
+A citation nobody argued from is only half of that. The `rationale` has to carry two claims
+and the connective between them — what the ground says, and why that makes this
+transformation irrelevant (or significant) — so **V31** also rejects a rationale short
+enough to be a caption.
+
+The rationale test is deliberately **not** V26's `ground` test. That check's vague-marker
+list is tuned for one-line capability statements, where "later" and "unknown" are evasions;
+in a paragraph they are ordinary words, and it rejected the declaration-order rationale for
+quoting its own clause ("later files override earlier ones"). A marker list tuned for a
+different field rejects correct text — the same reason V26's ground test does not reuse the
+out-of-scope marker list either.
+
+### A behavior is a real ground, not a fallback
+
+FR-045 admits a normative clause **or** a recorded behavior, and the committed catalogue
+uses both — three clauses and four behaviors. The contract's mandated-family table
+*nominates* a clause for five of the seven, but the pinned prose does not everywhere say
+what those relations assert: no clause unit carries the sentence that fixes the on-disk
+format as JSON-with-Comments, so `mrl-formatting-invariance` and `mrl-comment-invariance`
+cite `bhv-readconfig-basic-parse` and `bhv-readconfig-malformed-jsonc-rejected` instead.
+
+Stretching a nearby clause to fill the column would have been the worse outcome, and
+precisely the thing the ground requirement exists to prevent: a citation that does not say
+what the relation claims reads, to a reviewer, exactly like one that does. Where the prose
+is silent, cite the behavior that records what we actually know and say so in the rationale.
+
+### How a `clu-` ground resolves without the clause inventory
+
+A `bhv-` ground resolves against `behaviors/*.json`. A `clu-` ground resolves against the
+registry's own **clause classifications**: V12 already requires every clause unit to carry
+exactly one `clc-` record, so "named by a classification" and "is a clause unit" are the
+same set, and V11 separately reports a classification naming a clause that no longer
+exists. Resolving this way keeps V31 a pure function of the loaded registry, so `report`
+and `certify` see it too — rather than scoping it to the one entry point that happens to
+load the committed inventory.
+
+### The classes
+
+| Class | Fires on | Remedy |
+|---|---|---|
+| **V31** | a blank `ground`; a `ground` that is not a well-formed id, is neither a `clu-` nor a `bhv-`, or names a clause/behavior the registry does not carry; an empty `channels`; a `channels` entry absent from `channels.json`; an empty or duplicated `transformation`; a `rationale` under twenty words | Cite a clause or behavior that actually says it, and write the argument connecting the two |
+| **V32** | a mandated family (FR-044) with no record | Restore the relation, or change the mandated list deliberately — never silently |
+
+An **unknown `effect`** is listed under V31 by contracts/metamorphic-catalogue.md but is
+refused strictly earlier, at **load**, by the closed enum: same outcome, better diagnosis,
+and no record with an unrecognised effect can reach evaluation, where "unknown" would have
+to be resolved into one of the two answers by a default.
+
+The mandated list is a **floor, not a suggestion**. Dropping a family removes an assertion
+nothing else makes, and the loss is invisible in the ordinary way — every remaining relation
+still passes, so a smaller catalogue looks exactly like a healthy one. V32 is what makes the
+removal say so.
+
+### Scope
+
+A registry that declares **neither** a catalogue nor a scenario model is silent: a fixture
+predating this feature has not opted into the regime, and reporting seven missing families
+for each one would say nothing true about them. A registry that declares **either** is
+checked — in particular, deleting `metamorphic.json` from the real registry is V32 seven
+times over, not a quiet pass.
+
+### Relations are evaluated against deacon alone
+
+FR-048 requires it, and it is load-bearing rather than incidental: the metamorphic tier is
+the only part of discovery that needs **neither** the pinned oracle **nor** Docker **nor**
+the network, so a contributor with no devcontainer CLI installed can develop and test it.
+It does **not** license running it in a pull-request lane — FR-055 is absolute, and its
+reason is stochasticity, not resource cost.
+
+## Finding vs gap (do not conflate)
+
+A **finding** is a *candidate for an assertion*: a difference a campaign surfaced that nobody
+has yet decided anything about. A **gap** is an *admission of missing coverage*. They live in
+different roots, and the distinction is what lets a stochastic search be wired into CI at all.
+
+| | `conformance/discovery/findings.json` (`fnd-`) | `conformance/registry/gaps.json` (`gap-`) |
+|---|---|---|
+| What it admits | a difference **was observed**; nobody has judged it | **coverage is missing** — no evidence exists |
+| Evidence behind it | a reproducing witness, at least one | none, by definition |
+| Blocks `certify`? | **No**, never — `certify` cannot even read this root | **Yes**, always |
+| Blocks a PR? | only via D1–D5, on queue *integrity* — never on its contents | via V5, on the registry |
+| Who may create it | a campaign, mechanically | a human, deliberately |
+| Resolution | triage, then promote it (a human edit) or classify it away | add real evidence and delete the record |
+
+**Why they must never merge.** A finding is unreviewed by construction — a campaign that
+surfaces forty differences has made forty claims nobody has checked, and some will be
+`normalizer-defect` or `fixture-defect`, i.e. defects in the *observer*, not in deacon. If a
+finding blocked, every campaign would be a release gate whose verdict changed with its seed,
+and green would stop being reproducible. Conversely, if a gap did **not** block, the one
+record whose entire purpose is to say "we do not know" would become decorative.
+
+So the queue is a **triage list, not a defect list**, and the arrow between the roots points
+one way only: a finding becomes registry content by a human promoting it (`Finding::promotedTo`
+→ a real case, **D3**), never by a program writing one. A finding is never "fixed" by editing
+the queue — it is promoted, classified away, or observed to stop reproducing.
+
+**Corollary — an untriaged finding is not a passing finding.** `discovery report` counts the
+untriaged bucket explicitly so that "nothing has been looked at" can never render as "nothing
+was found" (the same failure mode `certify` avoids by counting `non-testable` separately from
+`covered`).

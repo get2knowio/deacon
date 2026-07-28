@@ -100,26 +100,54 @@ pub async fn deacon_binary() -> Result<PathBuf, HarnessError> {
         return Err(HarnessError::FixtureMissing { path });
     }
 
+    let path = cargo_bin("deacon", "deacon").await?;
+    eprintln!("deacon binary under test: {}", path.display());
+    Ok(path)
+}
+
+/// Build one workspace binary and take its path from **cargo's own artifact report**.
+///
+/// The generalization of [`deacon_binary`]'s rule, and it exists for the same reason: a
+/// caller outside the owning package cannot expand `env!("CARGO_BIN_EXE_<name>")`, and the
+/// tempting fallback — look under `target/{debug,release}` and use whichever file exists —
+/// silently judges whatever artifact happened to be lying there. That was a real defect with
+/// teeth (023 T115): a three-day-old `target/release/deacon` was compared against the
+/// current oracle and manufactured a verdict out of a binary nobody was testing.
+///
+/// One implementation rather than one per caller: a second copy of a "do not guess the
+/// binary" rule is the copy that rots.
+///
+/// `bin` is the **target** name (what `--bin` takes and what the artifact reports), which is
+/// not always the package name — `parity-harness` owns `discovery-campaign`.
+pub async fn cargo_bin(package: &str, bin: &str) -> Result<PathBuf, HarnessError> {
     let output = tokio::process::Command::new("cargo")
-        .args(["build", "-p", "deacon", "--message-format", "json"])
+        .args([
+            "build",
+            "-p",
+            package,
+            "--bin",
+            bin,
+            "--message-format",
+            "json",
+        ])
         .current_dir(crate::workspace_root())
         .kill_on_drop(true)
         .output()
         .await
         .map_err(|e| HarnessError::Report {
-            cause: format!("could not build the deacon binary under test: {e}"),
+            cause: format!("could not build `{bin}` from `{package}`: {e}"),
         })?;
     if !output.status.success() {
         return Err(HarnessError::Report {
             cause: format!(
-                "building the deacon binary under test failed ({}): {}",
+                "building `{bin}` from `{package}` failed ({}): {}",
                 output.status,
                 String::from_utf8_lossy(&output.stderr)
             ),
         });
     }
 
-    // cargo emits one JSON object per line; the `deacon` bin artifact carries the path.
+    // cargo emits one JSON object per line; the bin artifact carries the path.
     let mut executable: Option<PathBuf> = None;
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
@@ -128,7 +156,7 @@ pub async fn deacon_binary() -> Result<PathBuf, HarnessError> {
         if value.get("reason").and_then(|v| v.as_str()) != Some("compiler-artifact") {
             continue;
         }
-        if value.pointer("/target/name").and_then(|v| v.as_str()) != Some("deacon") {
+        if value.pointer("/target/name").and_then(|v| v.as_str()) != Some(bin) {
             continue;
         }
         if let Some(path) = value.get("executable").and_then(|v| v.as_str()) {
@@ -136,13 +164,12 @@ pub async fn deacon_binary() -> Result<PathBuf, HarnessError> {
         }
     }
 
-    let path = executable.ok_or_else(|| HarnessError::Report {
-        cause: "cargo reported no `deacon` executable artifact — refusing to guess which \
-                binary to judge"
-            .to_string(),
-    })?;
-    eprintln!("deacon binary under test: {}", path.display());
-    Ok(path)
+    executable.ok_or_else(|| HarnessError::Report {
+        cause: format!(
+            "cargo reported no `{bin}` executable artifact for `{package}` — refusing to \
+             guess which binary to judge"
+        ),
+    })
 }
 
 #[cfg(test)]

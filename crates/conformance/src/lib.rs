@@ -26,6 +26,7 @@ pub mod conservation;
 pub mod coverage;
 pub mod coverage_report;
 pub mod diff;
+pub mod discovery;
 pub mod inventory;
 pub mod load;
 pub mod mapping;
@@ -189,6 +190,192 @@ pub fn default_obligations_file() -> std::path::PathBuf {
 pub fn obligations_file_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
     let base = registry_dir.parent().unwrap_or(registry_dir);
     base.join("obligations").join("obligations.json")
+}
+
+/// The default discovery data root: `<workspace_root>/conformance/discovery` — the
+/// findings queue, the campaign history, and the real-world corpus manifest
+/// (025-exploratory-parity-discovery, research D6).
+///
+/// **A sibling of `registry/`, deliberately not inside it.** [`load::Registry::load`]
+/// enumerates *named* subdirectories under `conformance/registry/` and has no wildcard
+/// walk at the registry root, so nothing here can be picked up by the registry loader —
+/// not by convention, but because there is no code path that would reach it. That is
+/// what makes "an unreviewed finding can never influence a release gate" a property of
+/// the directory layout rather than a rule someone must remember.
+pub fn default_discovery_dir() -> std::path::PathBuf {
+    workspace_root().join("conformance").join("discovery")
+}
+
+/// Resolve the discovery data root belonging to a registry, as a sibling under the same
+/// `conformance/` tree: `<registry>/../discovery`. Mirrors [`clause_paths_for`] /
+/// [`migration_paths_for`] / [`obligations_file_for`], so `--registry <fixture>` picks up
+/// the fixture's own discovery root rather than the workspace's.
+pub fn discovery_dir_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
+    let base = registry_dir.parent().unwrap_or(registry_dir);
+    base.join("discovery")
+}
+
+/// The discovery-side (**D-class**) domain error taxonomy
+/// (025-exploratory-parity-discovery, contracts/findings-queue.md).
+///
+/// Each variant *is* a violation: [`DiscoveryError::class`] names the D-class it belongs
+/// to and [`DiscoveryError::record`] names the offending record, so `discovery check`
+/// renders `{class} {record}: {message}` without a parallel violation type. Every
+/// message names the cause precisely (constitution IV).
+///
+/// **Numbered separately from the registry's V-series on purpose.** These are emitted by
+/// a different command over a different data root; folding them into V-numbering would
+/// imply the registry validator can see the queue, which is exactly what the discovery
+/// root's placement exists to prevent (research D6/D11).
+///
+/// **D3** landed with US5 as [`DiscoveryError::PromotionUnresolved`]; **D4** landed with
+/// US7 as [`DiscoveryError::CorpusIntegrity`].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DiscoveryError {
+    /// **D1** — a record that does not parse, or that parses but is structurally
+    /// impossible (empty `witnesses`, a derived id that disagrees with its substance).
+    /// `record` is the record id when one could be read, else the file path.
+    #[error(
+        "malformed discovery record `{record}`: {cause}. Remedy: fix the record — the \
+         discovery data root is strict JSON and rejects unknown fields at load."
+    )]
+    MalformedRecord { record: String, cause: String },
+
+    /// **D1** — a reference that names something absent: a `firstObserved` /
+    /// `lastObserved` campaign missing from `campaigns.json`, a witness naming an
+    /// unresolvable campaign, or a `splitFrom` naming a finding that is gone.
+    ///
+    /// An unresolvable **`promotedTo`** is deliberately *not* here: it is
+    /// [`DiscoveryError::PromotionUnresolved`] (**D3**), because it is a claim about
+    /// *coverage* rather than about provenance, and folding it in would report a
+    /// finding that reads as covered while nothing executes it under the same code as a
+    /// stale campaign pointer.
+    #[error(
+        "discovery record `{record}` references {kind} `{reference}`, which does not \
+         resolve. Remedy: restore the referenced record or correct the reference — a \
+         dangling reference lets the queue claim provenance it does not have."
+    )]
+    UnresolvableReference {
+        record: String,
+        kind: String,
+        reference: String,
+    },
+
+    /// **D1** — a signature naming a channel absent from `channels.json`. The channel
+    /// set is closed: a signature over an undeclared channel is a signature nothing
+    /// observes.
+    #[error(
+        "discovery record `{record}` names undeclared channel `{channel}`. Remedy: use \
+         one of the channels declared in `conformance/registry/channels.json`, or declare \
+         the new channel there first (a new channel also needs a `reg-` regression record)."
+    )]
+    UnknownChannel { record: String, channel: String },
+
+    /// **D2** — a classification that is absent, present too early, or present where it
+    /// cannot lead anywhere.
+    ///
+    /// Three shapes, all one class because all three are the same defect — the queue
+    /// asserting a judgement nobody made, or making a judgement nobody can act on:
+    ///
+    /// - a finding in `triaged` / `promoted` / `no-longer-reproducing` with **no**
+    ///   classification (FR-028's "exactly one" reduced to zero);
+    /// - a finding in `untriaged` or `split` **carrying** one (an untriaged finding by
+    ///   definition has no judgement, and a split parent surrendered its judgement to its
+    ///   children — a parent that kept one would assert exactly what the split rejected);
+    /// - a `promoted` finding classified `normalizer-defect` or `fixture-defect`, which
+    ///   describe a defect in the discovery machinery rather than a behavior of either
+    ///   implementation and are therefore non-promotable (FR-035).
+    #[error(
+        "discovery finding `{record}` has a classification problem: {cause}. Remedy: \
+         record exactly one classification with `discovery triage` once the finding is \
+         triaged or later, and none while it is untriaged or a split ancestor — a queue \
+         that claims a judgement nobody made is worse than one that admits it has none."
+    )]
+    ClassificationArity { record: String, cause: String },
+
+    /// **D3** — a promotion the registry cannot back: a `promoted` finding with no
+    /// `promotedTo`, one naming a case the registry does not declare, or a `promotedTo`
+    /// carried in any state other than `promoted`.
+    ///
+    /// One class because all three are the same defect — **the queue claiming coverage
+    /// that does not exist**. That is worse than an uncovered finding: an uncovered
+    /// finding is visible in the untriaged bucket and gets reviewed, whereas a promotion
+    /// nothing executes reads as done and is never looked at again (FR-042's whole
+    /// purpose is that a promoted finding is not rediscovered and re-triaged).
+    ///
+    /// Deliberately checked against the *loaded registry* on every run rather than only
+    /// at the moment of promotion: a case deleted or renamed afterwards produces exactly
+    /// this shape, and nothing in the registry can notice, because the registry never
+    /// reads the queue (research D6).
+    #[error(
+        "discovery finding `{record}` has an unresolvable promotion: {cause}. Remedy: \
+         author the case with `discovery scaffold`'s skeleton, commit it, and point \
+         `promotedTo` at its real id — discovery never writes a case, so a promotion the \
+         registry cannot back is a claim nothing executes."
+    )]
+    PromotionUnresolved { record: String, cause: String },
+
+    /// **D4** — a corpus entry that does not name a retrievable, verifiable snapshot: a
+    /// `commit` that is not a 40-hex object name (a branch, a tag, `HEAD`, `latest`, an
+    /// abbreviated SHA), a malformed `contentDigest`, an id that does not derive from the
+    /// entry's own substance, a duplicate id or name, or a digest that was recorded and
+    /// then removed.
+    ///
+    /// The first four are answerable from the manifest alone and are checked
+    /// hermetically on every pull request — which is the entire reason the manifest is
+    /// Rust-owned strict JSON rather than a Python tuple (research D8). A validation that
+    /// only runs when the network is up is a validation that does not run.
+    #[error(
+        "corpus entry `{record}`: {cause}. Remedy: pin the entry to a 40-hex commit and \
+         leave `contentDigest` to the fetch — the manifest records provenance, and a \
+         provenance record that names moving content proves nothing about what was \
+         compared."
+    )]
+    CorpusIntegrity { record: String, cause: String },
+
+    /// **D5** — a pinned-input-set element naming a revision absent from
+    /// `revisions.json`. A finding is a claim about a specific pinned pair of
+    /// implementations; a pin nothing records is a claim nothing can be checked against.
+    #[error(
+        "discovery record `{record}`: pinned input `{element}` names revision `{value}`, \
+         which is absent from `conformance/registry/revisions.json`. Remedy: record the \
+         revision, or re-evaluate the finding under the current pins — a finding is never \
+         carried forward across a pin change unverified."
+    )]
+    StalePin {
+        record: String,
+        element: String,
+        value: String,
+    },
+}
+
+impl DiscoveryError {
+    /// The D-class this error belongs to (`"D1"` … `"D5"`).
+    pub fn class(&self) -> &'static str {
+        match self {
+            DiscoveryError::MalformedRecord { .. }
+            | DiscoveryError::UnresolvableReference { .. }
+            | DiscoveryError::UnknownChannel { .. } => "D1",
+            DiscoveryError::ClassificationArity { .. } => "D2",
+            DiscoveryError::PromotionUnresolved { .. } => "D3",
+            DiscoveryError::CorpusIntegrity { .. } => "D4",
+            DiscoveryError::StalePin { .. } => "D5",
+        }
+    }
+
+    /// The offending record's id (or the file path, when the record id could not be
+    /// read because the file itself did not parse).
+    pub fn record(&self) -> &str {
+        match self {
+            DiscoveryError::MalformedRecord { record, .. }
+            | DiscoveryError::UnresolvableReference { record, .. }
+            | DiscoveryError::UnknownChannel { record, .. }
+            | DiscoveryError::ClassificationArity { record, .. }
+            | DiscoveryError::PromotionUnresolved { record, .. }
+            | DiscoveryError::CorpusIntegrity { record, .. }
+            | DiscoveryError::StalePin { record, .. } => record,
+        }
+    }
 }
 
 /// Atomically write `contents` to `path` (unique temp file + `fs::rename`), creating

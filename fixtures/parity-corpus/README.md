@@ -25,7 +25,6 @@ Re-verification of that migration uses **git history**, not a retained copy: the
 |---|---|
 | `oracle.json` | the pinned `@devcontainers/cli` version every live comparison verifies against |
 | `registry.json` | the surviving live-binary enumeration (`parity_build`, `parity_exec`, `parity_up_exec`, `parity_observable_state`, `parity_state_diff`, `parity_conformance_runner`) plus the internal-consistency binaries. `corpora` is now empty — the corpora retired with the binaries that drove them |
-| `fetch_realworld_corpus.py` | a fetch utility, never a comparison runner; its 33 pinned entries are recorded as `external-corpus-entry` baseline units and covered by `res-realworld-corpus-not-vendored` (research D8) |
 | `errors/README.md` | prose describing the error-decision contract, which the declarative `case-errors-decl-*` cases now implement |
 | `REPORT.md` | the historical findings log |
 
@@ -53,25 +52,50 @@ The single normalization/equivalence definition lives in
 discovery rule in `crates/conformance/src/parity_corpus.rs`, re-exported by
 `crates/parity-harness/src/registry.rs`.
 
-## Tier 3 — pinned real-world corpus fetch
+## Tier 3 — pinned real-world corpus — MOVED
+
+`fetch_realworld_corpus.py` was **deleted** in 025-exploratory-parity-discovery (US7,
+T109). Its 33 pinned entries now live in `conformance/discovery/corpus.json`, a
+Rust-owned strict-JSON manifest, and the fetch lives in
+`crates/parity-harness/src/discovery/corpus_fetch.rs`.
+
+The script was not retired for tidiness. Two concrete reasons:
+
+1. **The immutable-reference check has to be hermetic.** FR-050 — reject any branch, tag,
+   `HEAD`, or `latest` — is a property of the *manifest*, not of a fetch: nothing needs to
+   be retrieved to know that `main` names different content tomorrow. In a Python tuple
+   nothing checked it; as strict JSON, violation class **D4** rejects it on every pull
+   request with no network at all (research D8).
+2. **Two statements of one manifest drift.** The frozen `realworld::<name>` baseline units
+   are derived from the entry names, and the corpus tier compares against the entry pins.
+   With two copies, one of those two would eventually be reading the other's stale twin.
+
+Its documented workflow had also stopped existing: the docstring told you to copy a
+fetched snapshot into the corpus root and run `parity_corpus_tier1` — deleted by 023, as
+was `parity_corpus_merged`, along with the corpus root itself. A
+script whose instructions name removed binaries is not an exploratory aid.
+
+What replaced it is strictly more, not less:
+
+- the entries are validated (**D4**) rather than merely written down;
+- each entry carries a **content digest**, recorded at first materialization and verified
+  on every later fetch (FR-051) — the Python fetcher verified nothing;
+- an unreachable entry is reported as unreachable, never as "ran and found nothing"
+  (FR-052);
+- the fetch uses a blob-filtered partial clone plus a sparse checkout instead of the
+  GitHub contents API, so it needs no `gh`, no token, and no rate-limit budget.
+
+Corpus content is still **never vendored** (FR-053): the manifest records provenance, not
+bytes. To run the canary:
 
 ```bash
-python3 fixtures/parity-corpus/fetch_realworld_corpus.py --clean --dest /tmp/realworld-corpus
+cargo run -p parity-harness --bin discovery-campaign -- \
+  --seed 0x… --tier corpus --budget-seconds 1800 --lane invoked
 ```
 
-`fetch_realworld_corpus.py` (a fetch utility, NOT a comparison runner — it makes
-no pass/fail claim) downloads a pinned set of public workspace snapshots into
-`/tmp/realworld-corpus` without vendoring third-party content into this
-repository. The current manifest mixes:
-
-- `devcontainers/images` workspace subtrees
-- two compose-based `devcontainers/templates` workspace subtrees
-- `microsoft/vscode-remote-try-*` sample repos
-- a couple of small real OSS repos with checked-in devcontainers
-
-The fetched corpus includes a `_manifest.json` recording the exact repos and
-commit SHAs used for the run. It is for manual exploration; the pinned, in-repo
-corpus above is what the nextest runners drive.
+It also runs weekly in `.github/workflows/discovery.yml`, on a schedule of its own —
+an ecological canary that runs only when someone remembers to invoke it cannot warn
+anyone (FR-056, research D10).
 
 ## Tier 2 — up/build (Docker)
 

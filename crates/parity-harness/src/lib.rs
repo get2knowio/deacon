@@ -22,6 +22,7 @@ use std::time::Duration;
 
 pub mod aggregate;
 pub mod compare;
+pub mod discovery;
 pub mod driver;
 pub mod equivalence;
 pub mod evidence;
@@ -181,6 +182,23 @@ pub enum HarnessError {
     )]
     DockerUnavailable { cause: String },
 
+    /// The **network-backed** corpus tier could not reach the network at all
+    /// (025-exploratory-parity-discovery, US7).
+    ///
+    /// Distinct from an *unreachable entry*, which is a per-entry status the campaign
+    /// counts and reports (FR-052). This is the tier's prerequisite failing before any
+    /// entry was attempted, and it is the same fail-loud discipline
+    /// [`DockerMissing`](Self::DockerMissing) applies: a corpus campaign that quietly
+    /// reported zero entries because it had no network would be byte-identical to one in
+    /// which the whole ecosystem agreed with deacon.
+    #[error(
+        "the corpus tier requires network access and a working `git`, and neither could be \
+         established: {cause}. Remedy: run this tier in the network-backed lane (or provide a \
+         working `git` via DEACON_DISCOVERY_GIT) — a corpus campaign with no network reports \
+         the same thing as one in which every entry agreed."
+    )]
+    NetworkUnavailable { cause: String },
+
     /// The runner requires Node (for the pinned oracle) but it is unavailable.
     #[error(
         "Node is unavailable for the conformance runner: {cause}. Remedy: install the Node \
@@ -272,10 +290,102 @@ pub enum HarnessError {
          budget and report as an unattributable lane failure."
     )]
     CaseTimeout { case: String, bound: Duration },
+
+    // --- Exploratory parity discovery (025-exploratory-parity-discovery, T005) ------
+    // Every variant below is a MACHINERY failure, never a finding. That distinction is
+    // the whole exit-status contract (contracts/discovery-cli.md): a campaign that finds
+    // forty differences exits `0`; a campaign that could not verify its oracle exits
+    // non-zero. Anything that would make the status depend on WHAT was found is a defect,
+    // because a stochastic gate makes green non-reproducible.
+    /// A campaign that needs the pinned reference could not verify it (FR-003).
+    ///
+    /// Deliberately DISTINCT from [`OracleMissing`](Self::OracleMissing) /
+    /// [`OracleVersionMismatch`](Self::OracleVersionMismatch), which name *which* check
+    /// failed: this names the CONSEQUENCE for the campaign — no findings were produced
+    /// and none may be attributed to this run. Collapsing the two would let "we compared
+    /// against an unverified reference" read as "we compared and found nothing", which is
+    /// the exact confusion a discovery run must never create.
+    #[error(
+        "discovery campaign cannot run: the pinned oracle is unverified ({cause}). Remedy: \
+         install the pinned `@devcontainers/cli` version — a campaign never reports findings \
+         against an unverified reference, and never silently skips."
+    )]
+    OracleUnverified { cause: String },
+
+    /// One candidate exceeded its per-candidate bound and was discarded and counted
+    /// (60 s hermetic / 5 min container-backed).
+    ///
+    /// Discarding rather than failing the campaign is deliberate: one pathological
+    /// generated input must not consume the tier's whole budget, and the count is
+    /// reported so a *rising* discard rate is visible rather than silent.
+    #[error(
+        "discovery candidate `{candidate}` exceeded its {bound:?} bound and was discarded. \
+         Remedy: none required — the candidate is counted in the campaign outcome; \
+         investigate only if the discard rate rises."
+    )]
+    CandidateTimeout { candidate: String, bound: Duration },
+
+    /// Minimization ran out of shrink steps before reaching a minimal input (FR-022).
+    ///
+    /// The best reduction found is still emitted, with `isMinimal: false` and this
+    /// reason — never silently presented as minimal. A reviewer who believes an input is
+    /// minimal when it is not will look for the defect in the wrong place.
+    #[error(
+        "shrink budget exhausted for finding `{finding}` after {steps} step(s); the best \
+         reduction is reported with `isMinimal: false`. Remedy: raise the per-finding shrink \
+         budget if the input warrants it — a partially reduced input is never presented as \
+         minimal."
+    )]
+    ShrinkBudgetExhausted { finding: String, steps: usize },
+
+    /// A fetched corpus entry's content digest disagrees with the recorded one (FR-051).
+    ///
+    /// Fails that entry loudly rather than comparing against unexpected content: an
+    /// unverified fetch means comparing against content nobody checked, and "expected to
+    /// be stable" is not "verified".
+    #[error(
+        "corpus entry `{entry}` content digest mismatch: recorded {expected}, fetched {actual}. \
+         Remedy: investigate the upstream change and re-pin the entry deliberately — never \
+         compare against content that does not match its recorded digest."
+    )]
+    CorpusDigestMismatch {
+        entry: String,
+        expected: String,
+        actual: String,
+    },
+
+    /// A corpus entry could not be fetched (FR-052).
+    ///
+    /// Reported as unreachable, NOT as "ran and found nothing" — the two are different
+    /// facts about the ecosystem and collapsing them makes the canary useless.
+    #[error(
+        "corpus entry `{entry}` is unreachable: {cause}. Remedy: check the network lane and the \
+         pinned repository/commit — an unreachable entry is reported as unreachable, never as \
+         an entry that ran and found nothing."
+    )]
+    CorpusUnreachable { entry: String, cause: String },
+
+    /// A declared metamorphic relation could not be evaluated (025 US6, FR-048).
+    ///
+    /// The **anti-inert** guarantee, and the reason this is an error rather than a skipped
+    /// relation: a relation the harness cannot apply reports nothing, and "reported
+    /// nothing" is byte-identical to "held". SC-011 requires zero inert relations, so a
+    /// relation with no transformation implementation, an inapplicable base fixture, or an
+    /// unparseable configuration must fail the run **naming the relation**, never quietly
+    /// contribute a pass.
+    #[error(
+        "metamorphic relation `{relation}` cannot be evaluated: {cause}. Remedy: implement or \
+         repair its transformation — a relation that cannot be applied reports nothing, and \
+         reporting nothing is indistinguishable from holding (SC-011)."
+    )]
+    RelationUnevaluable { relation: String, cause: String },
 }
 
 /// Environment override for the report/artifact root (see [`report_root`]).
 pub const REPORT_DIR_ENV: &str = "DEACON_PARITY_REPORT_DIR";
+
+/// Environment override for the discovery artifact root (see [`discovery_report_root`]).
+pub const DISCOVERY_REPORT_DIR_ENV: &str = "DEACON_DISCOVERY_REPORT_DIR";
 
 /// Absolute path to the workspace root, derived from this crate's
 /// `CARGO_MANIFEST_DIR` (`<root>/crates/parity-harness`) so artifact paths are
@@ -305,6 +415,21 @@ pub fn report_root() -> PathBuf {
         return PathBuf::from(dir);
     }
     workspace_root().join("target").join("parity")
+}
+
+/// The discovery artifact root: `DEACON_DISCOVERY_REPORT_DIR` when set, else
+/// `<workspace_root>/target/discovery` (025-exploratory-parity-discovery).
+///
+/// Separate from [`report_root`] rather than a subdirectory of it, because the two roots
+/// answer to different rules. `target/parity` holds the evidence of a **gating** lane;
+/// `target/discovery` holds the output of a lane that gates nothing and whose contents are
+/// unreviewed candidates. Writing the second into the first would make a discovery artifact
+/// look, to anyone reading `target/parity`, like part of a certification run.
+pub fn discovery_report_root() -> PathBuf {
+    if let Some(dir) = std::env::var_os(DISCOVERY_REPORT_DIR_ENV) {
+        return PathBuf::from(dir);
+    }
+    workspace_root().join("target").join("discovery")
 }
 
 /// Process-unique suffix source for atomic temp files.
@@ -358,6 +483,24 @@ mod tests {
         // set_var is unsafe); we assert the default shape separately.
         let default = report_root();
         assert!(default.ends_with("target/parity") || std::env::var_os(REPORT_DIR_ENV).is_some());
+    }
+
+    #[test]
+    fn the_discovery_root_is_not_inside_the_parity_root() {
+        // `target/parity` holds the evidence of a gating lane; `target/discovery` holds
+        // unreviewed candidates from a lane that gates nothing. Nesting the second inside
+        // the first would make a discovery artifact read, to anyone looking at
+        // `target/parity`, as part of a certification run.
+        let discovery = discovery_report_root();
+        assert!(
+            discovery.ends_with("target/discovery")
+                || std::env::var_os(DISCOVERY_REPORT_DIR_ENV).is_some()
+        );
+        if std::env::var_os(REPORT_DIR_ENV).is_none()
+            && std::env::var_os(DISCOVERY_REPORT_DIR_ENV).is_none()
+        {
+            assert!(!discovery.starts_with(report_root()));
+        }
     }
 
     #[tokio::test]

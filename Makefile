@@ -51,6 +51,9 @@ help: ## Show this help
 	@echo "Testing - Other:"
 	@grep -E '^(test-non-smoke|test-smoke|test-parity|test-parity-all|test-parity-regressions|parity):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
+	@echo "Testing - Exploratory discovery (never gates):"
+	@grep -E '^(test-discovery|test-discovery-proof|test-discovery-check):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@echo ""
 	@echo "Code Quality:"
 	@grep -E '^(fmt|clippy|coverage):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
@@ -337,6 +340,50 @@ test-parity-regressions: ## Prove every observable channel can fail (injected-re
 .PHONY: test-parity-all
 test-parity-all: ## Alias for test-parity (live parity certification)
 	$(MAKE) test-parity
+
+.PHONY: test-discovery
+test-discovery: install-nextest ## Run exploratory discovery campaigns, then render the findings queue
+	@set -euo pipefail; \
+	./scripts/nextest/assert-installed.sh; \
+	# 025-exploratory-parity-discovery (contracts/discovery-cli.md § Make targets). \
+	# Step 1 runs every registered discovery binary under the dedicated `discovery` \
+	# profile, whose default-filter is an EXPLICIT binary(=…) allow-list — never a \
+	# `discovery_*` glob, which would capture the hermetic guard. Step 2 renders \
+	# target/discovery/queue.{json,md}. \
+	# \
+	# This lane GATES NOTHING. A campaign that finds forty differences exits 0; only a \
+	# machinery failure is non-zero. It is a THIRD lane alongside the PR lanes and live \
+	# parity, and a red run here never blocks a release. \
+	# \
+	# Needs the pinned oracle for every tier except `metamorphic`, Docker for the \
+	# container-backed tier, and network for the corpus tier; each fails loud on a \
+	# missing prerequisite, never skips. \
+	cargo nextest run --profile discovery; \
+	cargo run -p deacon-conformance -- discovery report
+
+.PHONY: test-discovery-proof
+test-discovery-proof: ## Prove the discovery pipeline can surface an injected difference end to end
+	@set -euo pipefail; \
+	# 025-exploratory-parity-discovery (FR-042a): injects a known difference at the \
+	# SEALED evidence-source boundary and requires it to traverse generation → \
+	# comparison → minimization → candidate → classification → promotable. \
+	# \
+	# This is the ONE discovery command whose status depends on an outcome — and it is \
+	# not a finding-dependent status: it asserts a property of the MACHINERY, so \
+	# non-zero means the pipeline is broken, which is exactly the thing that should fail \
+	# a lane. An injection that never landed exits 1 as `InjectionInapplicable` rather \
+	# than being counted as "found nothing": a mis-authored proof must never masquerade \
+	# as a working pipeline. \
+	cargo run -p parity-harness --bin discovery-proof
+
+.PHONY: test-discovery-check
+test-discovery-check: ## Validate the discovery data root (hermetic; also runs in the fast lane)
+	@set -euo pipefail; \
+	# 025-exploratory-parity-discovery: the D1–D5 violation classes over \
+	# conformance/discovery/. Hermetic — no Docker, no network, no oracle — so it is \
+	# safe anywhere and is also asserted by the `discovery_hermetic` guard in the \
+	# default/dev-fast lanes. Read-only by construction: `check` never writes. \
+	cargo run -p deacon-conformance -- discovery check
 
 .PHONY: test-podman
 test-podman: ## Run Podman runtime tests via Makefile

@@ -31,6 +31,8 @@ use deacon_conformance::coverage_report::{build_coverage_reports, write_coverage
 use deacon_conformance::diff::{
     diff, render_json as render_diff_json, render_md as render_diff_md,
 };
+use deacon_conformance::discovery::queue::{self, DiscoveryData};
+use deacon_conformance::discovery::report as discovery_report_mod;
 use deacon_conformance::inventory::{
     InventoryDrift, compare, generate_inventory, render, write_inventory,
 };
@@ -135,6 +137,84 @@ enum Command {
     Coverage {
         #[command(subcommand)]
         command: CoverageCommand,
+    },
+    /// Exploratory parity discovery tooling (025-exploratory-parity-discovery,
+    /// contracts/discovery-cli.md). Hermetic: no network, no Docker, no reference oracle.
+    /// Dev-only — NEVER part of the shipped `deacon` consumer CLI.
+    ///
+    /// Operates on `conformance/discovery/`, a SIBLING of the registry that no registry
+    /// loader path reaches, so nothing here can influence `certify`.
+    Discovery {
+        #[command(subcommand)]
+        command: DiscoveryCommand,
+    },
+}
+
+/// `discovery <check|report|triage|split|scaffold>` (contracts/discovery-cli.md).
+///
+/// **The exit-status rule for every command here**: the status reflects *whether the
+/// command ran*, never *what it found*. A queue holding fifty untriaged findings still
+/// exits `0` from `report`. Any command whose status depended on its findings would
+/// become a gate the moment someone wired it into CI — and a stochastic gate makes green
+/// non-reproducible. `check` is the one exception, and it is a *structural* verdict on
+/// the records, not a verdict on what was discovered.
+#[derive(Debug, Subcommand)]
+enum DiscoveryCommand {
+    /// Validate the discovery data root (violation classes D1–D5). Read-only by
+    /// construction. Reports ALL violations in one pass, matching `validate`.
+    Check {
+        /// Emit a single JSON document (`{ "ok", "violations" }`) on stdout instead of
+        /// one violation per line; logs still go to stderr.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Render the findings queue and campaign history to `target/discovery/queue.{json,md}`
+    /// (git-ignored, byte-stable). **Never gates**: the exit status reflects only whether
+    /// the artifacts were produced.
+    Report {
+        /// Directory to write `queue.json` and `queue.md` into. Defaults to
+        /// `<workspace>/target/discovery/`.
+        #[arg(long, value_name = "DIR")]
+        out_dir: Option<PathBuf>,
+    },
+    /// Record a reviewer's classification. The ONLY writer of `classification`.
+    Triage {
+        /// The finding to classify (`fnd-<hash8>`).
+        #[arg(value_name = "FND-ID")]
+        finding: String,
+        /// One of the six closed classifications.
+        #[arg(long, value_name = "CLASSIFICATION")]
+        classification: String,
+        /// Reviewer prose recorded alongside the classification.
+        #[arg(long, value_name = "TEXT")]
+        notes: Option<String>,
+    },
+    /// Split a signature-merged finding whose witnesses turn out to have different
+    /// causes (FR-032). The parent becomes an inert ancestor.
+    Split {
+        /// The finding to split (`fnd-<hash8>`).
+        #[arg(value_name = "FND-ID")]
+        finding: String,
+    },
+    /// Emit a skeleton behavior + case + fixture layout for promoting a finding, to
+    /// **stdout only**, with `UNREVIEWED` sentinels the registry loader rejects.
+    ///
+    /// Stdout-only is the same discipline as `inventory scaffold` / `clause scaffold`:
+    /// generation never writes a hand-authored file. Promotion is a human editing the
+    /// registry with this output as a starting point, which is what makes FR-036 hold —
+    /// there is no code path from a finding to a registry write.
+    Scaffold {
+        /// The finding to scaffold a promotion for (`fnd-<hash8>`).
+        #[arg(value_name = "FND-ID")]
+        finding: String,
+        /// Scaffold a **tolerance** instead of a promotion: a scoped `wvr-` waiver
+        /// (rationale + `expires`) plus the `allowedDifferences` entry that references
+        /// it (FR-041). Still stdout only.
+        ///
+        /// A blanket or unscoped tolerance is refused rather than emitted — a bare-channel
+        /// `observablePath` is a global ignore list wearing a waiver id.
+        #[arg(long)]
+        tolerate: bool,
     },
 }
 
@@ -484,7 +564,503 @@ fn run(cli: Cli) -> i32 {
             }
             CoverageCommand::Scaffold {} => coverage_scaffold(&registry_dir, &today),
         },
+        Command::Discovery { command } => match command {
+            DiscoveryCommand::Check { json } => discovery_check(&registry_dir, json),
+            DiscoveryCommand::Report { out_dir } => discovery_report(&registry_dir, out_dir),
+            DiscoveryCommand::Triage {
+                finding,
+                classification,
+                notes,
+            } => discovery_triage(&registry_dir, &finding, &classification, notes.as_deref()),
+            DiscoveryCommand::Split { finding } => discovery_split(&registry_dir, &finding),
+            DiscoveryCommand::Scaffold { finding, tolerate } => {
+                discovery_scaffold(&registry_dir, &finding, tolerate)
+            }
+        },
     }
+}
+
+// ---------------------------------------------------------------------------
+// discovery (025-exploratory-parity-discovery)
+// ---------------------------------------------------------------------------
+
+/// Load the registry a `discovery` subcommand needs to resolve the queue's outward
+/// references (declared channels, recorded revisions, and — from US5 — cases).
+///
+/// The direction is one-way and load-bearing: discovery reads the registry, the registry
+/// never reads discovery. That asymmetry is what makes the queue unreachable from
+/// `certify` (research D6).
+fn load_for_discovery(registry_dir: &Path) -> Result<Registry, i32> {
+    // Deliberately NOT `load_for_coverage`: its diagnostic ends "…before generating
+    // obligations", which names the wrong subject entirely when a `discovery` subcommand
+    // is what failed. A message that misidentifies what the operator was doing sends them
+    // to the wrong file.
+    match Registry::load(registry_dir) {
+        Ok(registry) => Ok(registry),
+        Err(LoadError::Schema(errors)) => {
+            for violation in deacon_conformance::validate::schema_violations(&errors) {
+                eprintln!(
+                    "{} {}: {}",
+                    violation.code, violation.record, violation.message
+                );
+            }
+            eprintln!(
+                "error: {} is schema-invalid; discovery resolves its channels and pins \
+                 against the registry, so fix the registry records first",
+                registry_dir.display()
+            );
+            Err(1)
+        }
+        Err(other) => {
+            eprintln!(
+                "error: cannot read registry {}: {other}",
+                registry_dir.display()
+            );
+            Err(2)
+        }
+    }
+}
+
+/// A discovery data-root load failure, rendered per output mode by the caller.
+///
+/// Carrying the failure rather than printing it is what lets `--json` keep its contract:
+/// the violation report belongs on **stdout** as a single JSON document, and a helper that
+/// printed to stderr would leave `… --json | jq .ok` with a parse error instead of `false`
+/// exactly when something is wrong.
+struct DiscoveryLoadFailure {
+    /// One `(class, record, message)` triple per failing file.
+    violations: Vec<(&'static str, String, String)>,
+    /// The process exit code this failure maps to.
+    code: i32,
+}
+
+/// Load the discovery data root, reporting located schema failures as **D1**.
+///
+/// A malformed file is D1 rather than a bare load error because that is what it is: the
+/// records are the queue, and a record that does not parse is a malformed record.
+fn load_discovery_data(discovery_dir: &Path) -> Result<DiscoveryData, DiscoveryLoadFailure> {
+    match DiscoveryData::load(discovery_dir) {
+        Ok(data) => Ok(data),
+        Err(LoadError::Schema(errors)) => Err(DiscoveryLoadFailure {
+            violations: errors
+                .iter()
+                .map(|e| ("D1", e.file.display().to_string(), e.message.clone()))
+                .collect(),
+            code: 1,
+        }),
+        Err(other) => Err(DiscoveryLoadFailure {
+            violations: vec![(
+                "D1",
+                discovery_dir.display().to_string(),
+                format!("cannot read discovery data root: {other}"),
+            )],
+            code: 2,
+        }),
+    }
+}
+
+/// Print a load failure as plain text on stderr and return its exit code. Used by every
+/// discovery subcommand except `check --json`, which renders it as JSON on stdout.
+fn report_discovery_load_failure(failure: &DiscoveryLoadFailure, discovery_dir: &Path) -> i32 {
+    for (class, record, message) in &failure.violations {
+        eprintln!("{class} {record}: {message}");
+    }
+    eprintln!(
+        "error: {} could not be loaded; the discovery data root is strict JSON and rejects \
+         unknown fields, a missing `records` array, and an unsupported `schemaVersion`",
+        discovery_dir.display()
+    );
+    failure.code
+}
+
+/// `discovery check` (contracts/discovery-cli.md): validate the discovery data root.
+///
+/// Read-only by construction — it never writes. Exit `0` when there are no D-class
+/// violations, `1` when there are (all reported in one pass), `2` on an unreadable root
+/// (the usage/IO code every other command in this binary uses).
+///
+/// Under `--json` the violation report is a single JSON document on **stdout** in every
+/// failing case, including the case where the data root itself would not load — a
+/// consumer piping to `jq` must get `{"ok": false, …}`, never an empty stream.
+fn discovery_check(registry_dir: &Path, json: bool) -> i32 {
+    let render = |violations: &[(&str, String, String)], ok: bool| -> Result<(), i32> {
+        if json {
+            let document = serde_json::json!({
+                "ok": ok,
+                "violations": violations
+                    .iter()
+                    .map(|(class, record, message)| serde_json::json!({
+                        "class": class,
+                        "record": record,
+                        "message": message,
+                    }))
+                    .collect::<Vec<_>>(),
+            });
+            match serde_json::to_string_pretty(&document) {
+                Ok(text) => println!("{text}"),
+                Err(e) => {
+                    eprintln!("error: could not render the check result: {e}");
+                    return Err(2);
+                }
+            }
+        } else {
+            for (class, record, message) in violations {
+                println!("{class} {record}: {message}");
+            }
+        }
+        Ok(())
+    };
+
+    let registry = match load_for_discovery(registry_dir) {
+        Ok(registry) => registry,
+        Err(code) => {
+            // The registry failure is already reported as located `V…`/`SCHEMA` lines on
+            // stderr by `load_for_discovery`; emit a well-formed `ok: false` document so
+            // the JSON contract holds even here.
+            if let Err(render_code) = render(&[], false) {
+                return render_code;
+            }
+            return code;
+        }
+    };
+    let discovery_dir = deacon_conformance::discovery_dir_for(registry_dir);
+    let data = match load_discovery_data(&discovery_dir) {
+        Ok(data) => data,
+        Err(failure) => {
+            let violations: Vec<(&str, String, String)> = failure
+                .violations
+                .iter()
+                .map(|(c, r, m)| (*c, r.clone(), m.clone()))
+                .collect();
+            if let Err(render_code) = render(&violations, false) {
+                return render_code;
+            }
+            if !json {
+                // Text mode already printed the violations above; add the remedy line.
+                eprintln!(
+                    "error: {} could not be loaded; the discovery data root is strict JSON \
+                     and rejects unknown fields, a missing `records` array, and an \
+                     unsupported `schemaVersion`",
+                    discovery_dir.display()
+                );
+            }
+            return failure.code;
+        }
+    };
+
+    let checked = queue::check(&data, &queue::RegistryView::from_registry(&registry));
+    let violations: Vec<(&str, String, String)> = checked
+        .iter()
+        .map(|v| (v.class(), v.record().to_string(), v.to_string()))
+        .collect();
+    if let Err(code) = render(&violations, violations.is_empty()) {
+        return code;
+    }
+    let violations = checked;
+
+    if violations.is_empty() {
+        eprintln!(
+            // The corpus count is named alongside the queue's: a run that validated 33
+            // pinned entries and reported only "0 findings, 0 campaigns" would understate
+            // what it checked, and the D4 immutable-reference clause is the one thing here
+            // that must visibly run on every pull request.
+            "ok: {} validates clean ({} finding(s), {} campaign(s), {} corpus entr(ies))",
+            discovery_dir.display(),
+            data.findings.len(),
+            data.campaigns.len(),
+            data.corpus.len()
+        );
+        0
+    } else {
+        eprintln!(
+            "error: {} has {} discovery violation(s)",
+            discovery_dir.display(),
+            violations.len()
+        );
+        1
+    }
+}
+
+/// `discovery report` (contracts/discovery-cli.md): render the queue and the campaign
+/// history to `target/discovery/queue.{json,md}`.
+///
+/// **Never gates.** The exit status reflects only whether the artifacts were produced:
+/// `0` when written, `1` when they could not be (including when the inputs could not be
+/// read, since without them there is nothing to write). A queue holding fifty untriaged
+/// findings still exits `0`.
+fn discovery_report(registry_dir: &Path, out_dir: Option<PathBuf>) -> i32 {
+    let registry = match load_for_discovery(registry_dir) {
+        Ok(registry) => registry,
+        // `report` has only two statuses in the contract, so an unreadable input is a
+        // "could not write" — there is nothing to write from.
+        Err(_) => return 1,
+    };
+    let discovery_dir = deacon_conformance::discovery_dir_for(registry_dir);
+    let data = match load_discovery_data(&discovery_dir) {
+        Ok(data) => data,
+        Err(failure) => {
+            report_discovery_load_failure(&failure, &discovery_dir);
+            // The contract gives `report` exactly two statuses, so every failure — an
+            // unreadable root included — collapses to "could not write". Passing the
+            // loader's `2` through would invent a third status the contract does not have.
+            return 1;
+        }
+    };
+
+    let pins = discovery_report_mod::CurrentPins::from_registry(&registry);
+    // The behavior index is what lets promoted findings be *reported* grouped under the
+    // behavior their case names (FR-031) — a reviewed mapping, never one the report
+    // invents, because a finding itself never names a behavior (FR-025).
+    let behaviors = discovery_report_mod::BehaviorIndex::from_registry(&registry);
+    let report = discovery_report_mod::build_queue_report_with_behaviors(&data, &pins, &behaviors);
+    let dir = out_dir.unwrap_or_else(|| workspace_root().join("target").join("discovery"));
+
+    match discovery_report_mod::write_queue_report(&dir, &report) {
+        Ok(written) => {
+            for path in &written {
+                println!("{}", path.display());
+            }
+            eprintln!(
+                "wrote {} discovery artifact(s) to {} ({} finding(s): {} untriaged, {} triaged, \
+                 {} split, {} promoted, {} no-longer-reproducing, {} pin-stale; {} campaign(s), \
+                 {} signature(s) suppressed)",
+                written.len(),
+                dir.display(),
+                report.total,
+                report.untriaged.len(),
+                report.triaged.len(),
+                report.split.len(),
+                report.promoted.len(),
+                report.no_longer_reproducing.len(),
+                report.pin_stale.len(),
+                report.campaigns.len(),
+                report.signatures_suppressed,
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!(
+                "error: could not write the discovery report to {}: {e}",
+                dir.display()
+            );
+            1
+        }
+    }
+}
+
+/// `discovery triage` (contracts/discovery-cli.md): record a reviewer's classification.
+///
+/// The **only** writer of `classification`. Interactive-equivalent, never automated: no
+/// campaign invokes it, which is what keeps promotion a human act.
+///
+/// Exit `0` when recorded; `1` on an unknown finding, an invalid classification, or a
+/// finding already in a terminal state.
+fn discovery_triage(
+    registry_dir: &Path,
+    finding_id: &str,
+    classification: &str,
+    notes: Option<&str>,
+) -> i32 {
+    let Some(classification) = queue::Classification::parse(classification) else {
+        let names: Vec<&str> = queue::Classification::all()
+            .iter()
+            .map(|c| c.as_str())
+            .collect();
+        eprintln!(
+            "error: `{classification}` is not a classification; expected one of: {}",
+            names.join(", ")
+        );
+        return 1;
+    };
+
+    let discovery_dir = deacon_conformance::discovery_dir_for(registry_dir);
+    let mut data = match load_discovery_data(&discovery_dir) {
+        Ok(data) => data,
+        Err(failure) => return report_discovery_load_failure(&failure, &discovery_dir),
+    };
+
+    let Some(finding) = data.finding_mut(finding_id) else {
+        eprintln!(
+            "error: no finding `{finding_id}` in {}",
+            discovery_dir.display()
+        );
+        return 1;
+    };
+
+    // The state machine owns which states may be classified and which advance
+    // (`crates/conformance/src/discovery/queue.rs`, T069). Re-deciding that here would put
+    // the lifecycle in two places, and the copy the checker does not read is the one that
+    // drifts.
+    let previous_state = finding.state;
+    let new_state = match finding.triage(classification, notes) {
+        Ok(state) => state,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+
+    match queue::write_findings(&discovery_dir, &data.findings) {
+        Ok(()) => {
+            eprintln!(
+                "recorded `{}` on {finding_id} in {}",
+                classification.as_str(),
+                queue::findings_path(&discovery_dir).display()
+            );
+            if previous_state == new_state {
+                eprintln!(
+                    "note: {finding_id} stays in state `{}` — only a campaign that \
+                     reproduces it may change that",
+                    new_state.as_str()
+                );
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("error: could not write the findings queue: {e}");
+            1
+        }
+    }
+}
+
+/// `discovery split` (contracts/discovery-cli.md): split a signature-merged finding whose
+/// witnesses turn out to have different causes (FR-032).
+///
+/// The parent becomes an inert ancestor (invariant Q10): it keeps its witnesses as
+/// historical record, stops accepting new ones (enforced by [`queue::upsert_finding`], which
+/// refuses the whole lineage, not just this record), and **surrenders its classification to
+/// its children** — a split exists precisely because one classification could not describe
+/// them all, so a parent that kept one would assert the judgement the split rejected.
+///
+/// One child per witness, each keyed to `parent ‖ its own witness` and starting untriaged.
+/// See [`queue::split_finding`] for why the finest partition is the only one derivable from
+/// what the reviewer actually said.
+///
+/// Exit `0` when the split was written; `1` on an unknown finding, a finding with fewer
+/// than two witnesses (there is nothing to split), or a finding in a state the lifecycle
+/// does not let a split leave.
+fn discovery_split(registry_dir: &Path, finding_id: &str) -> i32 {
+    let discovery_dir = deacon_conformance::discovery_dir_for(registry_dir);
+    let mut data = match load_discovery_data(&discovery_dir) {
+        Ok(data) => data,
+        Err(failure) => return report_discovery_load_failure(&failure, &discovery_dir),
+    };
+
+    let split = match queue::split_finding(&mut data.findings, finding_id) {
+        Ok(split) => split,
+        Err(e) => {
+            eprintln!("error: {e}");
+            if matches!(e, queue::TransitionError::UnknownFinding { .. }) {
+                eprintln!("       (searched {})", discovery_dir.display());
+            }
+            return 1;
+        }
+    };
+
+    match queue::write_findings(&discovery_dir, &data.findings) {
+        Ok(()) => {
+            eprintln!(
+                "split {finding_id} into {} child finding(s); it is now an inert ancestor \
+                 that keeps its witnesses as historical record, accepts no new ones, and \
+                 carries no classification of its own.",
+                split.children.len()
+            );
+            for child in &split.children {
+                eprintln!("  {child}");
+            }
+            eprintln!(
+                "Each child is untriaged: classify them separately with `discovery triage`. \
+                 The split is permanent — the deduplication rule never re-merges this \
+                 lineage, so your judgement is not reverted by the next campaign."
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("error: could not write the findings queue: {e}");
+            1
+        }
+    }
+}
+
+/// `discovery scaffold` (contracts/discovery-cli.md): emit a skeleton for promoting — or,
+/// with `--tolerate`, for *tolerating* — a finding, to **stdout only**.
+///
+/// Writes **nothing**. That is the same discipline as `inventory scaffold` /
+/// `clause scaffold`, and here it is what makes FR-036 hold: there is no code path from a
+/// finding to a registry write, so a stochastic process cannot author the record it is
+/// tested against. Every field a human must decide carries the `UNREVIEWED` sentinel the
+/// registry loader rejects, so scaffolded output cannot be committed unedited.
+///
+/// The skeletons themselves live in `deacon_conformance::discovery::promote`, not here:
+/// they are pure `Finding → JSON` transformations, and keeping them in the library is what
+/// lets the hermetic guards assert the FR-041 scoping rule without spawning a process. This
+/// function is the process boundary and nothing else — load, dispatch, render, explain.
+///
+/// Exit `0` when emitted; `1` on an unknown finding, a non-promotable classification
+/// (`normalizer-defect` / `fixture-defect`, FR-035), or a tolerance that would be blanket
+/// or unscoped (FR-041).
+fn discovery_scaffold(registry_dir: &Path, finding_id: &str, tolerate: bool) -> i32 {
+    use deacon_conformance::discovery::promote;
+
+    let discovery_dir = deacon_conformance::discovery_dir_for(registry_dir);
+    let data = match load_discovery_data(&discovery_dir) {
+        Ok(data) => data,
+        Err(failure) => return report_discovery_load_failure(&failure, &discovery_dir),
+    };
+
+    let Some(finding) = data.finding(finding_id) else {
+        eprintln!(
+            "error: no finding `{finding_id}` in {}",
+            discovery_dir.display()
+        );
+        return 1;
+    };
+
+    let document = if tolerate {
+        promote::tolerance_skeleton(finding)
+    } else {
+        promote::promotion_skeleton(finding)
+    };
+    let document = match document {
+        Ok(document) => document,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+
+    match serde_json::to_string_pretty(&document) {
+        Ok(text) => println!("{text}"),
+        Err(e) => {
+            eprintln!("error: could not render the scaffold: {e}");
+            return 2;
+        }
+    }
+
+    if tolerate {
+        eprintln!(
+            "scaffolded a TOLERANCE skeleton for {finding_id}; stdout only — nothing was \
+             written. The waiver is scoped to the observable path the difference occurs at, \
+             never to the whole channel (FR-041): a bare-channel scope is a global ignore \
+             list wearing a waiver id, and it is refused rather than emitted. Fill in \
+             `rationale`, `expires`, the behavior, and the binary/fixture the scope names, \
+             then add the `allowedDifferences` entry to the case that observes this path. \
+             Every `{SCAFFOLD_SENTINEL}` field is rejected by the registry loader, so this \
+             cannot be committed unedited. Tolerating records that the difference is \
+             ACCEPTABLE — the waiver self-invalidates as stale the moment it stops \
+             reproducing, so this is not a way to make a difference go away."
+        );
+    } else {
+        eprintln!(
+            "scaffolded a promotion skeleton for {finding_id}; stdout only — nothing was written. \
+             Every `{SCAFFOLD_SENTINEL}` field carries the sentinel the registry loader rejects. \
+             Author the behavior's three axes by hand: a finding tells you what DIFFERS, not \
+             whether deacon is wrong, the reference is wrong, or the spec is silent — that is the \
+             review. Then copy the fixture, author the case with a FULL `scenarioContext` (V26), \
+             and flip the `odp-cmb-*` dispositions it covers off `gap` in the same commit."
+        );
+    }
+    0
 }
 
 // ---------------------------------------------------------------------------

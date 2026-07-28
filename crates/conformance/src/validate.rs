@@ -43,7 +43,11 @@
 //!   on a `non-testable` / `not-applicable` record;
 //! - **V14** provenance breakage: schemas manifest fingerprint mismatch, an
 //!   inventory `revision` that does not name the registry's `schema`-kind revision,
-//!   or a committed inventory that no longer byte-matches a fresh regeneration.
+//!   or a committed inventory that no longer byte-matches a fresh regeneration;
+//! - **V31** metamorphic-relation integrity: a missing or unresolvable `ground`, an
+//!   empty/undeclared `channels` entry, a duplicated `transformation`, or a filler
+//!   `rationale` (025-exploratory-parity-discovery, US6);
+//! - **V32** a mandated metamorphic relation family (FR-044) with no record.
 //!
 //! Pure sync file IO only (V1 executable existence, V7 pin file); no Unix-only APIs
 //! and no path-string parsing, so the crate compiles and validates identically on
@@ -56,6 +60,7 @@ use serde::Serialize;
 
 use crate::baseline::UnitCategory;
 use crate::clause::{generate_clauses, render as render_clauses};
+use crate::discovery::metamorphic::MANDATED_RELATIONS;
 use crate::inventory::{generate_inventory, render};
 use crate::load::{
     LoadError, Registry, SchemaError, load_clause_inventory, load_inventory, load_spec_manifest,
@@ -1652,6 +1657,10 @@ pub fn run(registry: &Registry, today: &str, repo_root: &Path) -> Vec<Violation>
     // V30: injected-regression coverage (024, US6). Same scoping as V27–V29 — a registry
     // that has not opted into the scenario model has not opted into this regime either.
     out.extend(check_regressions(registry));
+    // V31/V32: metamorphic relation integrity + mandated family coverage (025, US6).
+    // Registry-only, so `report` and `certify` see it too: a relation whose ground stopped
+    // resolving must not survive until someone happens to run `validate`.
+    out.extend(check_metamorphic(registry));
     sort_violations(&mut out);
     out
 }
@@ -1877,6 +1886,16 @@ impl<'a> Checker<'a> {
             r.regressions
                 .iter()
                 .map(|x| (x.id.as_str(), RecordType::Regression)),
+        );
+        // Metamorphic relations are hand-authored registry records too (025 US6) — the one
+        // piece of discovery data that lives inside the registry, so it obeys the same
+        // grammar, prefix↔type agreement, and cross-namespace uniqueness. The findings
+        // queue is deliberately absent: it is a sibling of the registry root, and this
+        // loader has no path that reaches it.
+        out.extend(
+            r.metamorphic
+                .iter()
+                .map(|x| (x.id.as_str(), RecordType::MetamorphicRelation)),
         );
         out
     }
@@ -3865,6 +3884,220 @@ fn kind_target_mismatch(record: &RegressionRecord) -> Option<String> {
     ))
 }
 
+// ---------------------------------------------------------------------------
+// V31 / V32 — metamorphic relation catalogue (025-exploratory-parity-discovery, US6)
+// ---------------------------------------------------------------------------
+
+/// **V31 — relation integrity** and **V32 — mandated family coverage**
+/// (025 US6; data-model.md § 7, contracts/metamorphic-catalogue.md).
+///
+/// | Class | What it refuses | Why |
+/// |---|---|---|
+/// | **V31** | a missing / malformed / unresolvable `ground` | without it a relation records an author's intuition about what *ought* to be irrelevant, and an ungrounded invariance relation that happens to be wrong does not fail — it **passes**, silently, asserting something the specification never said (FR-045) |
+/// | **V31** | an empty `channels`, or an entry not in `channels.json` | a relation asserting over no channel, or over one nothing observes, can never fail |
+/// | **V31** | a duplicate `transformation` | two records claiming the same transformation are one relation asserted twice, and a failure could not be attributed to either |
+/// | **V31** | a filler `rationale` | the ground is only checkable if the argument connecting it to the assertion is written down |
+/// | **V32** | a mandated family (FR-044) with no record | a family may not be dropped quietly; the six invariance families and the one sensitivity family are the declared floor |
+///
+/// An **unknown `effect`** is listed under V31 by the contract but is refused strictly
+/// earlier, at **load**, by the closed [`RelationEffect`] enum — same outcome, better
+/// diagnosis, and no record with an unrecognised effect can reach evaluation where
+/// "unknown" would have to be resolved into one of the two answers by a default.
+///
+/// ## How a ground resolves without the clause inventory
+///
+/// A `bhv-` ground resolves against `behaviors/*.json`. A `clu-` ground resolves against
+/// the registry's own **clause classifications**: V12 already requires every clause unit
+/// to carry exactly one `clc-` record, so "named by a classification" and "is a clause
+/// unit" are the same set, and V11 separately reports a classification naming a clause
+/// that no longer exists. Resolving this way keeps V31 a pure function of the loaded
+/// registry — so `run`, and therefore `report` and `certify`, all see it — instead of
+/// scoping it to the one entry point that happens to load the committed inventory.
+///
+/// ## Scope
+///
+/// Silent for a registry that declares **neither** a metamorphic catalogue nor a scenario
+/// model: a fixture predating this feature has not opted into the regime, and reporting
+/// seven missing families for each one would say nothing true about them. A registry that
+/// declares **either** is checked — in particular, deleting `metamorphic.json` from the
+/// real registry is V32 seven times over, not a quiet pass.
+pub fn check_metamorphic(registry: &Registry) -> Vec<Violation> {
+    let mut out = Vec::new();
+    if registry.metamorphic.is_empty() && registry.scenario.is_empty() {
+        return out;
+    }
+
+    let behaviors: HashSet<&str> = registry.behaviors.iter().map(|b| b.id.as_str()).collect();
+    let clauses: HashSet<&str> = registry
+        .clause_classifications
+        .iter()
+        .filter_map(|c| c.clause.as_deref())
+        .collect();
+    let channels: HashSet<&str> = registry.channels.iter().map(|c| c.id.as_str()).collect();
+
+    // -- V31: per-record integrity -----------------------------------------
+    let mut transformations: BTreeMap<String, &str> = BTreeMap::new();
+    for relation in &registry.metamorphic {
+        let ground = relation.ground.trim();
+        if ground.is_empty() {
+            out.push(Violation::new(
+                "V31",
+                &relation.id,
+                "names no `ground`. Every relation must cite a normative clause (`clu-`) or a \
+                 recorded behavior (`bhv-`): without one the relation asserts an intuition \
+                 about what ought to be irrelevant, and an ungrounded invariance relation \
+                 that happens to be wrong does not fail — it passes (FR-045).",
+            ));
+        } else {
+            match parse_id(ground) {
+                Ok(RecordType::Behavior) if !behaviors.contains(ground) => {
+                    out.push(Violation::new(
+                        "V31",
+                        &relation.id,
+                        format!(
+                            "`ground` {ground:?} names no behavior in the registry — a ground \
+                             that does not resolve cannot be read, so the assertion cannot be \
+                             judged"
+                        ),
+                    ))
+                }
+                Ok(RecordType::ClauseUnit) if !clauses.contains(ground) => {
+                    out.push(Violation::new(
+                        "V31",
+                        &relation.id,
+                        format!(
+                            "`ground` {ground:?} names no clause unit in the committed clause \
+                             inventory (no `clc-` record classifies it) — a ground that does \
+                             not resolve cannot be read, so the assertion cannot be judged"
+                        ),
+                    ))
+                }
+                Ok(RecordType::Behavior) | Ok(RecordType::ClauseUnit) => {}
+                Ok(other) => out.push(Violation::new(
+                    "V31",
+                    &relation.id,
+                    format!(
+                        "`ground` {ground:?} is a {} record; a relation may only be grounded \
+                         in a normative clause (`clu-`) or a recorded behavior (`bhv-`) \
+                         (FR-045)",
+                        record_type_name(other)
+                    ),
+                )),
+                Err(err) => out.push(Violation::new(
+                    "V31",
+                    &relation.id,
+                    format!("`ground` {ground:?} is not a well-formed record id: {err}"),
+                )),
+            }
+        }
+
+        if relation.channels.is_empty() {
+            out.push(Violation::new(
+                "V31",
+                &relation.id,
+                "declares no `channels`. A relation that asserts over no observable channel \
+                 observes nothing, so it can never fail — which is indistinguishable from a \
+                 relation that always holds.",
+            ));
+        }
+        for channel in &relation.channels {
+            if !channels.contains(channel.as_str()) {
+                out.push(Violation::new(
+                    "V31",
+                    &relation.id,
+                    format!(
+                        "asserts over channel {channel:?}, which is not declared in \
+                         `channels.json` — nothing observes it, so the assertion could never \
+                         be evaluated"
+                    ),
+                ));
+            }
+        }
+
+        let key = normalize_transformation(&relation.transformation);
+        if key.is_empty() {
+            out.push(Violation::new(
+                "V31",
+                &relation.id,
+                "declares an empty `transformation`. The transformation is what a reviewer \
+                 reproduces and what a failure names; an unnamed one makes the failure \
+                 unattributable.",
+            ));
+        } else if let Some(first) = transformations.insert(key, relation.id.as_str()) {
+            out.push(Violation::new(
+                "V31",
+                &relation.id,
+                format!(
+                    "declares the same `transformation` as `{first}`. Two records claiming one \
+                     transformation are one relation asserted twice, and a failure could not \
+                     be attributed to either."
+                ),
+            ));
+        }
+
+        if is_filler_rationale(&relation.rationale) {
+            out.push(Violation::new(
+                "V31",
+                &relation.id,
+                format!(
+                    "`rationale` {:?} does not connect the ground to the assertion — say why \
+                     the cited clause or behavior makes this transformation irrelevant (or \
+                     significant). A ground nobody argued from is a citation, not a reason.",
+                    relation.rationale
+                ),
+            ));
+        }
+    }
+
+    // -- V32: mandated family coverage --------------------------------------
+    let declared: HashSet<&str> = registry.metamorphic.iter().map(|r| r.id.as_str()).collect();
+    for family in MANDATED_RELATIONS {
+        if !declared.contains(family) {
+            out.push(Violation::new(
+                "V32",
+                *family,
+                "mandated metamorphic relation family has no record (FR-044). The declared \
+                 set is a floor, not a suggestion: dropping a family removes an assertion \
+                 nothing else makes, and the loss is invisible because every remaining \
+                 relation still passes.",
+            ));
+        }
+    }
+
+    out
+}
+
+/// Whether a relation's `rationale` is a label rather than an argument.
+///
+/// A rationale has to carry two claims and the connective between them — *what the cited
+/// ground says*, and *why that makes this transformation irrelevant (or significant)*.
+/// Twenty words is the shortest such an argument plausibly is; below it the field is a
+/// caption on a citation, and FR-045's whole point is that a citation nobody argued from
+/// leaves an ungrounded assertion looking grounded.
+///
+/// Deliberately **not** [`is_filler_ground`], and the reason is a defect that check would
+/// have introduced here: its `VAGUE_CAPABILITY_MARKERS` list is tuned for one-line
+/// capability statements, where "later" and "unknown" are evasions. In a paragraph of
+/// prose they are ordinary words — the declaration-order rationale legitimately says
+/// "later files override earlier ones", quoting the clause it cites, and the shared list
+/// rejected it. A marker list tuned for a different field rejects correct text, which is
+/// the same reasoning that kept [`is_filler_ground`] from reusing
+/// [`names_an_exclusion_ground`].
+fn is_filler_rationale(rationale: &str) -> bool {
+    rationale.split_whitespace().count() < 20
+}
+
+/// The comparison key for a relation's `transformation` — case-folded with runs of
+/// whitespace collapsed, so two records that differ only in capitalisation or line
+/// wrapping still collide as the single relation they are.
+fn normalize_transformation(transformation: &str) -> String {
+    transformation
+        .split_whitespace()
+        .map(|w| w.to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Whether a behavior applies in a profile's context: every applicability condition
 /// must be satisfied by the profile's assignment (empty applicability = everywhere).
 /// A condition on a dimension the profile does not assign is treated as unsatisfied.
@@ -3976,6 +4209,7 @@ fn record_type_name(ty: RecordType) -> &'static str {
         RecordType::Obligation => "obligation",
         RecordType::ObligationDisposition => "obligation disposition",
         RecordType::Regression => "injected-regression",
+        RecordType::MetamorphicRelation => "metamorphic-relation",
     }
 }
 
@@ -4669,5 +4903,262 @@ mod tests {
                 .any(|v| v.code == "V16" && v.record == "case-legacy-tier"),
             "a legacy case cannot join the error-path tier, got {out:?}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // V31 / V32 — metamorphic relation catalogue (025 US6, T088/T089)
+    // -----------------------------------------------------------------------
+
+    use crate::discovery::metamorphic::{MetamorphicRelation, RelationEffect};
+
+    /// A relation record that would validate cleanly, so each test can break exactly one
+    /// thing and attribute the resulting violation to it.
+    fn relation(id: &str, ground: &str) -> MetamorphicRelation {
+        MetamorphicRelation {
+            id: id.to_string(),
+            transformation: format!("apply the {id} transformation to the configuration"),
+            effect: RelationEffect::Invariance,
+            ground: ground.to_string(),
+            channels: vec!["chan-structured-output".to_string()],
+            rationale: "The cited ground fixes the meaning the document carries, so it \
+                        already decides that this transformation rewrites the spelling and \
+                        not the value, and the resolved configuration therefore cannot \
+                        change under it."
+                .to_string(),
+        }
+    }
+
+    /// A registry carrying every mandated family (so V32 is quiet) plus the records the
+    /// grounds resolve against.
+    fn metamorphic_registry() -> Registry {
+        let mut reg = Registry::default();
+        reg.channels.push(crate::model::ObservableChannel {
+            id: "chan-structured-output".to_string(),
+            description: "structured output".to_string(),
+        });
+        reg.behaviors.push(behavior(
+            "bhv-ground",
+            SpecStatus::Conformant,
+            ReferenceStatus::Aligned,
+            Decision::FollowSpec,
+            vec![],
+        ));
+        reg.clause_classifications.push(ClauseClassification {
+            id: "clc-a1b2c3d4".to_string(),
+            clause: Some("clu-a1b2c3d4".to_string()),
+            document: None,
+            disposition: Disposition::BehaviorMapped,
+            behaviors: vec!["bhv-ground".to_string()],
+            rationale: None,
+            notes: None,
+        });
+        for family in MANDATED_RELATIONS {
+            reg.metamorphic.push(relation(family, "bhv-ground"));
+        }
+        reg
+    }
+
+    /// **T088 / SC-010** — a relation with a missing or unresolvable `ground` is V31.
+    #[test]
+    fn v31_flags_a_relation_whose_ground_is_missing_or_unresolvable() {
+        // Clean baseline: every family present, every ground resolving.
+        let clean = metamorphic_registry();
+        assert!(
+            check_metamorphic(&clean).is_empty(),
+            "the baseline catalogue must validate cleanly, got {:?}",
+            check_metamorphic(&clean)
+        );
+
+        // 1. No ground at all.
+        let mut reg = metamorphic_registry();
+        reg.metamorphic[0].ground = String::new();
+        let out = check_metamorphic(&reg);
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V31" && v.record == MANDATED_RELATIONS[0]),
+            "a groundless relation must be V31, got {out:?}"
+        );
+
+        // 2. A `bhv-` ground naming no behavior.
+        let mut reg = metamorphic_registry();
+        reg.metamorphic[1].ground = "bhv-does-not-exist".to_string();
+        let out = check_metamorphic(&reg);
+        assert!(
+            out.iter().any(|v| v.code == "V31"
+                && v.record == MANDATED_RELATIONS[1]
+                && v.message.contains("bhv-does-not-exist")),
+            "an unresolvable behavior ground must be V31 naming it, got {out:?}"
+        );
+
+        // 3. A `clu-` ground no clause classification names. The registry has exactly one
+        //    classified clause, so a second `clu-` id is genuinely absent.
+        let mut reg = metamorphic_registry();
+        reg.metamorphic[2].ground = "clu-a1b2c3d4".to_string();
+        assert!(
+            check_metamorphic(&reg).is_empty(),
+            "a classified clause resolves as a ground"
+        );
+        reg.metamorphic[2].ground = "clu-deadbeef".to_string();
+        let out = check_metamorphic(&reg);
+        assert!(
+            out.iter().any(|v| v.code == "V31"
+                && v.record == MANDATED_RELATIONS[2]
+                && v.message.contains("clu-deadbeef")),
+            "an unresolvable clause ground must be V31 naming it, got {out:?}"
+        );
+
+        // 4. A ground of the wrong KIND resolves as an id but is not a clause or a
+        //    behavior, so it cannot be read as a justification.
+        let mut reg = metamorphic_registry();
+        reg.metamorphic[3].ground = "wvr-something".to_string();
+        let out = check_metamorphic(&reg);
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V31" && v.record == MANDATED_RELATIONS[3]),
+            "only a clause or a behavior may ground a relation, got {out:?}"
+        );
+
+        // 5. A ground that is not a well-formed id at all.
+        let mut reg = metamorphic_registry();
+        reg.metamorphic[4].ground = "see the spec".to_string();
+        let out = check_metamorphic(&reg);
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V31" && v.record == MANDATED_RELATIONS[4]),
+            "a free-prose ground must be V31, got {out:?}"
+        );
+    }
+
+    /// **T089** — a mandated family (data-model.md § 7) with no record is V32.
+    #[test]
+    fn v32_flags_a_mandated_family_with_no_record() {
+        for missing in MANDATED_RELATIONS {
+            let mut reg = metamorphic_registry();
+            reg.metamorphic.retain(|r| &r.id.as_str() != missing);
+            let out = check_metamorphic(&reg);
+            assert!(
+                out.iter().any(|v| v.code == "V32" && &v.record == missing),
+                "dropping `{missing}` must be V32 naming it — the loss is otherwise \
+                 invisible, because every remaining relation still passes. Got {out:?}"
+            );
+            assert_eq!(
+                out.iter().filter(|v| v.code == "V32").count(),
+                1,
+                "exactly the dropped family is reported, got {out:?}"
+            );
+        }
+    }
+
+    /// The remaining V31 clauses: channels, transformation uniqueness, and rationale.
+    #[test]
+    fn v31_flags_undeclared_channels_duplicate_transformations_and_filler_rationale() {
+        // An empty channel set: the relation observes nothing, so it can never fail.
+        let mut reg = metamorphic_registry();
+        reg.metamorphic[0].channels.clear();
+        let out = check_metamorphic(&reg);
+        assert!(
+            out.iter().any(|v| v.code == "V31"
+                && v.record == MANDATED_RELATIONS[0]
+                && v.message.contains("no `channels`")),
+            "a channel-less relation must be V31, got {out:?}"
+        );
+
+        // A channel `channels.json` does not declare.
+        let mut reg = metamorphic_registry();
+        reg.metamorphic[0].channels = vec!["chan-invented".to_string()];
+        let out = check_metamorphic(&reg);
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V31" && v.message.contains("chan-invented")),
+            "an undeclared channel must be V31 naming it, got {out:?}"
+        );
+
+        // Two records claiming one transformation — differing only in case and wrapping,
+        // which is precisely the near-duplicate a byte comparison would miss.
+        let mut reg = metamorphic_registry();
+        reg.metamorphic[1].transformation = reg.metamorphic[0]
+            .transformation
+            .to_uppercase()
+            .replace(' ', "\n  ");
+        let out = check_metamorphic(&reg);
+        assert!(
+            out.iter().any(|v| v.code == "V31"
+                && v.record == MANDATED_RELATIONS[1]
+                && v.message.contains(MANDATED_RELATIONS[0])),
+            "a duplicated transformation must be V31 naming the first claimant, got {out:?}"
+        );
+
+        // A rationale that cites without arguing.
+        let mut reg = metamorphic_registry();
+        reg.metamorphic[2].rationale = "obviously fine".to_string();
+        let out = check_metamorphic(&reg);
+        assert!(
+            out.iter()
+                .any(|v| v.code == "V31" && v.record == MANDATED_RELATIONS[2]),
+            "a filler rationale must be V31, got {out:?}"
+        );
+    }
+
+    /// The rationale test must not inherit V26's capability-marker vocabulary. Those
+    /// words are evasions in a one-line capability statement and ordinary prose in a
+    /// paragraph — the committed declaration-order rationale quotes its own clause
+    /// ("later files override earlier ones") and the shared list rejected it.
+    #[test]
+    fn a_rationale_is_judged_on_length_not_on_a_marker_list() {
+        let quoting_the_clause = "The cited clause states outright that the order of this \
+                                  array matters, because later files override earlier ones, \
+                                  so reversing it describes a different configuration and \
+                                  the result must change.";
+        assert!(
+            !is_filler_rationale(quoting_the_clause),
+            "a rationale that quotes its own clause must not be rejected for the words the \
+             clause happens to use"
+        );
+        assert!(is_filler_ground(quoting_the_clause), "…as V26's test would");
+        assert!(is_filler_rationale("obviously fine"));
+        assert!(is_filler_rationale("clu-a1b2c3d4"));
+    }
+
+    /// A registry that opted into neither regime is silent; one that declares a scenario
+    /// model but ships no catalogue is not.
+    #[test]
+    fn check_metamorphic_is_silent_only_for_a_registry_that_opted_out() {
+        let empty = Registry::default();
+        assert!(
+            check_metamorphic(&empty).is_empty(),
+            "a fixture registry predating this feature declares no relations and no \
+             scenario model; reporting seven missing families would say nothing true"
+        );
+
+        // Opting into the scenario model opts into the catalogue: deleting
+        // `metamorphic.json` from the real registry is seven V32s, not a quiet pass.
+        let mut opted_in = Registry::default();
+        opted_in.scenario.push(crate::scenario::ScenarioDimension {
+            id: "sdim-operation".to_string(),
+            kind: crate::scenario::ScenarioDimensionKind::Scenario,
+            description: "the consumer operation".to_string(),
+            values: vec!["up".to_string()],
+        });
+        let out = check_metamorphic(&opted_in);
+        assert_eq!(
+            out.iter().filter(|v| v.code == "V32").count(),
+            MANDATED_RELATIONS.len(),
+            "every mandated family must be reported missing, got {out:?}"
+        );
+    }
+
+    /// V31/V32 travel with `run`, so `report` and `certify` see them too — not only the
+    /// `validate` command.
+    #[test]
+    fn run_reports_the_metamorphic_classes() {
+        let mut reg = metamorphic_registry();
+        reg.metamorphic[0].ground = String::new();
+        reg.metamorphic.pop();
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(out.iter().any(|v| v.code == "V31"), "got {out:?}");
+        assert!(out.iter().any(|v| v.code == "V32"), "got {out:?}");
+        // The sort is numeric, so V31/V32 land after V30 rather than between V3 and V4.
+        assert!(code_rank("V30") < code_rank("V31"));
+        assert!(code_rank("V31") < code_rank("V32"));
     }
 }

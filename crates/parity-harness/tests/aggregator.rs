@@ -51,6 +51,9 @@ fn registry() -> ParityRegistry {
             path: "fixtures/parity-corpus".into(),
             min_cases: CORPUS_MIN,
         }],
+        // The aggregator reports on parity binaries only; the discovery lane is a
+        // separate surface with its own report (025 T060).
+        discovery_binaries: vec![],
     }
 }
 

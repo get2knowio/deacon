@@ -399,8 +399,11 @@ nothing. Each is gone, not merely quiescent:
 - `parity_read_configuration` — deleted; its 2 units became 2 `case-readconfig-decl-*`
 - `corpus_runner` — deleted (the shared module all four called)
 
-Their in-repo fixture trees went with them; `fetch_realworld_corpus.py` survives
-(research D8).
+Their in-repo fixture trees went with them. `fetch_realworld_corpus.py` was **deleted** in
+025 US7 (T109), having outlived 023: its 33 pinned entries are now the Rust-owned strict-JSON
+`conformance/discovery/corpus.json`, where the immutable-reference rule (**D4**) runs
+hermetically on every PR, and the fetch — with content-digest verification — lives in
+`parity_harness::discovery::corpus_fetch`.
 
 Every other profile (`default`/`full`/`ci`/`dev-fast`/`mvp-integration`) excludes
 the live set, so those lanes are truthful by **non-selection**: a green fast/CI
@@ -767,7 +770,13 @@ one. They are separate machinery — keep them distinct even though both say "pa
   compose lifecycle-marker case (issue #117, closed in the PR that added this note) was
   exactly such a mis-seed: markers are deacon-internal, the reference has no concept of them.
 
-**Two gates — do NOT conflate them** (this genuinely confuses):
+**Three lanes, two gates — do NOT conflate them** (this genuinely confuses):
+
+| Lane | Workflow | In the release path? | Gates on |
+|---|---|---|---|
+| `parity / live-certification` | `parity.yml` | **No** | live divergences (red never blocks a release) |
+| Conformance `certify` | `release.yml` § `verify` | **Yes** | gaps / uncovered behaviors / V28–V29 |
+| `discovery` | `discovery.yml` | **No** | **nothing** — status reflects whether it RAN, never what it found |
 
 - **`parity / live-certification` lane** (`.github/workflows/parity.yml`) — surfaces the live
   divergences. It is **NOT in the release path**: `release.yml` never runs it, so a **red
@@ -783,6 +792,11 @@ one. They are separate machinery — keep them distinct even though both say "pa
   non-blocking. Keep the registry gap-free (or every open gap consciously accepted) so
   releases aren't surprise-blocked. **`coverage report` is NOT a gate** — its exit code
   never reflects what it reports; it feeds `certify`, it does not duplicate it.
+- **`discovery` lane** (`.github/workflows/discovery.yml`, nightly + manual) — a **third** lane
+  that **gates nothing**. It searches for differences nobody curated; a campaign that finds forty
+  of them exits `0`. Only a *machinery* failure (unverifiable oracle, normalization failure,
+  unwritable data root) is non-zero. A stochastic gate would make green non-reproducible, which
+  is precisely why status is machinery-only — see the section below.
 
 **The build-out loop (apply these defaults).** When the harness surfaces a difference:
 
@@ -810,6 +824,67 @@ Defaults for the work itself:
   reports green forever.
 - **Never** make `certify` non-blocking or silently delete a real gap to go green; that is the
   one move the whole model exists to prevent.
+
+## Exploratory Parity Discovery (025-exploratory-parity-discovery)
+
+The registry says whether each *curated* behavior is covered; the coverage model says whether the
+*scenario space* is. This searches for differences **nobody curated** — and hands each one over as
+a reviewable candidate that a human, never a program, may promote into the record. All commands
+are **dev-only**; `parity_registry_check` asserts `deacon --help` gains nothing from any of them.
+
+**Two data roots, deliberately siblings.** `conformance/discovery/` (`findings.json`,
+`campaigns.json`, `corpus.json`) is a sibling of `conformance/registry/`, **not** a child. No
+registry loader path reaches it, so nothing a campaign finds can influence `validate` or
+`certify`. The one permitted cross-root reference points *out* of the queue
+(`Finding::promotedTo` → a registry case), never into it. `conformance/registry/metamorphic.json`
+(`mrl-` relation records) is the exception that lives in the registry proper, because a relation
+is a curated assertion, not a finding.
+
+**Never gates — the rule the whole lane rests on.** A discovery command's exit status reflects
+**whether it ran**, never **what it found**. A campaign that surfaces forty differences exits
+`0`; one that cannot verify the oracle exits non-zero. Any command whose status depends on its
+findings becomes a gate the moment someone wires it into CI, and a stochastic gate makes green
+non-reproducible. The single exception is `discovery-proof`, and it is *not* finding-dependent:
+it asserts a property of the **machinery** (an injected difference must traverse all six stages),
+so non-zero means the pipeline is broken — exactly the thing that should fail a lane.
+
+**Hermetic vs live split.**
+- **Hermetic** (`cargo run -p deacon-conformance -- discovery <check|report|triage|split|scaffold>`)
+  — no network, no Docker, no oracle. `discovery_hermetic` + `discovery_cli` run in the `default`
+  and `dev-fast` lanes. `check` is read-only by construction; `triage` is the ONLY writer of
+  `classification`; `scaffold` writes **nothing** (stdout only, `UNREVIEWED` sentinels the loader
+  rejects).
+- **Live** (`cargo run -p parity-harness --bin <discovery-campaign|discovery-proof>`) — four
+  campaign tiers: `metamorphic` (deacon-only, no oracle/Docker/network), `config-differential`
+  (nightly), `container-differential` (invoked-only; its 5-min per-candidate ceiling would starve
+  the scheduled window), `corpus` (weekly, network-backed). Selected **only** by
+  `[profile.discovery]`, whose `default-filter` is an explicit `binary(=…)` allow-list — never a
+  `discovery_*` glob, which would capture the hermetic guard `discovery_hermetic` and silently
+  drop it from the fast lane (the exact mistake the parity profile documents making with
+  `parity_harness_faults` / `parity_registry_check`).
+
+**D-classes vs V-classes — different roots, different consequences.** V-classes (`validate`)
+police the **registry** and block a PR; several feed `certify` and block a release. D-classes
+(`discovery check`) police the **discovery root** and block a PR *only* on the integrity of the
+queue itself — they can never block a release, because a finding is not coverage.
+
+| Class | Guards |
+|---|---|
+| **D1** | derived-id mismatch / duplicate id / empty witnesses; a signature naming an undeclared channel; an unresolvable `firstObserved`/`lastObserved`, witness, `splitFrom`, or campaign `profile`; a `split` ancestor with <2 children; non-finite `spaceCoveredFraction`; empty seed |
+| **D2** | a `triaged`/`promoted`/`no-longer-reproducing` finding with no classification; an `untriaged`/`split` one carrying one; a `promoted` finding classified `normalizer-defect` / `fixture-defect` |
+| **D3** | a `promoted` finding with no `promotedTo`, or naming a case absent from the registry; a `promotedTo` in any other state |
+| **D4** | a corpus `commit` that is not 40-hex (a branch or tag is mutable); malformed `contentDigest`; non-derived or duplicate corpus id/name |
+| **D5** | a `schemaPin` / `prosePin` / `oracleVersion` naming a revision absent from `revisions.json` |
+
+**Promotion is a human act, structurally.** There is no code path from a finding to a registry
+write — asserted behaviourally *and* by source scan (`no_discovery_source_references_a_registry_or_snapshot_writer`).
+`certify`'s verdict is byte-identical with a queue full of unreviewed findings and with an empty
+one. To promote: `discovery scaffold <fnd-id>` (or `--tolerate` for a **scoped** `wvr-` waiver —
+a blanket scope is refused, not emitted), then hand-edit the registry using that output as a
+starting point, then `validate`. A finding is a *candidate* for an assertion and never blocks; a
+gap is missing coverage and always blocks — do not conflate them (`conformance/RULES.md`).
+
+See `specs/025-exploratory-parity-discovery/quickstart.md`.
 
 ## Pre-Implementation Checklist
 
@@ -1178,6 +1253,8 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 - Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json` (strict-JSON records), `indexmap` (declaration order), `sha2` (unit/case/fixture hashing), `tokio` (bounded async exec in the harness), `thiserror` (domain errors), `tracing`, `toml` (nextest-profile drift check), `tempfile` (dev-dep, isolated workspaces). **No new crates, no new dependencies** (research D6). (023-migrate-parity-to-conformance)
 - strict-JSON, version-controlled. New: `conformance/migration/baseline.json` (frozen inventory), `conformance/migration/mapping.json` (unit → case/residual), `conformance/registry/residuals.json` (residual records). Extended: `conformance/registry/cases.json`. Generated (git-ignored): `target/conformance/migration-report.{json,md}`, `target/parity/equivalence.json`. All writes atomic (temp file + `fs::rename`). (023-migrate-parity-to-conformance)
 - strict-JSON, version-controlled. New hand-authored: `conformance/registry/scenario.json` (`sdim-` scenario dimensions), `conformance/registry/applicability.json` (`rule-` exclusions + `hrt-` high-risk triples), `conformance/registry/obligation-dispositions/<area>.json` (`odp-` records), `conformance/registry/regressions.json` (`reg-` records). New machine-owned: `conformance/obligations/obligations.json` (`obl-`, sole output of `coverage generate`). Migrated: `cases.json` → `cases/<area>.json`. Generated (git-ignored): `target/conformance/coverage-{pairwise,triples,operations,observables}.{json,md}`, `target/conformance/regressions.json`. All writes atomic. (024-deterministic-conformance-coverage)
+- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json` (strict-JSON records), `indexmap` (declaration order), `sha2` (`hash8` signature/fixture ids), `tokio` (bounded async exec), `thiserror` (domain errors), `tracing`, `tempfile` (dev-dep, isolated workspaces). **No new crates** — including no RNG crate (research D2). (025-exploratory-parity-discovery)
+- strict-JSON, version-controlled. New root `conformance/discovery/` (queue, campaigns, corpus manifest) — a sibling of `registry/`, deliberately outside it. New registry file `conformance/registry/metamorphic.json` (`mrl-` relation records). Generated artifacts under `target/discovery/` (git-ignored, byte-stable). All writes atomic (temp file + `fs::rename`). (025-exploratory-parity-discovery)
 
 ## Recent Changes
 - 024-deterministic-conformance-coverage: Filled the coverage gaps the migration froze in

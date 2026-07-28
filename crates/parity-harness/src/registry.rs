@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 use crate::HarnessError;
 
 pub use deacon_conformance::parity_corpus::{
-    Corpus, LiveBinary, LiveKind, ParityCorpusError, ParityRegistry, REGISTRY_JSON,
+    Corpus, DiscoveryBinary, DiscoveryRole, LiveBinary, LiveKind, ParityCorpusError,
+    ParityRegistry, REGISTRY_JSON,
 };
 
 /// Hermetic harness self-test binaries that intentionally carry the `parity_`
@@ -126,28 +127,51 @@ pub fn check_test_files(registry: &ParityRegistry, tests_dir: &Path) -> Vec<Stri
 /// Cross-check a nextest `[profile.parity]` default-filter expression: it must
 /// select EXACTLY the live binaries and NONE of the internal-consistency
 /// binaries (FR-013, FR-014). Returns problems (empty = OK).
+///
+/// Every verdict is reached by **evaluating** the expression with [`filter_selects`],
+/// not by token-matching it. The two differ the moment the filter names a binary in
+/// order to EXCLUDE it — which the parity filter now does for the discovery campaign
+/// binaries (025 T007), and which any future exclusion would do again. Token matching
+/// would read `… & not (binary(=discovery_campaign))` as "the parity profile selects
+/// `discovery_campaign`" and fail a correct file, so the check has to understand the
+/// operator it is reading. [`extract_binary_eq_tokens`] still supplies the *candidate*
+/// set — the names worth asking about — because there is no other way to discover a
+/// binary the filter mentions but the registry does not know.
 pub fn check_parity_profile_filter(registry: &ParityRegistry, filter_expr: &str) -> Vec<String> {
     let mut problems = Vec::new();
-    let selected: std::collections::HashSet<String> =
-        extract_binary_eq_tokens(filter_expr).into_iter().collect();
+
+    let selects = |name: &str, problems: &mut Vec<String>| -> Option<bool> {
+        match filter_selects(filter_expr, name) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                problems.push(format!(
+                    "[profile.parity] default-filter could not be evaluated for `{name}`: {e}"
+                ));
+                None
+            }
+        }
+    };
 
     for name in registry.live_names() {
-        if !selected.contains(name) {
+        if selects(name, &mut problems) == Some(false) {
             problems.push(format!(
                 "[profile.parity] filter does not select live binary `{name}`"
             ));
         }
     }
     for name in &registry.internal_consistency_binaries {
-        if selected.contains(name.as_str()) {
+        if selects(name, &mut problems) == Some(true) {
             problems.push(format!(
                 "[profile.parity] filter selects internal-consistency binary `{name}` (it must not)"
             ));
         }
     }
+
     let live: std::collections::HashSet<&str> = registry.live_names().into_iter().collect();
-    for name in &selected {
-        if !live.contains(name.as_str()) {
+    let mentioned: std::collections::BTreeSet<String> =
+        extract_binary_eq_tokens(filter_expr).into_iter().collect();
+    for name in &mentioned {
+        if !live.contains(name.as_str()) && selects(name, &mut problems) == Some(true) {
             problems.push(format!(
                 "[profile.parity] filter selects `{name}`, which is not a registered live binary"
             ));
@@ -159,9 +183,10 @@ pub fn check_parity_profile_filter(registry: &ParityRegistry, filter_expr: &str)
 /// Full `.config/nextest.toml` cross-check (research D5; FR-013, FR-014):
 ///
 /// - `[profile.parity]` selects EXACTLY the live set and none of the
-///   internal-consistency binaries (delegates to [`check_parity_profile_filter`],
-///   valid because the parity profile's `default-filter` is a pure `binary(=…)`
-///   allow-list);
+///   internal-consistency binaries (delegates to [`check_parity_profile_filter`], which
+///   EVALUATES the expression — the parity filter is an allow-list with an explicit
+///   exclusion group appended, not a pure `binary(=…)` union, so a token-matching check
+///   would misread the exclusion as a selection);
 /// - NO OTHER profile's `default-filter` selects any live parity binary — the
 ///   truthful-by-non-selection invariant (FR-014). This is evaluated by
 ///   [`filter_selects`] over each profile's filter expression, so an exclusion
@@ -210,6 +235,238 @@ pub fn check_nextest_profiles(
             }
         }
     }
+    problems
+}
+
+// ---------------------------------------------------------------------------
+// 025-exploratory-parity-discovery — the discovery lane's wiring checks
+// (T054/T056; FR-055, FR-057; research D9)
+// ---------------------------------------------------------------------------
+
+/// The one nextest profile permitted to select a live discovery campaign binary.
+pub const DISCOVERY_PROFILE: &str = "discovery";
+
+/// Every profile a pull request can run through. None of them may select a live
+/// discovery binary — the discovery lane gates nothing, so a green PR run must never
+/// imply a campaign ran (FR-055/FR-057).
+///
+/// `parity` is in this list deliberately. It is not a pull-request-only lane, but it *is*
+/// a lane whose result people read as a verdict, and the exclusion is about the two lanes
+/// answering different questions on different budgets — not about cost.
+pub const PULL_REQUEST_PROFILES: &[&str] = &[
+    "default",
+    "dev-fast",
+    "full",
+    "ci",
+    "mvp-integration",
+    "parity",
+];
+
+/// The profiles a hermetic discovery guard MUST be selected by.
+///
+/// Only the two fast lanes are required. `full` / `ci` select the guards today as a
+/// consequence of their `not (…)` filters, but `mvp-integration` and `parity` are narrow
+/// allow-lists that legitimately do not — demanding selection there would force unrelated
+/// binaries into two curated lanes to satisfy a rule about guards.
+pub const GUARD_REQUIRED_PROFILES: &[&str] = &["default", "dev-fast"];
+
+/// Directories that may hold a discovery test binary, checked for *unregistered* sources
+/// regardless of what the registry declares.
+///
+/// The registry's own `tests_dir` values are unioned in, so declaring a third location
+/// automatically extends the scan. These two are listed anyway because the file→registry
+/// direction has to work when the registry is the thing that is wrong: a binary dropped
+/// into a crate nobody declared is exactly the drift this direction exists to catch.
+const DISCOVERY_TEST_DIRS: &[&str] = &["crates/deacon/tests", "crates/conformance/tests"];
+
+/// Bidirectional file↔registry match for the discovery lane (FR-057).
+///
+/// Registry → file: every registered discovery binary has a source file at its declared
+/// `tests_dir`. File → registry: every `discovery_*.rs` under any candidate test
+/// directory is registered. Returns human-readable problems (empty = OK).
+pub fn check_discovery_files(registry: &ParityRegistry, workspace_root: &Path) -> Vec<String> {
+    let mut problems = Vec::new();
+
+    for binary in &registry.discovery_binaries {
+        let source = workspace_root
+            .join(&binary.tests_dir)
+            .join(format!("{}.rs", binary.name));
+        if !source.is_file() {
+            problems.push(format!(
+                "registered discovery binary `{}` has no source file {}",
+                binary.name,
+                source.display()
+            ));
+        }
+    }
+
+    let registered: std::collections::HashSet<&str> =
+        registry.discovery_names().into_iter().collect();
+    let mut dirs: std::collections::BTreeSet<&str> = DISCOVERY_TEST_DIRS.iter().copied().collect();
+    for binary in &registry.discovery_binaries {
+        dirs.insert(binary.tests_dir.as_str());
+    }
+    for dir in dirs {
+        let path = workspace_root.join(dir);
+        let rd = match std::fs::read_dir(&path) {
+            Ok(rd) => rd,
+            Err(e) => {
+                problems.push(format!("could not read discovery test dir {path:?}: {e}"));
+                continue;
+            }
+        };
+        for entry in rd.filter_map(Result::ok) {
+            let file = entry.file_name();
+            let file = file.to_string_lossy();
+            let Some(stem) = file.strip_suffix(".rs") else {
+                continue;
+            };
+            if stem.starts_with("discovery_") && !registered.contains(stem) {
+                problems.push(format!(
+                    "{dir}/{file} is a discovery test binary but is not registered in \
+                     fixtures/parity-corpus/registry.json discovery_binaries — an \
+                     unregistered binary has no declared lane, so nothing checks which \
+                     profiles select it"
+                ));
+            }
+        }
+    }
+
+    problems
+}
+
+/// Cross-check `.config/nextest.toml` for the discovery lane (FR-057).
+///
+/// Four claims, every one reached by **evaluating** the filter expression rather than
+/// token-matching it (the profiles name discovery binaries in order to *exclude* them,
+/// which a token match would read as a selection):
+///
+/// 1. `[profile.discovery]` exists and declares a `default-filter` — without one it
+///    selects every binary in the workspace.
+/// 2. It selects every `live` discovery binary.
+/// 3. It selects **no** `guard` discovery binary. This is research D9's `discovery_*`
+///    glob mistake stated as an assertion: the glob would capture the guards and silently
+///    remove them from the fast lane, and the symptom is invisible until it matters.
+/// 4. It names no binary it does not select-and-own — the symmetric counterpart of
+///    [`check_parity_profile_filter`]'s "selects `{name}`, which is not a registered live
+///    binary". Without it the allow-list is only checked for what it is *missing*, and an
+///    unrelated binary added to it would run under a 35-minute stochastic profile with
+///    nothing objecting.
+/// 5. No pull-request profile selects a `live` discovery binary, and both fast lanes
+///    select every `guard`.
+pub fn check_discovery_profiles(
+    registry: &ParityRegistry,
+    profiles: &NextestProfiles,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+
+    let live: Vec<&str> = registry
+        .discovery_of_role(DiscoveryRole::Live)
+        .into_iter()
+        .map(|b| b.name.as_str())
+        .collect();
+    let guards: Vec<&str> = registry
+        .discovery_of_role(DiscoveryRole::Guard)
+        .into_iter()
+        .map(|b| b.name.as_str())
+        .collect();
+
+    fn evaluate(profile: &str, expr: &str, name: &str, problems: &mut Vec<String>) -> Option<bool> {
+        match filter_selects(expr, name) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                problems.push(format!(
+                    "[profile.{profile}] default-filter could not be evaluated for `{name}`: {e}"
+                ));
+                None
+            }
+        }
+    }
+
+    match profiles.default_filters.get(DISCOVERY_PROFILE) {
+        None => problems.push(format!(
+            "nextest.toml has no [profile.{DISCOVERY_PROFILE}] — the discovery lane has no \
+             entry point, so its binaries either never run or run in a lane that gates"
+        )),
+        Some(None) => problems.push(format!(
+            "[profile.{DISCOVERY_PROFILE}] declares no default-filter, so it selects every \
+             binary in the workspace instead of exactly the discovery campaigns"
+        )),
+        Some(Some(expr)) => {
+            for name in &live {
+                if evaluate(DISCOVERY_PROFILE, expr, name, &mut problems) == Some(false) {
+                    problems.push(format!(
+                        "[profile.{DISCOVERY_PROFILE}] does not select live discovery binary \
+                         `{name}` — it is the only lane that may, so nothing would run it"
+                    ));
+                }
+            }
+            for name in &guards {
+                if evaluate(DISCOVERY_PROFILE, expr, name, &mut problems) == Some(true) {
+                    problems.push(format!(
+                        "[profile.{DISCOVERY_PROFILE}] captures the hermetic guard `{name}`. \
+                         The filter must be an explicit `binary(=…)` allow-list, never a \
+                         `discovery_*` glob: the glob silently removes the guards from the \
+                         fast lane, which is the mistake research D9 exists to prevent"
+                    ));
+                }
+            }
+            // Anything else the filter NAMES and SELECTS. The candidate set has to come
+            // from the expression's own `binary(=…)` tokens: there is no other way to
+            // discover a binary the filter mentions but the registry does not know.
+            let known: std::collections::HashSet<&str> = live.iter().copied().collect();
+            for name in extract_binary_eq_tokens(expr) {
+                if !known.contains(name.as_str())
+                    && evaluate(DISCOVERY_PROFILE, expr, &name, &mut problems) == Some(true)
+                {
+                    problems.push(format!(
+                        "[profile.{DISCOVERY_PROFILE}] selects `{name}`, which is not a \
+                         registered live discovery binary — the discovery lane runs under a \
+                         long stochastic budget and gates nothing, so admitting an unrelated \
+                         binary to it both distorts that binary's meaning and hides it from \
+                         the lane that should be asserting on it"
+                    ));
+                }
+            }
+        }
+    }
+
+    for profile in PULL_REQUEST_PROFILES {
+        let Some(filter) = profiles.default_filters.get(*profile) else {
+            problems.push(format!(
+                "[profile.{profile}] is missing from nextest.toml, so the discovery lane's \
+                 exclusion from it cannot be verified"
+            ));
+            continue;
+        };
+        let Some(expr) = filter.as_deref() else {
+            problems.push(format!(
+                "[profile.{profile}] has no default-filter, so it selects every binary \
+                 including the live discovery campaigns"
+            ));
+            continue;
+        };
+        for name in &live {
+            if evaluate(profile, expr, name, &mut problems) == Some(true) {
+                problems.push(format!(
+                    "[profile.{profile}] selects live discovery binary `{name}` — a green \
+                     pull-request run must never imply a campaign ran (FR-055/FR-057)"
+                ));
+            }
+        }
+        if GUARD_REQUIRED_PROFILES.contains(profile) {
+            for name in &guards {
+                if evaluate(profile, expr, name, &mut problems) == Some(false) {
+                    problems.push(format!(
+                        "[profile.{profile}] does not select the hermetic guard `{name}` — a \
+                         guard that does not run in the fast lane is a guard nobody notices \
+                         going stale"
+                    ));
+                }
+            }
+        }
+    }
+
     problems
 }
 
@@ -537,6 +794,50 @@ mod tests {
     }
 
     #[test]
+    fn naming_a_binary_in_order_to_exclude_it_is_not_selecting_it() {
+        // 025 T007 puts the discovery campaign binaries in the parity filter's `not`
+        // group, so the parity lane's non-selection of them is structural rather than
+        // incidental. A token-matching check would read that as "the parity profile
+        // selects `discovery_campaign`" and fail a correct file — the check has to
+        // understand the operator it is reading.
+        let reg = ParityRegistry::load().expect("embedded registry must parse");
+        let good = reg
+            .live_names()
+            .iter()
+            .map(|n| format!("binary(={n})"))
+            .collect::<Vec<_>>()
+            .join(" | ");
+
+        let excluding = format!(
+            "({good}) & not (binary(=discovery_campaign) | binary(=discovery_metamorphic))"
+        );
+        assert!(
+            check_parity_profile_filter(&reg, &excluding).is_empty(),
+            "an explicit exclusion must not read as a selection: {:?}",
+            check_parity_profile_filter(&reg, &excluding)
+        );
+
+        // Positively selecting an unregistered binary is still flagged — the exclusion
+        // tolerance must not become a blanket amnesty for unknown names.
+        let selecting = format!("{good} | binary(=discovery_campaign)");
+        let problems = check_parity_profile_filter(&reg, &selecting);
+        assert!(
+            problems.iter().any(|p| p.contains("discovery_campaign")),
+            "got: {problems:?}"
+        );
+
+        // An exclusion must not hide a MISSING live binary either.
+        let missing_live = format!("({good}) & not (binary(={}))", reg.live_names()[0]);
+        let problems = check_parity_profile_filter(&reg, &missing_live);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("does not select live binary")),
+            "got: {problems:?}"
+        );
+    }
+
+    #[test]
     fn check_test_files_against_real_tree() {
         let reg = ParityRegistry::load().expect("embedded registry must parse");
         let tests_dir = crate::workspace_root().join("crates/deacon/tests");
@@ -618,6 +919,158 @@ mod tests {
         assert!(
             problems.is_empty(),
             "nextest.toml profile cross-check problems: {problems:?}"
+        );
+    }
+
+    /// A registry carrying one live campaign and one guard, for the discovery checks.
+    fn discovery_registry() -> ParityRegistry {
+        ParityRegistry::parse(
+            r#"{
+              "live_binaries": [],
+              "internal_consistency_binaries": [],
+              "corpora": [],
+              "discovery_binaries": [
+                { "name": "discovery_campaign", "role": "live", "tests_dir": "crates/deacon/tests", "docker_required": true },
+                { "name": "discovery_hermetic", "role": "guard", "tests_dir": "crates/deacon/tests", "docker_required": false }
+              ]
+            }"#,
+        )
+        .expect("synthetic discovery registry parses")
+    }
+
+    fn profiles_from(pairs: &[(&str, &str)]) -> NextestProfiles {
+        let mut profiles = NextestProfiles::default();
+        for (name, expr) in pairs {
+            profiles
+                .default_filters
+                .insert((*name).to_string(), Some((*expr).to_string()));
+        }
+        profiles
+    }
+
+    #[test]
+    fn the_discovery_allow_list_must_not_capture_a_guard() {
+        // Research D9's mistake, stated as a test. A `discovery_*` glob selects both the
+        // campaign and the guard, and the symptom — a hermetic guard silently absent from
+        // the fast lane — is invisible until it matters.
+        let reg = discovery_registry();
+        let mut pairs = vec![("discovery", "binary(#discovery_*)")];
+        for profile in PULL_REQUEST_PROFILES {
+            pairs.push((profile, "not (binary(=discovery_campaign))"));
+        }
+        let problems = check_discovery_profiles(&reg, &profiles_from(&pairs));
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("discovery_hermetic") && p.contains("allow-list")),
+            "a glob filter must be reported as capturing the guard, got: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn a_pull_request_profile_selecting_a_campaign_is_flagged() {
+        let reg = discovery_registry();
+        let mut pairs = vec![("discovery", "binary(=discovery_campaign)")];
+        for profile in PULL_REQUEST_PROFILES {
+            // `dev-fast` "forgets" the exclusion — the exact drift FR-057 exists to catch.
+            pairs.push((
+                profile,
+                if *profile == "dev-fast" {
+                    "not (binary(#smoke_*))"
+                } else {
+                    "not (binary(=discovery_campaign))"
+                },
+            ));
+        }
+        let problems = check_discovery_profiles(&reg, &profiles_from(&pairs));
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("dev-fast") && p.contains("discovery_campaign")),
+            "got: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn a_fast_lane_dropping_a_guard_is_flagged() {
+        let reg = discovery_registry();
+        let mut pairs = vec![("discovery", "binary(=discovery_campaign)")];
+        for profile in PULL_REQUEST_PROFILES {
+            pairs.push((
+                profile,
+                if *profile == "default" {
+                    "not (binary(=discovery_campaign) | binary(=discovery_hermetic))"
+                } else {
+                    "not (binary(=discovery_campaign))"
+                },
+            ));
+        }
+        let problems = check_discovery_profiles(&reg, &profiles_from(&pairs));
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("default") && p.contains("discovery_hermetic")),
+            "got: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn an_unrelated_binary_in_the_discovery_allow_list_is_flagged() {
+        // The allow-list must be checked for what it ADDS, not only for what it is
+        // missing: the discovery lane runs under a 35-minute stochastic budget and gates
+        // nothing, so a binary quietly moved into it stops being asserted on anywhere.
+        let reg = discovery_registry();
+        let mut pairs = vec![(
+            "discovery",
+            "binary(=discovery_campaign) | binary(=integration_up_traditional)",
+        )];
+        for profile in PULL_REQUEST_PROFILES {
+            pairs.push((profile, "not (binary(=discovery_campaign))"));
+        }
+        let problems = check_discovery_profiles(&reg, &profiles_from(&pairs));
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("integration_up_traditional")),
+            "got: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn the_real_nextest_toml_wires_the_discovery_lane() {
+        let reg = ParityRegistry::load().expect("embedded registry must parse");
+        let toml_text =
+            std::fs::read_to_string(crate::workspace_root().join(".config/nextest.toml"))
+                .expect("read nextest.toml");
+        let profiles = parse_nextest_profiles(&toml_text).expect("parse nextest.toml");
+        let problems = check_discovery_profiles(&reg, &profiles);
+        assert!(
+            problems.is_empty(),
+            "discovery lane wiring problems: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn discovery_files_match_the_registry_both_directions() {
+        let reg = ParityRegistry::load().expect("embedded registry must parse");
+        let problems = check_discovery_files(&reg, &crate::workspace_root());
+        assert!(
+            problems.is_empty(),
+            "registry ↔ discovery source mismatch: {problems:?}"
+        );
+
+        // An unregistered source is reported: drop the guard from the registry and the
+        // file→registry direction must notice the file that is still on disk.
+        let mut trimmed = reg.clone();
+        trimmed
+            .discovery_binaries
+            .retain(|b| b.name != "discovery_hermetic");
+        let problems = check_discovery_files(&trimmed, &crate::workspace_root());
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("discovery_hermetic") && p.contains("not registered")),
+            "got: {problems:?}"
         );
     }
 

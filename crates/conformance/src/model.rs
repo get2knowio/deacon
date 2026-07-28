@@ -76,6 +76,11 @@ pub enum RecordType {
     /// A hand-authored injected-regression record (`reg-`) — the declarative perturbation
     /// that proves one observable channel can actually fail (024 US6).
     Regression,
+    /// A hand-authored metamorphic relation (`mrl-`) — 025-exploratory-parity-discovery,
+    /// US6. It lives INSIDE the registry, unlike a discovery finding, because a relation
+    /// is an assertion the project makes and references `clu-`/`bhv-` ids only the
+    /// registry loader resolves (research D11).
+    MetamorphicRelation,
 }
 
 impl RecordType {
@@ -102,6 +107,7 @@ impl RecordType {
             RecordType::Obligation => "obl",
             RecordType::ObligationDisposition => "odp",
             RecordType::Regression => "reg",
+            RecordType::MetamorphicRelation => "mrl",
         }
     }
 
@@ -128,6 +134,7 @@ impl RecordType {
             "obl" => RecordType::Obligation,
             "odp" => RecordType::ObligationDisposition,
             "reg" => RecordType::Regression,
+            "mrl" => RecordType::MetamorphicRelation,
             _ => return None,
         })
     }

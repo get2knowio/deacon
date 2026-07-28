@@ -40,5 +40,31 @@
     "consistency_remote_env_flags",
     "consistency_env_probe_flag"
   ],
-  "corpora": []
+  "corpora": [],
+  "discovery_binaries": [
+    {
+      "name": "discovery_campaign",
+      "role": "live",
+      "tests_dir": "crates/deacon/tests",
+      "docker_required": true
+    },
+    {
+      "name": "discovery_metamorphic",
+      "role": "live",
+      "tests_dir": "crates/deacon/tests",
+      "docker_required": false
+    },
+    {
+      "name": "discovery_hermetic",
+      "role": "guard",
+      "tests_dir": "crates/deacon/tests",
+      "docker_required": false
+    },
+    {
+      "name": "discovery_cli",
+      "role": "guard",
+      "tests_dir": "crates/conformance/tests",
+      "docker_required": false
+    }
+  ]
 }

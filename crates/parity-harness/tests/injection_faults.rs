@@ -491,8 +491,33 @@ fn a_dead_observer_is_reported_inert_rather_than_falsely_detected() {
 // T131 — an ordinary conformance run cannot apply a regression (FR-070)
 // ---------------------------------------------------------------------------------
 
-/// Every source file that could reach the injector, and the one file allowed to.
-const CAPABILITY_OWNER: &str = "coverage-regressions.rs";
+/// The **complete** set of files permitted to take out the injection capability, sorted.
+///
+/// An explicit allow-list rather than a single owner, because there is now more than one
+/// program whose entire purpose is to inject — but the property FR-070 protects is
+/// unchanged and the assertion is still exact equality, so a *new* declarer fails this
+/// guard until someone justifies it here.
+///
+/// Each entry earns its place by being a dedicated injection program, never a driver that
+/// happens to want the capability:
+///
+/// | File | Why it may declare |
+/// |---|---|
+/// | `coverage-regressions.rs` | the 024 injected-regression harness: proves each declared channel can fail |
+/// | `discovery-proof.rs` | the 025 FR-042a pipeline proof: plants a known difference and requires it to traverse the pipeline |
+/// | `injection_faults.rs` | this guard, which must exercise the capability to assert how it behaves |
+/// | `discovery_hermetic.rs` | the FR-042a acceptance test, which drives the proof in-process |
+///
+/// What must never appear here is a conformance *driver*
+/// (`parity_conformance_runner` / `parity_conformance_docker`) or any harness module they
+/// go through — a program that can perturb its own evidence can report anything.
+/// [`the_ordinary_run_can_only_reach_the_inert_hook`] asserts that half separately.
+const CAPABILITY_OWNERS: &[&str] = &[
+    "coverage-regressions.rs",
+    "discovery-proof.rs",
+    "discovery_hermetic.rs",
+    "injection_faults.rs",
+];
 
 /// Files whose call graph is the ORDINARY conformance run: the two driver test binaries
 /// and the harness modules they go through.
@@ -519,12 +544,16 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// STRUCTURAL, not conventional: the capability that enables injection is taken out in
-/// exactly one program, so no other program's call graph can reach the injector at all.
+/// STRUCTURAL, not conventional: the capability that enables injection is taken out only
+/// in the programs whose whole purpose is to inject, so no other program's call graph can
+/// reach the injector at all.
 ///
 /// The alternative — "the drivers just don't do that" — is a comment, and a comment does
 /// not survive the next person wiring a convenience helper. Enabling injection requires
-/// `RegressionHarness::declare`, and this asserts that call exists in one file only.
+/// `RegressionHarness::declare`, and this asserts that call exists **only** in
+/// [`CAPABILITY_OWNERS`]. The assertion is exact equality in both directions: a new
+/// declarer fails, and an owner that stops declaring fails too, because a listed program
+/// that no longer injects is an entry nobody would notice going stale.
 #[test]
 fn only_the_coverage_regressions_bin_can_enable_injection() {
     let root = workspace_root();
@@ -555,13 +584,13 @@ fn only_the_coverage_regressions_bin_can_enable_injection() {
     declaring.dedup();
     assert_eq!(
         declaring,
-        vec![
-            CAPABILITY_OWNER.to_string(),
-            "injection_faults.rs".to_string()
-        ],
-        "the injection capability must be taken out by the `coverage-regressions` bin and \
-         by this guard alone — any other program that declares it can perturb its own \
-         evidence (FR-070)"
+        CAPABILITY_OWNERS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect::<Vec<String>>(),
+        "the injection capability must be taken out ONLY by the dedicated injection \
+         programs listed in `CAPABILITY_OWNERS` — any other program that declares it can \
+         perturb its own evidence and then report anything (FR-070)"
     );
 }
 
