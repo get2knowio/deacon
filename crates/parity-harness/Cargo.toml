@@ -38,8 +38,9 @@ sha2 = { workspace = true }
 # workspace.rs). Runtime dep now (not just dev): the RAII cleanup guard owns a TempDir.
 tempfile = { workspace = true }
 
+# `tempfile` is a runtime dependency above (the RAII cleanup guard owns a TempDir), so it
+# is already available to tests; repeating it here would be a second place to bump.
 [dev-dependencies]
-tempfile = { workspace = true }
 
 [lints]
 workspace = true

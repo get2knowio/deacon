@@ -2985,38 +2985,44 @@ fn build_evidence_inputs(
         .parent()
         .map(|p| p.join("snapshots"))
         .unwrap_or_else(|| registry_dir.join("snapshots"));
+    // **Scoped to the platform under certification** (research D5, and the scoping
+    // `BlockingKind::StaleSnapshot` documents). 022 made committed-snapshot coverage
+    // non-blocking on the ground that a snapshot is a reviewed artifact, not a release
+    // gate, and that reasoning still holds for platforms nobody is certifying. Walking
+    // every `<os-arch>` directory made a snapshot recorded on some other platform block
+    // this release — pressure to record snapshots to go green, which is exactly what
+    // FR-055 exists to remove.
+    let certified_os_arch = std::env::var("DEACON_CERTIFY_PLATFORM")
+        .ok()
+        .zip(std::env::var("DEACON_CERTIFY_ARCH").ok())
+        .map(|(os, arch)| format!("{os}-{arch}"))
+        .unwrap_or_else(deacon_conformance::snapshot::current_os_arch);
     let mut stale_snapshots = Vec::new();
-    if let Ok(platforms) = std::fs::read_dir(&snapshots_dir) {
-        for platform in platforms.flatten() {
-            let Ok(cases) = std::fs::read_dir(platform.path()) else {
+    if let Ok(cases) = std::fs::read_dir(snapshots_dir.join(&certified_os_arch)) {
+        for case in cases.flatten() {
+            let provenance_path = case.path().join("provenance.json");
+            let Ok(raw) = std::fs::read_to_string(&provenance_path) else {
                 continue;
             };
-            for case in cases.flatten() {
-                let provenance_path = case.path().join("provenance.json");
-                let Ok(raw) = std::fs::read_to_string(&provenance_path) else {
-                    continue;
-                };
-                let Ok(provenance) =
-                    serde_json::from_str::<deacon_conformance::snapshot::Provenance>(&raw)
+            let Ok(provenance) =
+                serde_json::from_str::<deacon_conformance::snapshot::Provenance>(&raw)
+            else {
+                continue;
+            };
+            let case_id = case.file_name().to_string_lossy().to_string();
+            recorded_oracles.push((
+                format!("snapshot:{case_id}"),
+                provenance.oracle_version.clone(),
+            ));
+            if let Some(registry_case) = registry.cases.iter().find(|c| c.id == case_id) {
+                let Ok((case_hash, fixture_hash)) = hashes_for_case(registry_case, &fixtures_root)
                 else {
                     continue;
                 };
-                let case_id = case.file_name().to_string_lossy().to_string();
-                recorded_oracles.push((
-                    format!("snapshot:{case_id}"),
-                    provenance.oracle_version.clone(),
-                ));
-                if let Some(registry_case) = registry.cases.iter().find(|c| c.id == case_id) {
-                    let Ok((case_hash, fixture_hash)) =
-                        hashes_for_case(registry_case, &fixtures_root)
-                    else {
-                        continue;
-                    };
-                    if provenance.case_hash != case_hash {
-                        stale_snapshots.push((case_id.clone(), "caseHash".to_string()));
-                    } else if provenance.fixture_hash != fixture_hash {
-                        stale_snapshots.push((case_id.clone(), "fixtureHash".to_string()));
-                    }
+                if provenance.case_hash != case_hash {
+                    stale_snapshots.push((case_id.clone(), "caseHash".to_string()));
+                } else if provenance.fixture_hash != fixture_hash {
+                    stale_snapshots.push((case_id.clone(), "fixtureHash".to_string()));
                 }
             }
         }
@@ -3083,12 +3089,21 @@ fn write_certification_report(
 /// Read from the environment the certifying job declares rather than probed: certification
 /// must run with no container engine present (SC-013), so probing one would make the gate
 /// depend on the capability it is designed not to need.
+///
+/// **The fallbacks never invent an identity.** `platform`/`arch` fall back to the build
+/// target, which is true by construction; the engine falls back to `"unknown"`, never to
+/// `"docker"`. A hard-coded `linux`/`x86_64`/`docker` default made a report produced on any
+/// other host claim a combination that was never exercised — and `scope.doesNotCertify` is
+/// computed from these values, so the fabrication propagated into the statement of what the
+/// certification does *not* cover.
 fn report_environment() -> ReportEnvironment {
     ReportEnvironment {
-        platform: std::env::var("DEACON_CERTIFY_PLATFORM").unwrap_or_else(|_| "linux".into()),
-        arch: std::env::var("DEACON_CERTIFY_ARCH").unwrap_or_else(|_| "x86_64".into()),
+        platform: std::env::var("DEACON_CERTIFY_PLATFORM")
+            .unwrap_or_else(|_| std::env::consts::OS.to_string()),
+        arch: std::env::var("DEACON_CERTIFY_ARCH")
+            .unwrap_or_else(|_| std::env::consts::ARCH.to_string()),
         container_engine: std::env::var("DEACON_CERTIFY_ENGINE")
-            .unwrap_or_else(|_| "docker".into()),
+            .unwrap_or_else(|_| "unknown".into()),
         container_engine_version: std::env::var("DEACON_CERTIFY_ENGINE_VERSION")
             .unwrap_or_else(|_| "unknown".into()),
         compose_version: std::env::var("DEACON_CERTIFY_COMPOSE_VERSION")
@@ -3128,7 +3143,13 @@ fn lane_check(registry_dir: &Path, json: bool) -> i32 {
         }
     };
     let (units, memberships) = lane_inputs(&registry, registry_dir);
-    let violations = check_lanes(&lanes, &units, &memberships, None);
+    // The profile-drift sub-case runs here too. Passing `None` skipped it, so `lane check`
+    // reported clean on data `validate` rejected — two checkers of one rule disagreeing is
+    // worse than either one being absent.
+    let profiles = deacon_conformance::validate::parse_nextest_profiles(
+        &workspace_root().join(".config").join("nextest.toml"),
+    );
+    let violations = check_lanes(&lanes, &units, &memberships, profiles.as_ref());
 
     if json {
         let doc = serde_json::json!({ "ok": violations.is_empty(), "violations": violations });

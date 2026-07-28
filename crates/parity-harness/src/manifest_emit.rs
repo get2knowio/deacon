@@ -10,7 +10,7 @@
 //! ## Producer obligations, and why each one matters
 //!
 //! - **Atomic write.** A truncated manifest read by a parallel job would parse as
-//!   `V32-incomplete` and block a release for a reason that is not real.
+//!   `V35-malformed` and block a release for a reason that is not real.
 //! - **Record every required case**, including failures and dispositioned exclusions. A
 //!   manifest listing only successes is incomplete, not clean — omission must never read
 //!   as absence of a problem.
@@ -87,13 +87,17 @@ struct Environment {
 /// the right side of that split: the lane that ran the containers is the only one that can
 /// truthfully say which engine ran them.
 fn probe_environment() -> Environment {
+    // Both versions are probed through the SAME engine the manifest names. Hard-coding
+    // `docker` here recorded `containerEngine: podman` alongside a Docker version string —
+    // or `"unknown"` on a host with no Docker at all — which is a receipt that describes a
+    // combination the run never used.
+    let engine = std::env::var("DEACON_CONTAINER_RUNTIME").unwrap_or_else(|_| "docker".to_string());
     Environment {
         platform: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
-        container_engine: std::env::var("DEACON_CONTAINER_RUNTIME")
-            .unwrap_or_else(|_| "docker".to_string()),
-        container_engine_version: probe_version(&["docker", "--version"]),
-        compose_version: probe_version(&["docker", "compose", "version", "--short"]),
+        container_engine_version: probe_version(&[&engine, "--version"]),
+        compose_version: probe_version(&[&engine, "compose", "version", "--short"]),
+        container_engine: engine,
     }
 }
 

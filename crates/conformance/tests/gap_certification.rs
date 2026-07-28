@@ -527,15 +527,15 @@ fn the_real_registry_blocks_only_on_declared_coverage_gaps() {
     // Keeping the two sets separate is the point of the assertion. Folding them together
     // would make this test either permanently red (every local run lacks a manifest) or
     // permanently silent about the data gate it exists to protect.
-    const EVIDENCE_GATE_KINDS: &[&str] = &[
-        "stalesnapshot",
-        "missingexecution",
-        "incorrectoracle",
-        "runneromission",
-        "silentlyskippedcase",
-        "failingcase",
-        "inactiveprofile",
-    ];
+    //
+    // The list is exactly the conditions that follow from "no manifest exists", and no
+    // wider. `stalesnapshot`, `incorrectoracle`, and `failingcase` are NOT among them: a
+    // stale committed snapshot or a provenance recording the wrong oracle is a defect in
+    // the data this test exists to protect, and a recorded failure means the evidence says
+    // deacon diverged. Tolerating those would let exactly the breakage-behind-the-gaps this
+    // assertion guards against pass unnoticed.
+    const EVIDENCE_GATE_KINDS: &[&str] =
+        &["missingexecution", "runneromission", "silentlyskippedcase"];
     let unexpected: Vec<&serde_json::Value> = blocking
         .iter()
         .filter(|b| {

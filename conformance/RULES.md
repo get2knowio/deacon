@@ -74,11 +74,11 @@ checkable at a glance rather than by reading every section.
 | **V28** | an applicable obligation with zero dispositions, or with more than one | [Obligation dispositions](#obligation-dispositions-v28--v29) |
 | **V29** | malformed disposition: filler rationale; a high-risk triple dispositioned by rationale/waiver rather than a case; a disposition whose obligation no longer resolves (stale) | [Obligation dispositions](#obligation-dispositions-v28--v29) |
 | **V30** | injected-regression integrity: a declared channel with no regression record; a regression targeting a channel with no observer | [Injected-regression harness](#injected-regression-harness-v30) |
+| **V31** | metamorphic relation integrity: a missing or unresolvable `ground`; an empty `channels`, or one naming an undeclared channel; a duplicated `transformation`; a `rationale` that is a label rather than an argument | [Metamorphic relation catalogue](#metamorphic-relation-catalogue-v31--v32) |
+| **V32** | a mandated metamorphic relation family (FR-044) with no record | [Metamorphic relation catalogue](#metamorphic-relation-catalogue-v31--v32) |
 | **V34** | lane integrity: a derived execution unit assigned to zero lanes; a lane naming an unknown class, program, or profile; case predicates that overlap or leave a remainder; a lane declaring `blocking: true` where FR-015/FR-019 forbid it; any lane declaring `mayWriteRecord: true`; a declared nextest profile whose filter does not select the lane's programs | [Lanes and execution units](#lanes-and-execution-units-v34) |
 | **V35** | execution-manifest integrity: absent, malformed, incomplete, produced for a different revision, stale against current hashes, or carrying an unaccounted outcome | [Execution manifest](#execution-manifest-v35) |
 | **V36** | drift-record integrity: an observation whose id is not derived from its substance; a duplicate; a `lastCompletedRun` omitting a probed kind; an upgrade-proposal section marked absent or unsorted | [Drift observations and upgrade proposals](#drift-observations-and-upgrade-proposals-v36) |
-| **V31** | metamorphic relation integrity: a missing or unresolvable `ground`; an empty `channels`, or one naming an undeclared channel; a duplicated `transformation`; a `rationale` that is a label rather than an argument | [Metamorphic relation catalogue](#metamorphic-relation-catalogue-v31--v32) |
-| **V32** | a mandated metamorphic relation family (FR-044) with no record | [Metamorphic relation catalogue](#metamorphic-relation-catalogue-v31--v32) |
 
 **Three distinctions this file keeps apart**, because conflating any pair makes a status
 unfalsifiable:

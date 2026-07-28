@@ -315,17 +315,22 @@ fn scope(registry: &Registry, profile: &str, env: &Environment) -> Scope {
         .filter(|p| p.id != profile)
         .map(|p| p.id.clone())
         .collect();
-    for engine in ["podman", "containerd", "nerdctl"] {
+    // Each axis enumerates EVERY known value, including the one this certification covers,
+    // and excludes only the covered one. Listing just the "other" values worked by accident
+    // for linux/x86_64/docker and silently under-stated the scope everywhere else — a
+    // Podman certification never named Docker as uncovered, which is the exact misreading
+    // `doesNotCertify` exists to prevent.
+    for engine in ["docker", "podman", "containerd", "nerdctl"] {
         if engine != env.container_engine {
             does_not_certify.insert(format!("container engine: {engine}"));
         }
     }
-    for os in ["macos", "windows"] {
+    for os in ["linux", "macos", "windows"] {
         if os != env.platform {
             does_not_certify.insert(format!("operating system: {os}"));
         }
     }
-    for arch in ["aarch64", "armv7"] {
+    for arch in ["x86_64", "aarch64", "armv7"] {
         if arch != env.arch {
             does_not_certify.insert(format!("architecture: {arch}"));
         }
@@ -456,9 +461,21 @@ fn not_certified(registry: &Registry, certification: &Certification) -> NotCerti
         .map(|p| p.id.clone())
         .collect();
     inactive.sort();
+    // Enumerated from the registry's own dispositions, never left empty: an empty list
+    // here would claim "nothing is non-testable" while `coverage.contextCoverage` reports
+    // a non-zero count, and a reader could not tell "not applicable" from "forgotten"
+    // (FR-037) — which is the whole reason the field exists.
+    let mut non_testable: Vec<String> = registry
+        .obligation_dispositions
+        .iter()
+        .filter(|d| d.disposition == crate::obligation::DispositionKind::NonTestable)
+        .map(|d| d.obligation.clone())
+        .collect();
+    non_testable.sort();
+    non_testable.dedup();
     NotCertified {
         inactive_profiles: inactive,
-        non_testable: Vec::new(),
+        non_testable,
         no_reference_for_platform: certification.no_reference.clone(),
     }
 }

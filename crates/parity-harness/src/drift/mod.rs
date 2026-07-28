@@ -1,7 +1,7 @@
 //! Upstream drift detection — the **live** half (026-continuous-conformance-certification,
 //! US4; contracts/cli-drift.md).
 //!
-//! The hermetic half (records, `V33`, `drift check|report|scaffold`) lives in
+//! The hermetic half (records, `V36`, `drift check|report|scaffold`) lives in
 //! `deacon_conformance::drift`. This module owns the only thing that needs the network:
 //! looking at upstream and reporting what it currently is.
 //!

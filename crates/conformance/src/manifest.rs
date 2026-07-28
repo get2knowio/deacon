@@ -103,8 +103,17 @@ pub enum ManifestDefect {
     Malformed { path: String, cause: String },
     /// A required case id is missing from `cases`.
     Incomplete { case_id: String },
-    /// `revision` names a different commit, or the environment does not match the profile.
+    /// `revision` names a different commit.
     Revision { expected: String, found: String },
+    /// `profile` names a different certification profile. Kept distinct from
+    /// [`ManifestDefect::Revision`] because the remedies differ — one is "re-run on this
+    /// commit", the other is "run the right lane" — and a profile mismatch reported under
+    /// a message about revisions sends the reader after the wrong problem.
+    Profile { expected: String, found: String },
+    /// `requiredCaseCount` disagrees with the set certification requires. An over-narrow
+    /// run is otherwise invisible: every case the producer *listed* can pass while the
+    /// producer considered far fewer cases required than there are.
+    NarrowRun { recorded: usize, expected: usize },
     /// A recorded hash no longer matches the currently computed one.
     Stale {
         case_id: String,
@@ -124,6 +133,8 @@ impl ManifestDefect {
             ManifestDefect::Malformed { .. } => "V35-malformed",
             ManifestDefect::Incomplete { .. } => "V35-incomplete",
             ManifestDefect::Revision { .. } => "V35-revision",
+            ManifestDefect::Profile { .. } => "V35-profile",
+            ManifestDefect::NarrowRun { .. } => "V35-narrow",
             ManifestDefect::Stale { .. } => "V35-stale",
             ManifestDefect::Unaccounted { .. } => "V35-unaccounted",
         }
@@ -138,7 +149,9 @@ impl ManifestDefect {
             ManifestDefect::Incomplete { case_id }
             | ManifestDefect::Stale { case_id, .. }
             | ManifestDefect::Unaccounted { case_id, .. } => case_id.clone(),
-            ManifestDefect::Revision { .. } => "execution-manifest".to_string(),
+            ManifestDefect::Revision { .. }
+            | ManifestDefect::Profile { .. }
+            | ManifestDefect::NarrowRun { .. } => "execution-manifest".to_string(),
         }
     }
 
@@ -163,6 +176,17 @@ impl ManifestDefect {
                 "execution manifest was produced for `{found}` but certification is for \
                  `{expected}`. A manifest from another revision is not evidence for this \
                  one (FR-033c). Remedy: re-run the container-backed lane on this revision."
+            ),
+            ManifestDefect::Profile { expected, found } => format!(
+                "execution manifest was produced for profile `{found}` but certification is \
+                 for `{expected}`. A receipt from another profile describes a different \
+                 combination. Remedy: run the container-backed lane for `{expected}`."
+            ),
+            ManifestDefect::NarrowRun { recorded, expected } => format!(
+                "execution manifest records `requiredCaseCount` {recorded}, but \
+                 certification requires {expected} cases. An over-narrow run is not clean — \
+                 every listed case can pass while the producer considered fewer cases \
+                 required than exist. Remedy: re-run the container-backed lane."
             ),
             ManifestDefect::Stale {
                 case_id,
@@ -259,9 +283,15 @@ pub fn verify_loaded(
         });
     }
     if manifest.profile != expected.profile {
-        defects.push(ManifestDefect::Revision {
+        defects.push(ManifestDefect::Profile {
             expected: expected.profile.clone(),
             found: manifest.profile.clone(),
+        });
+    }
+    if manifest.required_case_count != expected.required.len() {
+        defects.push(ManifestDefect::NarrowRun {
+            recorded: manifest.required_case_count,
+            expected: expected.required.len(),
         });
     }
 
@@ -411,9 +441,38 @@ mod tests {
     fn a_missing_required_case_is_incomplete_not_clean() {
         let m = manifest(vec![case("case-a", CaseOutcome::Pass)]);
         let defects = verify_loaded(&m, &expectation(&["case-a", "case-b"]));
+        let incomplete: Vec<_> = defects
+            .iter()
+            .filter(|d| d.code() == "V35-incomplete")
+            .collect();
+        assert_eq!(incomplete.len(), 1);
+        assert_eq!(incomplete[0].record(), "case-b");
+        // The same manifest is ALSO an over-narrow run: it declared one required case where
+        // certification requires two. Both facts are reported, which is FR-043 — a
+        // maintainer must see the whole list, not the first line.
+        assert!(defects.iter().any(|d| d.code() == "V35-narrow"));
+    }
+
+    #[test]
+    fn an_over_narrow_run_is_reported_even_when_every_listed_case_passed() {
+        // The field `requiredCaseCount` exists to make this visible; before it was checked,
+        // a producer that considered one case required could pass a two-case gate.
+        let mut m = manifest(vec![case("case-a", CaseOutcome::Pass)]);
+        m.required_case_count = 0;
+        let defects = verify_loaded(&m, &expectation(&["case-a"]));
         assert_eq!(defects.len(), 1);
-        assert_eq!(defects[0].code(), "V35-incomplete");
-        assert_eq!(defects[0].record(), "case-b");
+        assert_eq!(defects[0].code(), "V35-narrow");
+    }
+
+    #[test]
+    fn a_profile_mismatch_is_not_reported_as_a_revision_mismatch() {
+        // Different remedies: "re-run on this commit" vs "run the right lane".
+        let mut m = manifest(vec![case("case-a", CaseOutcome::Pass)]);
+        m.profile = "prof-linux-arm64-podman-0870".into();
+        let defects = verify_loaded(&m, &expectation(&["case-a"]));
+        assert_eq!(defects.len(), 1);
+        assert_eq!(defects[0].code(), "V35-profile");
+        assert!(!defects[0].message().contains("another revision"));
     }
 
     #[test]

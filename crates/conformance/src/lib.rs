@@ -246,7 +246,7 @@ pub fn canary_file_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
 /// operational configuration — *which checks run where* — not a claim about deacon's
 /// conformance. Inside `registry/` it would sit on a path reachable by `certify`, so an
 /// edit to continuous-integration configuration could change a release verdict. Lane
-/// defects block the pull request that introduced them (V31) instead.
+/// defects block the pull request that introduced them (V34) instead.
 pub fn default_lanes_dir() -> std::path::PathBuf {
     workspace_root().join("conformance").join("lanes")
 }

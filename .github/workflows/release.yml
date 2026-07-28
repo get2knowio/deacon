@@ -27,7 +27,7 @@ jobs:
   #
   # Keeping the two jobs separate is what lets `verify` stay free of Docker, Node, and the
   # network while FR-041(h) remains enforceable: if this job fails or is skipped, no
-  # manifest artifact exists and `certify` blocks on `V32-absent` — the gate holds without
+  # manifest artifact exists and `certify` blocks on `V35-absent` — the gate holds without
   # `verify` knowing anything about job orchestration.
   docker-execution:
     name: Container-backed execution (evidence for certification)

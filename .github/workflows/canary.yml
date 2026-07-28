@@ -27,9 +27,11 @@ jobs:
     name: canary
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # Non-blocking by construction. The job is not a required check anywhere, and nothing
-    # in the release path consumes its status.
-    continue-on-error: true
+    # Non-blocking by construction: the job is not a required check anywhere, and nothing
+    # in the release path consumes its status. The tolerance is applied to the RUN step
+    # alone, deliberately — a job-level `continue-on-error` would also swallow the
+    # stable-tree verification below, and a canary that modified stable data would then
+    # report success. That is the one failure this lane must never absorb (FR-020, SC-008).
     steps:
       - name: Free disk space
         run: |
@@ -50,7 +52,10 @@ jobs:
           echo "digest=$(find conformance/registry conformance/snapshots fixtures/parity-corpus -type f -print0 \
             | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
+      # Findings never gate (FR-019): a canary run that surfaces forty differences must not
+      # redden the lane. The tolerance stops here — every step after it still fails the job.
       - name: Run the canary lane
+        continue-on-error: true
         run: cargo nextest run --profile canary --no-fail-fast
 
       # SC-008 asserted in CI as well as in `lane_integrity`: a canary run must leave the

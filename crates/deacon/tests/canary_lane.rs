@@ -143,11 +143,14 @@ fn this_lane_holds_no_write_path_to_the_record() {
         .filter(|line| !line.starts_with("//") && !line.contains("forbidden"))
         .collect::<Vec<_>>()
         .join("\n");
+    // Each entry carries the `forbidden` marker so the filter above excludes the literal
+    // that names it. Without the marker the array itself is the only match in the file, and
+    // the guard fails on its own declaration rather than on a real write path.
     for forbidden in [
-        "fs::write",
-        "fs::rename",
-        "atomic_write",
-        "refresh_snapshot",
+        "fs::write",        // forbidden-marker
+        "fs::rename",       // forbidden-marker
+        "atomic_write",     // forbidden-marker
+        "refresh_snapshot", // forbidden-marker
     ] {
         assert!(
             !code.contains(forbidden),

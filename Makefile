@@ -598,14 +598,14 @@ clean-branches: ## Delete local and remote branches fully merged into the defaul
 # ---------------------------------------------------------------------------
 
 .PHONY: test-lanes
-test-lanes: ## Check lane integrity (V31) and render the ran/excluded breakdown
+test-lanes: ## Check lane integrity (V34) and render the ran/excluded breakdown
 	@set -euo pipefail; \
 	cargo run -p deacon-conformance -- lane check; \
 	cargo run -p deacon-conformance -- lane report; \
 	echo "lane report: target/conformance/lanes.md"
 
 .PHONY: test-drift
-test-drift: ## Validate committed drift records (V33). Hermetic; does NOT scan upstream.
+test-drift: ## Validate committed drift records (V36). Hermetic; does NOT scan upstream.
 	@cargo run -p deacon-conformance -- drift check
 
 .PHONY: test-pr-docker
@@ -621,7 +621,7 @@ certify-report: ## Release certification + the report. Exits 1 when not certifie
 	@set -euo pipefail; \
 	# Certification is hermetic (FR-033a): no reference implementation, no container \
 	# engine, no network. It reads the execution manifest the container lane produced. \
-	# A local run without one blocks on `V32-absent`, which is the gate working — run \
+	# A local run without one blocks on `V35-absent`, which is the gate working — run \
 	# `make test-pr-docker` first, or fetch the CI artifact. \
 	cargo run -p deacon-conformance -- certify --report-dir target/conformance || { \
 		echo ""; \

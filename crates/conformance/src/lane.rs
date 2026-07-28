@@ -36,7 +36,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::load::Registry;
@@ -762,10 +761,6 @@ pub fn scaffold_lane(for_unit: &str) -> serde_json::Value {
         }
     })
 }
-
-/// The `IndexMap` re-export keeps the declaration-order contract visible at the module
-/// boundary even though the current record shape needs no ordered map.
-pub type OrderedFields = IndexMap<String, String>;
 
 #[cfg(test)]
 mod tests {

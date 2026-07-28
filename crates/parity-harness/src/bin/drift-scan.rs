@@ -51,14 +51,39 @@ async fn run() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // The committed file is written whole, so a `--kinds` subset would REPLACE the records
+    // of every kind it did not probe — silently discarding observations that are still
+    // true — and record a `kindsProbed` that `drift check` reports as V36. A partial scan
+    // is a legitimate thing to run; publishing it as the committed state is not.
+    if write && kinds.len() != DriftKind::ALL.len() {
+        eprintln!(
+            "error: --write requires a full scan. A `--kinds` subset would overwrite the \
+             committed observations for the kinds it did not probe, and record a partial \
+             `lastCompletedRun` that `drift check` reports as V36. Remedy: drop `--kinds`, \
+             or drop `--write` and read the artifact under `target/drift/`."
+        );
+        return ExitCode::from(2);
+    }
+    // Injected rather than read from the clock, and REQUIRED rather than defaulted: a
+    // blank date is itself a V36 defect (`lastCompletedRun` has a blank date), so the old
+    // fallback produced a file that failed `drift check` the moment it was written — and
+    // with `--write`, committed one that failed `validate`. Fail here instead, where the
+    // cause is obvious.
     let today = match args.iter().position(|a| a == "--today") {
-        Some(i) => args.get(i + 1).cloned().unwrap_or_default(),
+        Some(i) => match args.get(i + 1).filter(|v| !v.trim().is_empty()) {
+            Some(value) => value.clone(),
+            None => {
+                eprintln!("error: --today needs a YYYY-MM-DD value");
+                return ExitCode::from(2);
+            }
+        },
         None => {
-            // Injected rather than read from the clock wherever possible; the fallback
-            // keeps a manual run usable without making the artifact non-reproducible for
-            // the scheduled one, which always passes `--today`.
-            eprintln!("note: no --today given; observations will carry an empty date");
-            String::new()
+            eprintln!(
+                "error: --today <YYYY-MM-DD> is required. It is injected rather than read \
+                 from the clock so the artifact is byte-stable across reruns; an absent \
+                 date would be recorded blank, which `drift check` reports as V36."
+            );
+            return ExitCode::from(2);
         }
     };
 
@@ -100,7 +125,7 @@ async fn run() -> ExitCode {
     }
 
     // `lastCompletedRun` is recorded ONLY over the kinds that actually completed. A partial
-    // run therefore reads as partial (V33), and an empty `records` alongside it can never
+    // run therefore reads as partial (V36), and an empty `records` alongside it can never
     // be mistaken for "no drift" (FR-025).
     let file = DriftFile {
         schema_version: 1,
