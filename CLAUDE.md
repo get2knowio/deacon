@@ -1105,6 +1105,25 @@ rediscover-and-investigate loop:
   Tier 1c corpus are gone; these are now the declarative `case-errors-decl-*` cases in
   `conformance/registry/cases.json`, driven by `parity_conformance_runner`. Waivers still
   load from `conformance/registry/waivers/` via `deacon-conformance`.
+- **The three `bhv-readconfig-extends-*` behaviors carry `reference: divergent`, not
+  `not-applicable`, and that is correct** — even though every other `deacon-extension`
+  behavior uses `not-applicable`. The axis records whether the reference *has the surface*,
+  not whether it has the feature: `not-applicable` means the reference CLI has no concept of
+  the behavior at all (`down`, `doctor`, host CA injection, user profiles — no such
+  subcommand or knob exists). The reference **does** have `read-configuration` and **does**
+  process a config containing `extends`; it just echoes it literally instead of resolving.
+  That is an observable difference on a surface both sides expose, so it is `divergent`, and
+  RULES.md line "Backs which reference status: `divergent`" is why each one is waiver-backed.
+  Do not "normalize" these three to match their siblings.
+- **A residual's `blockedCarrier` naming a binary absent from
+  `fixtures/parity-corpus/registry.json` is not an orphan.** `res-harness-fault-injection`
+  (`parity_harness_faults`) and `res-harness-registry-structural` (`parity_registry_check`)
+  look dangling because that registry lists only the *live parity* binaries, and both of
+  those are deliberately hermetic guards excluded from the parity profile's allow-list.
+  `blockedCarrier` is validated (V23, `validate.rs`) against **baseline units**, not against
+  the parity registry — both programs are present in `conformance/migration/baseline.json`,
+  so both resolve. Both residuals are `disposition: permanent` anyway, so the carrier is
+  never deletable.
 
 ## Output Streams Contract
 
