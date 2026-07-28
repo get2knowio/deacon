@@ -17,7 +17,10 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 # `sync` is additive over the workspace feature set: the resource-group drivers bound
 # their concurrency with a `tokio::sync::Semaphore` over a `JoinSet` (024 T018).
-tokio = { workspace = true, features = ["sync"] }
+# `rt`/`macros`/`time` are additive: the drift probes are bounded async subprocesses
+# (`tokio::time::timeout` over `tokio::process`), and `drift-scan` drives them from a
+# single-threaded runtime it builds itself (026, US4).
+tokio = { workspace = true, features = ["sync", "rt", "macros", "time", "process"] }
 tracing = { workspace = true }
 # RFC3339 report timestamps. Not a [workspace.dependencies] entry (only used by
 # deacon-core today), so pinned directly here; `clock` (default) provides Utc::now.
@@ -28,11 +31,15 @@ toml = "0.8"
 # Declarative conformance runner (022): the `matches` stdout/stderr assertion is a
 # regex match; `regex` is already a [workspace.dependencies] entry (used by core).
 regex = { workspace = true }
+# Registry content digest for the upgrade-proposal `inputState` (026, US6). Already a
+# workspace dependency (deacon-core, deacon-conformance); wired into this crate here.
+sha2 = { workspace = true }
 # Isolated external temp workspaces for Docker-backed conformance cases (022 US5,
 # workspace.rs). Runtime dep now (not just dev): the RAII cleanup guard owns a TempDir.
 tempfile = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

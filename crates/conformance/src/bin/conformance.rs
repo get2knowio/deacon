@@ -21,7 +21,11 @@ use deacon_conformance::baseline::{
     self, BaselineDrift, BaselineFile, generate_baseline, load_baseline, write_baseline,
 };
 use deacon_conformance::case_hash::hashes_for_case;
-use deacon_conformance::certify::certify;
+use deacon_conformance::certification::{
+    Environment as ReportEnvironment, ReportInputs, build_report,
+    render_json as render_certification_json, render_md as render_certification_md,
+};
+use deacon_conformance::certify::{EvidenceInputs, certify_with_evidence};
 use deacon_conformance::clause::{generate_clauses, render as render_clauses, write_clauses};
 use deacon_conformance::clause_diff::{
     diff as clause_diff, render_json as render_clause_diff_json, render_md as render_clause_diff_md,
@@ -33,12 +37,19 @@ use deacon_conformance::diff::{
 };
 use deacon_conformance::discovery::queue::{self, DiscoveryData};
 use deacon_conformance::discovery::report as discovery_report_mod;
+use deacon_conformance::drift::check::{check_drift, check_proposal, drift_state_is_known};
+use deacon_conformance::drift::{load_drift, load_proposal};
 use deacon_conformance::inventory::{
     InventoryDrift, compare, generate_inventory, render, write_inventory,
+};
+use deacon_conformance::lane::{
+    CaseMembership, ExecutionUnit, build_lane_report, case_memberships, check_lanes,
+    derive_execution_units, load_lanes, render_lane_report_md, scaffold_lane,
 };
 use deacon_conformance::load::{
     LoadError, Registry, load_clause_inventory, load_inventory, load_spec_manifest,
 };
+use deacon_conformance::manifest::RequiredCase;
 use deacon_conformance::model::{ClauseInventory, ConstraintInventory, DocumentScope};
 use deacon_conformance::obligation::{
     ObligationInventory, ObligationKind, compare as compare_obligations, generate_obligations,
@@ -51,9 +62,9 @@ use deacon_conformance::validate::{
     ClauseInputs, InventoryInputs, Violation, validate_path, validate_path_with_inventory,
 };
 use deacon_conformance::{
-    CURRENT_SCHEMA_PIN, CURRENT_SPEC_PIN, clause_paths_for, default_clauses_file,
+    CURRENT_SCHEMA_PIN, CURRENT_SPEC_PIN, atomic_write, clause_paths_for, default_clauses_file,
     default_inventory_file, default_pinned_schemas_dir, default_pinned_spec_dir,
-    default_registry_dir, migration_paths_for, workspace_root,
+    default_registry_dir, drift_dir_for, lanes_dir_for, migration_paths_for, workspace_root,
 };
 
 /// Structural conformance-registry tooling (dev-only).
@@ -101,6 +112,27 @@ enum Command {
         /// the human-readable summary; logs still go to stderr (contracts/cli.md).
         #[arg(long)]
         json: bool,
+        /// Directory to write `certification.json` + `certification.md` into
+        /// (026-continuous-conformance-certification, FR-034). Written on BOTH a
+        /// certified and a blocked verdict, so a blocked release still ships the
+        /// artifact explaining why.
+        #[arg(long, value_name = "DIR")]
+        report_dir: Option<PathBuf>,
+        /// Execution manifest to verify (026, FR-033d). Defaults to
+        /// `target/conformance/execution-manifest.json`. An absent manifest is the
+        /// *missing required execution* blocker, never a skip.
+        #[arg(long, value_name = "FILE")]
+        manifest: Option<PathBuf>,
+    },
+    /// Continuous-integration lane tooling (026-continuous-conformance-certification).
+    Lane {
+        #[command(subcommand)]
+        command: LaneCommand,
+    },
+    /// Upstream source-drift tooling (026-continuous-conformance-certification).
+    Drift {
+        #[command(subcommand)]
+        command: DriftCommand,
     },
     /// Schema constraint inventory tooling (020-schema-constraint-inventory).
     Inventory {
@@ -418,6 +450,62 @@ enum ClauseCommand {
 
 /// `inventory <generate|check|diff|scaffold>` — machine-owned constraint inventory
 /// operations (contracts/cli-inventory.md). NEVER performs network IO.
+/// `lane` subcommands (026-continuous-conformance-certification, contracts/cli-lane.md).
+#[derive(Debug, Subcommand)]
+enum LaneCommand {
+    /// Report V34 lane-integrity violations. Read-only by construction.
+    Check {
+        /// Emit `{ "ok", "violations" }` on stdout instead of one violation per line.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write the per-lane ran/excluded breakdown. NEVER gates — the exit code reflects
+    /// whether the report could be written, never what it says.
+    Report {
+        #[arg(long, value_name = "DIR")]
+        out_dir: Option<PathBuf>,
+    },
+    /// Emit a skeleton lane record to stdout. Writes nothing.
+    Scaffold {
+        /// The unassigned unit the skeleton should claim.
+        #[arg(long, value_name = "UNIT")]
+        for_unit: String,
+    },
+}
+
+/// `drift` subcommands (026, contracts/cli-drift.md).
+#[derive(Debug, Subcommand)]
+enum DriftCommand {
+    /// Report V36 drift-record integrity violations.
+    Check {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Render the committed observations. NEVER gates.
+    Report {
+        #[arg(long, value_name = "DIR")]
+        out_dir: Option<PathBuf>,
+    },
+    /// Emit a skeleton observation to stdout. Writes nothing.
+    Scaffold,
+    /// Upgrade-proposal tooling.
+    Proposal {
+        #[command(subcommand)]
+        command: ProposalCommand,
+    },
+}
+
+/// `drift proposal` subcommands.
+#[derive(Debug, Subcommand)]
+enum ProposalCommand {
+    /// Verify a bundle carries all seven sections and is deterministic.
+    Check {
+        /// The bundle to check.
+        #[arg(value_name = "FILE")]
+        proposal: PathBuf,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 enum InventoryCommand {
     /// Extract the vendored pinned schemas into the canonical committed inventory.
@@ -501,7 +589,24 @@ fn run(cli: Cli) -> i32 {
     match cli.command {
         Command::Validate { json } => validate(&registry_dir, &today, json),
         Command::Report { out_dir } => report(&registry_dir, &today, out_dir),
-        Command::Certify { json } => certify_cmd(&registry_dir, &today, json),
+        Command::Certify {
+            json,
+            report_dir,
+            manifest,
+        } => certify_cmd(&registry_dir, &today, json, report_dir, manifest),
+        Command::Lane { command } => match command {
+            LaneCommand::Check { json } => lane_check(&registry_dir, json),
+            LaneCommand::Report { out_dir } => lane_report(&registry_dir, out_dir),
+            LaneCommand::Scaffold { for_unit } => lane_scaffold(&for_unit),
+        },
+        Command::Drift { command } => match command {
+            DriftCommand::Check { json } => drift_check(&registry_dir, json),
+            DriftCommand::Report { out_dir } => drift_report(&registry_dir, out_dir),
+            DriftCommand::Scaffold => drift_scaffold(),
+            DriftCommand::Proposal { command } => match command {
+                ProposalCommand::Check { proposal } => drift_proposal_check(&proposal),
+            },
+        },
         Command::Inventory { command } => match command {
             InventoryCommand::Generate { schemas, out } => inventory_generate(schemas, out),
             InventoryCommand::Check { schemas, inventory } => inventory_check(schemas, inventory),
@@ -2806,6 +2911,456 @@ fn report(registry_dir: &Path, today: &str, out_dir: Option<PathBuf>) -> i32 {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 026-continuous-conformance-certification — lane, drift, and certification report
+// ---------------------------------------------------------------------------
+
+/// Assemble the execution evidence certification needs (research D3).
+///
+/// The required case set is derived, not authored: it is exactly the declarative cases
+/// whose `resourceGroup` puts them in a container lane. A hand-authored list here would
+/// let a newly added Docker case go unexecuted while certification still reported the
+/// manifest complete.
+fn build_evidence_inputs(
+    registry: &Registry,
+    registry_dir: &Path,
+    manifest: Option<PathBuf>,
+) -> EvidenceInputs {
+    use deacon_conformance::lane::case_lane_membership;
+
+    // Fixtures are a sibling of the registry, matching the root the reviewed refresh and
+    // `snapshot check` use — three callers, one answer about what a case's inputs are.
+    let fixtures_root = registry_dir
+        .parent()
+        .map(|p| p.join("fixtures"))
+        .unwrap_or_else(|| registry_dir.join("fixtures"));
+
+    let manifest_path = manifest.unwrap_or_else(|| {
+        workspace_root()
+            .join("target")
+            .join("conformance")
+            .join("execution-manifest.json")
+    });
+
+    let mut required_cases = Vec::new();
+    let mut applicable_units = std::collections::BTreeSet::new();
+    for case in &registry.cases {
+        let Some(membership) = case_lane_membership(case) else {
+            continue;
+        };
+        if !membership.needs_container || membership.needs_oracle {
+            // Only the oracle-free container tier is the pull-request lane's obligation;
+            // live-differential cases are the nightly lane's, and it never gates a release.
+            continue;
+        }
+        // A case whose hashes cannot be computed is skipped rather than defaulted: a
+        // fabricated hash would compare unequal and report a stale manifest for a case
+        // that is merely unreadable, which sends the reader after the wrong problem.
+        let Ok((case_hash, fixture_hash)) = hashes_for_case(case, &fixtures_root) else {
+            continue;
+        };
+        required_cases.push(RequiredCase {
+            case_id: case.id.clone(),
+            case_hash,
+            fixture_hash,
+        });
+        applicable_units.insert(case.id.clone());
+    }
+
+    // What the manifest accounted for. An unreadable manifest yields an empty set, which
+    // surfaces as runner omissions ON TOP OF the V35-absent blocker — deliberately, since
+    // both facts are true and FR-043 wants every one reported.
+    let mut accounted_units = std::collections::BTreeSet::new();
+    let mut recorded_oracles = Vec::new();
+    if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
+        if let Ok(m) = serde_json::from_str::<deacon_conformance::manifest::ExecutionManifest>(&raw)
+        {
+            accounted_units = deacon_conformance::manifest::accounted_cases(&m);
+        }
+    }
+
+    // Oracle identity recorded in committed snapshot provenance (FR-041(g)). Reading the
+    // provenance is the whole check: certification never runs the reference to find out.
+    let snapshots_dir = registry_dir
+        .parent()
+        .map(|p| p.join("snapshots"))
+        .unwrap_or_else(|| registry_dir.join("snapshots"));
+    let mut stale_snapshots = Vec::new();
+    if let Ok(platforms) = std::fs::read_dir(&snapshots_dir) {
+        for platform in platforms.flatten() {
+            let Ok(cases) = std::fs::read_dir(platform.path()) else {
+                continue;
+            };
+            for case in cases.flatten() {
+                let provenance_path = case.path().join("provenance.json");
+                let Ok(raw) = std::fs::read_to_string(&provenance_path) else {
+                    continue;
+                };
+                let Ok(provenance) =
+                    serde_json::from_str::<deacon_conformance::snapshot::Provenance>(&raw)
+                else {
+                    continue;
+                };
+                let case_id = case.file_name().to_string_lossy().to_string();
+                recorded_oracles.push((
+                    format!("snapshot:{case_id}"),
+                    provenance.oracle_version.clone(),
+                ));
+                if let Some(registry_case) = registry.cases.iter().find(|c| c.id == case_id) {
+                    let Ok((case_hash, fixture_hash)) =
+                        hashes_for_case(registry_case, &fixtures_root)
+                    else {
+                        continue;
+                    };
+                    if provenance.case_hash != case_hash {
+                        stale_snapshots.push((case_id.clone(), "caseHash".to_string()));
+                    } else if provenance.fixture_hash != fixture_hash {
+                        stale_snapshots.push((case_id.clone(), "fixtureHash".to_string()));
+                    }
+                }
+            }
+        }
+    }
+    stale_snapshots.sort();
+    recorded_oracles.sort();
+
+    let profile_is_active = registry.profiles.iter().any(|p| p.active);
+
+    EvidenceInputs {
+        revision: std::env::var("DEACON_CERTIFY_REVISION").unwrap_or_default(),
+        manifest_path: Some(manifest_path),
+        required_cases,
+        resolvable_dispositions: registry
+            .obligation_dispositions
+            .iter()
+            .map(|d| d.id.clone())
+            .collect(),
+        stale_snapshots,
+        recorded_oracles,
+        applicable_units,
+        accounted_units,
+        profile_is_active,
+    }
+}
+
+/// Write `certification.{json,md}` atomically into `dir`.
+fn write_certification_report(
+    result: &deacon_conformance::certify::Certification,
+    registry: &Registry,
+    registry_dir: &Path,
+    today: &str,
+    dir: &Path,
+) -> Result<(), i32> {
+    let (schemas_dir, _) = inventory_paths_for(registry_dir);
+    let (spec_dir, _) = clause_paths_for(registry_dir);
+    let inputs = ReportInputs {
+        // From the build environment, never from a `git` call at report time — a report
+        // that shells out is not byte-reproducible across machines (FR-036).
+        deacon_revision: std::env::var("DEACON_CERTIFY_REVISION").unwrap_or_default(),
+        environment: report_environment(),
+        // From `--today`, never the clock, so the same inputs always yield the same bytes.
+        evaluation_date: today.to_string(),
+        schema_documents: count_manifest_documents(&schemas_dir),
+        prose_documents: count_manifest_documents(&spec_dir),
+        admitted_non_deterministic_inputs: Vec::new(),
+    };
+    let report = build_report(result, registry, &inputs);
+    let json_path = dir.join("certification.json");
+    let md_path = dir.join("certification.md");
+    if let Err(e) = atomic_write(&json_path, &render_certification_json(&report)) {
+        eprintln!("error: could not write {}: {e}", json_path.display());
+        return Err(2);
+    }
+    if let Err(e) = atomic_write(&md_path, &render_certification_md(&report)) {
+        eprintln!("error: could not write {}: {e}", md_path.display());
+        return Err(2);
+    }
+    Ok(())
+}
+
+/// The environment identity the report records.
+///
+/// Read from the environment the certifying job declares rather than probed: certification
+/// must run with no container engine present (SC-013), so probing one would make the gate
+/// depend on the capability it is designed not to need.
+fn report_environment() -> ReportEnvironment {
+    ReportEnvironment {
+        platform: std::env::var("DEACON_CERTIFY_PLATFORM").unwrap_or_else(|_| "linux".into()),
+        arch: std::env::var("DEACON_CERTIFY_ARCH").unwrap_or_else(|_| "x86_64".into()),
+        container_engine: std::env::var("DEACON_CERTIFY_ENGINE")
+            .unwrap_or_else(|_| "docker".into()),
+        container_engine_version: std::env::var("DEACON_CERTIFY_ENGINE_VERSION")
+            .unwrap_or_else(|_| "unknown".into()),
+        compose_version: std::env::var("DEACON_CERTIFY_COMPOSE_VERSION")
+            .unwrap_or_else(|_| "unknown".into()),
+    }
+}
+
+/// Count the documents a vendored `manifest.json` pins.
+fn count_manifest_documents(dir: &Path) -> usize {
+    let Ok(raw) = std::fs::read_to_string(dir.join("manifest.json")) else {
+        return 0;
+    };
+    let Ok(doc) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return 0;
+    };
+    doc.get("documents")
+        .and_then(|d| d.as_object())
+        .map(|m| m.len())
+        .unwrap_or(0)
+}
+
+/// `lane check` — V34 over the lane root (contracts/cli-lane.md).
+fn lane_check(registry_dir: &Path, json: bool) -> i32 {
+    let registry = match Registry::load(registry_dir) {
+        Ok(registry) => registry,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    };
+    let lanes_dir = lanes_dir_for(registry_dir);
+    let lanes = match load_lanes(&lanes_dir) {
+        Ok(lanes) => lanes,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    };
+    let (units, memberships) = lane_inputs(&registry, registry_dir);
+    let violations = check_lanes(&lanes, &units, &memberships, None);
+
+    if json {
+        let doc = serde_json::json!({ "ok": violations.is_empty(), "violations": violations });
+        match serde_json::to_string_pretty(&doc) {
+            Ok(text) => println!("{text}"),
+            Err(e) => {
+                eprintln!("error: could not serialize violations: {e}");
+                return 2;
+            }
+        }
+    } else {
+        for violation in &violations {
+            println!(
+                "{} {}: {}",
+                violation.code, violation.record, violation.message
+            );
+        }
+    }
+    i32::from(!violations.is_empty())
+}
+
+/// `lane report` — writes `target/conformance/lanes.{json,md}`.
+///
+/// **Reporting never gates.** The exit code reflects whether the report could be written,
+/// never what it says: a reporting command whose status depends on its content becomes a
+/// gate the moment someone wires it into a required check.
+fn lane_report(registry_dir: &Path, out_dir: Option<PathBuf>) -> i32 {
+    let registry = match Registry::load(registry_dir) {
+        Ok(registry) => registry,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    };
+    let lanes = match load_lanes(&lanes_dir_for(registry_dir)) {
+        Ok(lanes) => lanes,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    };
+    let (units, memberships) = lane_inputs(&registry, registry_dir);
+    let report = build_lane_report(&lanes, &units, &memberships);
+    let dir = out_dir.unwrap_or_else(|| workspace_root().join("target").join("conformance"));
+    let json = match serde_json::to_string_pretty(&report) {
+        Ok(mut text) => {
+            text.push('\n');
+            text
+        }
+        Err(e) => {
+            eprintln!("error: could not serialize lane report: {e}");
+            return 2;
+        }
+    };
+    if let Err(e) = atomic_write(&dir.join("lanes.json"), &json) {
+        eprintln!("error: could not write lanes.json: {e}");
+        return 2;
+    }
+    if let Err(e) = atomic_write(&dir.join("lanes.md"), &render_lane_report_md(&report)) {
+        eprintln!("error: could not write lanes.md: {e}");
+        return 2;
+    }
+    0
+}
+
+/// `lane scaffold` — stdout only, never writes.
+fn lane_scaffold(for_unit: &str) -> i32 {
+    match serde_json::to_string_pretty(&scaffold_lane(for_unit)) {
+        Ok(text) => {
+            println!("{text}");
+            0
+        }
+        Err(e) => {
+            eprintln!("error: could not render scaffold: {e}");
+            2
+        }
+    }
+}
+
+/// The derived denominator and case memberships a lane command needs.
+fn lane_inputs(
+    registry: &Registry,
+    registry_dir: &Path,
+) -> (
+    Vec<ExecutionUnit>,
+    std::collections::BTreeMap<String, CaseMembership>,
+) {
+    let tests_dir = workspace_root().join("crates").join("deacon").join("tests");
+    let snapshots_dir = registry_dir
+        .parent()
+        .map(|p| p.join("snapshots"))
+        .unwrap_or_else(|| registry_dir.join("snapshots"));
+    (
+        derive_execution_units(registry, &tests_dir, &snapshots_dir),
+        case_memberships(registry),
+    )
+}
+
+/// `drift check` — V36 over the committed observations.
+fn drift_check(registry_dir: &Path, json: bool) -> i32 {
+    let file = match load_drift(&drift_dir_for(registry_dir)) {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    };
+    let violations = check_drift(&file);
+    if json {
+        let doc = serde_json::json!({ "ok": violations.is_empty(), "violations": violations });
+        match serde_json::to_string_pretty(&doc) {
+            Ok(text) => println!("{text}"),
+            Err(e) => {
+                eprintln!("error: could not serialize violations: {e}");
+                return 2;
+            }
+        }
+    } else {
+        for violation in &violations {
+            println!(
+                "{} {}: {}",
+                violation.code, violation.record, violation.message
+            );
+        }
+    }
+    i32::from(!violations.is_empty())
+}
+
+/// `drift report` — writes `target/drift/observations.{json,md}`. Never gates.
+fn drift_report(registry_dir: &Path, out_dir: Option<PathBuf>) -> i32 {
+    let file = match load_drift(&drift_dir_for(registry_dir)) {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    };
+    let dir = out_dir.unwrap_or_else(|| workspace_root().join("target").join("drift"));
+    let json = match serde_json::to_string_pretty(&file) {
+        Ok(mut text) => {
+            text.push('\n');
+            text
+        }
+        Err(e) => {
+            eprintln!("error: could not serialize drift observations: {e}");
+            return 2;
+        }
+    };
+    if let Err(e) = atomic_write(&dir.join("observations.json"), &json) {
+        eprintln!("error: could not write observations.json: {e}");
+        return 2;
+    }
+
+    // The report states WHICH of the two empty-list meanings applies. Printing an empty
+    // table either way is what FR-025 exists to prevent.
+    let mut md = String::from("# Upstream drift observations\n\n");
+    if drift_state_is_known(&file) {
+        md.push_str("Drift detection has completed over every source kind.\n\n");
+    } else {
+        md.push_str(
+            "**Drift detection has NOT completed over every source kind.** An empty list \
+             below means *not looked at*, not *nothing found*.\n\n",
+        );
+    }
+    if file.records.is_empty() {
+        md.push_str("No drift observations recorded.\n");
+    } else {
+        md.push_str("| Kind | Pinned | Observed | Affected |\n|---|---|---|---|\n");
+        for record in &file.records {
+            md.push_str(&format!(
+                "| {} | `{}` | `{}` | {} |\n",
+                record.kind.as_str(),
+                record.pinned_revision,
+                record.observed_revision,
+                record.affected_surfaces.len()
+            ));
+        }
+    }
+    if let Err(e) = atomic_write(&dir.join("observations.md"), &md) {
+        eprintln!("error: could not write observations.md: {e}");
+        return 2;
+    }
+    0
+}
+
+/// `drift scaffold` — stdout only, `UNREVIEWED` sentinels the loader rejects.
+fn drift_scaffold() -> i32 {
+    let skeleton = serde_json::json!({
+        "id": "UNREVIEWED",
+        "kind": "UNREVIEWED",
+        "pinnedRevision": "UNREVIEWED",
+        "observedRevision": "UNREVIEWED",
+        "affectedSurfaces": [],
+        "observedAt": "UNREVIEWED",
+        "reviewArtifact": "UNREVIEWED"
+    });
+    match serde_json::to_string_pretty(&skeleton) {
+        Ok(text) => {
+            println!("{text}");
+            0
+        }
+        Err(e) => {
+            eprintln!("error: could not render scaffold: {e}");
+            2
+        }
+    }
+}
+
+/// `drift proposal check` — completeness and determinism of an upgrade bundle.
+///
+/// A bundle missing any of the seven section keys never reaches the checks below: the
+/// type requires all seven, so `serde` rejects the document (FR-030). That is the point of
+/// modelling the sections as named fields rather than a map — an unrun analysis cannot be
+/// represented as a clean one.
+fn drift_proposal_check(path: &Path) -> i32 {
+    let proposal = match load_proposal(path) {
+        Ok(proposal) => proposal,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    let violations = check_proposal(&proposal);
+    for violation in &violations {
+        println!(
+            "{} {}: {}",
+            violation.code, violation.record, violation.message
+        );
+    }
+    i32::from(!violations.is_empty())
+}
+
 /// `certify` (contracts/cli.md + contracts/cli-inventory.md): validate first (invalid
 /// → exit 1), then evaluate strict certification — including the schema-constraint
 /// inventory join (V11–V14), which blocks exactly as gaps/uncovered behaviors do. Exit
@@ -2813,7 +3368,13 @@ fn report(registry_dir: &Path, today: &str, out_dir: Option<PathBuf>) -> i32 {
 /// usage/IO. The committed inventory + vendored schemas are resolved as siblings of the
 /// registry dir (mirroring `validate`); a fixture registry that ships neither scopes the
 /// V11–V14 join out, so certification reduces to the gap/uncovered gate.
-fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
+fn certify_cmd(
+    registry_dir: &Path,
+    today: &str,
+    json: bool,
+    report_dir: Option<PathBuf>,
+    manifest: Option<PathBuf>,
+) -> i32 {
     let registry = match load_and_validate(registry_dir, today) {
         Ok(registry) => registry,
         Err(code) => return code,
@@ -2835,7 +3396,28 @@ fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
         .parent()
         .map(|p| p.join("snapshots"))
         .unwrap_or_else(|| registry_dir.join("snapshots"));
-    let result = certify(&registry, today, &inputs, &clause_inputs, &snapshots_dir);
+    // 026: certification is deterministic over committed evidence (FR-033a) — it never
+    // resolves or invokes the reference implementation, and needs no container engine or
+    // network. What it *does* need is the receipt proving the container-backed lane ran,
+    // which arrives as the execution manifest (research D3).
+    let evidence = build_evidence_inputs(&registry, registry_dir, manifest);
+    let result = certify_with_evidence(
+        &registry,
+        today,
+        &inputs,
+        &clause_inputs,
+        &snapshots_dir,
+        &evidence,
+    );
+
+    if let Some(dir) = report_dir.as_deref() {
+        // Written on BOTH verdicts: a blocked release must still ship the artifact that
+        // explains why it was blocked.
+        if let Err(code) = write_certification_report(&result, &registry, registry_dir, today, dir)
+        {
+            return code;
+        }
+    }
 
     if json {
         match serde_json::to_string_pretty(&result) {
@@ -2865,6 +3447,54 @@ fn certify_cmd(registry_dir: &Path, today: &str, json: bool) -> i32 {
                     "blocking obligation ({}): {}",
                     item.code.as_deref().unwrap_or("?"),
                     item.id
+                ),
+                // 026: each condition prints under the FR-041 name it blocks on, so a
+                // reader matches a blocked release to the requirement that blocked it
+                // (FR-042) rather than to an internal enum name.
+                BlockingKind::StaleSnapshot => println!(
+                    "blocking stale-snapshot: {} ({})",
+                    item.id,
+                    item.code
+                        .as_deref()
+                        .unwrap_or("evidence-determining input drifted")
+                ),
+                BlockingKind::MissingExecution => println!(
+                    "blocking missing-required-execution: {} ({})",
+                    item.id,
+                    item.code.as_deref().unwrap_or("V35")
+                ),
+                BlockingKind::IncorrectOracle => println!(
+                    "blocking incorrect-oracle: {} ({})",
+                    item.id,
+                    item.code
+                        .as_deref()
+                        .unwrap_or("recorded oracle differs from the pin")
+                ),
+                BlockingKind::RunnerOmission => println!(
+                    "blocking unknown-runner-omission: {} ({})",
+                    item.id,
+                    item.code
+                        .as_deref()
+                        .unwrap_or("neither executed nor explicitly accounted for")
+                ),
+                BlockingKind::SilentlySkippedCase => println!(
+                    "blocking silently-skipped-case: {} ({})",
+                    item.id,
+                    item.code
+                        .as_deref()
+                        .unwrap_or("outcome outside the enumeration")
+                ),
+                BlockingKind::FailingCase => println!(
+                    "blocking failing-case: {} ({})",
+                    item.id,
+                    item.code.as_deref().unwrap_or("recorded as failing")
+                ),
+                BlockingKind::InactiveProfile => println!(
+                    "blocking inactive-profile-refused: {} ({})",
+                    item.id,
+                    item.code
+                        .as_deref()
+                        .unwrap_or("zero applicable units is not the same as certified")
                 ),
             }
         }

@@ -146,7 +146,7 @@ slow-timeout = "60s"
 status-level = "pass"
 # Live parity scenario binaries run ONLY under `--profile parity` (018-harden-parity-harness).
 # Exclude them here so the default lane is truthful by non-selection (FR-014).
-default-filter = 'not (binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner) | binary(=parity_conformance_docker) | binary(=discovery_campaign) | binary(=discovery_metamorphic))'
+default-filter = 'not (binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner) | binary(=parity_conformance_docker) | binary(=discovery_campaign) | binary(=discovery_metamorphic) | binary(=canary_lane) | binary(=conformance_docker_pinned))'
 
 [[profile.default.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -317,7 +317,7 @@ slow-timeout = "30s"
 # `parity_*` test binaries, not the crate's own unit tests, so the lib joins
 # `parity_harness_faults` / `parity_registry_check` as an explicit exception. Its
 # shell-dependent tests are already `#[cfg(unix)]`-gated, so the Windows lane is unaffected.
-default-filter = 'not (binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_registry_check) | binary(=parity_harness))) | binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=integration_auto_forward) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build) | binary(=docker_channels) | binary(=discovery_campaign) | binary(=discovery_metamorphic))'
+default-filter = 'not (binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_registry_check) | binary(=parity_harness))) | binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_output) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=integration_auto_forward) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build) | binary(=docker_channels) | binary(=discovery_campaign) | binary(=discovery_metamorphic) | binary(=canary_lane) | binary(=conformance_docker_pinned))'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -466,7 +466,7 @@ slow-timeout = { period = "90s", terminate-after = 1 }
 status-level = "none"
 # Live parity scenario binaries run ONLY under `--profile parity` (018-harden-parity-harness).
 # Exclude them here so even the "full" lane is truthful by non-selection (FR-014).
-default-filter = 'not (binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner) | binary(=parity_conformance_docker) | binary(=discovery_campaign) | binary(=discovery_metamorphic))'
+default-filter = 'not (binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner) | binary(=parity_conformance_docker) | binary(=discovery_campaign) | binary(=discovery_metamorphic) | binary(=canary_lane) | binary(=conformance_docker_pinned))'
 
 # Profile for long-running integration tests (heavy end-to-end builds)
 
@@ -740,7 +740,7 @@ fail-fast = false
 global-timeout = "1h"
 # Live parity scenario binaries run ONLY under `--profile parity` (018); exclude
 # them from ci alongside smoke so this lane is truthful by non-selection (FR-014).
-default-filter = 'not (binary(#smoke_*) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner) | binary(=parity_conformance_docker) | binary(=discovery_campaign) | binary(=discovery_metamorphic))'
+default-filter = 'not (binary(#smoke_*) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner) | binary(=parity_conformance_docker) | binary(=discovery_campaign) | binary(=discovery_metamorphic) | binary(=canary_lane) | binary(=conformance_docker_pinned))'
 
 # Throttle smoke and parity tests while allowing more overlap
 [[profile.ci.overrides]]
@@ -859,7 +859,7 @@ slow-timeout = { period = "5m", terminate-after = 1 }
 status-level = "pass"
 fail-fast = false
 # MVP integration tests: smoke, parity, and core integration tests for up/exec/down/read-configuration
-default-filter = '(binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner) | binary(=parity_conformance_docker))) | binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_up_exec_identity) | binary(=integration_down) | binary(=integration_runtime_selection) | binary(=integration_read_configuration) | binary(=integration_read_configuration_output) | binary(=integration_config) | binary(=integration_custom_container_name) | binary(=integration_exec) | binary(=integration_exec_env) | binary(=integration_exec_pty) | binary(=integration_e2e) | binary(#integration_env_probe_*) | binary(=aggregator) | binary(=normalize_consistency) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel)) & not (binary(=discovery_campaign) | binary(=discovery_metamorphic))'
+default-filter = '(binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner) | binary(=parity_conformance_docker))) | binary(=integration_exec_selection) | binary(=integration_exec_id_label) | binary(=integration_up_exec_identity) | binary(=integration_down) | binary(=integration_runtime_selection) | binary(=integration_read_configuration) | binary(=integration_read_configuration_output) | binary(=integration_config) | binary(=integration_custom_container_name) | binary(=integration_exec) | binary(=integration_exec_env) | binary(=integration_exec_pty) | binary(=integration_e2e) | binary(#integration_env_probe_*) | binary(=aggregator) | binary(=normalize_consistency) | binary(=raw_outputs) | binary(=report_granularity) | binary(=observation_faults) | binary(=container_state_channel)) & not (binary(=discovery_campaign) | binary(=discovery_metamorphic) | binary(=canary_lane) | binary(=conformance_docker_pinned))'
 
 # Smoke test grouping
 [[profile.mvp-integration.overrides]]
@@ -940,7 +940,7 @@ test-group = 'fs-heavy'
 retries = 0
 slow-timeout = { period = "15m", terminate-after = 1 }
 status-level = "pass"
-default-filter = '(binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner) | binary(=parity_conformance_docker)) & not (binary(=discovery_campaign) | binary(=discovery_metamorphic))'
+default-filter = '(binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_conformance_runner) | binary(=parity_conformance_docker)) & not (binary(=discovery_campaign) | binary(=discovery_metamorphic) | binary(=canary_lane) | binary(=conformance_docker_pinned))'
 
 # Config-only parity runners → parity-cli group. `parity_conformance_runner` (022,
 # US1) drives the declarative runner over config-only read-configuration cases, so it
@@ -1014,7 +1014,7 @@ test-group = 'fs-heavy'
 retries = 0
 slow-timeout = { period = "35m", terminate-after = 1 }
 status-level = "pass"
-default-filter = 'binary(=discovery_campaign) | binary(=discovery_metamorphic)'
+default-filter = '(binary(=discovery_campaign) | binary(=discovery_metamorphic)) & not (binary(=canary_lane) | binary(=conformance_docker_pinned))'
 
 # The container-backed tier brings containers up but is safe to overlap with other
 # Docker work, so it takes the shared group rather than an exclusive one.
@@ -1027,3 +1027,59 @@ test-group = 'docker-shared'
 [[profile.discovery.overrides]]
 filter = 'binary(=discovery_metamorphic)'
 test-group = 'fs-heavy'
+
+
+# ---------------------------------------------------------------------------
+# Container-backed pull-request profile (026-continuous-conformance-certification,
+# US3): deacon against PINNED EXPECTED OBSERVABLES, with no reference oracle.
+#
+# The distinction from `[profile.parity]` is the whole point. `parity` provisions and
+# verifies the pinned `@devcontainers/cli` and compares against it live; this profile
+# never resolves a reference at all (FR-012). That is what makes it suitable for a pull
+# request: a red result means deacon changed, not that npm was slow or that upstream
+# republished a tag.
+#
+# The `default-filter` is an EXPLICIT `binary(=…)` allow-list, never a `conformance_*`
+# glob. A glob here would capture the HERMETIC `conformance_replay` alongside the
+# container binary and silently drop it from the fast lane — the identical mistake the
+# parity profile made with `parity_*` and the discovery profile documents avoiding with
+# `discovery_*`. The symptom is invisible until it matters.
+#
+# `slow-timeout` sits above the tier's 30-minute budget for the same reason
+# `parity_conformance_docker`'s does: the budget is asserted explicitly by the driver,
+# which reports the elapsed number, and a backstop that fired first would replace a
+# diagnosable failure with "the binary was slow".
+# ---------------------------------------------------------------------------
+[profile.pr-docker]
+retries = 0
+slow-timeout = { period = "35m", terminate-after = 1 }
+status-level = "pass"
+default-filter = 'binary(=conformance_docker_pinned)'
+
+# Brings containers up but uses collision-resistant names, so it overlaps safely with
+# other Docker work.
+[[profile.pr-docker.overrides]]
+filter = 'binary(=conformance_docker_pinned)'
+test-group = 'docker-shared'
+
+# ---------------------------------------------------------------------------
+# Canary profile (026-continuous-conformance-certification, US5): comparison against
+# explicitly pinned upstream DEVELOPMENT revisions.
+#
+# NON-BLOCKING in every context (FR-019) and structurally unable to touch stable data
+# (FR-020). Selected only here, so no other lane can pick it up by accident, and — like
+# discovery — it gates nothing: a canary run that surfaces forty differences exits 0.
+#
+# Again an explicit allow-list. A `discovery_*` glob would capture the hermetic
+# `discovery_hermetic` guard; a `canary_*` glob would capture nothing today and something
+# unintended tomorrow.
+# ---------------------------------------------------------------------------
+[profile.canary]
+retries = 0
+slow-timeout = { period = "35m", terminate-after = 1 }
+status-level = "pass"
+default-filter = 'binary(=canary_lane)'
+
+[[profile.canary.overrides]]
+filter = 'binary(=canary_lane)'
+test-group = 'docker-shared'

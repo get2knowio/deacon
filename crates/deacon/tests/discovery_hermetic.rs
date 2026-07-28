@@ -686,6 +686,7 @@ fn synthetic_queue(registry: &Registry, paths: &[&str]) -> DiscoveryData {
         findings: findings.records,
         campaigns: vec![campaign],
         corpus: Vec::new(),
+        canary: Vec::new(),
     }
 }
 
@@ -987,6 +988,7 @@ fn equal_signatures_from_two_campaigns_collapse_to_one_finding_with_two_witnesse
         findings,
         campaigns: vec![first.clone(), second.clone()],
         corpus: Vec::new(),
+        canary: Vec::new(),
     };
     assert_clean(&data, &registry, "merged");
 
@@ -1241,6 +1243,7 @@ fn a_finding_that_stops_reproducing_is_reported_with_its_last_campaign() {
         findings,
         campaigns: vec![first, second.clone(), third],
         corpus: Vec::new(),
+        canary: Vec::new(),
     };
     assert_clean(&data, &registry, "no-longer-reproducing");
 

@@ -1,0 +1,80 @@
+# Canary lane (026-continuous-conformance-certification, US5): comparison against
+# explicitly pinned upstream DEVELOPMENT revisions.
+#
+# **Non-blocking in every context** (FR-019) and structurally unable to touch stable data
+# (FR-020). Its pins live in the discovery data root, which no registry loader can reach,
+# so the certification verdict is byte-identical whether this lane has ever run or not
+# (FR-060, SC-016).
+#
+# Results are emitted to an artifact distinct from the certification report and labelled
+# with the pin they were produced against (FR-021). A canary finding may inform a stable
+# upgrade decision; it may not back one unless every input was pinned by immutable
+# identifier and the run was hermetic (FR-033).
+name: canary
+
+on:
+  schedule:
+    # Weekly. Early warning is valuable but strictly secondary to keeping the stable record
+    # clean, and a nightly cadence would spend container minutes on a signal nobody gates on.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Non-blocking by construction. The job is not a required check anywhere, and nothing
+    # in the release path consumes its status.
+    continue-on-error: true
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Record the stable tree digest before the run
+        id: before
+        run: |
+          echo "digest=$(find conformance/registry conformance/snapshots fixtures/parity-corpus -type f -print0 \
+            | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Run the canary lane
+        run: cargo nextest run --profile canary --no-fail-fast
+
+      # SC-008 asserted in CI as well as in `lane_integrity`: a canary run must leave the
+      # registry, the committed snapshots, and the pins byte-identical. This step is NOT
+      # `continue-on-error` at the step level — a canary that modified stable data is a
+      # machinery failure, not a finding, and is the one thing this lane must never do.
+      - name: Verify the stable tree is unchanged
+        run: |
+          AFTER=$(find conformance/registry conformance/snapshots fixtures/parity-corpus -type f -print0 \
+            | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          if [ "$AFTER" != "${{ steps.before.outputs.digest }}" ]; then
+            echo "::error::the canary lane modified stable data (FR-020, SC-008)"
+            git status --porcelain conformance/registry conformance/snapshots fixtures/parity-corpus
+            exit 1
+          fi
+          echo "stable tree unchanged"
+
+      # Labelled with the pins, and kept separate from any certification artifact (FR-021).
+      - name: Upload canary results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: canary-results
+          path: |
+            target/discovery/canary/
+            conformance/discovery/canary.json
+          if-no-files-found: ignore

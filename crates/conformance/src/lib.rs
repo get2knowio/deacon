@@ -19,6 +19,7 @@
 
 pub mod baseline;
 pub mod case_hash;
+pub mod certification;
 pub mod certify;
 pub mod clause;
 pub mod clause_diff;
@@ -27,8 +28,11 @@ pub mod coverage;
 pub mod coverage_report;
 pub mod diff;
 pub mod discovery;
+pub mod drift;
 pub mod inventory;
+pub mod lane;
 pub mod load;
+pub mod manifest;
 pub mod mapping;
 pub mod model;
 pub mod obligation;
@@ -213,6 +217,62 @@ pub fn default_discovery_dir() -> std::path::PathBuf {
 pub fn discovery_dir_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
     let base = registry_dir.parent().unwrap_or(registry_dir);
     base.join("discovery")
+}
+
+/// The default canary-pin file: `<workspace_root>/conformance/discovery/canary.json`
+/// (026-continuous-conformance-certification, clarification Q5).
+///
+/// **Inside the discovery root, deliberately not in the registry.** A canary pin names an
+/// upstream *development* revision, and FR-017a requires that its presence, absence, or
+/// content can never alter registry validation or release certification. Placing it under
+/// `conformance/discovery/` — which [`load::Registry::load`] has no code path to — makes
+/// that a property of the layout rather than a rule someone must remember. A
+/// `rev-canary-*` record in `revisions.json` would have been reachable by `certify`, which
+/// is exactly the reachability the requirement forbids.
+pub fn default_canary_file() -> std::path::PathBuf {
+    default_discovery_dir().join("canary.json")
+}
+
+/// Resolve the canary-pin file belonging to a registry: `<registry>/../discovery/canary.json`.
+pub fn canary_file_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
+    discovery_dir_for(registry_dir).join("canary.json")
+}
+
+/// The default lane data root: `<workspace_root>/conformance/lanes` — the hand-authored
+/// `lanes.json` declaring the five continuous-integration lanes
+/// (026-continuous-conformance-certification, research D1).
+///
+/// **A third sibling of `registry/`, alongside `discovery/`.** A lane record is
+/// operational configuration — *which checks run where* — not a claim about deacon's
+/// conformance. Inside `registry/` it would sit on a path reachable by `certify`, so an
+/// edit to continuous-integration configuration could change a release verdict. Lane
+/// defects block the pull request that introduced them (V31) instead.
+pub fn default_lanes_dir() -> std::path::PathBuf {
+    workspace_root().join("conformance").join("lanes")
+}
+
+/// Resolve the lane root belonging to a registry: `<registry>/../lanes`.
+pub fn lanes_dir_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
+    let base = registry_dir.parent().unwrap_or(registry_dir);
+    base.join("lanes")
+}
+
+/// The default drift data root: `<workspace_root>/conformance/drift` — the machine-owned
+/// `observations.json` recording what upstream currently looks like
+/// (026-continuous-conformance-certification, research D6).
+///
+/// **Observations are not pins.** This root records *what upstream looks like*; the pin —
+/// *what deacon is pinned to* — stays in `conformance/registry/revisions.json` and remains
+/// human-only (FR-028). That separation is what lets drift automation write here at all
+/// without blessing anything.
+pub fn default_drift_dir() -> std::path::PathBuf {
+    workspace_root().join("conformance").join("drift")
+}
+
+/// Resolve the drift root belonging to a registry: `<registry>/../drift`.
+pub fn drift_dir_for(registry_dir: &std::path::Path) -> std::path::PathBuf {
+    let base = registry_dir.parent().unwrap_or(registry_dir);
+    base.join("drift")
 }
 
 /// The discovery-side (**D-class**) domain error taxonomy

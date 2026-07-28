@@ -74,6 +74,42 @@ pub enum BlockingKind {
     /// already reports. Listing it twice would double-count one fact ("existing gap
     /// semantics", contracts/obligation.md).
     Obligation,
+
+    // ---- 026-continuous-conformance-certification (US2, FR-041 c/d/g/h/i) ----
+    /// **FR-041(c)** — a committed snapshot whose evidence-determining inputs have
+    /// drifted, or an absent snapshot for the profile *under certification*.
+    ///
+    /// Scoped deliberately. 022 made committed-snapshot coverage non-blocking on the
+    /// stated ground that "a snapshot is a reviewed artifact, not a release gate", and
+    /// that reasoning still holds for platforms nobody is certifying — blocking on every
+    /// missing snapshot anywhere would push maintainers toward recording snapshots to go
+    /// green, which is the blessing pressure this feature exists to remove. It does not
+    /// hold for the platform being certified: there, a drifted or absent snapshot means
+    /// the claim has no evidence behind it (research D5).
+    StaleSnapshot,
+    /// **FR-041(h)** — the execution manifest is absent, incomplete, produced for a
+    /// different revision, or stale. [`Blocking::code`] carries the `V35-*` sub-case.
+    MissingExecution,
+    /// **FR-041(g)** — a recorded oracle version, in a snapshot's provenance or in the
+    /// execution manifest, differing from the declared stable pin.
+    IncorrectOracle,
+    /// **FR-041(d)** — a declared applicable unit the runner neither executed nor
+    /// explicitly accounted for. The executed set must reconcile with the applicable set;
+    /// an unaccounted unit is the failure.
+    RunnerOmission,
+    /// **FR-041(i)** — a case whose result is neither pass, fail, nor an explicitly
+    /// dispositioned exclusion.
+    SilentlySkippedCase,
+    /// A case the execution manifest recorded as failing.
+    ///
+    /// Deliberately **not** folded into [`BlockingKind::MissingExecution`]: "the evidence
+    /// is malformed" and "the evidence says deacon diverged" need different fixes, and a
+    /// maintainer reading a blocked release must be able to tell which they have.
+    FailingCase,
+    /// **FR-045** — certification was requested for a profile that is not active.
+    /// Refused rather than reported as a vacuous pass, because zero applicable units is
+    /// not the same as certified.
+    InactiveProfile,
 }
 
 /// One blocking item: its `kind`, the offending record ID, and — for a `constraint`
@@ -340,6 +376,193 @@ pub fn certify(
         permanent_residuals,
         non_compliant_rules,
         obligations: obligation_summary(registry),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 026-continuous-conformance-certification — execution evidence (US2)
+// ---------------------------------------------------------------------------
+
+/// The evidence certification needs beyond the registry itself: the execution manifest,
+/// the committed snapshots' freshness, and the identity of the run under certification.
+///
+/// Separated from [`certify`] rather than folded into it so the existing data-only gate
+/// keeps its signature and its meaning. `certify` answers "is the record complete?";
+/// [`certify_with_evidence`] additionally answers "did the required execution happen, and
+/// does its evidence still apply?". Callers that only have a registry — every pre-026 test
+/// and fixture — keep working unchanged.
+#[derive(Debug, Clone, Default)]
+pub struct EvidenceInputs {
+    /// The revision under certification.
+    pub revision: String,
+    /// Path to the execution manifest. Absent evidence is a blocker, not a skip
+    /// (FR-041(h)), so a `None` here still produces `V35-absent`.
+    pub manifest_path: Option<std::path::PathBuf>,
+    /// The case ids the container-backed lane was required to execute, with their
+    /// currently computed hashes.
+    pub required_cases: Vec<crate::manifest::RequiredCase>,
+    /// Disposition ids an `excluded` outcome may legitimately name.
+    pub resolvable_dispositions: std::collections::BTreeSet<String>,
+    /// Case ids whose committed snapshot is stale, each with the first drifted input.
+    pub stale_snapshots: Vec<(String, String)>,
+    /// Oracle identities recorded in evidence, as `(source, recorded_version)`.
+    pub recorded_oracles: Vec<(String, String)>,
+    /// The applicable unit ids the runner had to account for (FR-041(d)).
+    pub applicable_units: std::collections::BTreeSet<String>,
+    /// The unit ids the runner actually accounted for.
+    pub accounted_units: std::collections::BTreeSet<String>,
+    /// Whether the profile under certification is active. `false` triggers FR-045's
+    /// refusal rather than a vacuous pass over zero applicable units.
+    pub profile_is_active: bool,
+}
+
+/// Certify with execution evidence — the full FR-041 gate.
+///
+/// **Every condition is evaluated; none short-circuits** (FR-043). A maintainer reading a
+/// blocked release must see the whole list, because fixing the first blocker and
+/// re-running to discover the second is how a release turns into an afternoon.
+pub fn certify_with_evidence(
+    registry: &Registry,
+    today: &str,
+    inventory: &InventoryInputs,
+    clauses: &ClauseInputs,
+    snapshots_dir: &Path,
+    evidence: &EvidenceInputs,
+) -> Certification {
+    let mut certification = certify(registry, today, inventory, clauses, snapshots_dir);
+
+    // (c) stale snapshots — scoped to the profile under certification (research D5).
+    for (case_id, drifted) in &evidence.stale_snapshots {
+        certification.blocking.push(Blocking {
+            kind: BlockingKind::StaleSnapshot,
+            id: case_id.clone(),
+            code: Some(drifted.clone()),
+        });
+    }
+
+    // (g) incorrect oracle — a recorded identity that differs from the declared pin.
+    let declared_oracle = registry
+        .revisions
+        .iter()
+        .find(|r| matches!(r.kind, crate::model::RevisionKind::Oracle))
+        .map(|r| r.pin.as_str());
+    if let Some(pin) = declared_oracle {
+        for (source, recorded) in &evidence.recorded_oracles {
+            if recorded != pin {
+                certification.blocking.push(Blocking {
+                    kind: BlockingKind::IncorrectOracle,
+                    id: source.clone(),
+                    code: Some(format!("recorded `{recorded}`, declared pin `{pin}`")),
+                });
+            }
+        }
+    }
+
+    // (h) missing required execution + (i) silently skipped case, from the manifest.
+    //
+    // **Required exactly when execution was required.** A registry that declares no
+    // container-backed case has nothing for a container lane to run, so demanding a receipt
+    // would block on the absence of evidence for work nobody owed. This is not an escape
+    // hatch: the required set is DERIVED from the registry's own cases, so the only way to
+    // empty it is to have no such cases — and adding one immediately re-arms the gate.
+    //
+    // The guard is scoped to the MANIFEST checks alone. Runner omission and the
+    // inactive-profile refusal below are independent of the receipt — an unaccounted unit
+    // is unaccounted whether or not a container lane owed anything — so short-circuiting
+    // the whole evidence block here would silently disarm two conditions that have nothing
+    // to do with containers.
+    if !evidence.required_cases.is_empty() {
+        let expectation = crate::manifest::ManifestExpectation {
+            revision: evidence.revision.clone(),
+            profile: certification.profile.clone(),
+            required: evidence.required_cases.clone(),
+            resolvable_dispositions: evidence.resolvable_dispositions.clone(),
+        };
+        let manifest_path = evidence.manifest_path.clone().unwrap_or_else(|| {
+            std::path::PathBuf::from("target/conformance/execution-manifest.json")
+        });
+        for defect in crate::manifest::verify_manifest(&manifest_path, &expectation) {
+            let kind = match defect {
+                crate::manifest::ManifestDefect::Unaccounted { .. } => {
+                    BlockingKind::SilentlySkippedCase
+                }
+                _ => BlockingKind::MissingExecution,
+            };
+            certification.blocking.push(Blocking {
+                kind,
+                id: defect.record(),
+                code: Some(defect.code().to_string()),
+            });
+        }
+        push_failing_cases(&mut certification, &manifest_path);
+    }
+    // (d) unknown runner omission — the executed set must reconcile with the applicable
+    // set. An unaccounted unit is the failure; silence is not evidence of absence.
+    for unit in evidence
+        .applicable_units
+        .difference(&evidence.accounted_units)
+    {
+        certification.blocking.push(Blocking {
+            kind: BlockingKind::RunnerOmission,
+            id: unit.clone(),
+            code: Some("neither executed nor explicitly accounted for".to_string()),
+        });
+    }
+
+    // FR-045 — an inactive profile is refused, never passed vacuously.
+    if !evidence.profile_is_active {
+        certification.blocking.push(Blocking {
+            kind: BlockingKind::InactiveProfile,
+            id: certification.profile.clone(),
+            code: Some("profile is not active".to_string()),
+        });
+    }
+
+    certification
+        .blocking
+        .sort_by(|a, b| (block_rank(a.kind), &a.id).cmp(&(block_rank(b.kind), &b.id)));
+    certification.certified = certification.blocking.is_empty();
+    certification
+}
+
+/// Record every case the manifest reported as failing.
+///
+/// Separated from manifest *integrity* deliberately: "the evidence is malformed" and "the
+/// evidence says deacon diverged" need different fixes, and a maintainer reading a blocked
+/// release must be able to tell which they have. A malformed manifest yields no failing
+/// cases here — it has already blocked as `V35-malformed`, and inventing failures out of an
+/// unparseable file would attribute a divergence to a case nothing measured.
+fn push_failing_cases(certification: &mut Certification, manifest_path: &Path) {
+    let Ok(raw) = std::fs::read_to_string(manifest_path) else {
+        return;
+    };
+    let Ok(manifest) = serde_json::from_str::<crate::manifest::ExecutionManifest>(&raw) else {
+        return;
+    };
+    for case_id in crate::manifest::failing_cases(&manifest) {
+        certification.blocking.push(Blocking {
+            kind: BlockingKind::FailingCase,
+            id: case_id,
+            code: Some("recorded outcome `fail`".to_string()),
+        });
+    }
+}
+
+/// Deterministic ordering rank for a blocking kind, so the report is byte-stable.
+fn block_rank(kind: BlockingKind) -> u8 {
+    match kind {
+        BlockingKind::Gap => 0,
+        BlockingKind::Uncovered => 1,
+        BlockingKind::Constraint => 2,
+        BlockingKind::Clause => 3,
+        BlockingKind::Obligation => 4,
+        BlockingKind::StaleSnapshot => 5,
+        BlockingKind::MissingExecution => 6,
+        BlockingKind::IncorrectOracle => 7,
+        BlockingKind::RunnerOmission => 8,
+        BlockingKind::SilentlySkippedCase => 9,
+        BlockingKind::FailingCase => 10,
+        BlockingKind::InactiveProfile => 11,
     }
 }
 

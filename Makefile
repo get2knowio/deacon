@@ -54,6 +54,9 @@ help: ## Show this help
 	@echo "Testing - Exploratory discovery (never gates):"
 	@grep -E '^(test-discovery|test-discovery-proof|test-discovery-check):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
+	@echo "Continuous conformance operation (026):"
+	@grep -E '^(test-lanes|test-drift|test-pr-docker|test-canary|certify-report):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@echo ""
 	@echo "Code Quality:"
 	@grep -E '^(fmt|clippy|coverage):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
@@ -589,3 +592,39 @@ clean-branches: ## Delete local and remote branches fully merged into the defaul
 	echo "Branch cleanup complete."
 
 .PHONY: test-non-smoke test-smoke
+
+# ---------------------------------------------------------------------------
+# Continuous conformance operation (026-continuous-conformance-certification)
+# ---------------------------------------------------------------------------
+
+.PHONY: test-lanes
+test-lanes: ## Check lane integrity (V31) and render the ran/excluded breakdown
+	@set -euo pipefail; \
+	cargo run -p deacon-conformance -- lane check; \
+	cargo run -p deacon-conformance -- lane report; \
+	echo "lane report: target/conformance/lanes.md"
+
+.PHONY: test-drift
+test-drift: ## Validate committed drift records (V33). Hermetic; does NOT scan upstream.
+	@cargo run -p deacon-conformance -- drift check
+
+.PHONY: test-pr-docker
+test-pr-docker: ## Container-backed lane: deacon vs pinned expected observables (no oracle)
+	@cargo nextest run --profile pr-docker --no-fail-fast
+
+.PHONY: test-canary
+test-canary: ## Canary lane against pinned upstream development revisions. Never gates.
+	@cargo nextest run --profile canary --no-fail-fast
+
+.PHONY: certify-report
+certify-report: ## Release certification + the report. Exits 1 when not certified, by design.
+	@set -euo pipefail; \
+	# Certification is hermetic (FR-033a): no reference implementation, no container \
+	# engine, no network. It reads the execution manifest the container lane produced. \
+	# A local run without one blocks on `V32-absent`, which is the gate working — run \
+	# `make test-pr-docker` first, or fetch the CI artifact. \
+	cargo run -p deacon-conformance -- certify --report-dir target/conformance || { \
+		echo ""; \
+		echo "not certified — see target/conformance/certification.md for the full list"; \
+		exit 1; \
+	}

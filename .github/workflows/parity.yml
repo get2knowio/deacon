@@ -87,8 +87,23 @@ jobs:
           echo "Installing @devcontainers/cli@${VERSION} from fixtures/parity-corpus/oracle.json"
           npm install -g "@devcontainers/cli@${VERSION}"
 
-      - name: Verify oracle version
-        run: devcontainer --version
+      # FR-014: the resolved reference must be EXACTLY the declared stable pin. Any other
+      # version fails the lane as a MACHINERY error rather than being reported as a
+      # behavioral divergence — a comparison against the wrong reference produces
+      # differences that describe nothing, and treating them as findings would send a
+      # reviewer after a divergence that does not exist.
+      - name: Assert the resolved reference is exactly the stable pin
+        run: |
+          set -euo pipefail
+          PINNED="$(jq -r .version fixtures/parity-corpus/oracle.json)"
+          RESOLVED="$(devcontainer --version | tr -d '[:space:]')"
+          if [ "$RESOLVED" != "$PINNED" ]; then
+            echo "::error::resolved reference is ${RESOLVED}, declared stable pin is ${PINNED}."
+            echo "::error::This is a machinery failure, NOT a divergence (FR-014): a comparison"
+            echo "::error::against the wrong reference produces differences that describe nothing."
+            exit 1
+          fi
+          echo "reference verified: ${RESOLVED} == declared pin ${PINNED}"
 
       # 024 Phase 7: an EXPLICIT BuildKit precondition, landed before the runner starts
       # depending on it so the runner change is never the thing that reddens the lane.
