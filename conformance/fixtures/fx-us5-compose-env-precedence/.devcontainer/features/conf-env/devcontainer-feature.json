@@ -1,0 +1,9 @@
+{
+	"id": "conf-env",
+	"version": "1.0.0",
+	"name": "Conformance env layer",
+	"containerEnv": {
+		"CONF_LAYER": "feature-loses",
+		"CONF_ONLY_FEATURE": "feature"
+	}
+}

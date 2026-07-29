@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceUs5ComposeEnvPrecedence",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"shutdownAction": "stopCompose",
+	"containerEnv": { "CONF_LAYER": "config-wins", "CONF_ONLY_CONFIG": "config" },
+	"features": { "./features/conf-env": {} },
+	"remoteUser": "root"
+}

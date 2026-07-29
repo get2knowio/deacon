@@ -247,6 +247,7 @@
       "obligation": "obl-cmb-2799eb8c",
       "disposition": "case",
       "cases": [
+        "case-up-compose-env-merge-precedence",
         "case-up-compose-project-resources",
         "case-up-compose-project-resources-differential",
         "case-up-compose-service-graph"
@@ -380,6 +381,7 @@
       "obligation": "obl-cmb-50abbf8e",
       "disposition": "case",
       "cases": [
+        "case-up-compose-env-merge-precedence",
         "case-up-compose-feature-restart"
       ]
     },
@@ -541,6 +543,7 @@
       "obligation": "obl-cmb-7b75c819",
       "disposition": "case",
       "cases": [
+        "case-up-compose-env-merge-precedence",
         "case-up-env-merge-differential",
         "case-up-env-merge-precedence",
         "case-up-path-construction"
@@ -563,6 +566,7 @@
       "obligation": "obl-cmb-7f53de5d",
       "disposition": "case",
       "cases": [
+        "case-up-compose-env-merge-precedence",
         "case-up-compose-feature-restart",
         "case-up-feature-single-differential",
         "case-up-feature-single-installed",
@@ -594,6 +598,7 @@
       "obligation": "obl-cmb-8440a94d",
       "disposition": "case",
       "cases": [
+        "case-up-compose-env-merge-precedence",
         "case-up-feature-single-differential",
         "case-up-feature-single-installed"
       ]
@@ -693,6 +698,7 @@
       "obligation": "obl-cmb-99575a20",
       "disposition": "case",
       "cases": [
+        "case-up-compose-env-merge-precedence",
         "case-up-compose-feature-restart"
       ]
     },
@@ -714,6 +720,7 @@
         "case-state-mount-variety",
         "case-state-single-container",
         "case-up-boundary-empty-collections",
+        "case-up-compose-env-merge-precedence",
         "case-up-container-identity-labels",
         "case-up-container-labels-stamped",
         "case-up-docker-channels",
@@ -859,8 +866,10 @@
     {
       "id": "odp-cmb-c6adecf0",
       "obligation": "obl-cmb-c6adecf0",
-      "disposition": "gap",
-      "gap": "gap-pairwise-up"
+      "disposition": "case",
+      "cases": [
+        "case-up-compose-env-merge-precedence"
+      ]
     },
     {
       "id": "odp-cmb-cf9650cb",
@@ -947,6 +956,7 @@
       "obligation": "obl-cmb-dfeff6c8",
       "disposition": "case",
       "cases": [
+        "case-up-compose-env-merge-precedence",
         "case-up-env-merge-differential",
         "case-up-env-merge-precedence",
         "case-up-path-construction"
@@ -1048,6 +1058,7 @@
       "obligation": "obl-cmb-fa8d7c4f",
       "disposition": "case",
       "cases": [
+        "case-up-compose-env-merge-precedence",
         "case-up-env-merge-differential",
         "case-up-env-merge-precedence",
         "case-up-path-construction"
