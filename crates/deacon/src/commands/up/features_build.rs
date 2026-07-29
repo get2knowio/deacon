@@ -360,6 +360,29 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         "--load".to_string(),
     ];
 
+    // This build's `FROM` names a tag that exists ONLY in the local daemon image store —
+    // deacon built and tagged it moments ago. A `docker-container` driver builder runs in
+    // an isolated BuildKit container that cannot read that store, so it falls through to
+    // the registry and fails with a bare "pull access denied" naming a repository nobody
+    // ever pushed (#391). `--load` does not help: it governs where the OUTPUT goes, not how
+    // INPUTS resolve.
+    //
+    // So pin this invocation to the docker-driver builder, which shares the daemon's store.
+    // That is not a preference being overridden — an isolated builder cannot execute this
+    // build at all. A caller who names a builder explicitly still wins: `to_docker_args`
+    // emits its `--builder` after this one, and buildx takes the last occurrence, so an
+    // explicit choice is honored (and fails loudly on its own terms if it cannot see the
+    // base).
+    //
+    // The default builder is only implicated when nothing else is active, which is why this
+    // was invisible locally and only reddened CI: `docker/setup-buildx-action` creates a
+    // container-driver builder and makes it current, while a stock install leaves the
+    // docker driver in place.
+    if build_options.map(|o| o.builder.is_none()).unwrap_or(true) {
+        build_args.push("--builder".to_string());
+        build_args.push("default".to_string());
+    }
+
     if let Some(opts) = build_options {
         if !opts.is_default() {
             build_args.extend(opts.to_docker_args());

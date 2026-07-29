@@ -457,6 +457,27 @@ impl DockerfileGenerator {
             "--load".to_string(),
         ];
 
+        // This build's `FROM` names an image that may exist ONLY in the local daemon store —
+        // for the Dockerfile shape it is the `deacon-build:<hash>` tag deacon created moments
+        // ago. A `docker-container` driver builder runs in an isolated BuildKit container
+        // that cannot read that store, so it falls through to the registry and fails with a
+        // bare "pull access denied" naming a repository nobody ever pushed (#391). `--load`
+        // does not help: it governs where the OUTPUT goes, not how INPUTS resolve.
+        //
+        // So pin the invocation to the docker-driver builder, which shares the daemon's
+        // store. That is not a preference being overridden — an isolated builder cannot
+        // execute this build at all. A caller who names a builder explicitly still wins:
+        // `to_docker_args` emits its `--builder` after this one and buildx takes the last
+        // occurrence, so an explicit choice is honored and fails on its own terms.
+        //
+        // Only the ACTIVE builder is implicated, which is why this was invisible locally and
+        // reddened only CI: `docker/setup-buildx-action` creates a container-driver builder
+        // and makes it current, while a stock install leaves the docker driver in place.
+        if build_options.map(|o| o.builder.is_none()).unwrap_or(true) {
+            args.push("--builder".to_string());
+            args.push("default".to_string());
+        }
+
         // Add cache/builder arguments from BuildOptions if provided and not default
         if let Some(opts) = build_options {
             if !opts.is_default() {
@@ -978,6 +999,53 @@ mod tests {
         assert!(!args.contains(&"--cache-from".to_string()));
         assert!(!args.contains(&"--cache-to".to_string()));
         assert!(!args.contains(&"--no-cache".to_string()));
-        assert!(!args.contains(&"--builder".to_string()));
+
+        // `--builder default` IS added, and is not a cache option: the build's `FROM` may
+        // name a daemon-local tag, which only the docker-driver builder can read (#391).
+        assert_eq!(
+            args.windows(2)
+                .find(|w| w[0] == "--builder")
+                .map(|w| w[1].as_str()),
+            Some("default"),
+            "the docker-driver builder must be selected when no builder was requested: {args:?}"
+        );
+    }
+
+    /// An explicitly requested builder wins over the default selection.
+    ///
+    /// buildx takes the LAST `--builder`, and `to_docker_args` emits the caller's after the
+    /// one added above — so a caller who names a builder gets it, and fails on its own terms
+    /// if that builder cannot see the base image.
+    #[test]
+    fn test_generate_build_args_explicit_builder_wins() {
+        let config = DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            target_stage: "dev_containers_target_stage".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
+        };
+
+        let build_options = BuildOptions {
+            builder: Some("my-remote-builder".to_string()),
+            ..Default::default()
+        };
+
+        let generator = DockerfileGenerator::new(config);
+        let args = generator.generate_build_args(
+            Path::new("/tmp/Dockerfile.extended"),
+            "test:latest",
+            Some(&build_options),
+        );
+
+        let builders: Vec<&str> = args
+            .windows(2)
+            .filter(|w| w[0] == "--builder")
+            .map(|w| w[1].as_str())
+            .collect();
+        assert_eq!(
+            builders,
+            vec!["my-remote-builder"],
+            "an explicit builder must be the only one requested: {args:?}"
+        );
     }
 }
