@@ -135,6 +135,17 @@
       ]
     },
     {
+      "id": "odp-bhv-83f69534",
+      "obligation": "obl-bhv-83f69534",
+      "disposition": "case",
+      "cases": [
+        "case-merged-decl-go-minimal",
+        "case-readconfig-decl-basic",
+        "case-readconfig-decl-with-variables",
+        "case-tier1-decl-go-minimal"
+      ]
+    },
+    {
       "id": "odp-bhv-9077557c",
       "obligation": "obl-bhv-9077557c",
       "disposition": "case",

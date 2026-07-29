@@ -201,6 +201,68 @@ pub struct ReadConfigurationOutput {
     pub merged_configuration: Option<serde_json::Value>,
 }
 
+/// Build the reference CLI's `configFilePath` value for a resolved config file.
+///
+/// The reference emits a VS Code URI object rather than a bare string:
+///
+/// ```json
+/// { "$mid": 1, "fsPath": "/ws/.devcontainer/devcontainer.json",
+///   "path": "/ws/.devcontainer/devcontainer.json", "scheme": "vscode-fileHost" }
+/// ```
+///
+/// `$mid: 1` is VS Code's marshalling marker for a URI. deacon reproduces the shape rather
+/// than inventing its own because the field is a consumer-facing contract: a tool reading
+/// `read-configuration` output already knows how to unmarshal this and knows nothing about
+/// a deacon-specific alternative. Emitting nothing — which deacon did — left every
+/// comparison reference-only on this path (75 occurrences, #376).
+///
+/// `fsPath` and `path` are emitted identically, which is what the reference produces on
+/// every POSIX observation. VS Code's URI type distinguishes them on Windows (`fsPath`
+/// keeps `\`, `path` uses `/` with a leading slash before the drive letter); that case is
+/// NOT reproduced here because it has not been observed against the pinned reference, and
+/// a guess would be a silent, untested divergence rather than an omission.
+///
+/// `scheme` records HOW the file was located, not where it is. The reference emits
+/// `vscode-fileHost` for a config it discovered and plain `file` for one the caller named
+/// with `--config` — the same path yields different schemes depending only on that, which
+/// is why `explicitly_named` is a parameter rather than something derivable from the path.
+fn config_file_path_value(config_path: &Path, explicitly_named: bool) -> serde_json::Value {
+    // Always absolute. The reference reports the real location of the file regardless of
+    // how the workspace was named on the command line, so a relative `--workspace-folder`
+    // must not leak a relative path into the output. Canonicalization is best-effort:
+    // if the file cannot be resolved the un-absolutized path is still better than nothing,
+    // and the caller only reaches here with a path a load already succeeded from.
+    let rendered = config_path
+        .canonicalize()
+        .or_else(|_| std::path::absolute(config_path))
+        .unwrap_or_else(|_| config_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    serde_json::json!({
+        "$mid": 1,
+        "fsPath": rendered,
+        "path": rendered,
+        "scheme": if explicitly_named { "file" } else { "vscode-fileHost" },
+    })
+}
+
+/// Insert `configFilePath` into a configuration document, if it is an object.
+///
+/// A non-object document is left alone rather than coerced: the only way it is not an
+/// object is a bug elsewhere, and quietly wrapping it would hide that.
+fn insert_config_file_path(
+    document: &mut serde_json::Value,
+    config_path: &Path,
+    explicitly_named: bool,
+) {
+    if let Some(obj) = document.as_object_mut() {
+        obj.insert(
+            "configFilePath".to_string(),
+            config_file_path_value(config_path, explicitly_named),
+        );
+    }
+}
+
 /// Resolve workspace configuration
 ///
 /// Computes the workspace configuration reported by `read-configuration`. Both values are
@@ -1801,17 +1863,31 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     };
 
     // Build output payload
+    let mut configuration_document = if container_only_mode {
+        // Per spec line 310: "Only container flags provided (no config/workspace): returns { configuration: {}, ... }"
+        serde_json::Value::Object(serde_json::Map::new())
+    } else if let Some(raw) = &raw_config_for_output {
+        // Divergence B: emit the raw (un-merged) entry config with `extends`
+        // preserved, matching the reference CLI.
+        serde_json::to_value(raw)?
+    } else {
+        serde_json::to_value(&config)?
+    };
+
+    // `configFilePath` rides on both documents, exactly where the reference puts it. It is
+    // keyed off a RESOLVED path, so container-only mode — which has no config file — emits
+    // no such field, and neither does the reference.
+    let mut merged_configuration = merged_configuration;
+    if let Some(cfg_path) = resolved_config_path.as_deref() {
+        let explicitly_named = args.config_path.is_some();
+        insert_config_file_path(&mut configuration_document, cfg_path, explicitly_named);
+        if let Some(merged) = merged_configuration.as_mut() {
+            insert_config_file_path(merged, cfg_path, explicitly_named);
+        }
+    }
+
     let output_payload = ReadConfigurationOutput {
-        configuration: if container_only_mode {
-            // Per spec line 310: "Only container flags provided (no config/workspace): returns { configuration: {}, ... }"
-            serde_json::Value::Object(serde_json::Map::new())
-        } else if let Some(raw) = &raw_config_for_output {
-            // Divergence B: emit the raw (un-merged) entry config with `extends`
-            // preserved, matching the reference CLI.
-            serde_json::to_value(raw)?
-        } else {
-            serde_json::to_value(&config)?
-        },
+        configuration: configuration_document,
         workspace: workspace_config,
         features_configuration: features_configuration_for_output,
         merged_configuration,

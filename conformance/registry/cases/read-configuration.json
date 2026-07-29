@@ -943,6 +943,7 @@
     {
       "id": "case-merged-decl-go-minimal",
       "behaviors": [
+        "bhv-readconfig-config-file-path",
         "bhv-readconfig-merged-configuration",
         "bhv-readconfig-workspace-folder-subpath",
         "bhv-readconfig-workspace-section-shape"
@@ -1601,7 +1602,8 @@
     {
       "id": "case-readconfig-decl-basic",
       "behaviors": [
-        "bhv-readconfig-basic-parse"
+        "bhv-readconfig-basic-parse",
+        "bhv-readconfig-config-file-path"
       ],
       "context": [],
       "scenarioContext": {
@@ -1646,7 +1648,8 @@
     {
       "id": "case-readconfig-decl-with-variables",
       "behaviors": [
-        "bhv-readconfig-basic-parse"
+        "bhv-readconfig-basic-parse",
+        "bhv-readconfig-config-file-path"
       ],
       "context": [],
       "scenarioContext": {
@@ -3216,6 +3219,7 @@
     {
       "id": "case-tier1-decl-go-minimal",
       "behaviors": [
+        "bhv-readconfig-config-file-path",
         "bhv-readconfig-tier1-corpus",
         "bhv-readconfig-workspace-folder-subpath",
         "bhv-readconfig-workspace-section-shape"

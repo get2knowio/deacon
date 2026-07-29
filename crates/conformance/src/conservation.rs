@@ -110,6 +110,16 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      than a variant of the scalar one.",
     ),
     (
+        "bhv-readconfig-config-file-path",
+        "WHICH configuration file the resolution actually used, reported as a path rather \
+     than inferred from the values. Separately falsifiable from every content behavior: an \
+     implementation can resolve the right file and name the wrong one, or name the right \
+     one having merged the wrong chain, and no behavior about the configuration's CONTENT \
+     distinguishes those. Newly recordable because the retired `prune` normalization \
+     dropped this key outright before comparison, which is why nothing pre-migration \
+     described it.",
+    ),
+    (
         "bhv-readconfig-workspace-folder-subpath",
         "Where the workspace lands INSIDE the container when the workspace folder is nested \
      under the mounted root, and what the default mount target is independently of \
