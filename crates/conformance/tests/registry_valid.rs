@@ -76,7 +76,13 @@ const TODAY: &str = "2026-07-19";
 /// reattached process context, which the metamorphic relationship does not look at), and
 /// a multi-file `templates apply` (a scaffolded tree, the template manifest that must not
 /// be scaffolded, and a mode). No record was removed.
-const MIGRATED_CASE_COUNT: usize = 204;
+///
+/// **204 → 205** (#374): the compose half of `bhv-up-container-env-merge-precedence`. The
+/// behavior is stated over "the created container" and spans both container shapes, but
+/// every case covering it was single-container shaped, so nothing in the registry could
+/// have caught the compose path dropping a Feature's `containerEnv` — or proved the fix.
+/// No record was removed.
+const MIGRATED_CASE_COUNT: usize = 205;
 
 #[test]
 fn real_registry_is_structurally_valid() {
