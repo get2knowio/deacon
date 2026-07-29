@@ -367,6 +367,73 @@
       "notes": "Covers the high-risk triple `hrt-exec-dockerfile-running-cli-overlay`. Three sources of environment meet in one invocation — the image's own `ENV`, the configuration's `containerEnv`, and a `--remote-env` overlay — and all three must survive together. The `command -v conf-tool` PATH probe that used to share this argv now lives in case-exec-image-path-overlay. Splitting them was forced by the tolerance model, not by preference: the probe DOES diverge (deacon loses the image's `ENV PATH`), the divergence lands in arbitrary stdout TEXT, and a tolerance over the whole of `chan-stdout` is a wildcard by any reading — which is exactly why `chan-stdout` is excluded from SCALAR_OBSERVABLE. Keeping both subjects in one case would have meant either weakening that rule or letting a real divergence sit uncharacterized. Each case now has one subject, and the exit-code tolerance in the sibling is scoped to a case whose only exit code IS the PATH probe."
     },
     {
+      "id": "case-exec-feature-path-ordering",
+      "behaviors": [
+        "bhv-exec-restored-path-ordering"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "running",
+        "sdim-features": "single",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-feature-path-ordering"
+          ]
+        },
+        {
+          "id": "op-exec-path",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "echo \"$PATH\"; image-tool; feature-tool"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec-path",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec-path",
+          "assertion": {
+            "equals": "/opt/image/bin:/opt/feature/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nimage-tool\nfeature-tool\n"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Pins what deacon's PATH restoration (#370) produces when BOTH an image `ENV PATH=` entry and a Feature's `/etc/profile.d` entry are in play \u2014 the case the fix's design question turned on. Deliberately spec-expectation, not live-differential: the reference produces `/opt/feature/bin:/opt/image/bin:\u2026` for this input, so a differential would fail on `chan-stdout`, and `chan-stdout` is un-waivable by design (its diverging path is the bare channel id, and a whole-channel tolerance is a wildcard). Asserting deacon's own output states what deacon does without claiming a cross-CLI agreement that does not hold. Both tools are then RUN, not just listed: an ordering assertion alone would still pass if a directory were on PATH but unreachable, and `image-tool`/`feature-tool` exiting 0 is what proves each contributor actually resolves. The measured reference ordering lives in `bhv-exec-restored-path-ordering`; image pinned to alpine:3.19 (V18)."
+    },
+    {
       "id": "case-exec-image-path-overlay",
       "behaviors": [
         "bhv-exec-image-path-preserved"
@@ -404,15 +471,6 @@
         {
           "channel": "chan-exit-code",
           "operation": "op-exec-path"
-        }
-      ],
-      "allowedDifferences": [
-        {
-          "behavior": "bhv-exec-image-path-preserved",
-          "context": [],
-          "observablePath": "chan-exit-code.exitCode",
-          "rationale": "The image puts `conf-tool` on PATH via `ENV PATH=/opt/conformance/bin:$PATH`. Inside the exec session the reference's shell resolves it and exits 0; deacon's shell has lost that PATH entry, so the lookup fails and `sh` exits 127. Measured at oracle 0.87.0. The exit code is the whole observable of this case, and it IS the PATH probe — nothing else in the case can be absorbed by this tolerance.",
-          "waiverId": "wvr-exec-image-path-dropped"
         }
       ],
       "cleanup": {

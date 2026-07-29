@@ -42,7 +42,8 @@
       "summary": "A command is executed inside the container with its output streamed and its exit code propagated, in the container's environment \u2014 including the PATH the image itself established.",
       "behaviors": [
         "bhv-exec-command-parity",
-        "bhv-exec-image-path-preserved"
+        "bhv-exec-image-path-preserved",
+        "bhv-exec-restored-path-ordering"
       ]
     },
     {

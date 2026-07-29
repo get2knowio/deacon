@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceExecFeaturePathOrdering",
+	"build": { "dockerfile": "Dockerfile" },
+	"remoteUser": "root",
+	"features": { "./features/pathfeat": {} }
+}

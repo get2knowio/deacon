@@ -9,8 +9,13 @@ use tracing::warn;
 pub struct EnvUserResolution {
     pub effective_env: HashMap<String, String>,
     pub effective_user: Option<String>,
-    /// Raw probed container environment (before merging with config remoteEnv / CLI overrides).
+    /// Probed container environment, before merging with config remoteEnv / CLI overrides.
     /// Callers may use this for runtime behavior that depends on user shell startup.
+    ///
+    /// `PATH` is the one entry that is not verbatim from the probe: it carries the
+    /// container's own `PATH` entries merged back in (#370), because a login shell on many
+    /// bases assigns `PATH` instead of extending it and would otherwise drop everything the
+    /// image contributed. See [`ContainerEnvironmentProber::merge_container_path`].
     pub probed_env: HashMap<String, String>,
     /// Raw container environment from container inspect (`Config.Env`), before userEnvProbe.
     /// This is the canonical source for `${containerEnv:VAR}` substitutions.
@@ -73,6 +78,34 @@ pub async fn resolve_env_and_user<D: Docker>(
             }
             Err(error) => {
                 warn!("Container environment probe failed: {}", error);
+            }
+        }
+
+        // Restore the container's own `PATH` entries that the probe's login shell dropped
+        // (#370). Only when BOTH sides have a `PATH` — with nothing to merge from, or
+        // nothing to merge into, the probe's answer stands unchanged.
+        //
+        // `effective_user` is the user the probe ran as and the user `exec` will run as, so
+        // it is the right input for the non-root `/sbin` rule. When no user was resolved,
+        // deacon passes no `-u` and the image's own `USER` applies — unknown to us here, and
+        // treated as non-root, exactly as the reference treats an unresolved user.
+        if let (Some(probed_path), Some(container_path)) =
+            (probed_env.get("PATH"), container_env.get("PATH"))
+        {
+            let is_root = matches!(effective_user.as_deref(), Some("root") | Some("0"));
+            let merged = ContainerEnvironmentProber::merge_container_path(
+                probed_path,
+                container_path,
+                is_root,
+            );
+            if &merged != probed_path {
+                tracing::debug!(
+                    probe = %probed_path,
+                    container = %container_path,
+                    merged = %merged,
+                    "restored container PATH entries dropped by the probe's login shell"
+                );
+                probed_env.insert("PATH".to_string(), merged);
             }
         }
     }
