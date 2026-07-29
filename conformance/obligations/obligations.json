@@ -351,6 +351,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-d584165f",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-features-configuration-omitted-when-none",
+      "context": []
+    },
+    {
       "id": "obl-bhv-d8b2b5e7",
       "kind": "behavior",
       "behavior": "bhv-readconfig-bad-config-path",

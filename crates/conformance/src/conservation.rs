@@ -110,6 +110,15 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      than a variant of the scalar one.",
     ),
     (
+        "bhv-readconfig-features-configuration-omitted-when-none",
+        "Whether the Features block is REPORTED at all when resolution found none, which is \
+     a different claim from what the block contains when it is present. An empty container \
+     asserts \"resolution ran and produced nothing\"; saying nothing asserts less, and a \
+     reader distinguishes them. Nothing pre-migration described the features-configuration \
+     document at all — the corpora compared the merged configuration only — so this is a \
+     newly recorded fact rather than a re-description.",
+    ),
+    (
         "bhv-readconfig-merged-lifecycle-slots",
         "Which lifecycle hook SLOTS the merged document reports, as opposed to what any of \
      them contains. Falsifiable on its own: an implementation that merges every declared \

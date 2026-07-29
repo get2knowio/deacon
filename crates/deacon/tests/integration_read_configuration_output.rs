@@ -131,7 +131,7 @@ fn test_configuration_field_always_included() -> Result<()> {
     Ok(())
 }
 
-/// Test that featuresConfiguration is included when flag is set
+/// Test that featuresConfiguration is reported only when a Feature actually resolves
 #[test]
 fn test_features_configuration_with_flag() -> Result<()> {
     let temp_dir = TempDir::new()?;
@@ -179,20 +179,14 @@ fn test_features_configuration_with_flag() -> Result<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: Value = serde_json::from_str(stdout.trim())?;
 
+    // The flag asks for the block; an authored-empty `"features": {}` resolves to nothing,
+    // so there is still nothing to report and the key stays absent. Verified against the
+    // pinned reference, which omits it for this exact config too (#376).
     assert!(
-        parsed.get("featuresConfiguration").is_some(),
-        "featuresConfiguration should be present with flag"
-    );
-
-    // Verify structure per spec
-    let features_config = &parsed["featuresConfiguration"];
-    assert!(
-        features_config.get("featureSets").is_some(),
-        "featureSets should be present"
-    );
-    assert!(
-        features_config["featureSets"].is_array(),
-        "featureSets should be an array"
+        parsed.get("featuresConfiguration").is_none(),
+        "featuresConfiguration must be omitted when no Feature resolves, even with the \
+         flag; got {:?}",
+        parsed.get("featuresConfiguration")
     );
 
     Ok(())
@@ -283,10 +277,11 @@ fn test_features_configuration_included_with_merged() -> Result<()> {
     let parsed: Value = serde_json::from_str(stdout.trim())?;
 
     // Per spec: when --include-merged-configuration is set without a container,
-    // featuresConfiguration is automatically computed to derive metadata
+    // featuresConfiguration is still computed to derive metadata for the merged
+    // configuration, but a resolution that found no Feature reports nothing (#376).
     assert!(
-        parsed.get("featuresConfiguration").is_some(),
-        "featuresConfiguration should be present when merged config is requested without container"
+        parsed.get("featuresConfiguration").is_none(),
+        "featuresConfiguration must be omitted when no Feature resolves"
     );
     assert!(
         parsed.get("mergedConfiguration").is_some(),
@@ -333,8 +328,8 @@ fn test_complete_output_structure() -> Result<()> {
     );
     assert!(parsed.get("workspace").is_some(), "Missing workspace");
     assert!(
-        parsed.get("featuresConfiguration").is_some(),
-        "Missing featuresConfiguration"
+        parsed.get("featuresConfiguration").is_none(),
+        "featuresConfiguration must be omitted when no Feature resolves"
     );
     assert!(
         parsed.get("mergedConfiguration").is_some(),

@@ -174,8 +174,10 @@ fn test_acceptance_merged_configuration_output() -> Result<()> {
     // Should contain configuration and mergedConfiguration
     assert!(result.get("configuration").is_some());
     assert!(result.get("workspace").is_some()); // workspace is always included when resolvable
-    assert!(result.get("featuresConfiguration").is_some()); // computed for merged config per spec
     assert!(result.get("mergedConfiguration").is_some()); // requested
+    // The Feature resolution still runs — the merged configuration needs it — but this
+    // config declares none, so nothing is REPORTED, matching the reference (#376).
+    assert!(result.get("featuresConfiguration").is_none());
 
     // Verify configuration content
     assert_eq!(result["configuration"]["name"], "test-merged");
@@ -325,14 +327,17 @@ fn test_acceptance_features_configuration_present() -> Result<()> {
 
     let result = helper.run_with_workspace(&["--include-features-configuration"])?;
 
-    // Should contain configuration and featuresConfiguration
     assert!(result.get("configuration").is_some());
-    assert!(result.get("featuresConfiguration").is_some()); // requested
     assert!(result.get("mergedConfiguration").is_none()); // not requested
 
-    // Verify featuresConfiguration structure (empty when no features defined)
-    let features_config = result["featuresConfiguration"].as_object().unwrap();
-    assert!(features_config.contains_key("featureSets"));
+    // The config declares no Features, so there is nothing to report and the block is
+    // omitted — which is what the reference does. An empty `featureSets` container would
+    // assert "resolution ran and produced none"; saying nothing asserts less (#376).
+    assert!(
+        result.get("featuresConfiguration").is_none(),
+        "featuresConfiguration must be omitted when no Feature resolves, got {:?}",
+        result.get("featuresConfiguration")
+    );
 
     Ok(())
 }
@@ -505,9 +510,9 @@ fn test_acceptance_additional_features_deep_merge_precedence() -> Result<()> {
 
     let result = helper.run_with_workspace(&["--include-features-configuration"])?;
 
-    // Should contain configuration and featuresConfiguration
     assert!(result.get("configuration").is_some());
-    assert!(result.get("featuresConfiguration").is_some());
+    // No Features declared and none added, so the block is omitted (#376).
+    assert!(result.get("featuresConfiguration").is_none());
 
     // Note: This test verifies that the command accepts the flags and runs without error.
     // Full validation of the merge semantics would require mocking the OCI registry
