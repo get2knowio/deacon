@@ -9,6 +9,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-075e4cd7",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-port-attributes-authored-keys",
+      "context": []
+    },
+    {
       "id": "obl-bhv-079ac919",
       "kind": "behavior",
       "behavior": "bhv-state-diff-parity",
@@ -156,6 +162,12 @@
       "id": "obl-bhv-6a9a3165",
       "kind": "behavior",
       "behavior": "bhv-up-mount-source-and-shape",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-6aebfb3a",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-merged-lifecycle-slots",
       "context": []
     },
     {

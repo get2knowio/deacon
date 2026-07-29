@@ -616,20 +616,41 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
 /// arrays under their plural names. The ordering is preserved: `entrypoint` first, then lifecycle
 /// hooks in their canonical sequence (see
 /// `devcontainers/cli/src/spec-node/imageMetadata.ts`).
-const COLLECTED_PROPERTIES: &[(&str, &str)] = &[
-    ("entrypoint", "entrypoints"),
-    ("onCreateCommand", "onCreateCommands"),
-    ("updateContentCommand", "updateContentCommands"),
-    ("postCreateCommand", "postCreateCommands"),
-    ("postStartCommand", "postStartCommands"),
-    ("postAttachCommand", "postAttachCommands"),
+///
+/// The third element says whether the plural key is emitted when NOTHING was collected. The
+/// two halves genuinely differ in the reference, which is why this is a per-property flag
+/// and not one rule: the five lifecycle hooks always appear, as `[]` when no entry
+/// contributed one, while `entrypoints` is omitted entirely. Measured against the pinned
+/// oracle on a config declaring three of the five hooks — the reference emitted
+/// `"updateContentCommands": []` and `"postAttachCommands": []` and no `entrypoints` at all.
+const COLLECTED_PROPERTIES: &[(&str, &str, EmptyPlural)] = &[
+    ("entrypoint", "entrypoints", EmptyPlural::Omit),
+    ("onCreateCommand", "onCreateCommands", EmptyPlural::Emit),
+    (
+        "updateContentCommand",
+        "updateContentCommands",
+        EmptyPlural::Emit,
+    ),
+    ("postCreateCommand", "postCreateCommands", EmptyPlural::Emit),
+    ("postStartCommand", "postStartCommands", EmptyPlural::Emit),
+    ("postAttachCommand", "postAttachCommands", EmptyPlural::Emit),
 ];
+
+/// Whether a collected property's plural key survives when no entry contributed a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmptyPlural {
+    /// Emit the key as `[]` — the reference always reports the lifecycle hook slots.
+    Emit,
+    /// Leave the key out entirely.
+    Omit,
+}
 
 /// Apply the upstream `mergeConfiguration` output shape to the merged base config JSON.
 ///
-/// For each `(singular, plural)` pair in [`COLLECTED_PROPERTIES`] this strips the singular
-/// property from `base` and—if any entry in `entries` carries a non-null value—emits the
-/// plural array at the same position, preserving entry declaration order.
+/// For each entry in [`COLLECTED_PROPERTIES`] this strips the singular property from `base`
+/// and emits the plural array at the same position, preserving entry declaration order. A
+/// property whose collection came up empty is emitted as `[]` or omitted according to its
+/// [`EmptyPlural`] flag.
 fn apply_upstream_merge_shape(
     mut base: serde_json::Value,
     entries: &[serde_json::Map<String, serde_json::Value>],
@@ -646,18 +667,18 @@ fn apply_upstream_merge_shape(
     // strip it so the merged output matches the reference.
     obj.remove("id");
 
-    for (singular, _) in COLLECTED_PROPERTIES {
+    for (singular, _, _) in COLLECTED_PROPERTIES {
         obj.remove(*singular);
     }
 
-    for (singular, plural) in COLLECTED_PROPERTIES {
+    for (singular, plural, when_empty) in COLLECTED_PROPERTIES {
         let collected: Vec<serde_json::Value> = entries
             .iter()
             .filter_map(|e| e.get(*singular))
             .filter(|v| !v.is_null())
             .cloned()
             .collect();
-        if !collected.is_empty() {
+        if !collected.is_empty() || *when_empty == EmptyPlural::Emit {
             obj.insert((*plural).to_string(), serde_json::Value::Array(collected));
         }
     }
@@ -672,7 +693,7 @@ fn collect_entry_from_config_json(
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut entry = serde_json::Map::new();
     if let Some(obj) = value.as_object() {
-        for (singular, _) in COLLECTED_PROPERTIES {
+        for (singular, _, _) in COLLECTED_PROPERTIES {
             if let Some(v) = obj.get(*singular) {
                 if !v.is_null() {
                     entry.insert((*singular).to_string(), v.clone());
@@ -3428,8 +3449,50 @@ API_KEY=another-secret
             result.get("postCreateCommands"),
             Some(&serde_json::json!(["echo b-post"]))
         );
-        // No entries contributed updateContentCommand → field omitted
-        assert!(result.get("updateContentCommands").is_none());
+        // No entries contributed a lifecycle hook → the slot is still reported, as `[]`.
+        // The reference always emits all five; only `entrypoints` is omitted when empty.
+        for plural in [
+            "updateContentCommands",
+            "postStartCommands",
+            "postAttachCommands",
+        ] {
+            assert_eq!(
+                result.get(plural),
+                Some(&serde_json::json!([])),
+                "{plural} must be reported as an empty array, not omitted"
+            );
+        }
+        assert!(
+            result.get("entrypoints").is_some(),
+            "this fixture contributes entrypoints, so they are present"
+        );
+    }
+
+    #[test]
+    fn test_apply_upstream_merge_shape_emits_empty_lifecycle_slots_but_no_entrypoints() {
+        // Nothing collected at all: the five lifecycle slots still appear as `[]`, and
+        // `entrypoints` does not appear. This is the asymmetry the `EmptyPlural` flag
+        // exists for, and it is the one a single "always emit" rule would get wrong.
+        let result =
+            apply_upstream_merge_shape(serde_json::json!({ "image": "ubuntu:24.04" }), &[]);
+
+        for plural in [
+            "onCreateCommands",
+            "updateContentCommands",
+            "postCreateCommands",
+            "postStartCommands",
+            "postAttachCommands",
+        ] {
+            assert_eq!(
+                result.get(plural),
+                Some(&serde_json::json!([])),
+                "{plural} must be reported even when empty"
+            );
+        }
+        assert!(
+            result.get("entrypoints").is_none(),
+            "entrypoints is omitted when empty, unlike the lifecycle slots"
+        );
     }
 
     #[tokio::test]

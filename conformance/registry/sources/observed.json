@@ -152,6 +152,16 @@
       ]
     },
     {
+      "id": "src-obs-merged-lifecycle-slots",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration --include-merged-configuration, lifecycle hook slots",
+      "summary": "On a config declaring `onCreateCommand`, `postCreateCommand` and `postStartCommand` only, the reference emitted all five plural arrays \u2014 the two undeclared ones as `[]` \u2014 and no `entrypoints` key. Observed 2026-07-28.",
+      "behaviors": [
+        "bhv-readconfig-merged-lifecycle-slots"
+      ]
+    },
+    {
       "id": "src-obs-missing-config",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",
@@ -169,6 +179,16 @@
       "summary": "The pinned reference reports an EMPTY table and exits 0; deacon resolves the chain and reports the inherited Feature (observed 2026-07-26).",
       "behaviors": [
         "bhv-outdated-extends-chain-features"
+      ]
+    },
+    {
+      "id": "src-obs-port-attributes-authored-keys",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration `configuration.portsAttributes` / `otherPortsAttributes`",
+      "summary": "The reference echoes exactly the attribute keys the author wrote: `{\"onAutoForward\": \"ignore\"}` stays one key. Observed 2026-07-28 on fx-tier1-ports-mixed and fx-tier1-universal-jsonc.",
+      "behaviors": [
+        "bhv-readconfig-port-attributes-authored-keys"
       ]
     },
     {
