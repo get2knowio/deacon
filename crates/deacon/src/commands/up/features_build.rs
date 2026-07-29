@@ -174,8 +174,14 @@ pub(crate) async fn build_image_with_features(
     log_cache_configuration(build_options);
 
     // Build image with BuildKit
-    let build_args =
-        generator.generate_build_args(&dockerfile_path, &extended_image_tag, build_options);
+    // `--builder` is a Docker CLI flag; Podman drives builds through its own CLI where it is
+    // an error, not a no-op. See the comment in `generate_build_args`.
+    let build_args = generator.generate_build_args(
+        &dockerfile_path,
+        &extended_image_tag,
+        build_options,
+        !cli.is_podman(),
+    );
 
     debug!("Building image with args: {:?}", build_args);
     let mode = build_options.map(|o| o.output_mode).unwrap_or_default();
@@ -378,7 +384,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     // was invisible locally and only reddened CI: `docker/setup-buildx-action` creates a
     // container-driver builder and makes it current, while a stock install leaves the
     // docker driver in place.
-    if build_options.map(|o| o.builder.is_none()).unwrap_or(true) {
+    if !cli.is_podman() && build_options.map(|o| o.builder.is_none()).unwrap_or(true) {
         build_args.push("--builder".to_string());
         build_args.push("default".to_string());
     }
