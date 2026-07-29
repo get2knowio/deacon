@@ -39,6 +39,11 @@ pub struct ConfigLoadArgs<'a> {
 #[derive(Debug)]
 pub struct ConfigLoadResult {
     pub config: DevContainerConfig,
+    /// The same merged configuration **before** variable substitution — what a
+    /// consumer must record when the record outlives this machine (the
+    /// `devcontainer.metadata` label, #373). Never use it to drive the run.
+    #[allow(dead_code)]
+    pub raw_config: DevContainerConfig,
     #[allow(dead_code)]
     pub substitution_report: SubstitutionReport,
     pub workspace_folder: PathBuf,
@@ -113,17 +118,19 @@ pub async fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
     };
 
     let merge_refs: Vec<&Path> = merge_paths.iter().map(|p| p.as_path()).collect();
-    let (config, substitution_report) = ConfigLoader::load_with_overrides_and_substitution(
-        &config_path,
-        &merge_refs,
-        secrets.as_ref(),
-        &workspace_folder,
-        args.resolve_devcontainer_id,
-    )
-    .await?;
+    let (raw_config, config, substitution_report) =
+        ConfigLoader::load_with_overrides_raw_and_substituted(
+            &config_path,
+            &merge_refs,
+            secrets.as_ref(),
+            &workspace_folder,
+            args.resolve_devcontainer_id,
+        )
+        .await?;
 
     Ok(ConfigLoadResult {
         config,
+        raw_config,
         substitution_report,
         workspace_folder,
         config_path,

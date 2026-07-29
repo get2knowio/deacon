@@ -78,7 +78,8 @@
       "locator": "devcontainer.metadata label on a container created from a configuration with a local Feature and templated mount sources",
       "summary": "What the image-metadata label records: the per-Feature entries, and whether configuration values appear as authored or as substituted.",
       "behaviors": [
-        "bhv-container-metadata-label-content"
+        "bhv-container-metadata-label-content",
+        "bhv-container-metadata-label-serialization"
       ]
     },
     {

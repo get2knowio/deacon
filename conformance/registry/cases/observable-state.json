@@ -152,6 +152,7 @@
         "bhv-container-identity-labels",
         "bhv-container-keepalive-command",
         "bhv-container-metadata-label-content",
+        "bhv-container-metadata-label-serialization",
         "bhv-state-diff-parity"
       ],
       "context": [],
@@ -235,11 +236,11 @@
           "divergenceId": "ext-container-identity-labels"
         },
         {
-          "behavior": "bhv-container-metadata-label-content",
+          "behavior": "bhv-container-metadata-label-serialization",
           "context": [],
           "observablePath": "chan-container-state.labels.devcontainer.metadata",
-          "rationale": "deacon's `devcontainer.metadata` omits the per-Feature `{\"id\": …}` entries the reference records, and records substituted absolute paths where the reference records the unsubstituted `${localWorkspaceFolder}` template. Measured at oracle 0.87.0; both are deacon defects awaiting a `parity-drift` issue.",
-          "waiverId": "wvr-container-metadata-label-content"
+          "rationale": "Only the BYTE FORM of this label differs now: the reference emits `[ {\u2026}, {\u2026} ]` when the value reaches the container through an image build (this case builds one) and deacon always emits compact `[{\u2026}]`, and deacon's `containerEnv` key order is `HashMap` order rather than authored order. Both values parse to the same entries \u2014 #373 closed the content difference, and the four cases that reach this label without an image build now compare it byte-for-byte.",
+          "waiverId": "wvr-container-metadata-label-serialization"
         }
       ],
       "cleanup": {
@@ -338,13 +339,6 @@
           "observablePath": "chan-container-state.labelNamespaces.devcontainer",
           "rationale": "The five identity labels deacon stamps and the reference does not make the `devcontainer` namespace's key SET differ, which is the same one-sided difference the per-key tolerances name, reported a second way by the derived grouping (024 US5 added it so a one-sided label is visible without enumerating every key either CLI might emit). Scoped to that one namespace.",
           "divergenceId": "ext-container-identity-labels"
-        },
-        {
-          "behavior": "bhv-container-metadata-label-content",
-          "context": [],
-          "observablePath": "chan-container-state.labels.devcontainer.metadata",
-          "rationale": "deacon's `devcontainer.metadata` omits the per-Feature `{\"id\": …}` entries the reference records, and records substituted absolute paths where the reference records the unsubstituted `${localWorkspaceFolder}` template. Measured at oracle 0.87.0; both are deacon defects awaiting a `parity-drift` issue.",
-          "waiverId": "wvr-container-metadata-label-content"
         }
       ],
       "cleanup": {
@@ -443,13 +437,6 @@
           "observablePath": "chan-container-state.labelNamespaces.devcontainer",
           "rationale": "The five identity labels deacon stamps and the reference does not make the `devcontainer` namespace's key SET differ, which is the same one-sided difference the per-key tolerances name, reported a second way by the derived grouping (024 US5 added it so a one-sided label is visible without enumerating every key either CLI might emit). Scoped to that one namespace.",
           "divergenceId": "ext-container-identity-labels"
-        },
-        {
-          "behavior": "bhv-container-metadata-label-content",
-          "context": [],
-          "observablePath": "chan-container-state.labels.devcontainer.metadata",
-          "rationale": "deacon's `devcontainer.metadata` omits the per-Feature `{\"id\": …}` entries the reference records, and records substituted absolute paths where the reference records the unsubstituted `${localWorkspaceFolder}` template. Measured at oracle 0.87.0; both are deacon defects awaiting a `parity-drift` issue.",
-          "waiverId": "wvr-container-metadata-label-content"
         }
       ],
       "cleanup": {
@@ -547,13 +534,6 @@
           "observablePath": "chan-container-state.labelNamespaces.devcontainer",
           "rationale": "The five identity labels deacon stamps and the reference does not make the `devcontainer` namespace's key SET differ, which is the same one-sided difference the per-key tolerances name, reported a second way by the derived grouping (024 US5 added it so a one-sided label is visible without enumerating every key either CLI might emit). Scoped to that one namespace.",
           "divergenceId": "ext-container-identity-labels"
-        },
-        {
-          "behavior": "bhv-container-metadata-label-content",
-          "context": [],
-          "observablePath": "chan-container-state.labels.devcontainer.metadata",
-          "rationale": "deacon's `devcontainer.metadata` omits the per-Feature `{\"id\": …}` entries the reference records, and records substituted absolute paths where the reference records the unsubstituted `${localWorkspaceFolder}` template. Measured at oracle 0.87.0; both are deacon defects awaiting a `parity-drift` issue.",
-          "waiverId": "wvr-container-metadata-label-content"
         }
       ],
       "cleanup": {

@@ -74,6 +74,7 @@ use tracing::{debug, info, instrument, warn};
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_container_up(
     config: &DevContainerConfig,
+    raw_config: &DevContainerConfig,
     identity: &ContainerIdentity,
     workspace_folder: &Path,
     args: &UpArgs,
@@ -90,12 +91,6 @@ pub(crate) async fn execute_container_up(
 
     // Merge CLI forward_ports into config
     let mut config = config.clone();
-
-    // #322: capture the pure USER config BEFORE any image-metadata merge, so the
-    // `devcontainer.metadata` config entry we stamp carries only devcontainer.json's
-    // own picked properties (remoteEnv/remoteUser/…) and does NOT duplicate the base
-    // image's metadata (which is already present as separate label entries).
-    let user_config_for_metadata = config.clone();
 
     // Host-CA injection (016, T028): synthesize the six CA env vars into the
     // container environment at create time, insert-if-absent so user
@@ -587,13 +582,20 @@ pub(crate) async fn execute_container_up(
     // container and is recoverable by exec/read-configuration/set-up without the
     // workspace — matching the reference CLI. Informational label; never feeds
     // `devcontainerId` (see `ContainerIdentity::id_hash_labels`).
+    //
+    // `raw_config` is the configuration as authored: before variable substitution
+    // and before the image-metadata merge (#373). The former keeps `${…}` templates
+    // intact, as the reference records them; the latter keeps the base image's own
+    // entries from being duplicated into the config entry — they are already present
+    // as separate, earlier entries in the same array.
     let create_identity_owned;
     let create_identity: &ContainerIdentity = match config.image.as_deref() {
         Some(image_ref) => {
             match super::merged_config::build_container_metadata_label(
                 docker,
                 image_ref,
-                &user_config_for_metadata,
+                raw_config,
+                resolved_features.as_deref().unwrap_or(&[]),
             )
             .await
             {

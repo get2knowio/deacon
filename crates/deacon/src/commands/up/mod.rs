@@ -193,6 +193,7 @@ pub(crate) async fn execute_up_with_runtime(
     // Load configuration with shared resolution (workspace/config/override/secrets)
     let ConfigLoadResult {
         mut config,
+        raw_config,
         workspace_folder,
         config_path,
         ..
@@ -218,6 +219,13 @@ pub(crate) async fn execute_up_with_runtime(
     // `deacon-build:<hash>` image). Hashing the post-build/post-substitution
     // config stamps a `devcontainer.configHash` label that `exec` can never
     // reproduce, breaking `up` ↔ `exec` reconnection for Dockerfile configs.
+    //
+    // This is NOT the same thing as `raw_config` (which the create paths stamp into
+    // the `devcontainer.metadata` label, #373): identity must hash a form both `up`
+    // and `exec` can reproduce, and `load_config` substitutes before either sees it,
+    // so the identity snapshot is taken post-substitution. `raw_config` is
+    // pre-substitution on purpose — the label travels with the image, so it must
+    // keep `${localWorkspaceFolder}` rather than bake in this machine's paths.
     let identity_config = config.clone();
 
     // T029: Check for disallowed features before any runtime operations
@@ -546,6 +554,7 @@ pub(crate) async fn execute_up_with_runtime(
     let container_info = if config.uses_compose() {
         execute_compose_up(
             &config,
+            &raw_config,
             &identity,
             workspace_folder.as_path(),
             &args,
@@ -560,6 +569,7 @@ pub(crate) async fn execute_up_with_runtime(
     } else {
         execute_container_up(
             &config,
+            &raw_config,
             &identity,
             workspace_folder.as_path(),
             &args,

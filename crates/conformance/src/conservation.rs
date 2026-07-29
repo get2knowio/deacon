@@ -77,6 +77,16 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      differ only by each side's own temp workspace path and are normalized, not tolerated.",
     ),
     (
+        "bhv-container-metadata-label-serialization",
+        "The BYTE FORM of the `devcontainer.metadata` label — JSON whitespace and object key \
+     order — as opposed to the entries it records. Newly RECORDABLE only because #373 closed \
+     the CONTENT difference its sibling `bhv-container-metadata-label-content` described: \
+     while the entries themselves disagreed, no comparison could reach the serialization, so \
+     nothing pre-migration could have stated it. Not a variant of the content claim — an \
+     implementation can record exactly the right entries and still emit them in a different \
+     byte form, which is precisely the state deacon is in now.",
+    ),
+    (
         "bhv-container-keepalive-command",
         "The two CLIs install different shell keep-alive commands. Newly RECORDABLE for the \
      same reason as the labels behavior: the legacy `diff_states` captured `cmd` and \
