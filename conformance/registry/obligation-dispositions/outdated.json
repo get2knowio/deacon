@@ -17,7 +17,6 @@
       "obligation": "obl-bhv-cd232792",
       "disposition": "case",
       "cases": [
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features"
       ]
     },
@@ -26,7 +25,6 @@
       "obligation": "obl-cmb-013b6887",
       "disposition": "case",
       "cases": [
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features"
       ]
     },
@@ -48,7 +46,6 @@
       "disposition": "case",
       "cases": [
         "case-outdated-dockerfile-workspace",
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features"
       ]
     },
@@ -57,7 +54,6 @@
       "obligation": "obl-cmb-0cea76d1",
       "disposition": "case",
       "cases": [
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features"
       ]
     },
@@ -93,6 +89,7 @@
         "case-outdated-compose-workspace",
         "case-outdated-malformed-config-rejected",
         "case-outdated-no-features-empty-report",
+        "case-outdated-reference-lenient-wrong-type-features",
         "case-outdated-unsupported-values-rejected"
       ]
     },
@@ -101,10 +98,10 @@
       "obligation": "obl-cmb-17d9587a",
       "disposition": "case",
       "cases": [
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features",
         "case-outdated-malformed-config-rejected",
         "case-outdated-no-features-empty-report",
+        "case-outdated-reference-lenient-wrong-type-features",
         "case-outdated-structured-report",
         "case-outdated-unsupported-values-rejected"
       ]
@@ -121,7 +118,6 @@
       "disposition": "case",
       "cases": [
         "case-outdated-dockerfile-workspace",
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features",
         "case-outdated-structured-report"
       ]
@@ -199,6 +195,7 @@
       "cases": [
         "case-outdated-malformed-config-rejected",
         "case-outdated-no-features-empty-report",
+        "case-outdated-reference-lenient-wrong-type-features",
         "case-outdated-unsupported-values-rejected"
       ]
     },
@@ -230,10 +227,10 @@
       "cases": [
         "case-outdated-compose-workspace",
         "case-outdated-dockerfile-workspace",
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features",
         "case-outdated-malformed-config-rejected",
         "case-outdated-no-features-empty-report",
+        "case-outdated-reference-lenient-wrong-type-features",
         "case-outdated-unsupported-values-rejected"
       ]
     },
@@ -248,7 +245,6 @@
       "obligation": "obl-cmb-6af5e680",
       "disposition": "case",
       "cases": [
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features"
       ]
     },
@@ -271,6 +267,7 @@
       "cases": [
         "case-outdated-malformed-config-rejected",
         "case-outdated-no-features-empty-report",
+        "case-outdated-reference-lenient-wrong-type-features",
         "case-outdated-structured-report",
         "case-outdated-unsupported-values-rejected"
       ]
@@ -303,6 +300,7 @@
         "case-outdated-compose-workspace",
         "case-outdated-malformed-config-rejected",
         "case-outdated-no-features-empty-report",
+        "case-outdated-reference-lenient-wrong-type-features",
         "case-outdated-unsupported-values-rejected"
       ]
     },
@@ -343,6 +341,7 @@
         "case-outdated-dockerfile-workspace",
         "case-outdated-malformed-config-rejected",
         "case-outdated-no-features-empty-report",
+        "case-outdated-reference-lenient-wrong-type-features",
         "case-outdated-unsupported-values-rejected"
       ]
     },
@@ -369,10 +368,10 @@
       "obligation": "obl-cmb-874c24c1",
       "disposition": "case",
       "cases": [
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features",
         "case-outdated-malformed-config-rejected",
         "case-outdated-no-features-empty-report",
+        "case-outdated-reference-lenient-wrong-type-features",
         "case-outdated-unsupported-values-rejected"
       ]
     },
@@ -381,7 +380,6 @@
       "obligation": "obl-cmb-8ac78070",
       "disposition": "case",
       "cases": [
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features",
         "case-outdated-structured-report"
       ]
@@ -391,7 +389,6 @@
       "obligation": "obl-cmb-95c39cdb",
       "disposition": "case",
       "cases": [
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features"
       ]
     },
@@ -497,6 +494,7 @@
         "case-outdated-compose-workspace",
         "case-outdated-malformed-config-rejected",
         "case-outdated-no-features-empty-report",
+        "case-outdated-reference-lenient-wrong-type-features",
         "case-outdated-unsupported-values-rejected"
       ]
     },
@@ -543,7 +541,6 @@
       "obligation": "obl-cmb-dad36f43",
       "disposition": "case",
       "cases": [
-        "case-outdated-extends-chain-differential",
         "case-outdated-extends-chain-features"
       ]
     },
@@ -580,6 +577,7 @@
         "case-outdated-dockerfile-workspace",
         "case-outdated-malformed-config-rejected",
         "case-outdated-no-features-empty-report",
+        "case-outdated-reference-lenient-wrong-type-features",
         "case-outdated-structured-report",
         "case-outdated-unsupported-values-rejected"
       ]
