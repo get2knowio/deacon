@@ -171,7 +171,13 @@ pub enum SourceInformation {
     },
 }
 
-/// Workspace configuration information
+/// Workspace configuration information.
+///
+/// The field set matches the reference CLI's `workspace` section exactly. It previously
+/// also carried `configFolderPath` and `rootFolderPath` — host paths the reference never
+/// emits — which made every `read-configuration` comparison diverge on two paths that had
+/// nothing to do with the behavior under test (104 occurrences across the live lane, #376).
+/// Callers that need the host-side paths read them from the arguments they already have.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceConfig {
@@ -180,10 +186,6 @@ pub struct WorkspaceConfig {
     /// Workspace mount specification (if applicable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_mount: Option<String>,
-    /// Configuration folder path (host path to .devcontainer directory)
-    pub config_folder_path: String,
-    /// Root folder path (host workspace root)
-    pub root_folder_path: String,
 }
 
 /// Output payload structure for read-configuration command
@@ -201,44 +203,31 @@ pub struct ReadConfigurationOutput {
 
 /// Resolve workspace configuration
 ///
-/// Computes the workspace configuration including folder paths and mount specifications.
-/// Uses the `mount_workspace_git_root` flag to determine whether to mount the Git root
-/// or the immediate workspace folder.
+/// Computes the workspace configuration reported by `read-configuration`. Both values are
+/// delegated to the shared helpers that `up` uses, so what this REPORTS is what `up`
+/// actually DOES — the invariant `container_workspace_folder`'s documentation claims and
+/// that this function used to break in two ways (#376, #383):
+///
+/// - `workspaceFolder` re-derived `/workspaces/<basename(root)>` and dropped the path from
+///   the git root down to the workspace folder, so a devcontainer in a monorepo
+///   subdirectory was reported at the repo root;
+/// - the default mount used `workspaceFolder` as its target, so an explicit
+///   `"workspaceFolder": "/opt/app"` was reported as mounted at `/opt/app` while `up`
+///   mounts it at `/workspaces/<basename(source)>` (`default_workspace_mount_target`, #273).
 #[instrument(skip_all)]
 fn resolve_workspace_configuration(
     workspace_folder: &Path,
-    config_path: Option<&Path>,
     mount_workspace_git_root: bool,
     config: &DevContainerConfig,
 ) -> Result<WorkspaceConfig> {
-    // Determine the root folder path based on mount_workspace_git_root flag
-    let root_folder_path = if mount_workspace_git_root {
-        // Use Git worktree detection to find the true workspace root
+    // The mount SOURCE: the git root when git-root mounting is active, else the workspace
+    // folder itself. This is also what the mount target's basename is taken from.
+    let mount_source = if mount_workspace_git_root {
         deacon_core::workspace::resolve_workspace_root(workspace_folder)?
     } else {
-        // Use the workspace folder as-is
         workspace_folder
             .canonicalize()
             .unwrap_or_else(|_| workspace_folder.to_path_buf())
-    };
-
-    // Determine config folder path
-    let config_folder_path = if let Some(config) = config_path {
-        // If config path is a directory, use it directly
-        // Otherwise, use its parent directory (for file paths)
-        if config.is_dir() {
-            config.to_path_buf()
-        } else {
-            config.parent().unwrap_or(workspace_folder).to_path_buf()
-        }
-    } else {
-        // Otherwise, look for .devcontainer directory in workspace
-        let devcontainer_dir = workspace_folder.join(".devcontainer");
-        if devcontainer_dir.exists() && devcontainer_dir.is_dir() {
-            devcontainer_dir
-        } else {
-            workspace_folder.to_path_buf()
-        }
     };
 
     // Compute workspace folder and mount. For compose flows, preserve authored
@@ -250,19 +239,16 @@ fn resolve_workspace_configuration(
             .unwrap_or_else(|| "/".to_string());
         (folder, config.workspace_mount.clone())
     } else {
-        let workspace_basename = root_folder_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("workspace");
-        let folder = config
-            .workspace_folder
-            .clone()
-            .unwrap_or_else(|| format!("/workspaces/{}", workspace_basename));
+        let folder = deacon_core::workspace::container_workspace_folder(
+            workspace_folder,
+            config.workspace_folder.as_deref(),
+            mount_workspace_git_root,
+        );
         let mount = config.workspace_mount.clone().or_else(|| {
             Some(format!(
                 "type=bind,source={},target={}",
-                root_folder_path.display(),
-                folder
+                mount_source.display(),
+                deacon_core::docker::default_workspace_mount_target(&mount_source),
             ))
         });
         (folder, mount)
@@ -271,8 +257,6 @@ fn resolve_workspace_configuration(
     Ok(WorkspaceConfig {
         workspace_folder: container_workspace_folder,
         workspace_mount,
-        config_folder_path: config_folder_path.to_string_lossy().to_string(),
-        root_folder_path: root_folder_path.to_string_lossy().to_string(),
     })
 }
 
@@ -1371,15 +1355,8 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     let workspace_config = if container_only_mode {
         None
     } else {
-        resolve_workspace_configuration(
-            workspace_folder,
-            resolved_config_path
-                .as_deref()
-                .or(args.config_path.as_deref()),
-            args.mount_workspace_git_root,
-            &config,
-        )
-        .ok()
+        resolve_workspace_configuration(workspace_folder, args.mount_workspace_git_root, &config)
+            .ok()
     };
 
     // Load secrets separately from config loading for container-specific substitution
@@ -3436,8 +3413,7 @@ API_KEY=another-secret
             ..Default::default()
         };
 
-        let workspace =
-            resolve_workspace_configuration(temp_dir.path(), None, true, &config).unwrap();
+        let workspace = resolve_workspace_configuration(temp_dir.path(), true, &config).unwrap();
 
         assert_eq!(workspace.workspace_folder, "/workspaces/compose-basic");
         assert!(workspace.workspace_mount.is_none());
@@ -3454,8 +3430,7 @@ API_KEY=another-secret
             ..Default::default()
         };
 
-        let workspace =
-            resolve_workspace_configuration(temp_dir.path(), None, true, &config).unwrap();
+        let workspace = resolve_workspace_configuration(temp_dir.path(), true, &config).unwrap();
 
         assert_eq!(workspace.workspace_folder, "/");
         assert!(workspace.workspace_mount.is_none());

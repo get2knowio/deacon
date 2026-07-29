@@ -17,7 +17,7 @@
       "id": "src-spec-container-lifecycle-reentry",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
-      "locator": "devcontainer-reference.md § Development container lifecycle",
+      "locator": "devcontainer-reference.md \u00a7 Development container lifecycle",
       "summary": "Creating a development container versus reconnecting to one that already exists, and what re-entry does when the configuration has changed since the container was created.",
       "behaviors": [
         "bhv-up-restart-reuses-container",
@@ -28,7 +28,7 @@
       "id": "src-spec-discovery-locations",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
-      "locator": "devcontainer-reference.md § devcontainer.json",
+      "locator": "devcontainer-reference.md \u00a7 devcontainer.json",
       "summary": "The three on-disk locations a product should expect to find devcontainer.json in, in order of precedence, including the one-level-deep sub-folder form.",
       "behaviors": [
         "bhv-readconfig-discovery-locations"
@@ -39,7 +39,7 @@
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
       "locator": "Command execution",
-      "summary": "A command is executed inside the container with its output streamed and its exit code propagated, in the container's environment — including the PATH the image itself established.",
+      "summary": "A command is executed inside the container with its output streamed and its exit code propagated, in the container's environment \u2014 including the PATH the image itself established.",
       "behaviors": [
         "bhv-exec-command-parity",
         "bhv-exec-image-path-preserved"
@@ -49,7 +49,7 @@
       "id": "src-spec-feature-install-order",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
-      "locator": "devcontainer-features.md § Installation order / feature-dependencies.md",
+      "locator": "devcontainer-features.md \u00a7 Installation order / feature-dependencies.md",
       "summary": "How the install order of a Feature set is determined: declared order, overrideFeatureInstallOrder, and dependency resolution.",
       "behaviors": [
         "bhv-readconfig-feature-resolution-order",
@@ -63,7 +63,7 @@
       "id": "src-spec-image-build",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
-      "locator": "devcontainerjson-reference.md § Image or Dockerfile specific properties",
+      "locator": "devcontainerjson-reference.md \u00a7 Image or Dockerfile specific properties",
       "summary": "Building an image from build.dockerfile, including build arguments and the failure of a build step.",
       "behaviors": [
         "bhv-build-failure-reported"
@@ -73,7 +73,7 @@
       "id": "src-spec-lifecycle-scripts",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
-      "locator": "devcontainer-reference.md § Lifecycle scripts / features-contribute-lifecycle-scripts.md",
+      "locator": "devcontainer-reference.md \u00a7 Lifecycle scripts / features-contribute-lifecycle-scripts.md",
       "summary": "The lifecycle hook sequence and the hooks a Feature may contribute to it.",
       "behaviors": [
         "bhv-run-user-commands-hook-order",
@@ -99,7 +99,7 @@
       "id": "src-spec-metadata-merge",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
-      "locator": "devcontainer-reference.md § Merge logic (image metadata and devcontainer.json)",
+      "locator": "devcontainer-reference.md \u00a7 Merge logic (image metadata and devcontainer.json)",
       "summary": "Configuration contributed by image metadata and Features is layered beneath the devcontainer.json's own properties; for a map-valued property such as containerEnv the later layer wins, and the devcontainer.json is applied last.",
       "behaviors": [
         "bhv-up-container-env-merge-precedence",
@@ -122,7 +122,7 @@
       "id": "src-spec-remote-user",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
-      "locator": "devcontainerjson-reference.md § containerUser / remoteUser / updateRemoteUserUID",
+      "locator": "devcontainerjson-reference.md \u00a7 containerUser / remoteUser / updateRemoteUserUID",
       "summary": "The user a container's process and remote commands run as, and the UID/GID that user resolves to inside the container.",
       "behaviors": [
         "bhv-up-effective-user-uid-gid"
@@ -132,7 +132,7 @@
       "id": "src-spec-templates-apply",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
-      "locator": "devcontainer-templates.md § Option resolution",
+      "locator": "devcontainer-templates.md \u00a7 Option resolution",
       "summary": "Template options and the substitution of ${templateOption:...} placeholders into the scaffolded files.",
       "behaviors": [
         "bhv-templates-apply-scaffolds-options"
@@ -142,10 +142,20 @@
       "id": "src-spec-variable-substitution",
       "inventory": "spec",
       "revision": "rev-spec-113500f4",
-      "locator": "devcontainerjson-reference.md § Variables in devcontainer.json",
+      "locator": "devcontainerjson-reference.md \u00a7 Variables in devcontainer.json",
       "summary": "The variable forms and the properties that support them, including the object-shaped fields that carry user templates.",
       "behaviors": [
         "bhv-readconfig-substitution-object-fields"
+      ]
+    },
+    {
+      "id": "src-spec-workspace-folder-default",
+      "inventory": "spec",
+      "revision": "rev-spec-113500f4",
+      "locator": "devcontainerjson-reference.md \u00a7 Image or Dockerfile specific properties \u2014 workspaceFolder",
+      "summary": "`workspaceFolder` \"Defaults to the automatic source code mount location\" \u2014 the location of THIS workspace inside the mount, which for a workspace nested under the mounted root includes the path down to it.",
+      "behaviors": [
+        "bhv-readconfig-workspace-folder-subpath"
       ]
     }
   ]

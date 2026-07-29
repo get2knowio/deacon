@@ -110,6 +110,25 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      than a variant of the scalar one.",
     ),
     (
+        "bhv-readconfig-workspace-folder-subpath",
+        "Where the workspace lands INSIDE the container when the workspace folder is nested \
+     under the mounted root, and what the default mount target is independently of \
+     `workspaceFolder`. No pre-migration behavior described the `workspace` section at all — \
+     every corpus fixture sat directly at its own root, so the subpath was always empty and \
+     the two values coincided. Not a variant of the tier-1 corpus claim: an implementation \
+     that reports every configuration field correctly can still report the wrong container \
+     path, which is what deacon did (#383).",
+    ),
+    (
+        "bhv-readconfig-workspace-section-shape",
+        "The FIELD SET of the `workspace` section, as distinct from the values in it. \
+     Separately falsifiable: an implementation can report the right `workspaceFolder` and \
+     still emit fields the reference does not have, which is exactly the state this behavior \
+     was recorded from — 104 diverging occurrences on two host-path fields whose VALUES were \
+     never in question. Nothing pre-migration described the output envelope, because the \
+     retired `prune` normalization dropped absent-on-one-side keys before comparison.",
+    ),
+    (
         "bhv-readconfig-feature-resolution-order",
         "The RESOLVED Feature set and its order as `read-configuration` reports it, including a \
      `--additional-features` overlay joining that resolution. Nothing pre-migration read the \
