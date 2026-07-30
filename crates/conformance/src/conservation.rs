@@ -77,6 +77,17 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      differ only by each side's own temp workspace path and are normalized, not tolerated.",
     ),
     (
+        "bhv-exec-restored-path-ordering",
+        "The relative order of a restored image `PATH` entry against one a Feature contributed \
+     through `/etc/profile.d`. Newly RECORDABLE only because the #370 fix created the \
+     situation it describes: before it, deacon dropped the image's entries outright, so there \
+     were never two contributors to order and nothing pre-migration could have stated this. \
+     Not a variant of `bhv-exec-image-path-preserved` — that one is about whether an entry \
+     SURVIVES, and it is now conformant and aligned; this is about where a surviving entry \
+     SITS, and it is a measured divergence. An implementation can preserve every entry and \
+     still order them differently, which is exactly the state deacon is in.",
+    ),
+    (
         "bhv-container-metadata-label-serialization",
         "The BYTE FORM of the `devcontainer.metadata` label — JSON whitespace and object key \
      order — as opposed to the entries it records. Newly RECORDABLE only because #373 closed \

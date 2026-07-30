@@ -24,12 +24,22 @@
     {
       "id": "bhv-exec-image-path-preserved",
       "area": "exec",
-      "statement": "`exec` runs the command with the environment the user-env probe captured; PATH entries the image contributed via `ENV PATH` are NOT preserved, while the reference preserves them.",
+      "statement": "`exec` runs the command with the environment the user-env probe captured, with the PATH entries the image contributed via `ENV PATH` restored when the probe's login shell dropped them.",
       "applicability": [],
-      "spec": "nonconformant",
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Fixed under #370. Measured at oracle 0.87.0 against fx-exec-dockerfile-overlay: the image's `Config.Env` PATH is `/opt/conformance/bin:/usr/local/sbin:\u2026`, and deacon's `exec` now reports exactly that, byte-identical to the reference; `conf-tool` resolves on both sides. The defect was a three-step composition \u2014 the probe runs a LOGIN shell whose `/etc/profile` ASSIGNS PATH (alpine:3.19 does), `build_effective_env` rebuilt the environment from that probe alone, and `build_exec_args` then re-asserted the degraded value as an explicit `-e PATH=`. `resolve_env_and_user` now restores the container's own PATH entries into the probe result before any of that, via `ContainerEnvironmentProber::merge_container_path`. ROOT CAUSE CORRECTION: the issue originally described this as an env-PRECEDENCE problem needing a per-variable policy for PATH. It is not. The reference does not resolve it by precedence at all \u2014 it REWRITES the container's `/etc/profile` to `export PATH=${PATH:-\u2026}` so a login shell stops clobbering, and applies an in-process merge only when it may not change system config. deacon does not modify container system files, so it always takes the merge path. The residual that leaves \u2014 the relative order of a restored image entry against a Feature's `/etc/profile.d` entry \u2014 is recorded separately as `bhv-exec-restored-path-ordering`. `wvr-exec-image-path-dropped` was deleted with the fix."
+    },
+    {
+      "id": "bhv-exec-restored-path-ordering",
+      "area": "exec",
+      "statement": "The relative order of a restored image `PATH` entry against one a Feature contributed through `/etc/profile.d`, when the probe's login shell dropped the image's.",
+      "applicability": [],
+      "spec": "unspecified",
       "reference": "divergent",
       "decision": "intentional-divergence",
-      "notes": "A deacon DEFECT, tracked at https://github.com/get2knowio/deacon/issues/370 — not a preference. `spec: nonconformant` states that plainly; the decision enum has no 'known defect, fix queued' value and R5/R6 forbid `follow-spec`/`align-with-reference` while the reference is divergent, so `intentional-divergence` is the only rule-valid decision and means, here, 'recorded and not yet fixed' (the same reading as bhv-container-metadata-label-content). Measured at oracle 0.87.0 against fx-exec-dockerfile-overlay: image `Config.Env` PATH is `/opt/conformance/bin:/usr/local/sbin:...`, the reference's exec sees exactly that, deacon's exec sees it with `/opt/conformance/bin` removed. Mechanism: the probe runs a LOGIN shell, whose `/etc/profile` replaces rather than extends PATH; `container_env_probe::build_effective_env` then rebuilds the environment from the probe alone (the sibling `merge_environments` implements the documented `probed < containerEnv < remoteEnv` layering, but `exec` does not call it); `docker::build_exec_args` finally re-asserts the degraded value as an explicit `-e PATH=`. Characterized by wvr-exec-image-path-dropped."
+      "notes": "The residual left by the #370 fix, and a deliberate consequence of how deacon fixes it. Measured at oracle 0.87.0 over fx-exec-feature-path-ordering (the image contributes `/opt/image/bin` via `ENV PATH=`, a Feature contributes `/opt/feature/bin` via `/etc/profile.d`): the reference's `exec` reports `/opt/feature/bin:/opt/image/bin:...` and deacon's reports `/opt/image/bin:/opt/feature/bin:...`. BOTH entries are present on both sides and both tools resolve - only the relative order of two SURVIVING entries differs, so nothing is unreachable either way. The cause is that the two CLIs fix the same problem by different means. The reference REWRITES the container's `/etc/profile` to `export PATH=${PATH:-...}` so a login shell stops clobbering; its probe therefore never loses the image's entry, and the Feature's script prepends in front of a PATH that already has it. deacon does not modify the container's system files, so it RECONSTRUCTS instead - and reconstruction cannot recover an ordering the probe never reported. `intentional-divergence` is accurate rather than a placeholder: writing to a container's `/etc/profile` is a posture decision, not a bug fix, and it was weighed against this residual and declined. The spec says nothing about PATH ordering between contributors, hence `spec: unspecified`. Covered by `case-exec-feature-path-ordering` and pinned in unit tests on `merge_container_path`."
     }
   ]
 }

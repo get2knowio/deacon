@@ -100,6 +100,21 @@ impl Default for ContainerEnvironmentProber {
     }
 }
 
+/// Whether a `PATH` entry names a `sbin` directory — `/sbin`, `/usr/sbin`,
+/// `/usr/local/sbin`, or anything below one.
+///
+/// Matches the reference's `/\/sbin(\/|$)/` test, written out rather than pulled in as a
+/// regex dependency. Deliberately anchored on a `/sbin` PATH SEGMENT, so `/opt/sbintools`
+/// is not one and `/opt/sbin/extra` is.
+fn is_sbin_dir(path_entry: &str) -> bool {
+    path_entry.match_indices("/sbin").any(|(index, _)| {
+        match path_entry[index + "/sbin".len()..].chars().next() {
+            None => true,
+            Some(next) => next == '/',
+        }
+    })
+}
+
 impl ContainerEnvironmentProber {
     /// Create a new container environment prober
     pub fn new() -> Self {
@@ -546,6 +561,51 @@ impl ContainerEnvironmentProber {
         Ok(env_vars)
     }
 
+    /// Restore the container's own `PATH` entries into a probed `PATH` that a login
+    /// shell dropped (#370).
+    ///
+    /// The probe runs the user's shell with its startup files, and on many bases
+    /// `/etc/profile` **assigns** `PATH` rather than extending it — `alpine:3.19` does
+    /// exactly that. Every directory the image contributed via `ENV PATH=…` is gone from
+    /// the probe result, and because the probed value is then passed to `docker exec` as
+    /// an explicit `-e PATH=…`, the degraded value wins for the whole session: a tool the
+    /// image installed becomes unreachable.
+    ///
+    /// This restores them without discarding what the probe found. Walking the container's
+    /// `PATH` in order, each directory the probe already has advances a cursor to just past
+    /// it, and each one the probe lacks is inserted at that cursor. Entries the probe
+    /// contributed — a Feature's `/etc/profile.d` addition, say — therefore keep their
+    /// position and their precedence, while the image's entries slot back in around them in
+    /// the image's own relative order.
+    ///
+    /// `is_root` gates one exception: a `/sbin` directory the probe does not have is NOT
+    /// restored for a non-root user, since those hold tools that user cannot run anyway. A
+    /// `/sbin` entry the probe DID report is untouched — this only governs re-adding.
+    ///
+    /// Mirrors the pinned reference (`@devcontainers/cli` 0.87.0), which applies the same
+    /// merge when it cannot instead patch the container's `/etc/profile` in place. deacon
+    /// does not modify the container's system files, so this path always applies.
+    pub fn merge_container_path(probed_path: &str, container_path: &str, is_root: bool) -> String {
+        let mut segments: Vec<&str> = probed_path.split(':').collect();
+        let mut insert_at = 0usize;
+
+        for segment in container_path.split(':') {
+            match segments.iter().position(|existing| *existing == segment) {
+                // Already present: advance the cursor past it, so anything restored next
+                // lands after it, preserving the container's relative order.
+                Some(index) => insert_at = index + 1,
+                None => {
+                    if is_root || !is_sbin_dir(segment) {
+                        segments.insert(insert_at, segment);
+                        insert_at += 1;
+                    }
+                }
+            }
+        }
+
+        segments.join(":")
+    }
+
     /// Merge probed environment with existing containerEnv/remoteEnv
     ///
     /// Precedence order (highest to lowest):
@@ -810,6 +870,121 @@ mod tests {
         assert_eq!(
             ContainerProbeMode::default(),
             ContainerProbeMode::LoginShell
+        );
+    }
+
+    // ========================================================================
+    // #370: restoring container `PATH` entries a login shell dropped.
+    //
+    // These pin THIS function's contract. Where an expectation also matches a
+    // measurement against `@devcontainers/cli` 0.87.0 it says so; one case
+    // deliberately does not match the reference, and says that instead.
+    // ========================================================================
+
+    fn merge(probe: &str, container: &str, is_root: bool) -> String {
+        ContainerEnvironmentProber::merge_container_path(probe, container, is_root)
+    }
+
+    /// The #370 case itself: `alpine:3.19`'s `/etc/profile` ASSIGNS `PATH`, so the probe
+    /// loses `/opt/conformance/bin` that the image's `ENV PATH=` put there. Restoring it
+    /// is the whole point, and it must come back in front, where the image put it.
+    #[test]
+    fn image_path_entry_dropped_by_the_login_shell_is_restored_in_front() {
+        let probe = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+        let container =
+            "/opt/conformance/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+        assert_eq!(merge(probe, container, true), container);
+    }
+
+    /// A Feature writing `/etc/profile.d/…` is exactly what `userEnvProbe` exists to
+    /// capture, so restoring the image's entries must not COST the Feature its entry. Both
+    /// survive — but the restored image entry lands in FRONT of the Feature's, and that is
+    /// a measured divergence from the reference, which produces
+    /// `/opt/feature/bin:/opt/image/bin:…` for this exact input.
+    ///
+    /// The reference gets there a different way: it rewrites the container's `/etc/profile`
+    /// so `PATH` is no longer assigned, its probe therefore never loses `/opt/image/bin`,
+    /// and the Feature's `profile.d` script prepends in front of a PATH that already has
+    /// it. deacon does not modify the container's system files, so it reconstructs instead —
+    /// and reconstruction cannot recover an ordering the probe never reported. Only the
+    /// relative order of two SURVIVING entries differs; nothing is missing on either side.
+    ///
+    /// Characterized as `bhv-exec-restored-path-ordering`. Asserted here so the difference
+    /// is pinned rather than incidental: if this ever produces the reference's order, that
+    /// is a real change and should be deliberate.
+    #[test]
+    fn a_restored_image_entry_lands_ahead_of_a_feature_entry_unlike_the_reference() {
+        let probe = "/opt/feature/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+        let container =
+            "/opt/image/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+        let merged = merge(probe, container, true);
+        assert_eq!(
+            merged,
+            "/opt/image/bin:/opt/feature/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        );
+        // The property that actually matters, stated separately from the ordering: both
+        // contributors are reachable.
+        for required in ["/opt/image/bin", "/opt/feature/bin"] {
+            assert!(
+                merged.split(':').any(|s| s == required),
+                "{required} must survive the merge, got: {merged}"
+            );
+        }
+    }
+
+    /// Nothing to restore is not an occasion to reorder: a probe that already carries every
+    /// container entry comes back byte-identical.
+    #[test]
+    fn a_probe_that_lost_nothing_is_returned_unchanged() {
+        let path = "/opt/image/bin:/usr/local/bin:/usr/bin:/bin";
+        assert_eq!(merge(path, path, true), path);
+        assert_eq!(merge(path, "/usr/bin:/bin", true), path);
+    }
+
+    /// `/sbin` directories hold tools a non-root user cannot run, so a missing one is not
+    /// restored for them — but IS for root.
+    #[test]
+    fn sbin_entries_are_restored_only_for_root() {
+        let probe = "/usr/local/bin:/usr/bin:/bin";
+        let container = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+        assert_eq!(merge(probe, container, true), container);
+        assert_eq!(merge(probe, container, false), probe);
+    }
+
+    /// The non-root rule governs RE-ADDING only. A `/sbin` entry the probe itself reported
+    /// is the user's own environment and is never taken away.
+    #[test]
+    fn a_probed_sbin_entry_survives_for_a_non_root_user() {
+        let probe = "/usr/sbin:/usr/bin:/bin";
+        let merged = merge(probe, "/usr/local/bin:/usr/bin:/bin", false);
+        assert!(
+            merged.split(':').any(|s| s == "/usr/sbin"),
+            "a probed /sbin entry must not be removed, got: {merged}"
+        );
+    }
+
+    /// `is_sbin_dir` is anchored on a path SEGMENT, so a directory that merely starts with
+    /// the letters `sbin` is an ordinary entry and is restored for any user.
+    #[test]
+    fn only_a_real_sbin_path_segment_triggers_the_non_root_rule() {
+        assert!(is_sbin_dir("/sbin"));
+        assert!(is_sbin_dir("/usr/sbin"));
+        assert!(is_sbin_dir("/usr/local/sbin"));
+        assert!(is_sbin_dir("/opt/sbin/extra"));
+        assert!(!is_sbin_dir("/opt/sbintools"));
+        assert!(!is_sbin_dir("/opt/bin"));
+
+        let merged = merge("/usr/bin", "/opt/sbintools:/usr/bin", false);
+        assert_eq!(merged, "/opt/sbintools:/usr/bin");
+    }
+
+    /// Several dropped entries come back in the container's own relative order, not
+    /// reversed — the insertion cursor advances with each one.
+    #[test]
+    fn multiple_dropped_entries_keep_the_containers_relative_order() {
+        assert_eq!(
+            merge("/usr/bin:/bin", "/opt/a:/opt/b:/opt/c:/usr/bin:/bin", true),
+            "/opt/a:/opt/b:/opt/c:/usr/bin:/bin"
         );
     }
 

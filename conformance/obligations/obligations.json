@@ -39,6 +39,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-1696dc0b",
+      "kind": "behavior",
+      "behavior": "bhv-exec-restored-path-ordering",
+      "context": []
+    },
+    {
       "id": "obl-bhv-1766f639",
       "kind": "behavior",
       "behavior": "bhv-down-compose-project-teardown",

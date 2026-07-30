@@ -604,6 +604,14 @@
       "obligation": "obl-cmb-fcb9ce2a",
       "disposition": "gap",
       "gap": "gap-pairwise-exec"
+    },
+    {
+      "id": "odp-bhv-1696dc0b",
+      "obligation": "obl-bhv-1696dc0b",
+      "disposition": "case",
+      "cases": [
+        "case-exec-feature-path-ordering"
+      ]
     }
   ]
 }

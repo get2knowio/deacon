@@ -82,7 +82,12 @@ const TODAY: &str = "2026-07-19";
 /// every case covering it was single-container shaped, so nothing in the registry could
 /// have caught the compose path dropping a Feature's `containerEnv` — or proved the fix.
 /// No record was removed.
-const MIGRATED_CASE_COUNT: usize = 205;
+/// **205 → 206** (#370): the PATH ordering deacon's restoration produces when an image
+/// `ENV PATH=` entry and a Feature's `/etc/profile.d` entry both contribute. Deliberately
+/// spec-expectation — the reference orders the two the other way round, and the difference
+/// lands in `chan-stdout`, which cannot carry a tolerance — so no existing case could have
+/// stated it. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 206;
 
 #[test]
 fn real_registry_is_structurally_valid() {
