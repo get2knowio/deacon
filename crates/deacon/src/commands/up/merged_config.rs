@@ -11,6 +11,8 @@ use anyhow::Result;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::docker::Docker;
 use deacon_core::dockerfile_generator::FeatureInstallEnv;
+use deacon_core::features::ResolvedFeature;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::debug;
@@ -443,42 +445,74 @@ fn apply_image_metadata_label(
     ConfigMerger::merge_configs(&chain)
 }
 
-/// Serialize the config's metadata-relevant ("picked") properties into a single
-/// `devcontainer.metadata` entry (#322). This is the entry deacon appends after
-/// the image's own metadata entries, so config living only in devcontainer.json —
-/// notably `remoteEnv` — is recoverable from the container by
-/// exec/read-configuration/set-up. Mirrors upstream `pickConfigProperties`.
-/// Null/empty values are dropped so the entry stays minimal.
-pub(crate) fn config_metadata_entry(config: &DevContainerConfig) -> serde_json::Value {
-    const PICK: &[&str] = &[
-        "init",
-        "privileged",
-        "capAdd",
-        "securityOpt",
-        "entrypoint",
-        "mounts",
-        "onCreateCommand",
-        "updateContentCommand",
-        "postCreateCommand",
-        "postStartCommand",
-        "postAttachCommand",
-        "waitFor",
-        "remoteUser",
-        "containerUser",
-        "updateRemoteUserUID",
-        "userEnvProbe",
-        "remoteEnv",
-        "containerEnv",
-        "customizations",
-        "overrideCommand",
-        "portsAttributes",
-        "otherPortsAttributes",
-        "shutdownAction",
-        "hostRequirements",
-    ];
-    let mut entry = serde_json::Map::new();
-    if let Ok(serde_json::Value::Object(full)) = serde_json::to_value(config) {
-        for k in PICK {
+/// The properties upstream picks from the **configuration** for a
+/// `devcontainer.metadata` entry (`pickConfigProperties`, the `SV` list in the
+/// pinned oracle 0.87.0 bundle). Deliberately ordered as upstream orders it.
+///
+/// Note there is no `entrypoint` here: `entrypoint` is a *Feature* property (see
+/// [`FEATURE_PICK`]), not a `devcontainer.json` one, and upstream picks it only
+/// from Features.
+const CONFIG_PICK: &[&str] = &[
+    "onCreateCommand",
+    "updateContentCommand",
+    "postCreateCommand",
+    "postStartCommand",
+    "postAttachCommand",
+    "waitFor",
+    "customizations",
+    "mounts",
+    "containerEnv",
+    "containerUser",
+    "init",
+    "privileged",
+    "capAdd",
+    "securityOpt",
+    "remoteUser",
+    "userEnvProbe",
+    "remoteEnv",
+    "overrideCommand",
+    "portsAttributes",
+    "otherPortsAttributes",
+    "forwardPorts",
+    "shutdownAction",
+    "updateRemoteUserUID",
+    "hostRequirements",
+];
+
+/// The properties upstream picks from an installed **Feature** for its
+/// `devcontainer.metadata` entry (`pickFeatureProperties`, the `RV` list in the
+/// pinned oracle 0.87.0 bundle).
+///
+/// `containerEnv` is intentionally absent: a Feature's `containerEnv` is baked
+/// into the feature-extended image's own `ENV`, so upstream does not re-record
+/// it in the label. Copying it here would double-count it on read-back.
+const FEATURE_PICK: &[&str] = &[
+    "onCreateCommand",
+    "updateContentCommand",
+    "postCreateCommand",
+    "postStartCommand",
+    "postAttachCommand",
+    "init",
+    "privileged",
+    "capAdd",
+    "securityOpt",
+    "entrypoint",
+    "mounts",
+    "customizations",
+];
+
+/// Pick `keys` out of a serialized record, dropping null/empty values.
+///
+/// The drop is what stands in for upstream's `key in object` test. Upstream
+/// picks from the *parsed JSON document*, so a key the author never wrote is
+/// simply absent; deacon picks from a typed struct, whose serialization
+/// materializes a default (`[]`, `null`) for every unset field. Without the
+/// drop, deacon would record keys the author never wrote — a bigger divergence
+/// than losing an authored-but-empty `"securityOpt": []`.
+fn pick_nonempty(record: &serde_json::Value, keys: &[&str]) -> serde_json::Map<String, Value> {
+    let mut picked = serde_json::Map::new();
+    if let Some(full) = record.as_object() {
+        for k in keys {
             if let Some(v) = full.get(*k) {
                 let empty = match v {
                     serde_json::Value::Null => true,
@@ -488,18 +522,63 @@ pub(crate) fn config_metadata_entry(config: &DevContainerConfig) -> serde_json::
                     _ => false,
                 };
                 if !empty {
-                    entry.insert((*k).to_string(), v.clone());
+                    picked.insert((*k).to_string(), v.clone());
                 }
             }
         }
     }
+    picked
+}
+
+/// Serialize the config's metadata-relevant ("picked") properties into a single
+/// `devcontainer.metadata` entry (#322). This is the entry deacon appends after
+/// the image's own metadata entries and the Feature entries, so config living
+/// only in devcontainer.json — notably `remoteEnv` — is recoverable from the
+/// container by exec/read-configuration/set-up. Mirrors upstream
+/// `pickConfigProperties`. Null/empty values are dropped so the entry stays
+/// minimal.
+///
+/// **Pass the config as authored, before variable substitution** (#373). The
+/// reference records `pick(config.raw, …)`, so a mount written
+/// `source=${localWorkspaceFolder}/ro,…` is recorded with the template intact.
+/// Recording the substituted value bakes the *building* machine's filesystem
+/// layout into a label that travels with the image, making it wrong for every
+/// consumer but the one that produced it.
+pub(crate) fn config_metadata_entry(config: &DevContainerConfig) -> serde_json::Value {
+    let full = serde_json::to_value(config).unwrap_or(serde_json::Value::Null);
+    serde_json::Value::Object(pick_nonempty(&full, CONFIG_PICK))
+}
+
+/// Serialize one installed Feature into its `devcontainer.metadata` entry
+/// (#373): `{"id": <feature id as written in devcontainer.json>, …picked}`.
+///
+/// The reference records one such entry per installed Feature, which is what
+/// lets a consumer reading the label back reconstruct the Feature set an image
+/// carries. `id` comes from [`ResolvedFeature::source`] — the reference uses
+/// `sourceInformation.userFeatureId`, i.e. the key exactly as authored
+/// (`./features/conf-env`, `ghcr.io/owner/repo/feat:1`), not deacon's internal
+/// canonical id (`local:/abs/path`).
+pub(crate) fn feature_metadata_entry(feature: &ResolvedFeature) -> serde_json::Value {
+    let mut entry = serde_json::Map::new();
+    entry.insert(
+        "id".to_string(),
+        serde_json::Value::String(feature.source.clone()),
+    );
+    let full = serde_json::to_value(&feature.metadata).unwrap_or(serde_json::Value::Null);
+    entry.extend(pick_nonempty(&full, FEATURE_PICK));
     serde_json::Value::Object(entry)
 }
 
 /// Build the `devcontainer.metadata` JSON to stamp on the created container
 /// (#322): the image's own metadata entries (from its `devcontainer.metadata`
-/// LABEL, which the feature-extended image inherits from the base) followed by
-/// the config entry from [`config_metadata_entry`].
+/// LABEL, which the feature-extended image inherits from the base), then one
+/// entry per installed Feature ([`feature_metadata_entry`], #373), then the
+/// config entry from [`config_metadata_entry`]. That is upstream's
+/// `[...baseImageMetadata.raw, ...featureEntries, pickConfigProperties(config.raw)]`,
+/// lowest precedence first.
+///
+/// `config` MUST be the configuration as authored — before variable
+/// substitution — for the reason spelled out on [`config_metadata_entry`].
 ///
 /// Always returns a JSON array, matching the reference CLI, which stamps
 /// `devcontainer.metadata` on every container it creates and uses `[]` when there is
@@ -515,6 +594,7 @@ pub(crate) async fn build_container_metadata_label(
     docker: &impl Docker,
     image_ref: &str,
     config: &DevContainerConfig,
+    features: &[ResolvedFeature],
 ) -> Option<String> {
     let mut entries: Vec<serde_json::Value> = match docker.inspect_image(image_ref).await {
         Ok(Some(info)) => match info.labels.get("devcontainer.metadata") {
@@ -527,6 +607,11 @@ pub(crate) async fn build_container_metadata_label(
         },
         _ => Vec::new(),
     };
+
+    // One entry per installed Feature, in installation order, between the image's
+    // inherited entries and the config's (#373). Always non-empty (it carries at
+    // least `id`), so no emptiness filter applies here.
+    entries.extend(features.iter().map(feature_metadata_entry));
 
     let cfg_entry = config_metadata_entry(config);
     let cfg_nonempty = cfg_entry
@@ -572,12 +657,90 @@ mod tests {
         assert!(obj.contains_key("remoteEnv"));
         assert!(obj.contains_key("capAdd"));
         assert!(obj.contains_key("customizations"));
+        // `forwardPorts` IS in upstream's config pick list (#373); deacon omitted it.
+        assert!(obj.contains_key("forwardPorts"));
         // NOT picked / dropped:
         assert!(!obj.contains_key("image"));
         assert!(!obj.contains_key("name"));
         assert!(!obj.contains_key("features"));
-        assert!(!obj.contains_key("forwardPorts"));
         assert!(!obj.contains_key("securityOpt"), "empty arrays are dropped");
+        // `entrypoint` is a Feature property, never a config one — upstream's
+        // config pick list has no such key (#373).
+        assert!(!obj.contains_key("entrypoint"));
+    }
+
+    /// #373: the config entry records the configuration AS AUTHORED. Callers pass
+    /// the pre-substitution config, and nothing in this function may resolve a
+    /// `${…}` template — the label travels with the image, so a substituted host
+    /// path would be wrong for every consumer but the machine that built it.
+    #[test]
+    fn config_metadata_entry_preserves_variable_templates_verbatim() {
+        let config: DevContainerConfig = serde_json::from_str(
+            r#"{
+                "image": "alpine:3.19",
+                "mounts": ["source=${localWorkspaceFolder}/ro,target=/mnt/ro,type=bind,readonly"],
+                "containerEnv": { "TPL": "${localWorkspaceFolder}/x", "ID": "${devcontainerId}" },
+                "remoteEnv": { "R": "${containerWorkspaceFolder}/y" }
+            }"#,
+        )
+        .unwrap();
+        let entry = config_metadata_entry(&config);
+        let obj = entry.as_object().unwrap();
+        assert_eq!(
+            obj["mounts"][0].as_str(),
+            Some("source=${localWorkspaceFolder}/ro,target=/mnt/ro,type=bind,readonly")
+        );
+        assert_eq!(
+            obj["containerEnv"]["TPL"].as_str(),
+            Some("${localWorkspaceFolder}/x")
+        );
+        assert_eq!(
+            obj["containerEnv"]["ID"].as_str(),
+            Some("${devcontainerId}")
+        );
+        assert_eq!(
+            obj["remoteEnv"]["R"].as_str(),
+            Some("${containerWorkspaceFolder}/y")
+        );
+    }
+
+    /// #373: every installed Feature gets an entry keyed by the id AS WRITTEN in
+    /// devcontainer.json — that is what lets a consumer reading the label back
+    /// reconstruct the Feature set. Measured against oracle 0.87.0, which records
+    /// `{"id": "./features/probe", "postCreateCommand": …, "mounts": […]}` for a
+    /// local Feature and omits its `containerEnv` (already baked into the image ENV).
+    #[test]
+    fn feature_metadata_entry_records_authored_id_and_picked_properties() {
+        let mut metadata = empty_metadata("probe");
+        metadata.post_create_command = Some(serde_json::json!("echo from-feature"));
+        metadata.mounts = vec![serde_json::json!({
+            "source": "probe-vol", "target": "/mnt/probe", "type": "volume"
+        })];
+        metadata
+            .container_env
+            .insert("FEAT".to_string(), "1".to_string());
+        let feature = ResolvedFeature {
+            // deacon's internal canonical id for a local Feature; NOT what the
+            // label records.
+            id: "local:/abs/path/features/probe".to_string(),
+            source: "./features/probe".to_string(),
+            options: HashMap::new(),
+            metadata,
+        };
+
+        let entry = feature_metadata_entry(&feature);
+        let obj = entry.as_object().unwrap();
+        assert_eq!(obj["id"].as_str(), Some("./features/probe"));
+        assert_eq!(obj["postCreateCommand"].as_str(), Some("echo from-feature"));
+        assert_eq!(obj["mounts"][0]["source"].as_str(), Some("probe-vol"));
+        assert!(
+            !obj.contains_key("containerEnv"),
+            "a Feature's containerEnv is baked into the image ENV; upstream does not \
+             re-record it in the label, and doing so would double-count it on read-back"
+        );
+        // Unset properties are absent rather than recorded as empty defaults.
+        assert!(!obj.contains_key("capAdd"));
+        assert!(!obj.contains_key("entrypoint"));
     }
 
     #[test]

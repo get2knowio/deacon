@@ -22,6 +22,15 @@
       ]
     },
     {
+      "id": "odp-bhv-234e7bca",
+      "obligation": "obl-bhv-234e7bca",
+      "disposition": "case",
+      "cases": [
+        "case-state-dockerfile-nonroot",
+        "case-up-env-merge-differential"
+      ]
+    },
+    {
       "id": "odp-bhv-7896e51a",
       "obligation": "obl-bhv-7896e51a",
       "disposition": "case",

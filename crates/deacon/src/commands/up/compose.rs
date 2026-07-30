@@ -72,6 +72,7 @@ async fn resolve_primary_container_id_with_retry(
 #[instrument(skip(config, workspace_folder, args, state_manager, runtime))]
 pub(crate) async fn execute_compose_up(
     config: &DevContainerConfig,
+    raw_config: &DevContainerConfig,
     identity: &ContainerIdentity,
     workspace_folder: &Path,
     args: &UpArgs,
@@ -456,7 +457,11 @@ pub(crate) async fn execute_compose_up(
             if let Some(json) = super::merged_config::build_container_metadata_label(
                 &runtime.cli_docker(),
                 &img,
-                config,
+                raw_config,
+                feature_build
+                    .as_ref()
+                    .map(|fb| fb.resolved_features.as_slice())
+                    .unwrap_or(&[]),
             )
             .await
             {

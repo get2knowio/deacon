@@ -1,0 +1,23 @@
+{
+  "id": "wvr-container-metadata-label-serialization",
+  "behaviors": [
+    "bhv-container-metadata-label-serialization"
+  ],
+  "scope": {
+    "kind": "corpus_case",
+    "corpus": "us5",
+    "case": "container-metadata-label-serialization"
+  },
+  "expect": {
+    "kind": "field-divergence",
+    "ours": [
+      "[{\"id\":\"./features/conf-env\"},{\"containerEnv\":{\"CONF_ONLY_CONFIG\":\"config\",\"CONF_LAYER\":\"config-wins\"}}]"
+    ],
+    "reference": [
+      "[ {\"id\":\"./features/conf-env\"}, {\"containerEnv\":{\"CONF_LAYER\":\"config-wins\",\"CONF_ONLY_CONFIG\":\"config\"}} ]"
+    ]
+  },
+  "rationale": "The residual left after #373 closed the CONTENT difference in `devcontainer.metadata`: both values now record the same entries, and only their BYTE FORM differs. Two causes, both measured at oracle 0.87.0 and both visible in the recorded pair above. (1) WHITESPACE: the reference emits `[ {…}, {…} ]` whenever the value reaches the container through an image build — written into a generated `LABEL` line and inherited — and compact `[{…}]` when it writes the container label directly (verified both ways). deacon always writes the container label directly, so it is always compact. Matching this would mean varying deacon's label formatting by whether an image build happened, mimicking an artifact of the reference's own build routing that no consumer can observe, since both parse to the same JSON. (2) KEY ORDER: deacon emits `containerEnv`/`remoteEnv` in `HashMap` iteration order rather than authored order, so a multi-key value is not byte-stable run-to-run. That one is a deacon defect, not an accepted difference — it is filed as `parity-drift` #394 and the fix (`IndexMap` on `DevContainerConfig`, ~366 references across 52 files) belongs in its own change; this waiver records it rather than hiding it. Scoped to the one label key on the two cases where an image build makes the difference visible — `case-state-dockerfile-nonroot` and `case-up-env-merge-differential`. The four other cases that reach this label WITHOUT an image build compare it byte-for-byte and MUST agree; their tolerances were deleted with #373 and their agreement is what proves the content fix. Self-invalidating: the moment deacon's label bytes match, this waiver reports stale.",
+  "added": "2026-07-29",
+  "expires": "2027-01-29"
+}

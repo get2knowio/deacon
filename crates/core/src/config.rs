@@ -2763,6 +2763,42 @@ impl ConfigLoader {
         workspace_path: &Path,
         resolve_devcontainer_id: bool,
     ) -> Result<(DevContainerConfig, crate::variable::SubstitutionReport)> {
+        let (_raw, substituted, report) = Self::load_with_overrides_raw_and_substituted(
+            path,
+            merge_config_paths,
+            secrets,
+            workspace_path,
+            resolve_devcontainer_id,
+        )
+        .await?;
+        Ok((substituted, report))
+    }
+
+    /// As [`Self::load_with_overrides_and_substitution`], but also returns the
+    /// merged configuration **before** variable substitution.
+    ///
+    /// The raw form is what a consumer must record when the recorded value
+    /// outlives the machine that produced it: the reference CLI writes
+    /// `pick(config.raw, …)` into the `devcontainer.metadata` image/container
+    /// label, so a mount authored `source=${localWorkspaceFolder}/ro,…` keeps
+    /// its template rather than baking the building machine's filesystem layout
+    /// into a label that travels with the image (#373).
+    ///
+    /// Everything that drives *this* run — mounts actually created, env actually
+    /// set, identity hashing — uses the substituted form, which is why that one
+    /// stays the default return of the wrapper above.
+    #[instrument(skip_all, fields(path = %path.display(), merges = merge_config_paths.len()))]
+    pub async fn load_with_overrides_raw_and_substituted(
+        path: &Path,
+        merge_config_paths: &[&Path],
+        secrets: Option<&crate::secrets::SecretsCollection>,
+        workspace_path: &Path,
+        resolve_devcontainer_id: bool,
+    ) -> Result<(
+        DevContainerConfig,
+        DevContainerConfig,
+        crate::variable::SubstitutionReport,
+    )> {
         debug!(
             "Loading configuration with merge fragments and substitution from {}",
             path.display()
@@ -2826,7 +2862,7 @@ impl ConfigLoader {
             merged.apply_variable_substitution(&substitution_context);
 
         debug!("Configuration loading with overrides and substitution complete");
-        Ok((substituted_config, substitution_report))
+        Ok((merged, substituted_config, substitution_report))
     }
 
     /// Load configuration with variable substitution applied

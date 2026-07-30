@@ -69,6 +69,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-234e7bca",
+      "kind": "behavior",
+      "behavior": "bhv-container-metadata-label-serialization",
+      "context": []
+    },
+    {
       "id": "obl-bhv-23a8de1d",
       "kind": "behavior",
       "behavior": "bhv-build-image-parity",

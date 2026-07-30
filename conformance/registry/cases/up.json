@@ -863,7 +863,7 @@
               "labels": {
                 "devcontainer.source": "deacon",
                 "devcontainer.config_file": "<WORKSPACE>/.devcontainer/devcontainer.json",
-                "devcontainer.metadata": "[{\"remoteUser\":\"dev\",\"containerUser\":\"dev\",\"containerEnv\":{\"CONF_CASE\":\"up-dockerfile-feature\"}}]"
+                "devcontainer.metadata": "[{\"id\":\"./features/marker\"},{\"containerEnv\":{\"CONF_CASE\":\"up-dockerfile-feature\"},\"containerUser\":\"dev\",\"remoteUser\":\"dev\"}]"
               }
             }
           }
@@ -1022,6 +1022,7 @@
       "id": "case-up-env-merge-differential",
       "behaviors": [
         "bhv-container-metadata-label-content",
+        "bhv-container-metadata-label-serialization",
         "bhv-up-container-env-merge-precedence",
         "bhv-up-path-construction"
       ],
@@ -1110,11 +1111,11 @@
           "divergenceId": "ext-container-identity-labels"
         },
         {
-          "behavior": "bhv-container-metadata-label-content",
+          "behavior": "bhv-container-metadata-label-serialization",
           "context": [],
           "observablePath": "chan-container-state.labels.devcontainer.metadata",
-          "rationale": "deacon's `devcontainer.metadata` omits the per-Feature `{\"id\": \u2026}` entries the reference records, and records substituted absolute paths where the reference records the unsubstituted `${localWorkspaceFolder}` template. Measured at oracle 0.87.0; both are deacon defects awaiting a `parity-drift` issue.",
-          "waiverId": "wvr-container-metadata-label-content"
+          "rationale": "Only the BYTE FORM of this label differs now: the reference emits `[ {\u2026}, {\u2026} ]` when the value reaches the container through an image build (this case builds one) and deacon always emits compact `[{\u2026}]`, and deacon's `containerEnv` key order is `HashMap` order rather than authored order. Both values parse to the same entries \u2014 #373 closed the content difference, and the four cases that reach this label without an image build now compare it byte-for-byte.",
+          "waiverId": "wvr-container-metadata-label-serialization"
         }
       ],
       "cleanup": {
@@ -1892,13 +1893,6 @@
           "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
           "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
           "divergenceId": "ext-container-identity-labels"
-        },
-        {
-          "behavior": "bhv-container-metadata-label-content",
-          "context": [],
-          "observablePath": "chan-container-state.labels.devcontainer.metadata",
-          "rationale": "deacon's `devcontainer.metadata` omits the per-Feature `{\"id\": \u2026}` entries the reference records, and records substituted absolute paths where the reference records the unsubstituted `${localWorkspaceFolder}` template. Measured at oracle 0.87.0; both are deacon defects awaiting a `parity-drift` issue.",
-          "waiverId": "wvr-container-metadata-label-content"
         }
       ],
       "cleanup": {
