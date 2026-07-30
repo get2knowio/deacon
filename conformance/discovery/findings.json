@@ -1,4 +1,5279 @@
 {
   "schemaVersion": 1,
-  "records": []
+  "records": [
+    {
+      "id": "fnd-03ca9a7c",
+      "signature": {
+        "id": "sig-8a3899f6",
+        "channel": "chan-structured-output",
+        "path": "configuration.customizations",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-f7d549a4",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-79be0dc6",
+          "minimalInput": {
+            "customizations": {},
+            "build": {}
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "empty-collection"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-808426d7",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-f3f20a7b",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": [
+              "docker-compose.yml",
+              "docker-compose.override.yml"
+            ],
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "containerUser": "vscode",
+            "customizations": {},
+            "mounts": [
+              {
+                "source": "${localWorkspaceFolder}/.cache",
+                "target": "/cache",
+                "type": "bind"
+              }
+            ],
+            "overrideCommand": true,
+            "overrideFeatureInstallOrder": [
+              "ghcr.io/devcontainers/features/common-utils"
+            ],
+            "postCreateCommand": "echo discovery",
+            "remoteUser": "vscode",
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ]
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-92cca6ad",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-f431c019",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerUser": "vscode",
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/git:1": {}
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postStartCommand": [
+              "discovery",
+              "echo"
+            ],
+            "remoteUser": "root",
+            "runArgs": [
+              "--init"
+            ],
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "userEnvProbe": "none",
+            "workspaceFolder": "${containerWorkspaceFolder",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-ordering-change",
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-d7d668b9",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-da08200e",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/git:1": {}
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "postCreateCommand": null,
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "secrets": {},
+            "shutdownAction": "none",
+            "updateContentCommand": "echo discovery",
+            "waitFor": "postCreateCommand",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-b292c80c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-e64c8da9",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "",
+            "containerUser": "root",
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "secrets": {},
+            "workspaceFolder": "/workspaces/project"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-3e51d9e5",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-de59e96a",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": [],
+            "service": "app",
+            "workspaceFolder": "/workspaces/project",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerUser": "root",
+            "customizations": {},
+            "init": true,
+            "onCreateCommand": {},
+            "shutdownAction": "none"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-7585c0cc",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d983329a",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "appPort": [
+              3000,
+              8080
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "customizations": {},
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "onCreateCommand": "echo discovery",
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "privileged": true,
+            "remoteEnv": {},
+            "remoteUser": "root",
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "stopContainer",
+            "updateRemoteUserUID": true,
+            "workspaceFolder": "/workspaces/project",
+            "xUnrecognizedSetting": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-unknown-field"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-da489434",
+      "signature": {
+        "id": "sig-3cf94604",
+        "channel": "chan-structured-output",
+        "path": "configuration.name",
+        "kind": "deacon-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-f7d549a4",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-79be0dc6",
+          "minimalInput": {
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "build": {
+              "dockerfile": "Dockerfile"
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-22fb22ad",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-2ee56f86",
+          "minimalInput": {},
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-substitution-edge",
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-7600bd8f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-1578de93",
+          "minimalInput": {
+            "remoteUser": "vscode",
+            "dockerComposeFile": [
+              "docker-compose.override.yml",
+              "docker-compose.yml"
+            ],
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "mounts": [
+              {
+                "source": "${localWorkspaceFolder}/.cache",
+                "target": "/cache",
+                "type": "bind"
+              }
+            ],
+            "privileged": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-compose-combination",
+            "mop-compose-combination"
+          ]
+        },
+        {
+          "id": "wit-7bf341c0",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5f56dd46",
+          "minimalInput": {
+            "runServices": [],
+            "dockerComposeFile": [
+              "docker-compose.yml"
+            ],
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "forwardPorts": [
+              3000
+            ],
+            "mounts": [
+              {
+                "source": "${localWorkspaceFolder}/.cache",
+                "target": "/cache",
+                "type": "bind"
+              }
+            ],
+            "onCreateCommand": [
+              "echo",
+              "discovery"
+            ],
+            "otherPortsAttributes": null,
+            "privileged": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-92fd09ba",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d9409d47",
+          "minimalInput": {
+            "onCreateCommand": [
+              "discovery",
+              "echo"
+            ],
+            "image": "alpine:3.19",
+            "capAdd": [
+              "SYS_PTRACE"
+            ]
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-unknown-field",
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-0afae60a",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-42d408fc",
+          "minimalInput": {
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "image": "alpine:3.19",
+            "appPort": [
+              3000,
+              8080
+            ],
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": false
+              }
+            },
+            "init": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-b9d97c8c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-df101038",
+          "minimalInput": {
+            "build": {
+              "dockerfile": "Dockerfile"
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-fbbf448e",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-30c7df92",
+          "minimalInput": {
+            "remoteEnv": {
+              "TEST_ENV": "single-container"
+            },
+            "image": "ubuntu:22.04",
+            "remoteUser": "root",
+            "workspaceFolder": "/workspace",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-wrong-type",
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-3e51d9e5",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-de59e96a",
+          "minimalInput": {
+            "init": true,
+            "dockerComposeFile": [],
+            "service": "app",
+            "workspaceFolder": "/workspaces/project",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerUser": "root",
+            "customizations": {}
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-empty-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-7a847ae3",
+      "signature": {
+        "id": "sig-915021bc",
+        "channel": "chan-structured-output",
+        "path": "configuration.build",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-f7d549a4",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-79be0dc6",
+          "minimalInput": {
+            "build": {}
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-b9d97c8c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-df101038",
+          "minimalInput": {
+            "build": {}
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-4c192adb",
+      "signature": {
+        "id": "sig-65bcc818",
+        "channel": "chan-structured-output",
+        "path": "configuration.features",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-f7d549a4",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-79be0dc6",
+          "minimalInput": {
+            "features": {},
+            "build": {}
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "empty-collection"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-1ce42f08",
+      "signature": {
+        "id": "sig-72d8f619",
+        "channel": "chan-structured-output",
+        "path": "configuration.otherPortsAttributes",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-f7d549a4",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-79be0dc6",
+          "minimalInput": {
+            "otherPortsAttributes": {},
+            "build": {}
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "empty-collection"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-7bf341c0",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5f56dd46",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": [
+              "docker-compose.yml"
+            ],
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "forwardPorts": [
+              3000
+            ],
+            "mounts": [
+              {
+                "source": "${localWorkspaceFolder}/.cache",
+                "target": "/cache",
+                "type": "bind"
+              }
+            ],
+            "onCreateCommand": [
+              "echo",
+              "discovery"
+            ],
+            "otherPortsAttributes": null,
+            "privileged": true,
+            "runServices": [],
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-b9d97c8c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-df101038",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "appPort": null,
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerUser": "vscode",
+            "otherPortsAttributes": {},
+            "overrideFeatureInstallOrder": [],
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "remoteUser": "root"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-77b3efc1",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-b5f55e2e",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "overrideFeatureInstallOrder": [],
+            "postAttachCommand": "echo discovery",
+            "remoteEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "runArgs": [
+              "--rm",
+              "--init"
+            ],
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-b2ecc8ac",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-7e4b9c1e",
+          "minimalInput": {
+            "name": "${localWorkspaceFolder}${localWorkspaceFolder}",
+            "dockerComposeFile": [
+              "docker-compose.yml"
+            ],
+            "service": "app",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerEnv": {
+              "DISCOVERY": "1"
+            },
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": false
+              }
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "stopCompose",
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-83cdf60d",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-388e888b",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "alpine:3.19",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "hostRequirements": {},
+            "init": true,
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "postStartCommand": "echo discovery",
+            "remoteEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "none",
+            "userEnvProbe": "none",
+            "features": {
+              "not a feature id": {}
+            },
+            "notASchemaProperty": null
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-invalid-feature-id",
+            "mop-unknown-field"
+          ]
+        },
+        {
+          "id": "wit-b50aa394",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-eaab0a54",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerUser": "vscode",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "hostRequirements": {},
+            "init": true,
+            "onCreateCommand": "echo discovery",
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postAttachCommand": "echo discovery",
+            "postStartCommand": "echo discovery",
+            "remoteUser": "root",
+            "updateRemoteUserUID": true,
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-daf2cea2",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-3eccbea1",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "hostRequirements": {},
+            "otherPortsAttributes": {},
+            "postAttachCommand": [
+              "discovery",
+              "echo"
+            ],
+            "remoteEnv": {
+              "DISCOVERY": "1"
+            },
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "shutdownAction": "stopCompose",
+            "updateContentCommand": {
+              "step": "echo discovery"
+            },
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-77d33f38",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d283d30c",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "appPort": "3000:3000",
+            "containerUser": "root",
+            "forwardPorts": [
+              "db:5432"
+            ],
+            "init": true,
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "privileged": true,
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "shutdownAction": "stopContainer",
+            "updateContentCommand": {
+              "step": "echo discovery"
+            },
+            "waitFor": "updateContentCommand",
+            "features": {
+              "not a feature id": {}
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-invalid-feature-id"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-b7137943",
+      "signature": {
+        "id": "sig-4b529d30",
+        "channel": "chan-structured-output",
+        "path": "configuration.hostRequirements.cpus",
+        "kind": "deacon-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-f7d549a4",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-79be0dc6",
+          "minimalInput": {
+            "onCreateCommand": [
+              "echo",
+              "discovery"
+            ],
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "customizations": {},
+            "features": {},
+            "hostRequirements": {}
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-4ec2967f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-a9274738",
+          "minimalInput": {
+            "name": "",
+            "image": "alpine:3.19",
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "overrideCommand": true,
+            "remoteEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "runArgs": [
+              "--init"
+            ],
+            "secrets": {},
+            "waitFor": "postStartCommand",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-fc889de5",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-f434211b",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "appPort": [
+              3000,
+              8080
+            ],
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "features": {
+              "ghcr.io/devcontainers/features/git:1": {}
+            },
+            "forwardPorts": [
+              "db:5432"
+            ],
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "updateRemoteUserUID": true,
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "notASchemaProperty": 7
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-unknown-field"
+          ]
+        },
+        {
+          "id": "wit-f364f484",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-976765fe",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "${containerWorkspaceFolder",
+            "workspaceFolder": "/workspaces/project",
+            "containerUser": "root",
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "overrideCommand": true,
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "remoteUser": "root",
+            "userEnvProbe": "interactiveShell",
+            "build": {
+              "dockerfile": "Dockerfile"
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source",
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-83cdf60d",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-388e888b",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "alpine:3.19",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "hostRequirements": {},
+            "init": true,
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "postStartCommand": "echo discovery",
+            "remoteEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "none",
+            "userEnvProbe": "none",
+            "features": {
+              "not a feature id": {}
+            },
+            "notASchemaProperty": null
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-invalid-feature-id",
+            "mop-unknown-field"
+          ]
+        },
+        {
+          "id": "wit-b50aa394",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-eaab0a54",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerUser": "vscode",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "hostRequirements": {},
+            "init": true,
+            "onCreateCommand": "echo discovery",
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postAttachCommand": "echo discovery",
+            "postStartCommand": "echo discovery",
+            "remoteUser": "root",
+            "updateRemoteUserUID": true,
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-ac065cea",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5530d77e",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "${containerWorkspaceFolder",
+            "service": "",
+            "workspaceFolder": "/workspace",
+            "hostRequirements": {},
+            "portsAttributes": {
+              "3000": {
+                "label": "web",
+                "onAutoForward": "notify"
+              }
+            },
+            "postStartCommand": {
+              "step": "echo discovery"
+            },
+            "secrets": {},
+            "updateContentCommand": [
+              "echo",
+              "discovery"
+            ],
+            "waitFor": "updateContentCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-daf2cea2",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-3eccbea1",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "hostRequirements": {},
+            "otherPortsAttributes": {},
+            "postAttachCommand": [
+              "discovery",
+              "echo"
+            ],
+            "remoteEnv": {
+              "DISCOVERY": "1"
+            },
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "shutdownAction": "stopCompose",
+            "updateContentCommand": {
+              "step": "echo discovery"
+            },
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-53988ab6",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-b0c5d569",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "workspaceFolder": "${localEnv:${localEnv:DEACON_DISCOVERY}}",
+            "containerEnv": {
+              "DISCOVERY": "1"
+            },
+            "containerUser": "root",
+            "forwardPorts": [
+              "db:5432"
+            ],
+            "hostRequirements": {},
+            "overrideFeatureInstallOrder": [
+              "ghcr.io/devcontainers/features/common-utils"
+            ],
+            "postCreateCommand": {
+              "step": "echo discovery"
+            },
+            "remoteUser": "root",
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-b1fa087c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-0b0df6b1",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+            "appPort": "3000:3000",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "hostRequirements": {},
+            "onCreateCommand": "echo discovery",
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "remoteUser": "root",
+            "updateContentCommand": [
+              "discovery",
+              "echo"
+            ],
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape",
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-b292c80c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-e64c8da9",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "",
+            "containerUser": "root",
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "secrets": {},
+            "workspaceFolder": "/workspaces/project"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-7585c0cc",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d983329a",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "appPort": [
+              3000,
+              8080
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "customizations": {},
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "onCreateCommand": "echo discovery",
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "privileged": true,
+            "remoteEnv": {},
+            "remoteUser": "root",
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "stopContainer",
+            "updateRemoteUserUID": true,
+            "workspaceFolder": "/workspaces/project",
+            "xUnrecognizedSetting": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-unknown-field"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-d0569901",
+      "signature": {
+        "id": "sig-84964fab",
+        "channel": "chan-structured-output",
+        "path": "configuration.hostRequirements.memory",
+        "kind": "deacon-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-f7d549a4",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-79be0dc6",
+          "minimalInput": {
+            "onCreateCommand": [
+              "echo",
+              "discovery"
+            ],
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "customizations": {},
+            "features": {},
+            "hostRequirements": {}
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-22fb22ad",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-2ee56f86",
+          "minimalInput": {
+            "name": "discovery-image",
+            "capAdd": [],
+            "hostRequirements": {
+              "cpus": 2
+            },
+            "onCreateCommand": "${}",
+            "overrideCommand": true,
+            "portsAttributes": {
+              "3000": {
+                "label": "web",
+                "onAutoForward": "notify"
+              }
+            },
+            "remoteEnv": {
+              "DISCOVERY": "1"
+            },
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-substitution-edge",
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-4ec2967f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-a9274738",
+          "minimalInput": {
+            "name": "",
+            "image": "alpine:3.19",
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "overrideCommand": true,
+            "remoteEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "runArgs": [
+              "--init"
+            ],
+            "secrets": {},
+            "waitFor": "postStartCommand",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-fc889de5",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-f434211b",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "appPort": [
+              3000,
+              8080
+            ],
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "features": {
+              "ghcr.io/devcontainers/features/git:1": {}
+            },
+            "forwardPorts": [
+              "db:5432"
+            ],
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "updateRemoteUserUID": true,
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "notASchemaProperty": 7
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-unknown-field"
+          ]
+        },
+        {
+          "id": "wit-4a1a9054",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-15ef7acd",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerEnv": {},
+            "forwardPorts": [
+              3000
+            ],
+            "hostRequirements": {
+              "cpus": 2
+            },
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "remoteUser": "vscode",
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "none",
+            "updateContentCommand": "echo discovery",
+            "updateRemoteUserUID": true,
+            "userEnvProbe": "loginInteractiveShell",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "runServices": [
+              "db",
+              "cache"
+            ],
+            "features": {
+              "not a feature id": {}
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-compose-combination",
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-f364f484",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-976765fe",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "${containerWorkspaceFolder",
+            "workspaceFolder": "/workspaces/project",
+            "containerUser": "root",
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "overrideCommand": true,
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "remoteUser": "root",
+            "userEnvProbe": "interactiveShell",
+            "build": {
+              "dockerfile": "Dockerfile"
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source",
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-83cdf60d",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-388e888b",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "alpine:3.19",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "hostRequirements": {},
+            "init": true,
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "postStartCommand": "echo discovery",
+            "remoteEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "none",
+            "userEnvProbe": "none",
+            "features": {
+              "not a feature id": {}
+            },
+            "notASchemaProperty": null
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-invalid-feature-id",
+            "mop-unknown-field"
+          ]
+        },
+        {
+          "id": "wit-b50aa394",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-eaab0a54",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerUser": "vscode",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "hostRequirements": {},
+            "init": true,
+            "onCreateCommand": "echo discovery",
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postAttachCommand": "echo discovery",
+            "postStartCommand": "echo discovery",
+            "remoteUser": "root",
+            "updateRemoteUserUID": true,
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-ac065cea",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5530d77e",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "${containerWorkspaceFolder",
+            "service": "",
+            "workspaceFolder": "/workspace",
+            "hostRequirements": {},
+            "portsAttributes": {
+              "3000": {
+                "label": "web",
+                "onAutoForward": "notify"
+              }
+            },
+            "postStartCommand": {
+              "step": "echo discovery"
+            },
+            "secrets": {},
+            "updateContentCommand": [
+              "echo",
+              "discovery"
+            ],
+            "waitFor": "updateContentCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-daf2cea2",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-3eccbea1",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "hostRequirements": {},
+            "otherPortsAttributes": {},
+            "postAttachCommand": [
+              "discovery",
+              "echo"
+            ],
+            "remoteEnv": {
+              "DISCOVERY": "1"
+            },
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "shutdownAction": "stopCompose",
+            "updateContentCommand": {
+              "step": "echo discovery"
+            },
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-53988ab6",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-b0c5d569",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "workspaceFolder": "${localEnv:${localEnv:DEACON_DISCOVERY}}",
+            "containerEnv": {
+              "DISCOVERY": "1"
+            },
+            "containerUser": "root",
+            "forwardPorts": [
+              "db:5432"
+            ],
+            "hostRequirements": {},
+            "overrideFeatureInstallOrder": [
+              "ghcr.io/devcontainers/features/common-utils"
+            ],
+            "postCreateCommand": {
+              "step": "echo discovery"
+            },
+            "remoteUser": "root",
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-b1fa087c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-0b0df6b1",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+            "appPort": "3000:3000",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "hostRequirements": {},
+            "onCreateCommand": "echo discovery",
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "remoteUser": "root",
+            "updateContentCommand": [
+              "discovery",
+              "echo"
+            ],
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape",
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-b292c80c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-e64c8da9",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "",
+            "containerUser": "root",
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "secrets": {},
+            "workspaceFolder": "/workspaces/project"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-7585c0cc",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d983329a",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "appPort": [
+              3000,
+              8080
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "customizations": {},
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "onCreateCommand": "echo discovery",
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "privileged": true,
+            "remoteEnv": {},
+            "remoteUser": "root",
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "stopContainer",
+            "updateRemoteUserUID": true,
+            "workspaceFolder": "/workspaces/project",
+            "xUnrecognizedSetting": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-unknown-field"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-de38ae6c",
+      "signature": {
+        "id": "sig-c8f8feca",
+        "channel": "chan-structured-output",
+        "path": "configuration.hostRequirements.storage",
+        "kind": "deacon-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-f7d549a4",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-79be0dc6",
+          "minimalInput": {
+            "onCreateCommand": [
+              "echo",
+              "discovery"
+            ],
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "customizations": {},
+            "features": {},
+            "hostRequirements": {}
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-22fb22ad",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-2ee56f86",
+          "minimalInput": {
+            "name": "discovery-image",
+            "capAdd": [],
+            "hostRequirements": {
+              "cpus": 2
+            },
+            "onCreateCommand": "${}",
+            "overrideCommand": true,
+            "portsAttributes": {
+              "3000": {
+                "label": "web",
+                "onAutoForward": "notify"
+              }
+            },
+            "remoteEnv": {
+              "DISCOVERY": "1"
+            },
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-substitution-edge",
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-4ec2967f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-a9274738",
+          "minimalInput": {
+            "name": "",
+            "image": "alpine:3.19",
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "overrideCommand": true,
+            "remoteEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "runArgs": [
+              "--init"
+            ],
+            "secrets": {},
+            "waitFor": "postStartCommand",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-fc889de5",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-f434211b",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "appPort": [
+              3000,
+              8080
+            ],
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "features": {
+              "ghcr.io/devcontainers/features/git:1": {}
+            },
+            "forwardPorts": [
+              "db:5432"
+            ],
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "updateRemoteUserUID": true,
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "notASchemaProperty": 7
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-unknown-field"
+          ]
+        },
+        {
+          "id": "wit-4a1a9054",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-15ef7acd",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerEnv": {},
+            "forwardPorts": [
+              3000
+            ],
+            "hostRequirements": {
+              "cpus": 2
+            },
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "remoteUser": "vscode",
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "none",
+            "updateContentCommand": "echo discovery",
+            "updateRemoteUserUID": true,
+            "userEnvProbe": "loginInteractiveShell",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "runServices": [
+              "db",
+              "cache"
+            ],
+            "features": {
+              "not a feature id": {}
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-compose-combination",
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-f364f484",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-976765fe",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "${containerWorkspaceFolder",
+            "workspaceFolder": "/workspaces/project",
+            "containerUser": "root",
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "overrideCommand": true,
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "remoteUser": "root",
+            "userEnvProbe": "interactiveShell",
+            "build": {
+              "dockerfile": "Dockerfile"
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source",
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-83cdf60d",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-388e888b",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "alpine:3.19",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "hostRequirements": {},
+            "init": true,
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "postStartCommand": "echo discovery",
+            "remoteEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "none",
+            "userEnvProbe": "none",
+            "features": {
+              "not a feature id": {}
+            },
+            "notASchemaProperty": null
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-invalid-feature-id",
+            "mop-unknown-field"
+          ]
+        },
+        {
+          "id": "wit-b50aa394",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-eaab0a54",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerUser": "vscode",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "hostRequirements": {},
+            "init": true,
+            "onCreateCommand": "echo discovery",
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postAttachCommand": "echo discovery",
+            "postStartCommand": "echo discovery",
+            "remoteUser": "root",
+            "updateRemoteUserUID": true,
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-ac065cea",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5530d77e",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "${containerWorkspaceFolder",
+            "service": "",
+            "workspaceFolder": "/workspace",
+            "hostRequirements": {},
+            "portsAttributes": {
+              "3000": {
+                "label": "web",
+                "onAutoForward": "notify"
+              }
+            },
+            "postStartCommand": {
+              "step": "echo discovery"
+            },
+            "secrets": {},
+            "updateContentCommand": [
+              "echo",
+              "discovery"
+            ],
+            "waitFor": "updateContentCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-daf2cea2",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-3eccbea1",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "hostRequirements": {},
+            "otherPortsAttributes": {},
+            "postAttachCommand": [
+              "discovery",
+              "echo"
+            ],
+            "remoteEnv": {
+              "DISCOVERY": "1"
+            },
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "shutdownAction": "stopCompose",
+            "updateContentCommand": {
+              "step": "echo discovery"
+            },
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-53988ab6",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-b0c5d569",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "workspaceFolder": "${localEnv:${localEnv:DEACON_DISCOVERY}}",
+            "containerEnv": {
+              "DISCOVERY": "1"
+            },
+            "containerUser": "root",
+            "forwardPorts": [
+              "db:5432"
+            ],
+            "hostRequirements": {},
+            "overrideFeatureInstallOrder": [
+              "ghcr.io/devcontainers/features/common-utils"
+            ],
+            "postCreateCommand": {
+              "step": "echo discovery"
+            },
+            "remoteUser": "root",
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-b1fa087c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-0b0df6b1",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+            "appPort": "3000:3000",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "hostRequirements": {},
+            "onCreateCommand": "echo discovery",
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "remoteUser": "root",
+            "updateContentCommand": [
+              "discovery",
+              "echo"
+            ],
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape",
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-b292c80c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-e64c8da9",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "",
+            "containerUser": "root",
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "secrets": {},
+            "workspaceFolder": "/workspaces/project"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-7585c0cc",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d983329a",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "appPort": [
+              3000,
+              8080
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "customizations": {},
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "onCreateCommand": "echo discovery",
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "privileged": true,
+            "remoteEnv": {},
+            "remoteUser": "root",
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "stopContainer",
+            "updateRemoteUserUID": true,
+            "workspaceFolder": "/workspaces/project",
+            "xUnrecognizedSetting": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-unknown-field"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-ea78c581",
+      "signature": {
+        "id": "sig-4bcdc7bd",
+        "channel": "chan-structured-output",
+        "path": "workspace.workspaceMount",
+        "kind": "deacon-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-f7d549a4",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-79be0dc6",
+          "minimalInput": {
+            "dockerComposeFile": "",
+            "build": {}
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "empty-collection",
+            "minimize-scalar"
+          ],
+          "observedValues": {
+            "deacon": "type=bind,source=<WORKSPACE>,target=/workspaces/deacon-discovery-AdGBe1",
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-2d879f7f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-4bb0e61b",
+          "minimalInput": {
+            "name": "Compose Test Fixture",
+            "dockerComposeFile": "",
+            "workspaceFolder": "/workspace",
+            "dockerFile": "Dockerfile"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": "type=bind,source=<WORKSPACE>,target=/workspaces/deacon-discovery-G3jKLH",
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-fcc7dc57",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-603ef8db",
+          "minimalInput": {
+            "name": "Multi-service Compose Test",
+            "dockerComposeFile": [
+              "../docker-compose.yml",
+              "docker-compose.override.yml"
+            ],
+            "runServices": [
+              "db",
+              "redis"
+            ],
+            "workspaceFolder": "/workspace",
+            "forwardPorts": [
+              3000,
+              5432,
+              6379
+            ],
+            "portsAttributes": {
+              "3000": {
+                "label": "Web App",
+                "onAutoForward": "notify"
+              },
+              "5432": {
+                "label": "PostgreSQL",
+                "onAutoForward": "silent"
+              },
+              "6379": {
+                "label": "Redis",
+                "onAutoForward": "ignore"
+              }
+            },
+            "privileged": true,
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "securityOpt": [
+              "seccomp=unconfined"
+            ]
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": "type=bind,source=<WORKSPACE>,target=/workspaces/deacon-discovery-jWuck7",
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-compose-combination"
+          ]
+        },
+        {
+          "id": "wit-0ba40b12",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-3c15f00f",
+          "minimalInput": {
+            "name": "Multi-service Compose Test",
+            "dockerComposeFile": "../docker-compose.yml",
+            "runServices": [
+              "db",
+              "redis"
+            ],
+            "workspaceFolder": "/workspace",
+            "forwardPorts": [
+              3000,
+              5432,
+              6379
+            ],
+            "portsAttributes": {
+              "3000": {
+                "label": "Web App",
+                "onAutoForward": "notify"
+              },
+              "5432": {
+                "label": "PostgreSQL",
+                "onAutoForward": "silent"
+              },
+              "6379": {
+                "label": "Redis",
+                "onAutoForward": "ignore"
+              }
+            },
+            "privileged": true,
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "dockerFile": "Dockerfile"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": "type=bind,source=<WORKSPACE>,target=/workspaces/deacon-discovery-EsvJDQ",
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-564f59fd",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-18a15d88",
+          "minimalInput": {
+            "name": "Multi-service Compose Test",
+            "dockerComposeFile": "${localWorkspaceFolder}${localWorkspaceFolder}",
+            "runServices": [
+              "db",
+              "redis"
+            ],
+            "workspaceFolder": "/workspace",
+            "forwardPorts": [
+              3000,
+              5432,
+              6379
+            ],
+            "portsAttributes": {
+              "3000": {
+                "label": "Web App",
+                "onAutoForward": "notify"
+              },
+              "5432": {
+                "label": "PostgreSQL",
+                "onAutoForward": "silent"
+              },
+              "6379": {
+                "label": "Redis",
+                "onAutoForward": "ignore"
+              }
+            },
+            "privileged": true,
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "features": {
+              "not a feature id": {}
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": "type=bind,source=<WORKSPACE>,target=/workspaces/deacon-discovery-Xv70Bd",
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-substitution-edge",
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-53988ab6",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-b0c5d569",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "docker-compose.yml",
+            "workspaceFolder": "${localEnv:${localEnv:DEACON_DISCOVERY}}",
+            "containerEnv": {
+              "DISCOVERY": "1"
+            },
+            "containerUser": "root",
+            "forwardPorts": [
+              "db:5432"
+            ],
+            "hostRequirements": {},
+            "overrideFeatureInstallOrder": [
+              "ghcr.io/devcontainers/features/common-utils"
+            ],
+            "postCreateCommand": {
+              "step": "echo discovery"
+            },
+            "remoteUser": "root",
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": "type=bind,source=<WORKSPACE>,target=/workspaces/deacon-discovery-arp0Rl",
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-e5259f9a",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-7dc98d7f",
+          "minimalInput": {
+            "name": "Compose Test Fixture",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": null,
+            "workspaceFolder": "/workspace"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": "type=bind,source=<WORKSPACE>,target=/workspaces/deacon-discovery-1Q1pcF",
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-fb0fd4af",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-1b40ca6d",
+          "minimalInput": {
+            "name": "discovery-image",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "updateContentCommand": {
+              "step": "echo discovery"
+            },
+            "userEnvProbe": "interactiveShell",
+            "waitFor": "onCreateCommand",
+            "workspaceFolder": "/workspaces/project",
+            "dockerComposeFile": "docker-compose.yml"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": "type=bind,source=<WORKSPACE>,target=/workspaces/deacon-discovery-Mz9OtC",
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-a8143436",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-b51c280e",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "onCreateCommand": "echo discovery",
+            "postStartCommand": "echo discovery",
+            "privileged": true,
+            "remoteUser": "root",
+            "shutdownAction": "stopContainer",
+            "updateRemoteUserUID": true,
+            "waitFor": "onCreateCommand",
+            "workspaceFolder": "/workspace",
+            "dockerComposeFile": "docker-compose.yml"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": "type=bind,source=<WORKSPACE>,target=/workspaces/deacon-discovery-WU0z41",
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-d59b7cbd",
+      "signature": {
+        "id": "sig-fc2832df",
+        "channel": "chan-structured-output",
+        "path": "workspace.workspaceFolder",
+        "kind": "value",
+        "valueShapeClass": "value-changed"
+      },
+      "witnesses": [
+        {
+          "id": "wit-f7d549a4",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-79be0dc6",
+          "minimalInput": {
+            "dockerComposeFile": "",
+            "build": {}
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "empty-collection",
+            "minimize-scalar"
+          ],
+          "observedValues": {
+            "deacon": "/workspaces/deacon-discovery-AdGBe1",
+            "reference": "/"
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-4e80b7ed",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-771ad525",
+          "minimalInput": {
+            "name": "Feature and Dotfiles Test",
+            "image": "ubuntu:22.04",
+            "remoteUser": "root",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "remoteEnv": {
+              "FIXTURE_TYPE": "feature-and-dotfiles"
+            },
+            "updateContentCommand": "apt-get update && apt-get install -y git && echo 'Update content command'",
+            "postCreateCommand": "echo 'Post-create command'",
+            "dockerComposeFile": "docker-compose.yml"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": "/workspaces/deacon-discovery-iUDFiG",
+            "reference": "/"
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-ff31f170",
+      "signature": {
+        "id": "sig-cd5e5823",
+        "channel": "chan-structured-output",
+        "path": "configuration.capAdd",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-22fb22ad",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-2ee56f86",
+          "minimalInput": {
+            "capAdd": []
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "drop-optional-key"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": []
+          },
+          "mutationOperators": [
+            "mop-substitution-edge",
+            "mop-empty-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-e8e0abb2",
+      "signature": {
+        "id": "sig-210b7985",
+        "channel": "chan-structured-output",
+        "path": "configuration.runServices",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-7600bd8f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-1578de93",
+          "minimalInput": {
+            "runServices": [],
+            "dockerComposeFile": [],
+            "service": "",
+            "workspaceFolder": ""
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "un-apply-mutation",
+            "empty-collection",
+            "minimize-scalar",
+            "minimize-scalar"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": []
+          },
+          "mutationOperators": [
+            "mop-compose-combination",
+            "mop-compose-combination"
+          ]
+        },
+        {
+          "id": "wit-7bf341c0",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5f56dd46",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": [
+              "docker-compose.yml"
+            ],
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "forwardPorts": [
+              3000
+            ],
+            "mounts": [
+              {
+                "source": "${localWorkspaceFolder}/.cache",
+                "target": "/cache",
+                "type": "bind"
+              }
+            ],
+            "onCreateCommand": [
+              "echo",
+              "discovery"
+            ],
+            "otherPortsAttributes": null,
+            "privileged": true,
+            "runServices": [],
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": []
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-28386f3a",
+      "signature": {
+        "id": "sig-c101fb87",
+        "channel": "chan-structured-output",
+        "path": "configuration.dockerComposeFile",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-7600bd8f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-1578de93",
+          "minimalInput": {
+            "workspaceFolder": "/workspace",
+            "dockerComposeFile": [],
+            "service": "app"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-compose-combination",
+            "mop-compose-combination"
+          ]
+        },
+        {
+          "id": "wit-7bf341c0",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5f56dd46",
+          "minimalInput": {
+            "workspaceFolder": "/workspace",
+            "dockerComposeFile": [],
+            "service": "app"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-2d879f7f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-4bb0e61b",
+          "minimalInput": {
+            "name": "Compose Test Fixture",
+            "dockerComposeFile": "",
+            "workspaceFolder": "/workspace",
+            "dockerFile": "Dockerfile"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": ""
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-d631954e",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-02141b1a",
+          "minimalInput": {
+            "name": "Multi-service Compose Test",
+            "dockerComposeFile": "",
+            "service": "app",
+            "runServices": [
+              "db",
+              "redis"
+            ],
+            "forwardPorts": [
+              3000,
+              5432,
+              6379
+            ],
+            "portsAttributes": {
+              "3000": {
+                "label": "Web App",
+                "onAutoForward": "notify"
+              },
+              "5432": {
+                "label": "PostgreSQL",
+                "onAutoForward": "silent"
+              },
+              "6379": {
+                "label": "Redis",
+                "onAutoForward": "ignore"
+              }
+            },
+            "privileged": true,
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "features": {
+              "not a feature id": {}
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": ""
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-3e51d9e5",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-de59e96a",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": [],
+            "service": "app",
+            "workspaceFolder": "/workspaces/project",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerUser": "root",
+            "customizations": {},
+            "init": true,
+            "onCreateCommand": {},
+            "shutdownAction": "none"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": []
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-empty-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-4b3d44b3",
+      "signature": {
+        "id": "sig-2074514d",
+        "channel": "chan-structured-output",
+        "path": "configuration.service",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-7600bd8f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-1578de93",
+          "minimalInput": {
+            "workspaceFolder": "/workspace",
+            "dockerComposeFile": [],
+            "service": ""
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-compose-combination",
+            "mop-compose-combination"
+          ]
+        },
+        {
+          "id": "wit-7bf341c0",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5f56dd46",
+          "minimalInput": {
+            "workspaceFolder": "/workspace",
+            "dockerComposeFile": [],
+            "service": ""
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-ac065cea",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5530d77e",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "${containerWorkspaceFolder",
+            "service": "",
+            "workspaceFolder": "/workspace",
+            "hostRequirements": {},
+            "portsAttributes": {
+              "3000": {
+                "label": "web",
+                "onAutoForward": "notify"
+              }
+            },
+            "postStartCommand": {
+              "step": "echo discovery"
+            },
+            "secrets": {},
+            "updateContentCommand": [
+              "echo",
+              "discovery"
+            ],
+            "waitFor": "updateContentCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": ""
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-e5259f9a",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-7dc98d7f",
+          "minimalInput": {
+            "name": "Compose Test Fixture",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": null,
+            "workspaceFolder": "/workspace"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-3e51d9e5",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-de59e96a",
+          "minimalInput": {
+            "workspaceFolder": "/workspaces/project",
+            "dockerComposeFile": [],
+            "service": ""
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-empty-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-27ef0855",
+      "signature": {
+        "id": "sig-4c4cd99c",
+        "channel": "chan-structured-output",
+        "path": "configuration.workspaceFolder",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-7600bd8f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-1578de93",
+          "minimalInput": {
+            "workspaceFolder": "",
+            "dockerComposeFile": [],
+            "service": ""
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-compose-combination",
+            "mop-compose-combination"
+          ]
+        },
+        {
+          "id": "wit-7bf341c0",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5f56dd46",
+          "minimalInput": {
+            "workspaceFolder": "",
+            "dockerComposeFile": [],
+            "service": ""
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-3e51d9e5",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-de59e96a",
+          "minimalInput": {
+            "workspaceFolder": "",
+            "dockerComposeFile": [],
+            "service": ""
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-empty-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-9ce4a834",
+      "signature": {
+        "id": "sig-dc73d777",
+        "channel": "chan-structured-output",
+        "path": "configuration.secrets",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-7bf341c0",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5f56dd46",
+          "minimalInput": {
+            "secrets": {},
+            "dockerComposeFile": [],
+            "service": "",
+            "workspaceFolder": ""
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "drop-optional-key",
+            "empty-collection",
+            "minimize-scalar",
+            "minimize-scalar"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-4ec2967f",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-a9274738",
+          "minimalInput": {
+            "name": "",
+            "image": "alpine:3.19",
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "overrideCommand": true,
+            "remoteEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "runArgs": [
+              "--init"
+            ],
+            "secrets": {},
+            "waitFor": "postStartCommand",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-808426d7",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-f3f20a7b",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": [
+              "docker-compose.yml",
+              "docker-compose.override.yml"
+            ],
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "containerUser": "vscode",
+            "customizations": {},
+            "mounts": [
+              {
+                "source": "${localWorkspaceFolder}/.cache",
+                "target": "/cache",
+                "type": "bind"
+              }
+            ],
+            "overrideCommand": true,
+            "overrideFeatureInstallOrder": [
+              "ghcr.io/devcontainers/features/common-utils"
+            ],
+            "postCreateCommand": "echo discovery",
+            "remoteUser": "vscode",
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ]
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-b2ecc8ac",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-7e4b9c1e",
+          "minimalInput": {
+            "name": "${localWorkspaceFolder}${localWorkspaceFolder}",
+            "dockerComposeFile": [
+              "docker-compose.yml"
+            ],
+            "service": "app",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerEnv": {
+              "DISCOVERY": "1"
+            },
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": false
+              }
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "stopCompose",
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-4a1a9054",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-15ef7acd",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerEnv": {},
+            "forwardPorts": [
+              3000
+            ],
+            "hostRequirements": {
+              "cpus": 2
+            },
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "remoteUser": "vscode",
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "none",
+            "updateContentCommand": "echo discovery",
+            "updateRemoteUserUID": true,
+            "userEnvProbe": "loginInteractiveShell",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "runServices": [
+              "db",
+              "cache"
+            ],
+            "features": {
+              "not a feature id": {}
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-compose-combination",
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-32afc49d",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-c8ca5667",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerEnv": {},
+            "containerUser": "vscode",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "init": true,
+            "mounts": [
+              {
+                "source": "${localWorkspaceFolder}/.cache",
+                "target": "/cache",
+                "type": "bind"
+              }
+            ],
+            "overrideCommand": true,
+            "overrideFeatureInstallOrder": [],
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "remoteUser": "root",
+            "secrets": {},
+            "updateContentCommand": [
+              "echo",
+              "discovery"
+            ],
+            "userEnvProbe": "none",
+            "waitFor": "onCreateCommand",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "build": {
+              "dockerfile": "Dockerfile"
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        },
+        {
+          "id": "wit-cf2089c5",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d3822325",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": [
+              "docker-compose.yml"
+            ],
+            "service": "app",
+            "workspaceFolder": "/workspaces/project",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerEnv": {
+              "DISCOVERY": "1"
+            },
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "features": {
+              "ghcr.io/devcontainers/features/git:1": {}
+            },
+            "mounts": [
+              {
+                "source": "${localWorkspaceFolder}/.cache",
+                "target": "/cache",
+                "type": "bind"
+              }
+            ],
+            "postStartCommand": {
+              "step0": "echo",
+              "step1": "discovery"
+            },
+            "privileged": true,
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "none",
+            "userEnvProbe": "none"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-d7d668b9",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-da08200e",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/git:1": {}
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "postCreateCommand": null,
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "secrets": {},
+            "shutdownAction": "none",
+            "updateContentCommand": "echo discovery",
+            "waitFor": "postCreateCommand",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-ac065cea",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-5530d77e",
+          "minimalInput": {
+            "name": "discovery-compose",
+            "dockerComposeFile": "${containerWorkspaceFolder",
+            "service": "",
+            "workspaceFolder": "/workspace",
+            "hostRequirements": {},
+            "portsAttributes": {
+              "3000": {
+                "label": "web",
+                "onAutoForward": "notify"
+              }
+            },
+            "postStartCommand": {
+              "step": "echo discovery"
+            },
+            "secrets": {},
+            "updateContentCommand": [
+              "echo",
+              "discovery"
+            ],
+            "waitFor": "updateContentCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-b292c80c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-e64c8da9",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "",
+            "containerUser": "root",
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "secrets": {},
+            "workspaceFolder": "/workspaces/project"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-empty-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-fa666dd8",
+      "signature": {
+        "id": "sig-3976b160",
+        "channel": "chan-structured-output",
+        "path": "configuration.overrideFeatureInstallOrder",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-92fd09ba",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d9409d47",
+          "minimalInput": {
+            "overrideFeatureInstallOrder": [],
+            "image": ""
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "un-apply-mutation",
+            "drop-optional-key",
+            "minimize-scalar"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": []
+          },
+          "mutationOperators": [
+            "mop-unknown-field",
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-b9d97c8c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-df101038",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "appPort": null,
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerUser": "vscode",
+            "otherPortsAttributes": {},
+            "overrideFeatureInstallOrder": [],
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "remoteUser": "root"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": []
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-77b3efc1",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-b5f55e2e",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "overrideFeatureInstallOrder": [],
+            "postAttachCommand": "echo discovery",
+            "remoteEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "runArgs": [
+              "--rm",
+              "--init"
+            ],
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": []
+          },
+          "mutationOperators": [
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-32afc49d",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-c8ca5667",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerEnv": {},
+            "containerUser": "vscode",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "init": true,
+            "mounts": [
+              {
+                "source": "${localWorkspaceFolder}/.cache",
+                "target": "/cache",
+                "type": "bind"
+              }
+            ],
+            "overrideCommand": true,
+            "overrideFeatureInstallOrder": [],
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "remoteUser": "root",
+            "secrets": {},
+            "updateContentCommand": [
+              "echo",
+              "discovery"
+            ],
+            "userEnvProbe": "none",
+            "waitFor": "onCreateCommand",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "build": {
+              "dockerfile": "Dockerfile"
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": []
+          },
+          "mutationOperators": [
+            "mop-conflicting-source"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-e39c5344",
+      "signature": {
+        "id": "sig-46ab26e0",
+        "channel": "chan-structured-output",
+        "path": "configuration.image",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-92fd09ba",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d9409d47",
+          "minimalInput": {
+            "image": ""
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-unknown-field",
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-0afae60a",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-42d408fc",
+          "minimalInput": {
+            "image": ""
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-6512b396",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-49f4f5df",
+          "minimalInput": {
+            "name": "Image Reference Test Fixture",
+            "image": ""
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": ""
+          },
+          "mutationOperators": [
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-07406c78",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-0961f162",
+          "minimalInput": {
+            "name": "Single Container Test",
+            "image": "",
+            "remoteUser": "root",
+            "workspaceFolder": "${}",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "remoteEnv": {
+              "TEST_ENV": "single-container"
+            },
+            "postCreateCommand": "echo 'Post-create command executed'",
+            "updateContentCommand": "apt-get update && apt-get install -y git && echo 'Update content command executed'"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": ""
+          },
+          "mutationOperators": [
+            "mop-substitution-edge",
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-2404f573",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-1e137b12",
+          "minimalInput": {
+            "name": "Image Reference Test Fixture",
+            "image": null
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-b292c80c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-e64c8da9",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "",
+            "containerUser": "root",
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "secrets": {},
+            "workspaceFolder": "/workspaces/project"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": ""
+          },
+          "mutationOperators": [
+            "mop-empty-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-3d2379fa",
+      "signature": {
+        "id": "sig-069ea5e4",
+        "channel": "chan-structured-output",
+        "path": "configuration.remoteEnv",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-92fd09ba",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d9409d47",
+          "minimalInput": {
+            "remoteEnv": {},
+            "image": ""
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "un-apply-mutation",
+            "drop-optional-key",
+            "minimize-scalar"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-unknown-field",
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-65300525",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-eadf7a33",
+          "minimalInput": {
+            "name": "Single Container Test",
+            "remoteUser": "root",
+            "workspaceFolder": "/workspace",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "remoteEnv": {},
+            "postCreateCommand": "echo 'Post-create command executed'",
+            "updateContentCommand": "apt-get update && apt-get install -y git && echo 'Update content command executed'"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-7585c0cc",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d983329a",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "appPort": [
+              3000,
+              8080
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "customizations": {},
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "onCreateCommand": "echo discovery",
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "privileged": true,
+            "remoteEnv": {},
+            "remoteUser": "root",
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "stopContainer",
+            "updateRemoteUserUID": true,
+            "workspaceFolder": "/workspaces/project",
+            "xUnrecognizedSetting": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-unknown-field"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-20e22286",
+      "signature": {
+        "id": "sig-f750e12b",
+        "channel": "chan-structured-output",
+        "path": "configuration.portsAttributes",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-0afae60a",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-42d408fc",
+          "minimalInput": {
+            "portsAttributes": {},
+            "image": ""
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "drop-optional-key",
+            "minimize-scalar"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-b9d97c8c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-df101038",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "appPort": null,
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerUser": "vscode",
+            "otherPortsAttributes": {},
+            "overrideFeatureInstallOrder": [],
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "remoteUser": "root"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-4a1a9054",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-15ef7acd",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerEnv": {},
+            "forwardPorts": [
+              3000
+            ],
+            "hostRequirements": {
+              "cpus": 2
+            },
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "remoteUser": "vscode",
+            "secrets": {},
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "none",
+            "updateContentCommand": "echo discovery",
+            "updateRemoteUserUID": true,
+            "userEnvProbe": "loginInteractiveShell",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "runServices": [
+              "db",
+              "cache"
+            ],
+            "features": {
+              "not a feature id": {}
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-compose-combination",
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-b99a25f8",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-9a1dc5d2",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postCreateCommand": "echo discovery",
+            "postStartCommand": "echo discovery",
+            "remoteUser": "root",
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "updateContentCommand": "echo discovery",
+            "updateRemoteUserUID": true,
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "app",
+            "workspaceFolder": "/workspace",
+            "runServices": [
+              "db"
+            ]
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-compose-combination",
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-b50aa394",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-eaab0a54",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "debian:bookworm-slim",
+            "containerUser": "vscode",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "hostRequirements": {},
+            "init": true,
+            "onCreateCommand": "echo discovery",
+            "otherPortsAttributes": {},
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postAttachCommand": "echo discovery",
+            "postStartCommand": "echo discovery",
+            "remoteUser": "root",
+            "updateRemoteUserUID": true,
+            "waitFor": "postStartCommand"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape"
+          ]
+        },
+        {
+          "id": "wit-92cca6ad",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-f431c019",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerUser": "vscode",
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/git:1": {}
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "postStartCommand": [
+              "discovery",
+              "echo"
+            ],
+            "remoteUser": "root",
+            "runArgs": [
+              "--init"
+            ],
+            "secrets": {
+              "TOKEN": {
+                "description": "a token"
+              }
+            },
+            "userEnvProbe": "none",
+            "workspaceFolder": "${containerWorkspaceFolder",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-ordering-change",
+            "mop-substitution-edge"
+          ]
+        },
+        {
+          "id": "wit-ff14febe",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-a2352da3",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "containerUser": "vscode",
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "shutdownAction": "stopContainer",
+            "workspaceFolder": "/workspace",
+            "features": {
+              "not a feature id": {}
+            }
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-invalid-feature-id"
+          ]
+        },
+        {
+          "id": "wit-d7d668b9",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-da08200e",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/git:1": {}
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "postCreateCommand": null,
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "secrets": {},
+            "shutdownAction": "none",
+            "updateContentCommand": "echo discovery",
+            "waitFor": "postCreateCommand",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        },
+        {
+          "id": "wit-b1fa087c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-0b0df6b1",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+            "appPort": "3000:3000",
+            "customizations": {
+              "vscode": {
+                "extensions": [
+                  "rust-lang.rust-analyzer"
+                ]
+              }
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "hostRequirements": {},
+            "onCreateCommand": "echo discovery",
+            "overrideCommand": true,
+            "portsAttributes": {},
+            "remoteUser": "root",
+            "updateContentCommand": [
+              "discovery",
+              "echo"
+            ],
+            "updateRemoteUserUID": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-lifecycle-shape",
+            "mop-ordering-change"
+          ]
+        },
+        {
+          "id": "wit-b292c80c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-e64c8da9",
+          "minimalInput": {
+            "name": "discovery-image",
+            "image": "",
+            "containerUser": "root",
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/common-utils:2": {
+                "installZsh": false
+              }
+            },
+            "hostRequirements": {},
+            "onCreateCommand": {
+              "step": "echo discovery"
+            },
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "secrets": {},
+            "workspaceFolder": "/workspaces/project"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-7585c0cc",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-d983329a",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "appPort": [
+              3000,
+              8080
+            ],
+            "containerEnv": {
+              "DISCOVERY_PATH": "${containerEnv:PATH}"
+            },
+            "customizations": {},
+            "hostRequirements": {},
+            "mounts": [
+              "source=${localWorkspaceFolder}/.cache,target=/cache,type=bind"
+            ],
+            "onCreateCommand": "echo discovery",
+            "portsAttributes": {},
+            "postAttachCommand": {
+              "step": "echo discovery"
+            },
+            "privileged": true,
+            "remoteEnv": {},
+            "remoteUser": "root",
+            "securityOpt": [
+              "seccomp=unconfined"
+            ],
+            "shutdownAction": "stopContainer",
+            "updateRemoteUserUID": true,
+            "workspaceFolder": "/workspaces/project",
+            "xUnrecognizedSetting": true
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-unknown-field"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-b77b8a5e",
+      "signature": {
+        "id": "sig-2c681fc6",
+        "channel": "chan-structured-output",
+        "path": "configuration.appPort",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-b9d97c8c",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-df101038",
+          "minimalInput": {
+            "appPort": null,
+            "build": {}
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "empty-collection"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-5fbfcace",
+      "signature": {
+        "id": "sig-1bd9dd8d",
+        "channel": "chan-structured-output",
+        "path": "configuration.postCreateCommand",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-fbbf448e",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-30c7df92",
+          "minimalInput": {
+            "postCreateCommand": ""
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "drop-optional-key"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": ""
+          },
+          "mutationOperators": [
+            "mop-wrong-type",
+            "mop-empty-value"
+          ]
+        },
+        {
+          "id": "wit-d7d668b9",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-da08200e",
+          "minimalInput": {
+            "name": "discovery-dockerfile",
+            "build": {
+              "dockerfile": "Dockerfile"
+            },
+            "capAdd": [
+              "SYS_PTRACE"
+            ],
+            "customizations": {},
+            "features": {
+              "ghcr.io/devcontainers/features/git:1": {}
+            },
+            "forwardPorts": [
+              3000,
+              8080
+            ],
+            "portsAttributes": {},
+            "postAttachCommand": [
+              "echo",
+              "discovery"
+            ],
+            "postCreateCommand": null,
+            "postStartCommand": [
+              "echo",
+              "discovery"
+            ],
+            "runArgs": [
+              "--init",
+              "--rm"
+            ],
+            "secrets": {},
+            "shutdownAction": "none",
+            "updateContentCommand": "echo discovery",
+            "waitFor": "postCreateCommand",
+            "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+          },
+          "isMinimal": false,
+          "reductionSteps": [],
+          "observedValues": {
+            "deacon": null,
+            "reference": null
+          },
+          "mutationOperators": [
+            "mop-null-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    },
+    {
+      "id": "fnd-e2510ffc",
+      "signature": {
+        "id": "sig-0c1885f8",
+        "channel": "chan-structured-output",
+        "path": "configuration.onCreateCommand",
+        "kind": "ref-only",
+        "valueShapeClass": "present-absent"
+      },
+      "witnesses": [
+        {
+          "id": "wit-3e51d9e5",
+          "campaignId": "cmp-978ec2cf",
+          "candidateId": "cnd-de59e96a",
+          "minimalInput": {
+            "onCreateCommand": {},
+            "dockerComposeFile": [],
+            "service": "",
+            "workspaceFolder": ""
+          },
+          "isMinimal": true,
+          "reductionSteps": [
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "drop-optional-key",
+            "un-apply-mutation",
+            "empty-collection",
+            "minimize-scalar",
+            "minimize-scalar"
+          ],
+          "observedValues": {
+            "deacon": null,
+            "reference": {}
+          },
+          "mutationOperators": [
+            "mop-empty-value",
+            "mop-empty-value"
+          ]
+        }
+      ],
+      "classification": null,
+      "state": "untriaged",
+      "firstObserved": "cmp-978ec2cf",
+      "lastObserved": "cmp-978ec2cf",
+      "promotedTo": null,
+      "splitFrom": null,
+      "notes": ""
+    }
+  ]
 }

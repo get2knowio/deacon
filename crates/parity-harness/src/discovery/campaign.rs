@@ -494,7 +494,22 @@ pub async fn run(request: &CampaignRequest) -> Result<CampaignRun, HarnessError>
             for drifted in &reduction.drifted {
                 observed.insert(drifted.signature.id.clone());
                 let drift_witness = Witness {
-                    id: Witness::derived_id(&campaign_id, &drifted.signature.id),
+                    // Derived from the CANDIDATE, like every other witness this crate
+                    // writes — never from the drifted signature. A witness id is
+                    // substance-anchored over `campaignId ‖ candidateId` (D1 recomputes it
+                    // from those two stored fields), so hashing anything else produces a
+                    // record the discovery loader rejects as malformed. It did: the first
+                    // real config-differential campaign wrote 14 such witnesses, and every
+                    // one of them failed `discovery check`, which is why no finding had
+                    // ever been committed to the queue.
+                    //
+                    // Two drifts from ONE candidate into ONE finding therefore collapse to
+                    // a single witness (`upsert_finding` returns `AlreadyWitnessed`). That
+                    // is the intended reading, not a loss: the id says an observation is
+                    // identified by the campaign and the input that produced it, and both
+                    // drifts came from the same input. The drifted signature still gets its
+                    // own FINDING — which is what FR-023 is about.
+                    id: Witness::derived_id(&campaign_id, &candidate.id),
                     campaign_id: campaign_id.clone(),
                     candidate_id: candidate.id.clone(),
                     // The rejected proposal the drift was SEEN on — not the candidate's
@@ -1144,6 +1159,8 @@ fn complete(
         },
     };
 
+    reject_underived_witness(&queue.findings)?;
+
     if request.persist {
         let mut campaigns = existing_campaigns.to_vec();
         // Append-only: a campaign record is never rewritten, because a finding names the
@@ -1175,6 +1192,39 @@ fn complete(
         // Filled in by the corpus driver after this returns; every other tier has none.
         corpus_statuses: Vec::new(),
     })
+}
+
+/// Refuse to hand back a queue whose witness ids the discovery loader would reject.
+///
+/// A witness id is substance-anchored over `campaignId ‖ candidateId`, and **D1** recomputes
+/// it from those two stored fields. Each of the four witness-construction sites in this
+/// crate derives its own id, and one of them hashed the drifted SIGNATURE while storing the
+/// candidate — so the first real config-differential campaign wrote 14 records that
+/// `discovery check` refused, and the queue could not be committed at all. A convention four
+/// call sites must independently honour is one call site away from breaking again; this
+/// makes it structural.
+///
+/// Fail-loud rather than repair-in-place: a mismatch means the writer and the identity rule
+/// disagree about what a witness IS, and quietly rewriting the id would bury that.
+fn reject_underived_witness(findings: &[Finding]) -> Result<(), HarnessError> {
+    for finding in findings {
+        for witness in &finding.witnesses {
+            let derived = Witness::derived_id(&witness.campaign_id, &witness.candidate_id);
+            if witness.id != derived {
+                return Err(HarnessError::Report {
+                    cause: format!(
+                        "refusing to write a findings queue the loader would reject: witness \
+                         `{}` on finding `{}` has an id that is not derived from its own \
+                         `campaignId ‖ candidateId` (expected `{derived}`). A witness id is \
+                         substance-anchored; whichever construction site produced this one is \
+                         hashing something other than the two fields it stores.",
+                        witness.id, finding.id
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The findings queue plus one campaign's admission bookkeeping (FR-030/FR-034/FR-034b).
@@ -1495,6 +1545,35 @@ mod tests {
         assert_eq!(queue.findings.len(), 1);
         assert_eq!(queue.findings[0].witnesses.len(), 2);
         assert!(queue.suppressed.is_empty());
+    }
+
+    /// The regression this guard exists for. The drift path used to hash the drifted
+    /// SIGNATURE into the witness id while storing the candidate id beside it, so every
+    /// drift witness failed **D1** the moment `discovery check` looked at it — and a
+    /// campaign that shrank anything produced a queue nobody could commit.
+    #[test]
+    fn a_witness_id_hashed_from_anything_but_its_own_fields_is_refused_before_writing() {
+        let mut queue = AdmissionQueue::new(&[], "cmp-11111111", 25);
+        queue.offer(
+            signature("structuredOutput.configuration.name"),
+            witness("cmp-11111111", "cnd-a"),
+        );
+        assert!(
+            reject_underived_witness(&queue.findings).is_ok(),
+            "a queue whose witnesses derive their own ids must pass"
+        );
+
+        // Exactly the old drift-path mistake: a real campaign id, a real candidate id, and
+        // an id hashed over something else entirely.
+        queue.findings[0].witnesses[0].id = Witness::derived_id("cmp-11111111", "sig-deadbeef");
+        let err = reject_underived_witness(&queue.findings)
+            .expect_err("an id that is not derived from the stored fields must be refused");
+        let message = err.to_string();
+        assert!(
+            message.contains(&Witness::derived_id("cmp-11111111", "cnd-a")),
+            "the error must name the id the loader WILL derive, so the fix is mechanical: \
+             {message}"
+        );
     }
 
     #[test]
