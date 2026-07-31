@@ -541,16 +541,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-0412e436",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-config-source": "image",
-        "sdim-output-mode": "human"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-042be3b8",
       "kind": "combination",
       "operation": "upgrade",
@@ -667,16 +657,6 @@
       "assignment": {
         "sdim-config-source": "dockerfile",
         "sdim-container-state": "none"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-0806ebda",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-config-source": "image",
-        "sdim-output-mode": "structured"
       },
       "arity": 2
     },
@@ -1072,16 +1052,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-131ad79f",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-layering": "single",
-        "sdim-output-mode": "structured"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-13ab5772",
       "kind": "combination",
       "operation": "outdated",
@@ -1168,16 +1138,6 @@
       "assignment": {
         "sdim-config-source": "compose",
         "sdim-features": "single"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-16edd486",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-config-source": "compose",
-        "sdim-layering": "extends-chain"
       },
       "arity": 2
     },
@@ -1298,16 +1258,6 @@
       "assignment": {
         "sdim-features": "multiple-dependency-order",
         "sdim-layering": "extends-chain"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-1bae26a2",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-layering": "extends-chain",
-        "sdim-output-mode": "human"
       },
       "arity": 2
     },
@@ -1712,16 +1662,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-2a2e5b40",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-features": "none",
-        "sdim-output-mode": "human"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-2a744af0",
       "kind": "combination",
       "operation": "up",
@@ -1911,16 +1851,6 @@
         "sdim-features": "multiple-dependency-order"
       },
       "arity": 3
-    },
-    {
-      "id": "obl-cmb-31670959",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-container-state": "none",
-        "sdim-output-mode": "structured"
-      },
-      "arity": 2
     },
     {
       "id": "obl-cmb-316cc1b7",
@@ -2143,16 +2073,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-3d890f23",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-features": "none",
-        "sdim-layering": "extends-chain"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-3dbf8b9d",
       "kind": "combination",
       "operation": "down",
@@ -2179,16 +2099,6 @@
       "assignment": {
         "sdim-config-source": "dockerfile",
         "sdim-layering": "cli-overlay"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-3e60d85c",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-layering": "cli-overlay",
-        "sdim-output-mode": "human"
       },
       "arity": 2
     },
@@ -2339,16 +2249,6 @@
       "assignment": {
         "sdim-container-state": "none",
         "sdim-layering": "single"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-44d5dd3c",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-layering": "single",
-        "sdim-output-mode": "human"
       },
       "arity": 2
     },
@@ -2905,16 +2805,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-584d6440",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-config-source": "compose",
-        "sdim-output-mode": "human"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-58f98a2e",
       "kind": "combination",
       "operation": "exec",
@@ -3161,16 +3051,6 @@
       "assignment": {
         "sdim-features": "none",
         "sdim-layering": "cli-overlay"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-62966e8d",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-config-source": "dockerfile",
-        "sdim-layering": "extends-chain"
       },
       "arity": 2
     },
@@ -4607,16 +4487,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-9342e98c",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-config-source": "compose",
-        "sdim-output-mode": "structured"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-93c0b0a3",
       "kind": "combination",
       "operation": "build",
@@ -4693,16 +4563,6 @@
       "operation": "outdated",
       "assignment": {
         "sdim-features": "single",
-        "sdim-layering": "extends-chain"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-95e84e7b",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-container-state": "none",
         "sdim-layering": "extends-chain"
       },
       "arity": 2
@@ -5781,16 +5641,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-bae3303e",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-layering": "extends-chain",
-        "sdim-output-mode": "structured"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-bb536130",
       "kind": "combination",
       "operation": "exec",
@@ -5848,16 +5698,6 @@
       "assignment": {
         "sdim-features": "multiple-dependency-order",
         "sdim-layering": "cli-overlay"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-bc986d3a",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-container-state": "none",
-        "sdim-output-mode": "human"
       },
       "arity": 2
     },
@@ -6322,16 +6162,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-c846b04a",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-config-source": "image",
-        "sdim-layering": "extends-chain"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-c8adf857",
       "kind": "combination",
       "operation": "outdated",
@@ -6408,26 +6238,6 @@
       "assignment": {
         "sdim-features": "multiple-declared-order",
         "sdim-output-mode": "structured"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-cc08481e",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-config-source": "dockerfile",
-        "sdim-output-mode": "human"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-cc12fdd0",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-features": "multiple-declared-order",
-        "sdim-output-mode": "human"
       },
       "arity": 2
     },
@@ -6518,16 +6328,6 @@
       "assignment": {
         "sdim-container-state": "running",
         "sdim-features": "none"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-cf98d7c3",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-features": "single",
-        "sdim-output-mode": "human"
       },
       "arity": 2
     },
@@ -6753,16 +6553,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-d85553f9",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-features": "multiple-dependency-order",
-        "sdim-output-mode": "human"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-d957bebd",
       "kind": "combination",
       "operation": "up",
@@ -6883,16 +6673,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-dbe96618",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-features": "none",
-        "sdim-output-mode": "structured"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-dc346367",
       "kind": "combination",
       "operation": "up",
@@ -6959,16 +6739,6 @@
       "assignment": {
         "sdim-features": "single",
         "sdim-layering": "extends-chain"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-de19fbe2",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-layering": "cli-overlay",
-        "sdim-output-mode": "structured"
       },
       "arity": 2
     },
@@ -7118,26 +6888,6 @@
       "operation": "up",
       "assignment": {
         "sdim-layering": "single",
-        "sdim-output-mode": "structured"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-e5530e73",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-features": "lockfile",
-        "sdim-output-mode": "human"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-e5638543",
-      "kind": "combination",
-      "operation": "templates-apply",
-      "assignment": {
-        "sdim-config-source": "dockerfile",
         "sdim-output-mode": "structured"
       },
       "arity": 2
@@ -7620,16 +7370,6 @@
       "assignment": {
         "sdim-config-source": "compose",
         "sdim-layering": "cli-overlay"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-fcbbce91",
-      "kind": "combination",
-      "operation": "upgrade",
-      "assignment": {
-        "sdim-layering": "extends-chain",
-        "sdim-output-mode": "human"
       },
       "arity": 2
     },

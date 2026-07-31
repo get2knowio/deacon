@@ -34,12 +34,6 @@
       "gap": "gap-pairwise-upgrade"
     },
     {
-      "id": "odp-cmb-0412e436",
-      "obligation": "obl-cmb-0412e436",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
       "id": "odp-cmb-042be3b8",
       "obligation": "obl-cmb-042be3b8",
       "disposition": "gap",
@@ -117,12 +111,6 @@
       "gap": "gap-pairwise-upgrade"
     },
     {
-      "id": "odp-cmb-2a2e5b40",
-      "obligation": "obl-cmb-2a2e5b40",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
       "id": "odp-cmb-2bb41234",
       "obligation": "obl-cmb-2bb41234",
       "disposition": "case",
@@ -152,20 +140,8 @@
       ]
     },
     {
-      "id": "odp-cmb-3e60d85c",
-      "obligation": "obl-cmb-3e60d85c",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
       "id": "odp-cmb-3f125c4d",
       "obligation": "obl-cmb-3f125c4d",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
-      "id": "odp-cmb-44d5dd3c",
-      "obligation": "obl-cmb-44d5dd3c",
       "disposition": "gap",
       "gap": "gap-pairwise-upgrade"
     },
@@ -180,12 +156,6 @@
     {
       "id": "odp-cmb-53668210",
       "obligation": "obl-cmb-53668210",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
-      "id": "odp-cmb-584d6440",
-      "obligation": "obl-cmb-584d6440",
       "disposition": "gap",
       "gap": "gap-pairwise-upgrade"
     },
@@ -440,12 +410,6 @@
       "gap": "gap-pairwise-upgrade"
     },
     {
-      "id": "odp-cmb-bc986d3a",
-      "obligation": "obl-cmb-bc986d3a",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
       "id": "odp-cmb-c21c09c0",
       "obligation": "obl-cmb-c21c09c0",
       "disposition": "gap",
@@ -470,38 +434,14 @@
       "gap": "gap-pairwise-upgrade"
     },
     {
-      "id": "odp-cmb-cc08481e",
-      "obligation": "obl-cmb-cc08481e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
-      "id": "odp-cmb-cc12fdd0",
-      "obligation": "obl-cmb-cc12fdd0",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
       "id": "odp-cmb-cebf08fb",
       "obligation": "obl-cmb-cebf08fb",
       "disposition": "gap",
       "gap": "gap-pairwise-upgrade"
     },
     {
-      "id": "odp-cmb-cf98d7c3",
-      "obligation": "obl-cmb-cf98d7c3",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
       "id": "odp-cmb-d123620b",
       "obligation": "obl-cmb-d123620b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
-      "id": "odp-cmb-d85553f9",
-      "obligation": "obl-cmb-d85553f9",
       "disposition": "gap",
       "gap": "gap-pairwise-upgrade"
     },
@@ -528,12 +468,6 @@
         "case-upgrade-regenerates-lockfile",
         "case-upgrade-unsupported-values-rejected"
       ]
-    },
-    {
-      "id": "odp-cmb-e5530e73",
-      "obligation": "obl-cmb-e5530e73",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
     },
     {
       "id": "odp-cmb-e873981b",
@@ -575,12 +509,6 @@
         "case-upgrade-regenerates-lockfile",
         "case-upgrade-unsupported-values-rejected"
       ]
-    },
-    {
-      "id": "odp-cmb-fcbbce91",
-      "obligation": "obl-cmb-fcbbce91",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
     }
   ]
 }

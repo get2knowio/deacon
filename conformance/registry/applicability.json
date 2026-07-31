@@ -45,6 +45,24 @@
       "ground": "These operations neither create nor attach to a container: they resolve configuration, build an image, resolve Feature versions, scaffold files, or probe the host. A pre-existing container is therefore not a condition they can observe or act on, and only the degenerate `none` state remains meaningful."
     },
     {
+      "id": "rule-no-extends-chain-for-scaffolding",
+      "excludes": [
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "templates-apply"
+          ]
+        },
+        {
+          "dimension": "sdim-layering",
+          "values": [
+            "extends-chain"
+          ]
+        }
+      ],
+      "ground": "`templates apply` copies the template's payload into the target workspace and substitutes only its declared options; it never loads or resolves a devcontainer configuration, so an extends chain is never traversed. A payload file that happens to contain an `extends` key is copied opaquely, byte for byte, which leaves the value indistinguishable from `single` in every observable the operation produces — the same ground on which `image-metadata` is already excluded for it. A command-line overlay is different and stays applicable: `--option` genuinely layers over the template's declared option defaults."
+    },
+    {
       "id": "rule-no-feature-composition-for-attach-only-operations",
       "excludes": [
         {
@@ -129,6 +147,24 @@
       "ground": "`doctor` reports host, runtime, and environment diagnostics rather than a merged configuration; it never resolves an extends chain or applies a command-line overlay, so how a configuration would have been layered cannot affect the diagnosis it prints."
     },
     {
+      "id": "rule-no-result-document-for-scaffolding",
+      "excludes": [
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "templates-apply"
+          ]
+        },
+        {
+          "dimension": "sdim-output-mode",
+          "values": [
+            "structured"
+          ]
+        }
+      ],
+      "ground": "`templates apply` delivers its result by writing files into the target workspace. It carries no output-format flag — `--output` names a destination directory, not a rendering — and it writes nothing at all to stdout on success, so there is no result document whose rendering a case could choose between. Its observables are exit code, filesystem, file content, and stderr; declaring `structured` would satisfy the scenario match while observing none of it."
+    },
+    {
       "id": "rule-no-result-document-for-teardown-and-hook-execution",
       "excludes": [
         {
@@ -154,7 +190,8 @@
           "dimension": "sdim-operation",
           "values": [
             "read-configuration",
-            "up"
+            "up",
+            "upgrade"
           ]
         },
         {
@@ -164,7 +201,7 @@
           ]
         }
       ],
-      "ground": "`read-configuration` and `up` emit their result exclusively as a single JSON document on stdout; neither carries an output-format flag, so a human-readable rendering of the result does not exist and cannot be exercised."
+      "ground": "`read-configuration`, `up`, and `upgrade` emit their result exclusively as a single JSON document on stdout; none carries an output-format flag, so a human-readable rendering of the result does not exist and cannot be exercised. `upgrade` is the one to check rather than assume, because its sibling `outdated` does carry `--output text|json` and both of its modes are reachable; `upgrade` prints the regenerated lockfile document and nothing else, and every case already declares `structured` and observes `chan-structured-output`."
     }
   ],
   "triples": [
