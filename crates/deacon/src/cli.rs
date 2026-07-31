@@ -1780,9 +1780,19 @@ impl Cli {
             }) => {
                 use crate::commands::upgrade::{UpgradeArgs, execute_upgrade};
 
+                // Resolve the selected profile (017): ordered override fragments
+                // to layer beneath any `--override-config`. Mirrors `outdated`.
+                let resolved_profile = crate::commands::shared::profile::resolve_active_profile(
+                    self.user_data_folder.as_deref(),
+                    self.profile.as_deref(),
+                )?;
+
                 let args = UpgradeArgs {
                     workspace_folder: self.workspace_folder,
                     config_path: self.config,
+                    override_config: self.override_config,
+                    settings_merge_paths: resolved_profile.merge_paths,
+                    cli_merge_paths: self.merge_config,
                     docker_path,
                     docker_compose_path,
                     dry_run,

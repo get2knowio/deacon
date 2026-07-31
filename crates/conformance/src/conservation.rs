@@ -411,6 +411,18 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      a fidelity loss on input both sides accept.",
     ),
     (
+        "bhv-upgrade-cli-config-overlay-honored",
+        "Whether `upgrade` regenerates its lockfile from the configuration AFTER the \
+     command-line overlays apply. Unrecordable before #409 in either direction: deacon \
+     ADVERTISED `--override-config` and `--merge-config` on the subcommand and silently \
+     discarded both (`UpgradeArgs` carried no field for either and both `load_config` \
+     sites passed `override_config_path: None` hard-coded), so no pre-migration unit \
+     could invoke the surface it names. Not a variant of any pre-migration claim: the \
+     reference CLI has no `--merge-config` anywhere and its `upgrade` takes neither \
+     flag, so there is no reference behavior this could be a variant OF. A deacon \
+     extension recorded by ext-cli-config-overlay.",
+    ),
+    (
         "bhv-readconfig-merged-computed-empties-omitted",
         "Which computed-empty properties the reference synthesizes into `mergedConfiguration` for a \
      configuration that authors none. Unobservable before #398 in either direction: deacon emitted \

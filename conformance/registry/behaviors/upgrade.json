@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "bhv-upgrade-cli-config-overlay-honored",
+      "area": "upgrade",
+      "statement": "`upgrade` regenerates the lockfile from the configuration AFTER the command-line overlays are applied: `--override-config` replaces the base document and `--merge-config` fragments deep-overlay on top, so a Feature contributed or removed by an overlay is reflected in the regenerated lockfile.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "The reference CLI's `upgrade` accepts NEITHER flag \u2014 `--merge-config` does not exist anywhere in its surface, and its `upgrade` has no `--override-config` even though its `up` and `read-configuration` do. There is therefore no reference surface to compare against, which is why `reference` is `not-applicable` rather than `divergent`. Recorded by ext-cli-config-overlay. Fixes #409: deacon ADVERTISED both flags on `upgrade` and silently discarded them (`UpgradeArgs` had no field for either and both `load_config` sites passed `override_config_path: None` hard-coded), so a user pinning a configuration got a lockfile regenerated from a different one, exit 0, no warning. The profile-sourced `mergeConfig` fragments were dropped the same way."
+    },
+    {
       "id": "bhv-upgrade-empty-feature-set",
       "area": "upgrade",
       "statement": "`upgrade` on a configuration that declares no Features regenerates an EMPTY lockfile and exits 0.",

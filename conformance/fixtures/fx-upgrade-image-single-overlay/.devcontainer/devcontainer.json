@@ -1,0 +1,4 @@
+{
+	"name": "ConformanceUpgradeImageSingleOverlay",
+	"image": "alpine:3.19"
+}

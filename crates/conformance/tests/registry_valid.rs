@@ -110,7 +110,14 @@ const TODAY: &str = "2026-07-19";
 /// while declaring `single`. Relabelling it needed an honest `single` twin, which is the one
 /// case added. `gap-pairwise-templates-apply` was deleted in the same change — the third
 /// operation to reach zero. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 226;
+/// **226 → 229** (#409): `upgrade` advertised `--override-config` and `--merge-config` and
+/// silently discarded both, so the overlay surface it names could not be exercised at all.
+/// Three cases arrive with the fix — a `--merge-config` that ADDS a Feature, an
+/// `--override-config` that REMOVES one, and an overlay contributing the only Feature. Two
+/// use `jsonEquals` rather than `jsonSubset` deliberately: a subset assertion of
+/// `{"features": {}}` matches any features map and would have passed against the buggy
+/// output. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 229;
 
 #[test]
 fn real_registry_is_structurally_valid() {
