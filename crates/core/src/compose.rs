@@ -576,6 +576,62 @@ impl ComposeCommand {
         let output = self.execute(&["config", "--format", "json"]).await?;
         parse_service_shape_from_config(&output, service_name)
     }
+
+    /// The primary service's **declared** entrypoint, as the rendered compose config
+    /// reports it (`Ok(None)` when it declares none, or when the service is absent).
+    ///
+    /// Needed because deacon's keep-alive is injected as an `entrypoint:` that PREPENDS to
+    /// the declared one rather than replacing it (T117, see
+    /// [`ComposeProject::keepalive_entrypoint`]) — so the declared value has to be read
+    /// before the override can be written. The rendered config is used, not the raw compose
+    /// file, so `extends`/multi-file merging and interpolation are already applied.
+    pub async fn extract_service_entrypoint(
+        &self,
+        service_name: &str,
+    ) -> Result<Option<Vec<String>>> {
+        let output = self.execute(&["config", "--format", "json"]).await?;
+        parse_service_entrypoint_from_config(&output, service_name)
+    }
+}
+
+/// Parse the declared `entrypoint` of `service_name` out of `docker compose config --format
+/// json` output. Accepts both compose forms — a string (shell form) and an array (exec form)
+/// — and normalizes to an argv vector.
+fn parse_service_entrypoint_from_config(
+    json_output: &str,
+    service_name: &str,
+) -> Result<Option<Vec<String>>> {
+    if json_output.trim().is_empty() {
+        return Ok(None);
+    }
+    let config: serde_json::Value = serde_json::from_str(json_output).map_err(|e| {
+        DockerError::CLIError(format!("Failed to parse compose config JSON: {}", e))
+    })?;
+    let Some(entrypoint) = config
+        .get("services")
+        .and_then(|s| s.as_object())
+        .and_then(|s| s.get(service_name))
+        .and_then(|s| s.get("entrypoint"))
+    else {
+        return Ok(None);
+    };
+    match entrypoint {
+        // Shell form: compose passes it to `/bin/sh -c`, so preserve that framing rather
+        // than word-splitting it here (splitting would break quoted arguments).
+        serde_json::Value::String(s) if !s.trim().is_empty() => Ok(Some(vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            s.clone(),
+        ])),
+        serde_json::Value::Array(items) => {
+            let argv: Vec<String> = items
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            Ok(if argv.is_empty() { None } else { Some(argv) })
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Shape of a compose service relevant to the features-install pipeline.
@@ -1007,8 +1063,25 @@ impl ComposeManager {
             project.name, services, gpu_mode
         );
 
+        // Read the service's DECLARED entrypoint before writing the override: deacon's
+        // keep-alive prepends to it rather than replacing it (T117), so it has to be in
+        // hand. A failure to read is not fatal — the wrapper alone still keeps the container
+        // alive and still execs the declared COMMAND, so the fallback degrades to "a
+        // declared entrypoint is not preserved" rather than to "nothing runs".
+        let service_entrypoint = match command.extract_service_entrypoint(&project.service).await {
+            Ok(ep) => ep,
+            Err(e) => {
+                warn!(
+                    "Could not read declared entrypoint for compose service '{}': {}. \
+                     Proceeding without preserving it.",
+                    project.service, e
+                );
+                None
+            }
+        };
+
         // Generate injection override if we have mounts or env to inject
-        let injection_override = project.generate_injection_override();
+        let injection_override = project.generate_injection_override(service_entrypoint.as_deref());
 
         command
             .up_with_injection(&services, true, gpu_mode, injection_override.as_deref())
@@ -1315,22 +1388,98 @@ impl ComposeProject {
     /// in the original compose files remain intact, and missing external volumes
     /// will surface as compose errors (not silently replaced with bind mounts).
     ///
-    /// Returns None if no mounts, env, or command override are needed.
-    #[must_use = "injection override should be passed to compose up"]
-    pub fn generate_injection_override(&self) -> Option<String> {
-        // Spec default for overrideCommand is true: keep the container alive
-        // through the lifecycle so exec and post-create hooks can attach.
-        let override_cmd = self.override_command.unwrap_or(true);
-
-        if self.additional_mounts.is_empty()
-            && self.additional_env.is_empty()
-            && !override_cmd
-            && self.service_image_override.is_none()
-            && self.deacon_labels.is_empty()
-        {
-            return None;
+    /// The `entrypoint:` line injected into the compose override: deacon's keep-alive
+    /// wrapper, followed by the service's own declared entrypoint (when it has one).
+    ///
+    /// # Why the entrypoint and not the command
+    ///
+    /// A devcontainer must stay alive long enough for lifecycle hooks and `exec` to attach,
+    /// AND — on the compose path, per `overrideCommand`'s default of `false` — must still run
+    /// the service's declared command. Putting the keep-alive in `command` cannot do both:
+    /// it discards the command it replaces (T117).
+    ///
+    /// The wrapper resolves it, and this shape is the reference's, measured against pinned
+    /// oracle 0.87.0 rather than guessed:
+    ///
+    /// ```text
+    /// entrypoint = [wrapper, "-"] ++ <declared entrypoint>
+    /// command    = <declared command>          (or [] when overrideCommand: true)
+    /// ```
+    ///
+    /// Docker appends `Cmd` to `Entrypoint` as arguments, so inside the wrapper `"$@"` is
+    /// the declared entrypoint followed by the declared command. Three cases, all correct:
+    ///
+    /// - **declared command** → `exec "$@"` runs it, replacing the wrapper shell. The
+    ///   container lives exactly as long as the service's own process, which is what
+    ///   `overrideCommand: false` means.
+    /// - **nothing declared** → `"$@"` is empty, `exec` is a no-op, and the
+    ///   `while sleep 1 & wait $!` loop keeps the container alive.
+    /// - **declared entrypoint** → it is prepended-to, never replaced, so a multi-stage
+    ///   entrypoint (tini, a wrapper script) still receives the command as its args. Verified
+    ///   against the reference, which concatenates identically: a fixture declaring both an
+    ///   entrypoint and a command runs BOTH.
+    ///
+    /// `"-"` occupies `$0` so the first real argument lands in `$1`; without it `exec "$@"`
+    /// would silently drop the declared entrypoint's own program name.
+    ///
+    /// The `trap` + background + `wait` shape must MATCH `docker.rs`'s single-container
+    /// keep-alive: without it a foreground `sleep` as PID 1 cannot service SIGTERM, so
+    /// `docker stop` / `compose down` waits the full 10s grace period and then SIGKILLs
+    /// (measured at 10,258 ms against the reference's 215 ms before that fix). `sleep
+    /// infinity` falls back to `tail -f /dev/null` for BusyBox/Alpine.
+    ///
+    /// `$` is doubled (`$$@`, `$$!`) because compose interpolates `$` in the override YAML.
+    fn keepalive_entrypoint(service_entrypoint: Option<&[String]>) -> String {
+        // deacon's existing single-container keep-alive, with `exec "$@"` inserted ahead of
+        // it. When a command is declared `exec` replaces this shell and the keep-alive is
+        // never reached (correct: the service's own process owns the container's lifetime,
+        // and its own SIGTERM handling applies — the reference behaves identically). When
+        // nothing is declared `exec` no-ops and the trap + backgrounded sleep take over.
+        const WRAPPER: &str = "trap \\\"exit 0\\\" TERM INT; exec \\\"$$@\\\"; \
+                               (sleep infinity || tail -f /dev/null) & wait $$!";
+        let mut parts = vec![
+            "\"/bin/sh\"".to_string(),
+            "\"-c\"".to_string(),
+            format!("\"{WRAPPER}\""),
+            "\"-\"".to_string(),
+        ];
+        for arg in service_entrypoint.unwrap_or(&[]) {
+            parts.push(format!(
+                "\"{}\"",
+                arg.replace('\\', "\\\\").replace('"', "\\\"")
+            ));
         }
+        format!("    entrypoint: [{}]\n", parts.join(", "))
+    }
 
+    /// Returns None only when there is nothing at all to inject.
+    ///
+    /// `service_entrypoint` is the primary service's **declared** entrypoint as the
+    /// rendered compose config reports it ([`ComposeCommand::extract_service_entrypoint`]),
+    /// or `None` when it declares none. It is prepended-to rather than replaced — see
+    /// [`Self::keepalive_entrypoint`].
+    #[must_use = "injection override should be passed to compose up"]
+    pub fn generate_injection_override(
+        &self,
+        service_entrypoint: Option<&[String]>,
+    ) -> Option<String> {
+        // Spec default for `overrideCommand` is `true` for an image/Dockerfile and
+        // **`false` when referencing a Docker Compose file** (devcontainerjson-reference.md,
+        // which spells out the reason: "Set to `false` if the default command must run for
+        // the container to function properly"). This function is only ever reached for
+        // compose, so the default here is `false`.
+        //
+        // It read `unwrap_or(true)` until T117, so deacon replaced the service's declared
+        // command with its keep-alive and the service's own process never ran. Measured
+        // against pinned oracle 0.87.0: a service whose command creates a marker file and
+        // then sleeps produces the marker under the reference and not under deacon. The
+        // defect was invisible for the ubiquitous `command: ["sleep", "infinity"]` idiom,
+        // which is why every compose fixture in the suite passed.
+        let override_cmd = self.override_command.unwrap_or(false);
+
+        // The keep-alive entrypoint is ALWAYS injected (see `keepalive_entrypoint`), so the
+        // override is never empty on the compose path. The early return survives only for
+        // callers that construct a project for inspection rather than for `up`.
         let mut yaml = String::from("services:\n");
         yaml.push_str(&format!("  {}:\n", self.service));
 
@@ -1340,23 +1489,17 @@ impl ComposeProject {
             yaml.push_str(&format!("    image: \"{}\"\n", image.replace('"', "\\\"")));
         }
 
+        yaml.push_str(&Self::keepalive_entrypoint(service_entrypoint));
+
         if override_cmd {
-            // Mirror the single-container keep-alive used in docker.rs:
-            // sleep infinity (GNU coreutils), fall back to tail -f /dev/null
-            // for BusyBox/Alpine. Only command is overridden; the image's
-            // entrypoint is preserved so multi-stage entrypoints (e.g. tini)
-            // still receive our command as args.
-            //
-            // The `trap` + background + `wait` shape must MATCH docker.rs: without it a
-            // foreground `sleep` as PID 1 cannot service SIGTERM, so `docker stop` /
-            // `compose down` waits the full 10s grace period and then SIGKILLs (measured
-            // at 10,258 ms vs the reference CLI's 215 ms before the fix). Keeping the two
-            // paths symmetric is the point — a compose container that took 10s to stop
-            // while the single-container path took 245ms would be a silent asymmetry.
-            yaml.push_str(
-                "    command: [\"/bin/sh\", \"-c\", \"trap \\\"exit 0\\\" TERM INT; \
-                 (sleep infinity || tail -f /dev/null) & wait $$!\"]\n",
-            );
+            // `overrideCommand: true` on the compose path means "do NOT run the service's
+            // default command". The reference expresses that by CLEARING the command so the
+            // entrypoint wrapper's `exec "$@"` has nothing to exec and falls through to the
+            // keep-alive loop — measured: with `overrideCommand: true` the reference leaves
+            // the same entrypoint in place and reports `Cmd: []`. Emptying the command is
+            // therefore the whole of the override; the keep-alive itself lives in the
+            // entrypoint either way.
+            yaml.push_str("    command: []\n");
         }
 
         if !self.additional_env.is_empty() {
@@ -2213,8 +2356,18 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
 
-        // No mounts or env, should return None
-        assert!(project.generate_injection_override().is_none());
+        // T117: with nothing else to inject the override is NOT empty — it still carries
+        // the keep-alive `entrypoint`, which a compose devcontainer always needs so the
+        // container survives for lifecycle hooks and `exec`. What `overrideCommand: false`
+        // suppresses is the `command:` line, so the service's declared command still runs.
+        let yaml = project
+            .generate_injection_override(None)
+            .expect("the keep-alive entrypoint is always injected");
+        assert!(yaml.contains("entrypoint:"), "{yaml}");
+        assert!(
+            !yaml.contains("command:"),
+            "overrideCommand=false must not replace the service's command:\n{yaml}"
+        );
     }
 
     #[test]
@@ -2239,7 +2392,7 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
         assert!(override_yaml.contains("services:"));
         assert!(override_yaml.contains("myservice:"));
         assert!(override_yaml.contains("environment:"));
@@ -2280,7 +2433,7 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
         assert!(override_yaml.contains("services:"));
         assert!(override_yaml.contains("myservice:"));
         assert!(override_yaml.contains("volumes:"));
@@ -2312,7 +2465,7 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
         assert!(override_yaml.contains("volumes:"));
         assert!(override_yaml.contains("- type: tmpfs"));
         assert!(override_yaml.contains("target: /mnt/config-tmp"));
@@ -2355,7 +2508,7 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // The per-service `volumes:` list still gets the short-form mount…
         assert!(override_yaml.contains("feat-probe-vol:/feat-mnt"));
@@ -2397,7 +2550,7 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // Should have both environment and volumes sections
         assert!(override_yaml.contains("environment:"));
@@ -2430,7 +2583,7 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // Verify proper escaping
         assert!(override_yaml.contains("MULTILINE: \"line1\\nline2\""));
@@ -2463,7 +2616,7 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // IndexMap preserves insertion order: ZZZ, AAA, MMM (not sorted alphabetically)
         let zzz_pos = override_yaml.find("ZZZ:").unwrap();
@@ -2504,7 +2657,7 @@ mod tests {
             deacon_labels: labels,
         };
 
-        let yaml = project.generate_injection_override().unwrap();
+        let yaml = project.generate_injection_override(None).unwrap();
 
         // Exactly one `app:` mapping, exactly one `db:` mapping.
         assert_eq!(
@@ -2521,8 +2674,14 @@ mod tests {
 
     #[test]
     fn test_generate_injection_override_command_default_on() {
-        // Spec default: override_command unset (None) is treated as true,
-        // so an otherwise-empty override still injects the keep-alive command.
+        // T117: `override_command` unset means the COMPOSE default, which the spec states is
+        // **false** — "Defaults to `true` for when using an image Dockerfile and `false` when
+        // referencing a Docker Compose file", because "the default command must run for the
+        // container to function properly". This test previously asserted the opposite while
+        // citing "Spec default", which is how the defect survived.
+        //
+        // What is still unconditional is the keep-alive ENTRYPOINT: the container must
+        // outlive `up` for lifecycle hooks and `exec` whether or not the command is replaced.
         let project = ComposeProject {
             name: "test".to_string(),
             base_path: PathBuf::from("/test"),
@@ -2540,7 +2699,7 @@ mod tests {
         };
 
         let override_yaml = project
-            .generate_injection_override()
+            .generate_injection_override(None)
             .expect("override command should produce override yaml even with no env/mounts");
 
         assert!(override_yaml.contains("services:\n  app:\n"));
@@ -2555,12 +2714,108 @@ mod tests {
             override_yaml.contains("(sleep infinity || tail -f /dev/null) & wait $$!"),
             "keep-alive must background the sleep and wait on it: {override_yaml}"
         );
+        // The keep-alive is an `entrypoint:`, and it does NOT replace the command.
+        assert!(
+            override_yaml.contains("    entrypoint: ["),
+            "the keep-alive must be injected as an entrypoint: {override_yaml}"
+        );
+        assert!(
+            !override_yaml.contains("command:"),
+            "the compose default (overrideCommand=false) must leave the service's command \
+             alone — replacing it is what stopped the service's own process from ever \
+             running (T117): {override_yaml}"
+        );
+    }
+
+    /// T117: the wrapper PREPENDS to a declared entrypoint rather than replacing it, so a
+    /// multi-stage entrypoint (tini, a wrapper script) still receives the command as args.
+    /// The reference concatenates identically — measured on a fixture declaring both an
+    /// entrypoint and a command, where BOTH ran.
+    #[test]
+    fn keepalive_entrypoint_prepends_to_a_declared_entrypoint() {
+        let declared = vec!["/usr/bin/tini".to_string(), "--".to_string()];
+        let line = ComposeProject::keepalive_entrypoint(Some(&declared));
+        assert!(
+            line.contains("\"/usr/bin/tini\", \"--\"]"),
+            "the declared entrypoint must survive, appended after the wrapper: {line}"
+        );
+        // `-` occupies $0 so the declared program name lands in $1 and `exec "$@"` keeps it.
+        assert!(line.contains("\"-\", \"/usr/bin/tini\""), "{line}");
+
+        // With nothing declared the wrapper stands alone and the keep-alive loop is reached.
+        let bare = ComposeProject::keepalive_entrypoint(None);
+        assert!(bare.trim_end().ends_with("\"-\"]"), "{bare}");
+    }
+
+    /// T117: `overrideCommand: true` on the compose path is expressed by CLEARING the
+    /// command, not by replacing it with the keep-alive — measured against pinned oracle
+    /// 0.87.0, which leaves the same entrypoint in place and reports `Cmd: []`.
+    #[test]
+    fn override_command_true_clears_the_command_rather_than_replacing_it() {
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env: IndexMap::new(),
+            external_volumes: Vec::new(),
+            override_command: Some(true),
+            service_image_override: None,
+            deacon_labels: IndexMap::new(),
+        };
+        let yaml = project.generate_injection_override(None).expect("override");
+        assert!(
+            yaml.contains("    command: []\n"),
+            "overrideCommand=true must EMPTY the command so `exec \"$@\"` falls through to \
+             the keep-alive loop: {yaml}"
+        );
+        assert!(yaml.contains("    entrypoint: ["), "{yaml}");
+    }
+
+    #[test]
+    fn declared_entrypoint_is_read_from_the_rendered_compose_config() {
+        // Exec form.
+        let json = r#"{"services":{"app":{"entrypoint":["/usr/bin/tini","--"]}}}"#;
+        assert_eq!(
+            parse_service_entrypoint_from_config(json, "app").unwrap(),
+            Some(vec!["/usr/bin/tini".to_string(), "--".to_string()])
+        );
+        // Shell form: compose hands it to `/bin/sh -c`, so that framing is preserved rather
+        // than word-split (splitting would break quoted arguments).
+        let shell = r#"{"services":{"app":{"entrypoint":"echo hi && exec \"$@\""}}}"#;
+        assert_eq!(
+            parse_service_entrypoint_from_config(shell, "app").unwrap(),
+            Some(vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "echo hi && exec \"$@\"".to_string()
+            ])
+        );
+        // Absent / empty / unknown service → None, never a spurious empty argv.
+        for (j, svc) in [
+            (r#"{"services":{"app":{}}}"#, "app"),
+            (r#"{"services":{"app":{"entrypoint":[]}}}"#, "app"),
+            (r#"{"services":{"app":{"entrypoint":"  "}}}"#, "app"),
+            (r#"{"services":{"other":{"entrypoint":["x"]}}}"#, "app"),
+            ("", "app"),
+        ] {
+            assert_eq!(
+                parse_service_entrypoint_from_config(j, svc).unwrap(),
+                None,
+                "expected None for {j}"
+            );
+        }
     }
 
     #[test]
     fn test_generate_injection_override_command_explicit_false() {
-        // overrideCommand=false must run the service's natural command;
-        // with no env/mounts the override yaml is None.
+        // overrideCommand=false must run the service's natural command. The override is
+        // still emitted (the keep-alive entrypoint is unconditional, T117); what must be
+        // absent is the `command:` line that would replace the declared command.
         let project = ComposeProject {
             name: "test".to_string(),
             base_path: PathBuf::from("/test"),
@@ -2577,7 +2832,17 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
 
-        assert!(project.generate_injection_override().is_none());
+        let yaml = project
+            .generate_injection_override(None)
+            .expect("the keep-alive entrypoint is always injected");
+        assert!(
+            !yaml.contains("command:"),
+            "an explicit overrideCommand=false must leave the service's command alone:\n{yaml}"
+        );
+        assert!(
+            yaml.contains("exec \\\"$$@\\\""),
+            "the wrapper must exec the declared entrypoint+command:\n{yaml}"
+        );
     }
 
     #[test]
@@ -2602,7 +2867,7 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
 
-        let override_yaml = project.generate_injection_override().unwrap();
+        let override_yaml = project.generate_injection_override(None).unwrap();
 
         // The keep-alive must carry the SIGTERM trap and the background+`wait` shape,
         // not a bare foreground `sleep`: without them PID 1 cannot service SIGTERM and
@@ -3021,7 +3286,7 @@ mod tests {
             deacon_labels: IndexMap::new(),
         };
         let yaml = project
-            .generate_injection_override()
+            .generate_injection_override(None)
             .expect("override emitted");
         assert!(
             yaml.contains("image: \"deacon-features:abc123\""),
@@ -3053,7 +3318,7 @@ mod tests {
             service_image_override: Some("img:tag".into()),
             deacon_labels: IndexMap::new(),
         };
-        assert!(project.generate_injection_override().is_some());
+        assert!(project.generate_injection_override(None).is_some());
     }
 
     /// BEAD-14a-T10: image tags with embedded double-quotes are escaped so they
@@ -3075,7 +3340,7 @@ mod tests {
             service_image_override: Some(r#"weird"tag"#.into()),
             deacon_labels: IndexMap::new(),
         };
-        let yaml = project.generate_injection_override().unwrap();
+        let yaml = project.generate_injection_override(None).unwrap();
         assert!(yaml.contains(r#"image: "weird\"tag""#));
     }
 }

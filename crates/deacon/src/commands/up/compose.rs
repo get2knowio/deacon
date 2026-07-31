@@ -32,10 +32,19 @@ use std::path::Path;
 use std::time::Duration;
 use tracing::{debug, info, instrument, warn};
 
-/// Resolve the primary service container ID, retrying with exponential backoff
+/// Resolve the primary service container ID, retrying with capped exponential backoff
 /// to absorb the brief window between `docker compose up` returning and the
 /// container appearing in `docker compose ps`. Shared by the host-CA injection
 /// step (before post-create) and the final result assembly.
+///
+/// The per-attempt delay is CAPPED. Uncapped doubling reached a 51-second single sleep and
+/// ~102 s in total — absurd for absorbing a startup race, and newly reachable since T117
+/// made deacon honor `overrideCommand`'s compose default: a service whose declared command
+/// exits now legitimately produces no running container, and a user should not wait 102 s to
+/// be told so. The capped schedule still covers ~13 s of startup jitter.
+///
+/// The exhaustion message names that cause, because it is by far the most likely one and it
+/// has a one-line remedy.
 async fn resolve_primary_container_id_with_retry(
     compose_manager: &ComposeManager,
     project: &ComposeProject,
@@ -43,13 +52,18 @@ async fn resolve_primary_container_id_with_retry(
     let mut attempts = 0;
     const MAX_ATTEMPTS: u32 = 10;
     const INITIAL_DELAY_MS: u64 = 100;
+    const MAX_DELAY_MS: u64 = 2_000;
 
     loop {
         match compose_manager.get_primary_container_id(project).await? {
             Some(id) => break Ok(id),
             None if attempts < MAX_ATTEMPTS => {
                 attempts += 1;
-                let delay = Duration::from_millis(INITIAL_DELAY_MS * 2u64.pow(attempts - 1));
+                let delay = Duration::from_millis(
+                    INITIAL_DELAY_MS
+                        .saturating_mul(2u64.saturating_pow(attempts - 1))
+                        .min(MAX_DELAY_MS),
+                );
                 debug!(
                     "Waiting for container to be ready, attempt {}/{}, waiting {:?}",
                     attempts, MAX_ATTEMPTS, delay
@@ -58,7 +72,13 @@ async fn resolve_primary_container_id_with_retry(
             }
             None => {
                 break Err(anyhow::anyhow!(
-                    "Failed to get primary container ID after starting compose project (tried {} times)",
+                    "No running container for compose service '{}' after starting the project \
+                     (tried {} times). The most common cause is that the service's own command \
+                     exited: on the compose path `overrideCommand` defaults to false, so the \
+                     declared command runs and the container lives only as long as it does. \
+                     Set \"overrideCommand\": true in devcontainer.json to keep the container \
+                     alive instead.",
+                    project.service,
                     MAX_ATTEMPTS
                 ));
             }
