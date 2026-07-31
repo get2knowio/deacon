@@ -46,7 +46,7 @@
 //!     features: HashMap::new(),
 //! };
 //!
-//! lockfile.features.get_or_insert_default().insert(
+//! lockfile.features.insert(
 //!     "ghcr.io/devcontainers/features/node".to_string(),
 //!     LockfileFeature {
 //!         version: "1.2.3".to_string(),
@@ -81,7 +81,7 @@ pub type Result<T, E = LockfileError> = std::result::Result<T, E>;
 ///     features: HashMap::new(),
 /// };
 ///
-/// lockfile.features.get_or_insert_default().insert(
+/// lockfile.features.insert(
 ///     "ghcr.io/devcontainers/features/docker".to_string(),
 ///     LockfileFeature {
 ///         version: "2.0.0".to_string(),
@@ -399,7 +399,7 @@ pub async fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) 
 /// use std::collections::HashMap;
 ///
 /// let mut existing = Lockfile { features: HashMap::new() };
-/// existing.features.get_or_insert_default().insert(
+/// existing.features.insert(
 ///     "feature-a".to_string(),
 ///     LockfileFeature {
 ///         version: "1.0.0".to_string(),
@@ -410,7 +410,7 @@ pub async fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) 
 /// );
 ///
 /// let mut new = Lockfile { features: HashMap::new() };
-/// new.features.get_or_insert_default().insert(
+/// new.features.insert(
 ///     "feature-a".to_string(),
 ///     LockfileFeature {
 ///         version: "2.0.0".to_string(),
@@ -421,7 +421,7 @@ pub async fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) 
 /// );
 ///
 /// let merged = merge_lockfile_features(&existing, &new);
-/// assert_eq!(merged.features().get("feature-a").unwrap().version, "2.0.0");
+/// assert_eq!(merged.features.get("feature-a").unwrap().version, "2.0.0");
 /// ```
 pub fn merge_lockfile_features(existing: &Lockfile, new: &Lockfile) -> Lockfile {
     let mut merged_features = existing.features.clone();

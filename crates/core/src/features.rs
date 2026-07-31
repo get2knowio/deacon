@@ -649,7 +649,7 @@ impl MergedSecurityOptions {
 ///
 /// let config = DevContainerConfig {
 ///     privileged: Some(true),
-///     cap_add: vec!["SYS_PTRACE".to_string()],
+///     cap_add: Some(vec!["SYS_PTRACE".to_string()]),
 ///     ..Default::default()
 /// };
 /// let features = vec![];
