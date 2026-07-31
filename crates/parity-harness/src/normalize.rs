@@ -555,11 +555,11 @@ pub fn config_document_rules(value: &Value, side: Side, block: DocumentBlock) ->
 /// Removes a key **named in [`ABSENT_OPTIONAL_KEYS`]** when its value carries no
 /// information (`null`, `[]`, `{}`, `""`). Nothing else, ever.
 ///
-/// **Why it exists**: deacon serializes every modeled optional property of
+/// **Why it exists**: deacon serialized every modeled optional property of
 /// `devcontainer.json` unconditionally, while the reference omits keys that were not
-/// authored. The two documents therefore describe the SAME resolved configuration in
-/// different JSON shapes, and without this rule that one serializer difference produces
-/// ~48 spurious divergences per corpus case and buries the real ones.
+/// authored. The two documents therefore described the SAME resolved configuration in
+/// different JSON shapes, and without this rule that one serializer difference produced
+/// ~48 spurious divergences per corpus case and buried the real ones.
 ///
 /// **Why it is not `prune`**: the removal set is a finite, enumerated list of key names
 /// (FR-021). A property added to `DevContainerConfig` tomorrow is NOT on the list, so it
@@ -569,7 +569,28 @@ pub fn config_document_rules(value: &Value, side: Side, block: DocumentBlock) ->
 ///
 /// **It compensates for a deacon defect and is deleted when that defect is fixed** —
 /// deacon should apply `skip_serializing_if` so absent optionals are omitted, matching
-/// the reference. Tracked in `specs/023-migrate-parity-to-conformance/tasks.md#T111`.
+/// the reference. Tracked at #398 (formerly
+/// `specs/023-migrate-parity-to-conformance/tasks.md#T111`).
+///
+/// # SHRINKING, not yet gone (#398)
+///
+/// #398 applied `skip_serializing_if` to every `Option<_>` field, so deacon now emits 13
+/// keys where it emitted ~40 for a configuration authoring one property. On deacon's
+/// `configuration` block this rule is consequently a no-op for those keys — there is
+/// nothing left to drop.
+///
+/// **The list is NOT pruned to match, and that is deliberate.** Two reasons:
+/// - On `mergedConfiguration` the rule runs on BOTH sides, because both CLIs synthesize
+///   that block and both emit computed empties in it. Every name here is still
+///   load-bearing there, so removing one would change a live comparison rather than
+///   delete dead weight.
+/// - The 11 names that are still live on deacon's `configuration` block —
+///   `capAdd`, `containerEnv`, `customizations`, `features`, `forwardPorts`, `mounts`,
+///   `portsAttributes`, `remoteEnv`, `runArgs`, `runServices`, `securityOpt` — are the
+///   fields typed as bare collections rather than `Option`, which is the remaining half
+///   of #398. Wrapping them in `Option` is what retires this rule; adding a
+///   `Vec::is_empty` skip instead would collapse authored-empty into unset from the other
+///   direction and make the defect permanent.
 ///
 /// # NARROWED in 024 US5 (T123): deacon's `configuration` block only
 ///

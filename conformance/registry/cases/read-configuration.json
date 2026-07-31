@@ -2241,7 +2241,7 @@
           "assertion": {
             "jsonSubset": {
               "nullEmptyOmitted": {
-                "name": "null",
+                "name": "omitted",
                 "forwardPorts": "empty",
                 "containerEnv": "empty",
                 "image": "present",
@@ -2315,6 +2315,20 @@
           "context": [],
           "observablePath": "chan-structured-output.nullEmptyOmitted.mounts",
           "rationale": "The author did NOT write `mounts`. The reference omits it and reports `omitted`; deacon serializes `[]` and reports `empty`. This is the direction of the defect stated positively, on a property chosen precisely because it is absent from the document.",
+          "waiverId": "wvr-readconfig-authored-empty-omitted"
+        },
+        {
+          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
+          "context": [],
+          "observablePath": "chan-structured-output.configuration.name",
+          "rationale": "The author wrote `\"name\": null`. The reference echoes it; deacon now omits it, because #398 made unset optionals skip serialization and deacon holds an authored null and an omission in the same `None`. This is the null-vs-omitted half of the defect, which that fix deliberately left open \u2014 the boundary moved rather than closed: before the fix both CLIs emitted `null` here and agreed.",
+          "waiverId": "wvr-readconfig-authored-empty-omitted"
+        },
+        {
+          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
+          "context": [],
+          "observablePath": "chan-structured-output.nullEmptyOmitted.name",
+          "rationale": "The same difference stated over the derived FR-055 field: the reference reports `null` for the authored null, deacon reports `omitted`. Named separately from `configuration.name` because the derived field is what makes the three-state distinction legible, and a tolerance on the raw key alone would leave the classification uncompared.",
           "waiverId": "wvr-readconfig-authored-empty-omitted"
         }
       ],
