@@ -110,7 +110,7 @@ const TODAY: &str = "2026-07-19";
 /// while declaring `single`. Relabelling it needed an honest `single` twin, which is the one
 /// case added. `gap-pairwise-templates-apply` was deleted in the same change — the third
 /// operation to reach zero. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 216;
+const MIGRATED_CASE_COUNT: usize = 226;
 
 #[test]
 fn real_registry_is_structurally_valid() {

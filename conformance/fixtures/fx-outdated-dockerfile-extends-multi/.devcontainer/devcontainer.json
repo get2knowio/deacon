@@ -1,0 +1,5 @@
+{
+	"name": "ConformanceOutdatedDockerfileExtendsMulti",
+	"extends": "./multi-base.json",
+	"containerEnv": { "LAYER": "child" }
+}

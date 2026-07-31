@@ -1,0 +1,9 @@
+{
+	"name": "ConformanceOutdatedComposeLockfileOverlay",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"features": {
+		"ghcr.io/devcontainers/features/git:1": {}
+	}
+}
