@@ -100,7 +100,17 @@ const TODAY: &str = "2026-07-19";
 /// `features=none` x `cli-overlay` at all, since adding a Feature moves the scenario out of
 /// that value by construction. `--merge-config` is what makes those pairs reachable.
 /// `gap-pairwise-read-configuration` was deleted in the same change. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 215;
+/// **215 → 216** (Phase 5, `templates-apply`): fifteen gap pairs, but only one wanted a case.
+/// Fourteen were unreachable rather than uncovered — `output-mode=structured` for a subcommand
+/// that has no output-format flag and writes nothing to stdout, and `layering=extends-chain`
+/// for one that never loads a configuration — and those went to two applicability rules, which
+/// is what shrinks a denominator honestly. The fifteenth, `config-source=compose` x
+/// `layering=cli-overlay`, turned out to be a mislabel: `case-templates-apply-compose-target`
+/// supplies `--option` and asserts the overlaid value, so it had always exercised the overlay
+/// while declaring `single`. Relabelling it needed an honest `single` twin, which is the one
+/// case added. `gap-pairwise-templates-apply` was deleted in the same change — the third
+/// operation to reach zero. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 216;
 
 #[test]
 fn real_registry_is_structurally_valid() {

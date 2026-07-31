@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "records": [
     {
-      "id": "case-templates-apply-compose-target",
+      "id": "case-templates-apply-compose-default-option",
       "behaviors": [
         "bhv-templates-apply-scaffolds-options"
       ],
@@ -13,6 +13,63 @@
         "sdim-container-state": "none",
         "sdim-features": "none",
         "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "fs-heavy",
+      "operations": [
+        {
+          "id": "op-apply",
+          "subcommand": "templates-apply",
+          "argv": [
+            "${WORKSPACE}/template",
+            "--output",
+            "${WORKSPACE}/applied"
+          ],
+          "fixtures": [
+            "fx-templates-target-compose"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-apply",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-apply",
+          "assertion": {
+            "jsonSubset": {
+              "applied/.devcontainer/devcontainer.json": "{\n\t\"name\": \"conformance-minimal\",\n\t\"image\": \"alpine:3.19\"\n}\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "applied/.devcontainer/devcontainer.json"
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The unoverlaid twin of `case-templates-apply-compose-target`, which supplies `--option` and is therefore `cli-overlay`. No option is supplied here, so the declared default (`3.19`) must reach the scaffolded bytes. The distinction matters because the two failure modes are indistinguishable from the outside: a template engine that ignores defaults and one that ignores the command line both exit 0 and write a file. Pinning the default separately is the only way the overlay case proves the overlay did anything."
+    },
+    {
+      "id": "case-templates-apply-compose-target",
+      "behaviors": [
+        "bhv-templates-apply-scaffolds-options"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "templates-apply",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
         "sdim-output-mode": "human"
       },
       "inputClass": "valid",
@@ -58,7 +115,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. The Compose counterpart, with an option supplied: the target workspace's own configuration shape is irrelevant to the substitution, which is the property worth pinning rather than assuming."
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. The Compose counterpart, with an option supplied: the target workspace's own configuration shape is irrelevant to the substitution, which is the property worth pinning rather than assuming. Relabelled `single` to `cli-overlay`: the argv supplies `--option imageVariant=3.20` and the assertion pins the overlaid `3.20`, so the case has always exercised the overlay. It was the sole violator of the convention every other case follows, and the mislabel made `compose x cli-overlay` read as an uncovered gap while `compose x single` read as covered by evidence that did not show it. `case-templates-apply-compose-default-option` now carries `single` honestly."
     },
     {
       "id": "case-templates-apply-default-option",
