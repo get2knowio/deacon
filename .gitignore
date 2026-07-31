@@ -57,6 +57,12 @@ artifacts/nextest/full-timing.json
 # runs. The intentionally-committed lockfile-demo lives at an example root (not
 # in a .devcontainer/ dir), so this scoped rule leaves it tracked.
 **/.devcontainer/devcontainer-lock.json
+# ...but a conformance fixture's lockfile is test INPUT, not a generated artifact:
+# a case asserts what the lockfile makes the CLI report. Without this exemption
+# `git add -A` skips it silently, the fixture works locally (the file is in the
+# working tree) and the case fails in CI (the checkout has no such file) with a
+# diff that looks like a behavior difference rather than a missing file.
+!conformance/fixtures/**/devcontainer-lock.json
 
 # Beads / Dolt files (added by bd init)
 .dolt/
