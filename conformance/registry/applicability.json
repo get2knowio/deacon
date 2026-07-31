@@ -190,7 +190,8 @@
           "dimension": "sdim-operation",
           "values": [
             "read-configuration",
-            "up"
+            "up",
+            "upgrade"
           ]
         },
         {
@@ -200,7 +201,7 @@
           ]
         }
       ],
-      "ground": "`read-configuration` and `up` emit their result exclusively as a single JSON document on stdout; neither carries an output-format flag, so a human-readable rendering of the result does not exist and cannot be exercised."
+      "ground": "`read-configuration`, `up`, and `upgrade` emit their result exclusively as a single JSON document on stdout; none carries an output-format flag, so a human-readable rendering of the result does not exist and cannot be exercised. `upgrade` is the one to check rather than assume, because its sibling `outdated` does carry `--output text|json` and both of its modes are reachable; `upgrade` prints the regenerated lockfile document and nothing else, and every case already declares `structured` and observes `chan-structured-output`."
     }
   ],
   "triples": [
