@@ -339,6 +339,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-c5b125aa",
+      "kind": "behavior",
+      "behavior": "bhv-outdated-malformed-lockfile-rejected",
+      "context": []
+    },
+    {
       "id": "obl-bhv-c658c572",
       "kind": "behavior",
       "behavior": "bhv-container-identity-labels",

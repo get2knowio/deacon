@@ -411,6 +411,18 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      a fidelity loss on input both sides accept.",
     ),
     (
+        "bhv-outdated-malformed-lockfile-rejected",
+        "Whether a PRESENT but invalid `devcontainer-lock.json` is an error for `outdated` or \
+     is silently ignored. Unrecordable before #406 in either direction: deacon swallowed the \
+     validation failure at `debug!` and continued as though the file were absent, so the \
+     two states produced the same observation and no pre-migration unit could have \
+     distinguished them. Not a variant of the read-configuration strictness family, which \
+     rejects malformed CONFIGURATION documents both CLIs parse; here the reference never \
+     reads the file at all for this subcommand, so the difference comes from deacon \
+     consuming an input the reference does not, and it is waived on that ground by \
+     wvr-outdated-malformed-lockfile-rejected.",
+    ),
+    (
         "bhv-outdated-reports-declared-reference-key",
         "Whether the `outdated` report is keyed by the DECLARED Feature reference or by the \
      canonical untagged id, and therefore whether two Features declared at different tags \

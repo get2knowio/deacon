@@ -1,0 +1,9 @@
+{
+	"features": {
+		"ghcr.io/devcontainers/features/git": {
+			"version": "1.3.0",
+			"resolved": "x",
+			"integrity": "sha256:aaaa"
+		}
+	}
+}
