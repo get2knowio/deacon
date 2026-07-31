@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceOutdatedDockerfileOverlayNoFeatures",
+	"build": {
+		"dockerfile": "Dockerfile"
+	}
+}

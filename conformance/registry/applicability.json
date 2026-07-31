@@ -63,6 +63,42 @@
       "ground": "`templates apply` copies the template's payload into the target workspace and substitutes only its declared options; it never loads or resolves a devcontainer configuration, so an extends chain is never traversed. A payload file that happens to contain an `extends` key is copied opaquely, byte for byte, which leaves the value indistinguishable from `single` in every observable the operation produces — the same ground on which `image-metadata` is already excluded for it. A command-line overlay is different and stays applicable: `--option` genuinely layers over the template's declared option defaults."
     },
     {
+      "id": "rule-no-dependency-order-for-version-reporting",
+      "excludes": [
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "outdated"
+          ]
+        },
+        {
+          "dimension": "sdim-features",
+          "values": [
+            "multiple-dependency-order"
+          ]
+        }
+      ],
+      "ground": "`outdated` reports the version of each DECLARED Feature and never resolves the dependency graph: `commands/outdated.rs` takes the features map straight off the effective configuration, preserving declaration order, and iterates it. No `dependsOn` is followed, no `installsAfter` is honoured, and no transitive Feature is added, verified by declaring a Feature with dependencies and observing that only that Feature is reported. Declaration order IS observable — reversing the two keys reverses the table rows — so `multiple-declared-order` stays applicable and is the value that carries multi-Feature coverage here. A dependency relationship among the declared Features changes neither the rows nor their order, so the value is indistinguishable from `multiple-declared-order` in every observable. Note this is specific to `outdated`: its sibling `upgrade` resolves Features to regenerate a lockfile, so the value is NOT excluded there."
+    },
+    {
+      "id": "rule-no-lockfile-for-configuration-reporting",
+      "excludes": [
+        {
+          "dimension": "sdim-operation",
+          "values": [
+            "read-configuration"
+          ]
+        },
+        {
+          "dimension": "sdim-features",
+          "values": [
+            "lockfile"
+          ]
+        }
+      ],
+      "ground": "`read-configuration` reports the configuration as authored and never consults `devcontainer-lock.json`: `commands/read_configuration.rs` does not mention a lockfile anywhere, and its output is byte-identical with the file present and absent. Resolved Feature versions belong to `outdated` and `upgrade`, which do read it. This rule corrects an over-claim rather than shrinking real coverage: four cases previously declared `features=lockfile` while asserting only `configuration`/`mergedConfiguration` Feature keys, which come from `devcontainer.json`, so no assertion could tell whether a lockfile existed. They are relabelled `single`, the value their fixtures actually exercise."
+    },
+    {
       "id": "rule-no-feature-composition-for-attach-only-operations",
       "excludes": [
         {

@@ -1,0 +1,5 @@
+{
+	"name": "ConformanceOutdatedComposeLockfileExtends",
+	"extends": "./compose-base.json",
+	"containerEnv": { "LAYER": "child" }
+}

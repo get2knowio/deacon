@@ -284,22 +284,6 @@
       ]
     },
     {
-      "id": "odp-cmb-030accfe",
-      "obligation": "obl-cmb-030accfe",
-      "disposition": "case",
-      "cases": [
-        "case-readconfig-compose-lockfile-overlay"
-      ]
-    },
-    {
-      "id": "odp-cmb-037a318e",
-      "obligation": "obl-cmb-037a318e",
-      "disposition": "case",
-      "cases": [
-        "case-readconfig-lockfile-present"
-      ]
-    },
-    {
       "id": "odp-cmb-05df8fcb",
       "obligation": "obl-cmb-05df8fcb",
       "disposition": "case",
@@ -387,14 +371,6 @@
         "case-errors-decl-extends-missing",
         "case-readconfig-extends-merge-precedence",
         "case-tier1-decl-extends-child"
-      ]
-    },
-    {
-      "id": "odp-cmb-28c7fc43",
-      "obligation": "obl-cmb-28c7fc43",
-      "disposition": "case",
-      "cases": [
-        "case-readconfig-compose-lockfile-merged"
       ]
     },
     {
@@ -595,14 +571,6 @@
       ]
     },
     {
-      "id": "odp-cmb-4a7b3111",
-      "obligation": "obl-cmb-4a7b3111",
-      "disposition": "case",
-      "cases": [
-        "case-readconfig-lockfile-present"
-      ]
-    },
-    {
       "id": "odp-cmb-4bcf721d",
       "obligation": "obl-cmb-4bcf721d",
       "disposition": "case",
@@ -764,14 +732,6 @@
       ]
     },
     {
-      "id": "odp-cmb-51d90cdc",
-      "obligation": "obl-cmb-51d90cdc",
-      "disposition": "case",
-      "cases": [
-        "case-readconfig-dockerfile-lockfile-extends"
-      ]
-    },
-    {
       "id": "odp-cmb-5ae9f1fc",
       "obligation": "obl-cmb-5ae9f1fc",
       "disposition": "case",
@@ -864,14 +824,6 @@
       "cases": [
         "case-merged-decl-feature-order",
         "case-merged-decl-python-features"
-      ]
-    },
-    {
-      "id": "odp-cmb-81377d6a",
-      "obligation": "obl-cmb-81377d6a",
-      "disposition": "case",
-      "cases": [
-        "case-readconfig-compose-lockfile-overlay"
       ]
     },
     {
@@ -979,14 +931,6 @@
         "case-tier1-decl-universal-jsonc",
         "case-tier1-decl-user-mapping",
         "case-tier1-decl-workspacefolder-custom"
-      ]
-    },
-    {
-      "id": "odp-cmb-9c95a825",
-      "obligation": "obl-cmb-9c95a825",
-      "disposition": "case",
-      "cases": [
-        "case-readconfig-dockerfile-lockfile-extends"
       ]
     },
     {
@@ -1135,14 +1079,6 @@
       "cases": [
         "case-readconfig-overlay-dockerfile-depends",
         "case-readconfig-overlay-dockerfile-depends-order"
-      ]
-    },
-    {
-      "id": "odp-cmb-be729589",
-      "obligation": "obl-cmb-be729589",
-      "disposition": "case",
-      "cases": [
-        "case-readconfig-lockfile-present"
       ]
     },
     {
@@ -1395,14 +1331,6 @@
       "disposition": "case",
       "cases": [
         "case-readconfig-dockerfile-declared-order-overlay"
-      ]
-    },
-    {
-      "id": "odp-cmb-e5f367b4",
-      "obligation": "obl-cmb-e5f367b4",
-      "disposition": "case",
-      "cases": [
-        "case-readconfig-lockfile-present"
       ]
     },
     {

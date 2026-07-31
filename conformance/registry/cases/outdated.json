@@ -2,6 +2,273 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "case-outdated-compose-extends-empty-report",
+      "behaviors": [
+        "bhv-outdated-extends-chain-features"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-outdated-compose-extends-nofeatures"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-outdated",
+          "assertion": {
+            "matches": "^Feature \\| Current \\| Wanted \\| Latest\\s*$"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "A chain in which no link declares a Feature must produce the header and nothing else. The regex is anchored so a spurious row fails it; an unanchored `contains` of the header would pass no matter what followed, since the header is printed unconditionally."
+    },
+    {
+      "id": "case-outdated-compose-lockfile-extends",
+      "behaviors": [
+        "bhv-outdated-extends-chain-features"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile",
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-outdated-compose-lockfile-extends"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-outdated",
+          "assertion": {
+            "matches": "git \\| 1\\.3\\.0 \\| 1 \\|"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The Feature is contributed by the parent link and its version by the lockfile, so two resolution steps have to both work for the row to be right. `current` 1.3.0 comes from the lockfile while `wanted` stays the parent's declared `1`; either step failing independently yields a row that still looks reasonable, which is why both columns are pinned and `latest` is not."
+    },
+    {
+      "id": "case-outdated-compose-lockfile-overlay",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--merge-config",
+            "${WORKSPACE}/.devcontainer/overlay.json",
+            "--output",
+            "json"
+          ],
+          "fixtures": [
+            "fx-outdated-compose-lockfile-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-outdated",
+          "assertion": {
+            "jsonSubset": {
+              "features": {
+                "ghcr.io/devcontainers/features/git": {
+                  "current": "1.3.0",
+                  "wanted": "1"
+                },
+                "ghcr.io/devcontainers/features/node": {
+                  "current": "1.6.1",
+                  "wanted": "1.6.1"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Two independent inputs meet in one report. `git` is declared `:1` and its `current` (1.3.0) can only have come from the lockfile \u2014 `wanted` stays the declared `1`, so the two fields together prove the lockfile was read rather than the reference re-derived. `node` is declared NOWHERE in devcontainer.json and reaches the report only through `--merge-config`. An implementation that ignored either input would still exit 0 with a plausible-looking report, which is why both are asserted in the same case. The map key is deacon's canonical untagged id; the reference echoes the declared reference with its tag. That divergence is filed as #407 and this assertion pins deacon's current shape to make the change visible when it lands, not to endorse it."
+    },
+    {
+      "id": "case-outdated-compose-multi",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-outdated-compose-multi"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-outdated",
+          "assertion": {
+            "matches": "git \\| 1\\.3\\.2 \\| 1\\.3\\.2 \\|[\\s\\S]*node \\| 1\\.6\\.1 \\| 1\\.6\\.1 \\|"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Multiple Features on a Compose configuration, in declaration order, with no overlay and no chain. The Compose service shape is irrelevant to version reporting, which is the property worth pinning rather than assuming \u2014 `outdated` never starts a container, so a Compose configuration must report exactly as an image one does."
+    },
+    {
+      "id": "case-outdated-compose-single-overlay",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--merge-config",
+            "${WORKSPACE}/.devcontainer/overlay.json"
+          ],
+          "fixtures": [
+            "fx-outdated-compose-single-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-outdated",
+          "assertion": {
+            "matches": "git \\| 1\\.3\\.2 \\| 1\\.3\\.2 \\|"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The configuration declares no Features at all; the single reported row exists only because `--merge-config` contributed it. The report would be empty and the exit code 0 if the overlay were dropped, so the stdout assertion is the whole case."
+    },
+    {
       "id": "case-outdated-compose-workspace",
       "behaviors": [
         "bhv-outdated-reports-feature-versions"
@@ -40,6 +307,175 @@
         "tempdir": true
       },
       "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. The Compose counterpart, with no Features declared: the empty report again, reached through a different configuration shape."
+    },
+    {
+      "id": "case-outdated-dockerfile-extends-multi",
+      "behaviors": [
+        "bhv-outdated-extends-chain-features"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--output",
+            "json"
+          ],
+          "fixtures": [
+            "fx-outdated-dockerfile-extends-multi"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-outdated",
+          "assertion": {
+            "jsonSubset": {
+              "features": {
+                "ghcr.io/devcontainers/features/git": {
+                  "current": "1.3.2",
+                  "wanted": "1.3.2"
+                },
+                "ghcr.io/devcontainers/features/node": {
+                  "current": "1.6.1",
+                  "wanted": "1.6.1"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Both Features live on the parent link and neither on the child, so an implementation reading only the top document reports an empty set and exits 0 \u2014 a silent miss. The existing extends case pins a single inherited Feature; this pins that the whole inherited map survives, which a merge that overwrites rather than merges would break. The map key is deacon's canonical untagged id; the reference echoes the declared reference with its tag. That divergence is filed as #407 and this assertion pins deacon's current shape to make the change visible when it lands, not to endorse it."
+    },
+    {
+      "id": "case-outdated-dockerfile-lockfile",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-outdated-dockerfile-lockfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-outdated",
+          "assertion": {
+            "matches": "git \\| 1\\.3\\.0 \\| 1 \\|"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The lockfile's contribution isolated from any chain or overlay: `current` 1.3.0 against a declared `:1`. Note the lockfile must be keyed by the CANONICAL untagged id to be found, because `derive_current_version` looks up `canonical_feature_id(reference)`; a lockfile keyed by the tagged reference is silently ignored, so a naively authored fixture would pass this case while proving nothing. See #407."
+    },
+    {
+      "id": "case-outdated-dockerfile-overlay-empty-report",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--merge-config",
+            "${WORKSPACE}/.devcontainer/overlay.json",
+            "--output",
+            "json"
+          ],
+          "fixtures": [
+            "fx-outdated-dockerfile-overlay-nofeatures"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-outdated",
+          "assertion": {
+            "jsonEquals": {
+              "features": {}
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "An overlay that contributes no Features must not invent any. Deliberately `jsonEquals` and not `jsonSubset`: a subset assertion of `{\"features\": {}}` is satisfied by ANY features map, so it would pass while the command reported anything at all \u2014 the exact always-green shape recorded in CLAUDE.md under the 024 coverage model. Exact equality is the only assertion that can fail here."
     },
     {
       "id": "case-outdated-dockerfile-workspace",
@@ -130,6 +566,110 @@
         "tempdir": true
       },
       "notes": "Covers the high-risk triple `hrt-outdated-extends-chain-image-single-feature`. The chain's BASE link contributes the only Feature, so an implementation that reads the top document alone reports an empty table and exits 0 \u2014 a silent miss, not an error. The regex pins the row's identifier and both pinned columns while leaving `latest` free."
+    },
+    {
+      "id": "case-outdated-image-lockfile-overlay",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--merge-config",
+            "${WORKSPACE}/.devcontainer/overlay.json"
+          ],
+          "fixtures": [
+            "fx-outdated-image-lockfile-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-outdated",
+          "assertion": {
+            "matches": "git \\| 1\\.3\\.0 \\| 1 \\|[\\s\\S]*node \\| 1\\.6\\.1 \\| 1\\.6\\.1 \\|"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The lockfile governs the configured Feature while the overlay adds one the lockfile says nothing about, so the two inputs must compose rather than one replacing the other. The overlay-contributed `node` row correctly falls back to its declared version, which is the part an implementation that applied the lockfile to every row would get wrong."
+    },
+    {
+      "id": "case-outdated-image-multi-overlay",
+      "behaviors": [
+        "bhv-outdated-reports-feature-versions"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--merge-config",
+            "${WORKSPACE}/.devcontainer/overlay.json"
+          ],
+          "fixtures": [
+            "fx-outdated-image-multi-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-outdated",
+          "assertion": {
+            "matches": "git \\| 1\\.3\\.2 \\| 1\\.3\\.2 \\|[\\s\\S]*node \\| 1\\.6\\.1 \\| 1\\.6\\.1 \\|[\\s\\S]*common-utils \\| 2\\.5\\.2 \\| 2\\.5\\.2 \\|"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Declaration ORDER is the subject. The two configured Features come first in the order they were written and the overlay's contribution follows; the regex pins that sequence rather than mere membership, because a map-shaped report that lost declaration order would still contain all three rows. `latest` is left free in every row \u2014 it is whatever the registry publishes next and asserting it would decay into a false failure."
     },
     {
       "id": "case-outdated-malformed-config-rejected",

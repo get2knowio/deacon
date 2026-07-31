@@ -1,0 +1,5 @@
+{
+	"name": "ConformanceOutdatedComposeExtendsNoFeatures",
+	"extends": "./compose-base.json",
+	"containerEnv": { "LAYER": "child" }
+}
