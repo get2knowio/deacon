@@ -93,7 +93,14 @@ const TODAY: &str = "2026-07-19";
 /// case showed them to be independent, which is the only thing a pairwise obligation asks.
 /// Closing them emptied `gap-pairwise-doctor`, and that record was deleted in the same
 /// change — the first operation to reach zero. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 208;
+/// **208 → 215** (Phase 5, `read-configuration`): the twelve pairs that stood between it and
+/// full pairwise coverage, closed by seven cases (a case fixes five dimensions at once, so one
+/// case can close several pairs). Six of the twelve involve `layering=cli-overlay`, which every
+/// prior overlay case reached through `--additional-features` — a flag that cannot express
+/// `features=none` x `cli-overlay` at all, since adding a Feature moves the scenario out of
+/// that value by construction. `--merge-config` is what makes those pairs reachable.
+/// `gap-pairwise-read-configuration` was deleted in the same change. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 215;
 
 #[test]
 fn real_registry_is_structurally_valid() {

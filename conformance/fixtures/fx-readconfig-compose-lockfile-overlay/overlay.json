@@ -1,0 +1,6 @@
+{
+ "name": "compose-lockfile-overlaid",
+ "containerEnv": {
+  "FROM_OVERLAY": "1"
+ }
+}

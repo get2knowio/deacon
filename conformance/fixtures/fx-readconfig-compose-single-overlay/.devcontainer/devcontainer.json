@@ -1,0 +1,9 @@
+{
+ "name": "compose-single-base",
+ "dockerComposeFile": "docker-compose.yml",
+ "service": "app",
+ "workspaceFolder": "/workspace",
+ "features": {
+  "./features/solo-tool": {}
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "compose-lockfile-merged",
+ "dockerComposeFile": "docker-compose.yml",
+ "service": "app",
+ "workspaceFolder": "/workspace",
+ "features": {
+  "ghcr.io/devcontainers/features/git:1.3.2": {}
+ },
+ "remoteUser": "root"
+}
