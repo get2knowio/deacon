@@ -258,9 +258,27 @@ fn test_outdated_text_strips_v_prefix() -> Result<(), Box<dyn Error>> {
 
     let stdout = String::from_utf8(output.stdout)?;
 
-    // Should show 18.0.0 without the v prefix
-    assert!(stdout.contains("18.0.0"));
-    assert!(!stdout.contains("v18"));
+    // The version COLUMNS strip the `v`; the identifier column does not, because it
+    // echoes the reference exactly as declared (#407) and the tag really is `v18.0.0`.
+    // Assert on the row's columns rather than on the whole line, which now contains the
+    // declared tag and would make a bare `!contains("v18")` fail for the wrong reason.
+    let row = stdout
+        .lines()
+        .find(|l| l.contains("features/node:v18.0.0"))
+        .expect("the node row must be present, keyed by its declared reference");
+    let cols: Vec<&str> = row.split('|').map(str::trim).collect();
+    assert_eq!(
+        cols[0], "ghcr.io/devcontainers/features/node:v18.0.0",
+        "identifier column echoes the declared reference verbatim"
+    );
+    for (i, c) in cols.iter().enumerate().skip(1) {
+        assert!(
+            !c.starts_with('v'),
+            "version column {i} must have the `v` prefix stripped, got {c:?}"
+        );
+    }
+    assert_eq!(cols[1], "18.0.0");
+    assert_eq!(cols[2], "18.0.0");
 
     Ok(())
 }

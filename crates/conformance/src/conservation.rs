@@ -411,6 +411,17 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      a fidelity loss on input both sides accept.",
     ),
     (
+        "bhv-outdated-reports-declared-reference-key",
+        "Whether the `outdated` report is keyed by the DECLARED Feature reference or by the \
+     canonical untagged id, and therefore whether two Features declared at different tags \
+     both appear. Unrecordable before #407: deacon collapsed them onto one key and every \
+     pre-migration fixture declared each Feature exactly once, so canonical and declared \
+     keys coincided and no unit could have distinguished them. Not a variant of \
+     bhv-outdated-reports-feature-versions, which claims each Feature's current/wanted/latest \
+     are correct; this claims WHICH entries exist at all, and its failure mode is a declared \
+     Feature silently absent from the report with a zero exit.",
+    ),
+    (
         "bhv-upgrade-cli-config-overlay-honored",
         "Whether `upgrade` regenerates its lockfile from the configuration AFTER the \
      command-line overlays apply. Unrecordable before #409 in either direction: deacon \

@@ -74,7 +74,7 @@ fn test_outdated_resolves_features_from_extends() -> Result<(), Box<dyn Error>> 
     );
 
     // Check node feature from extended config
-    let node = features.get("ghcr.io/devcontainers/features/node");
+    let node = features.get("ghcr.io/devcontainers/features/node:18");
     assert!(
         node.is_some(),
         "Feature 'node' from extended config should be present in outdated report"
@@ -84,7 +84,7 @@ fn test_outdated_resolves_features_from_extends() -> Result<(), Box<dyn Error>> 
     assert_eq!(node["wanted"], "18");
 
     // Check python feature from main config
-    let python = features.get("ghcr.io/devcontainers/features/python");
+    let python = features.get("ghcr.io/devcontainers/features/python:3.11");
     assert!(
         python.is_some(),
         "Feature 'python' from main config should be present in outdated report"
@@ -168,15 +168,15 @@ fn test_outdated_extends_chain_resolution() -> Result<(), Box<dyn Error>> {
 
     // Verify all three features
     assert!(
-        features.contains_key("ghcr.io/devcontainers/features/node"),
+        features.contains_key("ghcr.io/devcontainers/features/node:16"),
         "Feature 'node' from base should be present"
     );
     assert!(
-        features.contains_key("ghcr.io/devcontainers/features/python"),
+        features.contains_key("ghcr.io/devcontainers/features/python:3.10"),
         "Feature 'python' from intermediate should be present"
     );
     assert!(
-        features.contains_key("ghcr.io/devcontainers/features/docker-in-docker"),
+        features.contains_key("ghcr.io/devcontainers/features/docker-in-docker:2"),
         "Feature 'docker-in-docker' from main should be present"
     );
 
@@ -232,20 +232,37 @@ fn test_outdated_extends_feature_override() -> Result<(), Box<dyn Error>> {
 
     let features = parsed["features"].as_object().unwrap();
 
-    // Should only have one node feature entry
+    // BOTH node entries are reported, and that is what the merge actually produces.
+    //
+    // This assertion used to read "exactly one node feature (the override)", and it
+    // passed only because `outdated` keyed its report by the CANONICAL untagged id:
+    // `node:16` and `node:18` collapsed onto one key and the last one won, which LOOKED
+    // like override semantics. Keying by the declared reference (#407) removed the
+    // collapse and exposed the truth — `features` is a map, `node:16` and `node:18` are
+    // distinct keys, and `merge_two_configs` unions them. `upgrade` on the same chain
+    // tries to FETCH `node:16`, which shows the two-entry map is what feeds Feature
+    // resolution, not just reporting.
+    //
+    // Whether a child declaring a different tag of a Feature its base declares should
+    // OVERRIDE it is a real open question, tracked separately — it is a config-merge
+    // decision with blast radius through `up`/`build` Feature installation, not a
+    // reporting one. This test now records what the code does; it deliberately does not
+    // bless it.
     let node_features: Vec<_> = features.keys().filter(|k| k.contains("node")).collect();
     assert_eq!(
         node_features.len(),
-        1,
-        "Should have exactly one node feature (the override)"
+        2,
+        "both declared node tags are distinct map keys and both survive the merge; got {node_features:?}"
     );
 
-    // Verify it's the version from the main config (18, not 16)
-    let node = features.get("ghcr.io/devcontainers/features/node").unwrap();
-    assert_eq!(
-        node["current"], "18",
-        "Node version should be 18 (from main config override), not 16 (from base)"
-    );
+    let node18 = features
+        .get("ghcr.io/devcontainers/features/node:18")
+        .expect("the child's node:18 must be reported");
+    assert_eq!(node18["current"], "18");
+    let node16 = features
+        .get("ghcr.io/devcontainers/features/node:16")
+        .expect("the base's node:16 must be reported, not silently dropped");
+    assert_eq!(node16["current"], "16");
 
     Ok(())
 }
@@ -297,11 +314,11 @@ fn test_outdated_text_output_with_extends() -> Result<(), Box<dyn Error>> {
 
     // Verify both features appear in text output
     assert!(
-        text_output.contains("ghcr.io/devcontainers/features/node"),
+        text_output.contains("ghcr.io/devcontainers/features/node:18"),
         "Text output should include node feature from extends"
     );
     assert!(
-        text_output.contains("ghcr.io/devcontainers/features/python"),
+        text_output.contains("ghcr.io/devcontainers/features/python:3.11"),
         "Text output should include python feature from main config"
     );
 

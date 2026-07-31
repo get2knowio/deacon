@@ -12,7 +12,18 @@ use semver::Version;
 /// Per-feature version information reported by `outdated`
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FeatureVersionInfo {
-    /// Canonical fully-qualified feature id without version (e.g. "ghcr.io/devcontainers/features/node")
+    /// The feature identifier exactly as the configuration declared it, tag and
+    /// all (e.g. `"ghcr.io/devcontainers/features/node:1.6.1"`).
+    ///
+    /// This is the DECLARED reference, not the canonical untagged id, and the
+    /// distinction is load-bearing (#407). Two Features that differ only by tag
+    /// are distinct keys in `devcontainer.json` but collapse to one canonical
+    /// id, so reporting canonically dropped a declared Feature from the report
+    /// entirely — with a zero exit and no warning. It also matches the reference
+    /// CLI, which echoes the declared reference.
+    ///
+    /// The lockfile lookup still keys on the canonical id (see
+    /// [`derive_current_version`]); only what is REPORTED changed.
     pub id: String,
 
     /// Current version (lockfile or wanted fallback)

@@ -117,7 +117,13 @@ const TODAY: &str = "2026-07-19";
 /// use `jsonEquals` rather than `jsonSubset` deliberately: a subset assertion of
 /// `{"features": {}}` matches any features map and would have passed against the buggy
 /// output. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 229;
+/// **229 → 230** (#407 divergence 1): the boundary the old `outdated` implementation lost.
+/// A configuration declaring the same Feature at two different tags is two keys in
+/// `devcontainer.json` but one canonical id, and keying the report canonically collapsed them
+/// and dropped one silently with exit 0. No existing case could have caught it: every other
+/// fixture declares each Feature once, so canonical and declared keys coincide. No record was
+/// removed.
+const MIGRATED_CASE_COUNT: usize = 230;
 
 #[test]
 fn real_registry_is_structurally_valid() {

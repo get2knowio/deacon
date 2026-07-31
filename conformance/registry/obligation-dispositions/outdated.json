@@ -13,6 +13,14 @@
       ]
     },
     {
+      "id": "odp-bhv-a09673dc",
+      "obligation": "obl-bhv-a09673dc",
+      "disposition": "case",
+      "cases": [
+        "case-outdated-same-feature-two-tags"
+      ]
+    },
+    {
       "id": "odp-bhv-cd232792",
       "obligation": "obl-bhv-cd232792",
       "disposition": "case",

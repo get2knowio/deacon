@@ -37,10 +37,10 @@ fn test_outdated_text_rendering_shows_features_table() -> Result<(), Box<dyn Err
             "Feature | Current | Wanted | Latest",
         ))
         .stdout(predicate::str::contains(
-            "ghcr.io/devcontainers/features/node | 18 | 18 |",
+            "ghcr.io/devcontainers/features/node:18 | 18 | 18 |",
         ))
         .stdout(predicate::str::contains(
-            "ghcr.io/devcontainers/features/python | 3.11 | 3.11 |",
+            "ghcr.io/devcontainers/features/python:3.11 | 3.11 | 3.11 |",
         ));
 
     Ok(())

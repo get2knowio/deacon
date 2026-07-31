@@ -40,10 +40,10 @@ fn test_outdated_graceful_registry_failure() -> Result<(), Box<dyn Error>> {
             "Feature | Current | Wanted | Latest",
         ))
         .stdout(predicate::str::contains(
-            "ghcr.io/devcontainers/features/node",
+            "ghcr.io/devcontainers/features/node:18",
         ))
         .stdout(predicate::str::contains(
-            "ghcr.io/devcontainers/features/python",
+            "ghcr.io/devcontainers/features/python:3.11",
         ));
 
     Ok(())
@@ -82,7 +82,7 @@ fn test_outdated_graceful_registry_failure_json() -> Result<(), Box<dyn Error>> 
     let json_str = String::from_utf8(output.stdout)?;
     let parsed: serde_json::Value = serde_json::from_str(&json_str)?;
 
-    let node = &parsed["features"]["ghcr.io/devcontainers/features/node"];
+    let node = &parsed["features"]["ghcr.io/devcontainers/features/node:18"];
 
     // current and wanted should be present, latest should be null
     assert_eq!(node["current"], "18");
@@ -121,10 +121,10 @@ fn test_outdated_invalid_feature_reference() -> Result<(), Box<dyn Error>> {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains(
-            "ghcr.io/devcontainers/features/node",
+            "ghcr.io/devcontainers/features/node:18",
         ))
         .stdout(predicate::str::contains(
-            "ghcr.io/devcontainers/features/python",
+            "ghcr.io/devcontainers/features/python@sha256:deadbeef",
         ));
 
     Ok(())
@@ -165,7 +165,7 @@ fn test_outdated_missing_lockfile_fallback() -> Result<(), Box<dyn Error>> {
     let json_str = String::from_utf8(output.stdout)?;
     let parsed: serde_json::Value = serde_json::from_str(&json_str)?;
 
-    let node = &parsed["features"]["ghcr.io/devcontainers/features/node"];
+    let node = &parsed["features"]["ghcr.io/devcontainers/features/node:18"];
 
     // Both current and wanted should be "18" (fallback)
     assert_eq!(node["current"], "18");
