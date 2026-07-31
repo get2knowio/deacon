@@ -2362,11 +2362,35 @@ mod tests {
 
     // --- T018 loader -------------------------------------------------------
 
+    /// The committed root loads and every finding in it is anchored to a campaign that
+    /// actually ran.
+    ///
+    /// This used to assert the root was EMPTY, which was true only because no campaign had
+    /// ever produced a committable queue — the drift path wrote witness ids the loader
+    /// rejected, so `discovery check` failed on anything a shrink touched. With that fixed
+    /// the queue is populated, and an emptiness assertion would forbid the very thing this
+    /// feature exists to do. What is worth pinning is the invariant that survives
+    /// population: a finding is only as good as the run that witnessed it, so a witness
+    /// naming a campaign the history does not contain is a record nobody can re-examine.
     #[test]
-    fn the_committed_data_root_loads_and_is_empty() {
+    fn every_committed_finding_is_anchored_to_a_campaign_that_ran() {
         let data = DiscoveryData::load_default().expect("the committed discovery root must load");
-        assert!(data.findings.is_empty());
-        assert!(data.campaigns.is_empty());
+        for finding in &data.findings {
+            assert!(
+                !finding.witnesses.is_empty(),
+                "{} claims a difference with nothing to show for it",
+                finding.id
+            );
+            for witness in &finding.witnesses {
+                assert!(
+                    data.campaign(&witness.campaign_id).is_some(),
+                    "{}/{} names campaign {}, which is absent from campaigns.json",
+                    finding.id,
+                    witness.id,
+                    witness.campaign_id
+                );
+            }
+        }
     }
 
     #[test]
@@ -2432,18 +2456,43 @@ mod tests {
 
     #[test]
     fn the_rendered_empty_file_matches_the_committed_data_root() {
-        // The T003 seed files were hand-written; assert the writer reproduces them
-        // byte-for-byte, so the first campaign's write is a content diff and not a
-        // whole-file reformat.
-        let rendered = render_findings(&FindingsFile::default());
-        for name in ["findings.json", "campaigns.json"] {
-            let committed =
-                std::fs::read_to_string(crate::default_discovery_dir().join(name)).expect(name);
-            assert_eq!(
-                committed, rendered,
-                "{name} must match the canonical rendering"
-            );
-        }
+        // `findings.json` and `campaigns.json` are no longer empty — the first campaign
+        // whose output the loader accepted populated them — so the claim takes the same
+        // form it already took for `corpus.json` below: the committed file IS the canonical
+        // rendering of its own records. That is what keeps the NEXT campaign's write a
+        // content diff rather than a whole-file reformat, which is the property this test
+        // exists for, restated over content rather than over emptiness.
+        let discovery_dir = crate::default_discovery_dir();
+
+        let committed = std::fs::read_to_string(discovery_dir.join("findings.json"))
+            .expect("findings.json is readable");
+        let parsed: FindingsFile =
+            serde_json::from_str(&committed).expect("findings.json parses as strict JSON");
+        assert!(
+            !parsed.records.is_empty(),
+            "the queue is populated; an empty one would make this assertion vacuous rather \
+             than satisfied"
+        );
+        assert_eq!(
+            committed,
+            render_findings(&parsed),
+            "findings.json must match the canonical rendering"
+        );
+
+        let committed = std::fs::read_to_string(discovery_dir.join("campaigns.json"))
+            .expect("campaigns.json is readable");
+        let parsed: CampaignsFile =
+            serde_json::from_str(&committed).expect("campaigns.json parses as strict JSON");
+        assert!(
+            !parsed.records.is_empty(),
+            "a populated queue implies at least one campaign ran; findings with no campaign \
+             history would be unanchored"
+        );
+        assert_eq!(
+            committed,
+            render_campaigns(&parsed),
+            "campaigns.json must match the canonical rendering"
+        );
 
         // `corpus.json` is no longer empty (US7 T106 populated it with the 33 pinned
         // entries), so the claim is the same one in the form it can still take: the
