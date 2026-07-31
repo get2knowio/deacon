@@ -474,12 +474,16 @@ impl ResourceSpec {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct HostRequirements {
     /// Minimum CPU cores required (e.g., "2", "4.0")
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cpus: Option<ResourceSpec>,
     /// Minimum memory required (e.g., "4GB", "512MB")
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<ResourceSpec>,
     /// Minimum storage space required (e.g., "10GB", "500MB")
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub storage: Option<ResourceSpec>,
     /// GPU requirement. Supports boolean, string, or object forms per spec.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub gpu: Option<serde_json::Value>,
 }
 
@@ -584,34 +588,38 @@ pub struct DevContainerConfig {
     /// Human-readable name for the development container.
     ///
     /// Reference: [Container Configuration - name](https://containers.dev/implementors/json_reference/#name)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
     /// Container image to use.
     ///
     /// Reference: [Container Configuration - image](https://containers.dev/implementors/json_reference/#image)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
 
     /// Path to Dockerfile relative to devcontainer.json.
     ///
     /// Reference: [Container Configuration - dockerFile](https://containers.dev/implementors/json_reference/#dockerfile)
-    #[serde(rename = "dockerFile")]
+    #[serde(rename = "dockerFile", skip_serializing_if = "Option::is_none")]
     pub dockerfile: Option<String>,
 
     /// Build configuration when using a Dockerfile.
     ///
     /// Reference: [Container Configuration - build](https://containers.dev/implementors/json_reference/#build)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub build: Option<serde_json::Value>,
 
     /// Docker Compose file(s) to use for multi-container environments.
     ///
     /// Can be a single file path or an array of file paths.
     /// Reference: [Container Configuration - dockerComposeFile](https://containers.dev/implementors/json_reference/#docker-compose-file)
-    #[serde(rename = "dockerComposeFile")]
+    #[serde(rename = "dockerComposeFile", skip_serializing_if = "Option::is_none")]
     pub docker_compose_file: Option<serde_json::Value>,
 
     /// Name of the Docker Compose service to connect to as the primary development container.
     ///
     /// Reference: [Container Configuration - service](https://containers.dev/implementors/json_reference/#service)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
 
     /// Array of additional Docker Compose services to start alongside the primary service.
@@ -637,7 +645,7 @@ pub struct DevContainerConfig {
     /// default topological sort order while still respecting dependencies.
     ///
     /// Reference: [Feature Configuration - overrideFeatureInstallOrder](https://containers.dev/implementors/json_reference/#override-feature-install-order)
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub override_feature_install_order: Option<Vec<String>>,
 
     /// Tool-specific customizations.
@@ -654,12 +662,13 @@ pub struct DevContainerConfig {
     /// Path to workspace folder inside the container.
     ///
     /// Reference: [Workspace Configuration - workspaceFolder](https://containers.dev/implementors/json_reference/#workspace-folder)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_folder: Option<String>,
 
     /// Mount configuration for the workspace folder.
     ///
     /// Reference: [Container Configuration - workspaceMount](https://containers.dev/implementors/json_reference/#workspace-mount)
-    #[serde(rename = "workspaceMount")]
+    #[serde(rename = "workspaceMount", skip_serializing_if = "Option::is_none")]
     pub workspace_mount: Option<String>,
 
     /// Additional mount points for the container.
@@ -683,22 +692,28 @@ pub struct DevContainerConfig {
     /// User to run commands as inside the container.
     ///
     /// Reference: [User Configuration - containerUser](https://containers.dev/implementors/json_reference/#container-user)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub container_user: Option<String>,
 
     /// User to run commands as in the remote environment.
     ///
     /// Reference: [User Configuration - remoteUser](https://containers.dev/implementors/json_reference/#remote-user)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_user: Option<String>,
 
     /// Whether to update the remote user's UID/GID to match the host user.
     ///
     /// Reference: [User Configuration - updateRemoteUserUID](https://containers.dev/implementors/json_reference/#update-remote-user-uid)
-    #[serde(rename = "updateRemoteUserUID")]
+    #[serde(
+        rename = "updateRemoteUserUID",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub update_remote_user_uid: Option<bool>,
 
     /// Shell probing mode used to collect user environment variables.
     ///
     /// Reference: [userEnvProbe](https://containers.dev/implementors/json_reference/#general-devcontainerjson-properties)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub user_env_probe: Option<ContainerProbeMode>,
 
     /// Ports to forward from the container.
@@ -710,6 +725,7 @@ pub struct DevContainerConfig {
     /// Primary application port.
     ///
     /// Reference: [Port Configuration - appPort](https://containers.dev/implementors/json_reference/#app-port)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub app_port: Option<AppPort>,
 
     /// Attributes for specific ports.
@@ -723,6 +739,7 @@ pub struct DevContainerConfig {
     ///
     /// These attributes are applied to any forwarded ports that don't have
     /// specific entries in ports_attributes.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub other_ports_attributes: Option<PortAttributes>,
 
     /// Additional arguments to pass to docker run.
@@ -734,65 +751,74 @@ pub struct DevContainerConfig {
     /// Action to take when shutting down the container.
     ///
     /// Reference: [Container Configuration - shutdownAction](https://containers.dev/implementors/json_reference/#shutdown-action)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub shutdown_action: Option<String>,
 
     /// Whether to override the default command.
     ///
     /// Reference: [Container Configuration - overrideCommand](https://containers.dev/implementors/json_reference/#override-command)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub override_command: Option<bool>,
 
     /// Lifecycle phase that supporting tools should wait for before connecting.
     ///
     /// Reference: [Lifecycle Commands - waitFor](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_for: Option<String>,
 
     /// Command to run once after the container is created.
     ///
     /// Reference: [Lifecycle Commands - onCreateCommand](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub on_create_command: Option<serde_json::Value>,
 
     /// Command to run each time the container starts.
     ///
     /// Reference: [Lifecycle Commands - postStartCommand](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub post_start_command: Option<serde_json::Value>,
 
     /// Command to run after the container is created and connected.
     ///
     /// Reference: [Lifecycle Commands - postCreateCommand](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub post_create_command: Option<serde_json::Value>,
 
     /// Command to run each time a tool attaches to the container.
     ///
     /// Reference: [Lifecycle Commands - postAttachCommand](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub post_attach_command: Option<serde_json::Value>,
 
     /// Command to run before other commands when the container is created.
     ///
     /// Reference: [Lifecycle Commands - initializeCommand](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub initialize_command: Option<serde_json::Value>,
 
     /// Command to run when updating content (e.g., git pull).
     ///
     /// Reference: [Lifecycle Commands - updateContentCommand](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub update_content_command: Option<serde_json::Value>,
 
     /// Host requirements for the development environment.
     ///
     /// Specifies minimum system requirements (CPU, memory, storage) that the host
     /// must meet to successfully run the development container.
-    #[serde(rename = "hostRequirements")]
+    #[serde(rename = "hostRequirements", skip_serializing_if = "Option::is_none")]
     pub host_requirements: Option<HostRequirements>,
 
     /// Whether to run the container in privileged mode.
     ///
     /// Reference: [Container Configuration - privileged](https://containers.dev/implementors/json_reference/#privileged)
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub privileged: Option<bool>,
 
     /// Whether to use an init inside the container.
     ///
     /// Reference: [Container Configuration - init](https://containers.dev/implementors/json_reference/#general-properties)
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub init: Option<bool>,
 
     /// Linux capabilities to add to the container.
@@ -814,7 +840,7 @@ pub struct DevContainerConfig {
     /// this is metadata only — it does not contain secret *values*. Tools
     /// (IDE prompts, CI dashboards) read it to know which secrets to
     /// expect, and `read-configuration` must surface it intact (#72).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secrets: Option<std::collections::HashMap<String, SecretMetadata>>,
 
     /// Unknown / unmodeled fields, preserved verbatim for forward-compatibility.
@@ -5736,16 +5762,60 @@ mod tests {
     }
 
     #[test]
-    fn test_secrets_absent_serializes_as_null() {
-        // When `secrets` is absent from the source JSON, it stays None;
-        // `read-configuration` emits it as `null` so consumers can branch
-        // on presence (#72).
-        let json = r#"{ "image": "alpine:3.18" }"#;
-        let config: DevContainerConfig = serde_json::from_str(json).unwrap();
+    fn test_secrets_omitted_when_absent_and_emitted_when_authored() {
+        // A property the author did not write is OMITTED, matching the reference (#398).
+        //
+        // This used to assert the opposite — `secrets` serialized as `null` "so consumers
+        // can branch on presence (#72)". That rationale had it backwards: a consumer
+        // branching on presence is served by ABSENCE, and emitting `null` for every unset
+        // optional is what made deacon's output unable to distinguish an authored empty
+        // value from an omitted one. Surfacing an authored `secrets` intact, which is what
+        // #72 actually asked for, is the second half of this test and still holds.
+        let config: DevContainerConfig =
+            serde_json::from_str(r#"{ "image": "alpine:3.18" }"#).unwrap();
         assert!(config.secrets.is_none());
-
         let serialized = serde_json::to_value(&config).unwrap();
-        assert_eq!(serialized.get("secrets"), Some(&serde_json::Value::Null));
+        assert_eq!(
+            serialized.get("secrets"),
+            None,
+            "an unset optional must not be emitted at all: {serialized}"
+        );
+
+        let authored: DevContainerConfig = serde_json::from_str(
+            r#"{ "image": "alpine:3.18", "secrets": { "TOKEN": { "description": "a token" } } }"#,
+        )
+        .unwrap();
+        let serialized = serde_json::to_value(&authored).unwrap();
+        assert!(
+            serialized
+                .get("secrets")
+                .and_then(|s| s.get("TOKEN"))
+                .is_some(),
+            "an authored value must survive serialization (#72): {serialized}"
+        );
+    }
+
+    /// The distinction the whole change exists to restore (#398): an EMPTY value the author
+    /// wrote is not the same as a property they never wrote, and the serialized document
+    /// must say which one it is.
+    #[test]
+    fn an_authored_empty_optional_is_distinguishable_from_an_omitted_one() {
+        let omitted: DevContainerConfig =
+            serde_json::from_str(r#"{ "image": "alpine:3.18" }"#).unwrap();
+        let authored: DevContainerConfig =
+            serde_json::from_str(r#"{ "image": "alpine:3.18", "build": {} }"#).unwrap();
+
+        let omitted = serde_json::to_value(&omitted).unwrap();
+        let authored = serde_json::to_value(&authored).unwrap();
+
+        assert_eq!(omitted.get("build"), None);
+        assert_eq!(authored.get("build"), Some(&serde_json::json!({})));
+        assert_ne!(
+            omitted.get("build"),
+            authored.get("build"),
+            "before #398 both serialized as `null` and the two documents were identical \
+             here, which is exactly the fidelity loss the reference does not have"
+        );
     }
 }
 
