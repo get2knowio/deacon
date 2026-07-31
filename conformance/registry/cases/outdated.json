@@ -92,7 +92,7 @@
           "channel": "chan-stdout",
           "operation": "op-outdated",
           "assertion": {
-            "matches": "git \\| 1\\.3\\.0 \\| 1 \\|"
+            "matches": "git:1 \\| 1\\.3\\.0 \\| 1 \\|"
           }
         }
       ],
@@ -148,11 +148,11 @@
           "assertion": {
             "jsonSubset": {
               "features": {
-                "ghcr.io/devcontainers/features/git": {
+                "ghcr.io/devcontainers/features/git:1": {
                   "current": "1.3.0",
                   "wanted": "1"
                 },
-                "ghcr.io/devcontainers/features/node": {
+                "ghcr.io/devcontainers/features/node:1.6.1": {
                   "current": "1.6.1",
                   "wanted": "1.6.1"
                 }
@@ -207,7 +207,7 @@
           "channel": "chan-stdout",
           "operation": "op-outdated",
           "assertion": {
-            "matches": "git \\| 1\\.3\\.2 \\| 1\\.3\\.2 \\|[\\s\\S]*node \\| 1\\.6\\.1 \\| 1\\.6\\.1 \\|"
+            "matches": "git:1\\.3\\.2 \\| 1\\.3\\.2 \\| 1\\.3\\.2 \\|[\\s\\S]*node:1\\.6\\.1 \\| 1\\.6\\.1 \\| 1\\.6\\.1 \\|"
           }
         }
       ],
@@ -259,7 +259,7 @@
           "channel": "chan-stdout",
           "operation": "op-outdated",
           "assertion": {
-            "matches": "git \\| 1\\.3\\.2 \\| 1\\.3\\.2 \\|"
+            "matches": "git:1\\.3\\.2 \\| 1\\.3\\.2 \\| 1\\.3\\.2 \\|"
           }
         }
       ],
@@ -353,11 +353,11 @@
           "assertion": {
             "jsonSubset": {
               "features": {
-                "ghcr.io/devcontainers/features/git": {
+                "ghcr.io/devcontainers/features/git:1.3.2": {
                   "current": "1.3.2",
                   "wanted": "1.3.2"
                 },
-                "ghcr.io/devcontainers/features/node": {
+                "ghcr.io/devcontainers/features/node:1.6.1": {
                   "current": "1.6.1",
                   "wanted": "1.6.1"
                 }
@@ -412,7 +412,7 @@
           "channel": "chan-stdout",
           "operation": "op-outdated",
           "assertion": {
-            "matches": "git \\| 1\\.3\\.0 \\| 1 \\|"
+            "matches": "git:1 \\| 1\\.3\\.0 \\| 1 \\|"
           }
         }
       ],
@@ -558,7 +558,7 @@
           "channel": "chan-stdout",
           "operation": "op-outdated",
           "assertion": {
-            "matches": "ghcr\\.io/devcontainers/features/git\\s*\\|\\s*1\\.3\\.2\\s*\\|\\s*1\\.3\\.2\\s*\\|"
+            "matches": "ghcr\\.io/devcontainers/features/git:1\\.3\\.2\\s*\\|\\s*1\\.3\\.2\\s*\\|\\s*1\\.3\\.2\\s*\\|"
           }
         }
       ],
@@ -610,7 +610,7 @@
           "channel": "chan-stdout",
           "operation": "op-outdated",
           "assertion": {
-            "matches": "git \\| 1\\.3\\.0 \\| 1 \\|[\\s\\S]*node \\| 1\\.6\\.1 \\| 1\\.6\\.1 \\|"
+            "matches": "git:1 \\| 1\\.3\\.0 \\| 1 \\|[\\s\\S]*node:1\\.6\\.1 \\| 1\\.6\\.1 \\| 1\\.6\\.1 \\|"
           }
         }
       ],
@@ -662,7 +662,7 @@
           "channel": "chan-stdout",
           "operation": "op-outdated",
           "assertion": {
-            "matches": "git \\| 1\\.3\\.2 \\| 1\\.3\\.2 \\|[\\s\\S]*node \\| 1\\.6\\.1 \\| 1\\.6\\.1 \\|[\\s\\S]*common-utils \\| 2\\.5\\.2 \\| 2\\.5\\.2 \\|"
+            "matches": "git:1\\.3\\.2 \\| 1\\.3\\.2 \\| 1\\.3\\.2 \\|[\\s\\S]*node:1\\.6\\.1 \\| 1\\.6\\.1 \\| 1\\.6\\.1 \\|[\\s\\S]*common-utils:2\\.5\\.2 \\| 2\\.5\\.2 \\| 2\\.5\\.2 \\|"
           }
         }
       ],
@@ -805,6 +805,69 @@
       "notes": "The `reference-lenient` input class for `outdated` (FR-040): an input the reference accepts and deacon rejects, run through a subcommand other than `read-configuration` to show that deacon's type-strictness is a property of configuration loading rather than of one command's output path.\n\nThe divergence is deliberately observed on `chan-exit-code` rather than `chan-stdout`. An exit code is addressable as `chan-exit-code.exitCode`, so the tolerance above can actually be consumed; `chan-stdout`'s diverging path is the bare channel id by design (its evidence is arbitrary text, so a whole-channel tolerance would be a wildcard, FR-032), which is what made the previous `reference-lenient` case here unrunnable."
     },
     {
+      "id": "case-outdated-same-feature-two-tags",
+      "behaviors": [
+        "bhv-outdated-reports-declared-reference-key"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "boundary",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--output",
+            "json"
+          ],
+          "fixtures": [
+            "fx-outdated-same-feature-two-tags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-outdated",
+          "assertion": {
+            "jsonSubset": {
+              "features": {
+                "ghcr.io/devcontainers/features/node:1.6.1": {
+                  "current": "1.6.1",
+                  "wanted": "1.6.1"
+                },
+                "ghcr.io/devcontainers/features/node:2.1.0": {
+                  "current": "2.1.0",
+                  "wanted": "2.1.0"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Regression evidence for #407 divergence 1, and the boundary the old implementation lost. The configuration declares the SAME Feature at two different tags \u2014 distinct keys in `devcontainer.json`, but one canonical id. Keying the report canonically collapsed them and dropped the `1.6.1` entry silently, exit 0. Both entries are asserted, each with its own `current`/`wanted`, so a report that keeps only one fails no matter which one survives. `latest` is deliberately not asserted: it is whatever the registry publishes next, and deacon and the reference additionally disagree on its FORM here \u2014 deacon emits the raw tag `2.1`, the reference normalizes to `2.1.0` \u2014 which is tracked separately on #407 and is why this case is spec-expectation rather than a live differential."
+    },
+    {
       "id": "case-outdated-structured-report",
       "behaviors": [
         "bhv-outdated-reports-feature-versions"
@@ -849,7 +912,7 @@
           "assertion": {
             "jsonSubset": {
               "features": {
-                "ghcr.io/devcontainers/features/git": {
+                "ghcr.io/devcontainers/features/git:1.3.2": {
                   "current": "1.3.2",
                   "wanted": "1.3.2"
                 }

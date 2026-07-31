@@ -270,7 +270,6 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
     // Build results preserving original declaration order
     for (i, declared_ref) in declared_refs.iter().enumerate() {
         let declared_ref = declared_ref.as_str();
-        let canonical = core_outdated::canonical_feature_id(declared_ref);
         let wanted = core_outdated::compute_wanted_version(declared_ref);
         let current = core_outdated::derive_current_version(declared_ref, lockfile_opt.as_ref());
         let latest = latests.get(i).cloned().unwrap_or(None);
@@ -279,7 +278,13 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
         let latest_major = core_outdated::latest_major(&latest);
 
         results.push(core_outdated::FeatureVersionInfo {
-            id: canonical,
+            // The DECLARED reference, tag and all (#407). Reporting the
+            // CANONICAL untagged id collapsed two Features declared at
+            // different tags into one row and silently dropped the other.
+            // `canonical_feature_id` is still applied where it belongs —
+            // inside `derive_current_version`, to look the entry up in the
+            // lockfile, which IS keyed canonically.
+            id: declared_ref.to_string(),
             current: current.clone(),
             wanted: wanted.clone(),
             latest: latest.clone(),

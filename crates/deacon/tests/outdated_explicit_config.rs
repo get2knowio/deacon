@@ -40,10 +40,10 @@ fn test_outdated_respects_explicit_config_path() -> Result<(), Box<dyn Error>> {
             "Feature | Current | Wanted | Latest",
         ))
         .stdout(predicate::str::contains(
-            "ghcr.io/devcontainers/features/node | 18 | 18 |",
+            "ghcr.io/devcontainers/features/node:18 | 18 | 18 |",
         ))
         .stdout(predicate::str::contains(
-            "ghcr.io/devcontainers/features/python | 3.11 | 3.11 |",
+            "ghcr.io/devcontainers/features/python:3.11 | 3.11 | 3.11 |",
         ));
 
     Ok(())

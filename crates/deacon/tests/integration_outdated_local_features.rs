@@ -60,8 +60,8 @@ fn test_outdated_skips_local_features() -> Result<(), Box<dyn Error>> {
     assert_eq!(features.len(), 2, "Only OCI features should be in output");
 
     // Check that OCI features are present
-    assert!(features.contains_key("ghcr.io/devcontainers/features/node"));
-    assert!(features.contains_key("ghcr.io/devcontainers/features/python"));
+    assert!(features.contains_key("ghcr.io/devcontainers/features/node:18"));
+    assert!(features.contains_key("ghcr.io/devcontainers/features/python:3.11"));
 
     // Check that local/non-OCI features are NOT present
     assert!(!features.contains_key("./local-feature"));
@@ -107,7 +107,7 @@ fn test_outdated_text_skips_local_features() -> Result<(), Box<dyn Error>> {
     let stdout = String::from_utf8(output.stdout)?;
 
     // Check that only the OCI feature appears in output
-    assert!(stdout.contains("ghcr.io/devcontainers/features/node"));
+    assert!(stdout.contains("ghcr.io/devcontainers/features/node:18"));
 
     // Check that local features don't appear
     assert!(!stdout.contains("./feature-a"));

@@ -193,6 +193,16 @@
       ]
     },
     {
+      "id": "src-obs-outdated-declared-reference-key",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "`outdated --output json` against a configuration declaring `ghcr.io/devcontainers/features/node` at BOTH `:1.6.1` and `:2.1.0`, compared with `devcontainer outdated --output-format json`",
+      "summary": "Whether the report is keyed by the declared Feature reference or by the canonical untagged id, and therefore whether two Features differing only by tag both appear.",
+      "behaviors": [
+        "bhv-outdated-reports-declared-reference-key"
+      ]
+    },
+    {
       "id": "src-obs-outdated-extends-chain",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",

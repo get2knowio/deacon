@@ -44,7 +44,9 @@ fn test_outdated_json_output_format() -> Result<(), Box<dyn Error>> {
     let json_str = String::from_utf8(output.stdout)?;
     let parsed: Value = serde_json::from_str(&json_str)?;
 
-    // Verify structure: { features: { "canonical-id": { current, wanted, latest, ... } } }
+    // Verify structure: { features: { "<declared ref>": { current, wanted, latest, ... } } }
+    // Keyed by the DECLARED reference, tag included (#407) — not the canonical untagged id,
+    // which collapsed two tags of one Feature into a single entry and dropped the other.
     assert!(parsed.is_object());
     assert!(parsed.get("features").is_some());
 
@@ -52,7 +54,9 @@ fn test_outdated_json_output_format() -> Result<(), Box<dyn Error>> {
     assert_eq!(features.len(), 2);
 
     // Check node feature
-    let node = features.get("ghcr.io/devcontainers/features/node").unwrap();
+    let node = features
+        .get("ghcr.io/devcontainers/features/node:18")
+        .unwrap();
     assert_eq!(node["current"], "18");
     assert_eq!(node["wanted"], "18");
     // latest should be null since we forced OCI failure
@@ -60,7 +64,7 @@ fn test_outdated_json_output_format() -> Result<(), Box<dyn Error>> {
 
     // Check python feature
     let python = features
-        .get("ghcr.io/devcontainers/features/python")
+        .get("ghcr.io/devcontainers/features/python:3.11")
         .unwrap();
     assert_eq!(python["current"], "3.11");
     assert_eq!(python["wanted"], "3.11");
@@ -139,9 +143,9 @@ fn test_outdated_json_preserves_declaration_order() -> Result<(), Box<dyn Error>
     // Verify declaration order is preserved (zzz, aaa, mmm), not alphabetical (aaa, mmm, zzz)
     let keys: Vec<&String> = features.keys().collect();
     assert_eq!(keys.len(), 3);
-    assert_eq!(keys[0], "ghcr.io/devcontainers/features/zzz");
-    assert_eq!(keys[1], "ghcr.io/devcontainers/features/aaa");
-    assert_eq!(keys[2], "ghcr.io/devcontainers/features/mmm");
+    assert_eq!(keys[0], "ghcr.io/devcontainers/features/zzz:1");
+    assert_eq!(keys[1], "ghcr.io/devcontainers/features/aaa:1");
+    assert_eq!(keys[2], "ghcr.io/devcontainers/features/mmm:1");
 
     Ok(())
 }
@@ -178,7 +182,7 @@ fn test_outdated_json_schema_stability() -> Result<(), Box<dyn Error>> {
     let json_str = String::from_utf8(output.stdout)?;
     let parsed: Value = serde_json::from_str(&json_str)?;
 
-    let node = &parsed["features"]["ghcr.io/devcontainers/features/node"];
+    let node = &parsed["features"]["ghcr.io/devcontainers/features/node:18"];
 
     // Verify expected fields exist
     assert!(node.get("current").is_some());

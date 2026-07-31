@@ -255,6 +255,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-a09673dc",
+      "kind": "behavior",
+      "behavior": "bhv-outdated-reports-declared-reference-key",
+      "context": []
+    },
+    {
       "id": "obl-bhv-a21a70a1",
       "kind": "behavior",
       "behavior": "bhv-trust-host-hook-gate",

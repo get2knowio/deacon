@@ -12,6 +12,16 @@
       "notes": "The pinned reference does not resolve `extends`, so it reports an EMPTY table and exits 0 for a workspace whose only Feature is declared one link up \u2014 a silent miss, not an error (observed 2026-07-26, src-obs-outdated-extends-chain). Backed by wvr-outdated-extends-chain-features; the difference is only visible on stdout, so that is the compared channel. The divergence is characterized by wvr-outdated-extends-chain-features and covered by the spec-expectation case-outdated-extends-chain-features, NOT by a live differential \u2014 the differential form is structurally unavailable here. The difference lands on `chan-stdout`, whose diverging path is deliberately the bare channel id because its evidence is arbitrary text, so no `observablePath` can tolerate it (FR-032). A companion differential case existed carrying a tolerance scoped to `chan-stdout.table`, a path no observation produces: it could never be consumed, the divergence could never be allowed, and the case was red by construction rather than by any deacon behavior. It was deleted, losing no coverage \u2014 the spec-expectation twin shares its `scenarioContext` and every obligation it appeared in. Comparing structured output instead is closed by a second fact: the runner sends ONE argv to both sides, deacon spells the flag `--output json` where the pinned reference spells it `--output-format json`, and deacon rejects `--output-format` outright (#389)."
     },
     {
+      "id": "bhv-outdated-reports-declared-reference-key",
+      "area": "outdated",
+      "statement": "`outdated` keys each report entry by the Feature reference the configuration DECLARED, tag included, so two Features differing only by tag are reported as two entries.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "aligned",
+      "decision": "align-with-reference",
+      "notes": "Fixes #407 divergence 1. deacon previously keyed the report by the CANONICAL untagged id, which collapsed two Features declared at different tags into a single entry and silently dropped the other \u2014 exit 0, no warning, a user asking which Features are outdated told about one of two. The reference CLI echoes the declared reference, and after the fix the two agree byte-for-byte on this shape. The canonical id is still what the LOCKFILE is keyed by (`derive_current_version`); only the report changed. A residual difference remains on the same document and is NOT covered by this behavior: deacon reports `latest` as the raw registry tag (`2.1`) where the reference normalizes to full semver (`2.1.0`), tracked on #407."
+    },
+    {
       "id": "bhv-outdated-reports-feature-versions",
       "area": "outdated",
       "statement": "`outdated` reports each configured Feature's current, wanted, and latest version, and reports an empty result for a configuration that declares no Features.",
