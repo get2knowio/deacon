@@ -158,16 +158,25 @@ fn test_outdated_performance_with_lockfile() -> Result<(), Box<dyn Error>> {
     );
     fs::write(devcontainer_dir.join("devcontainer.json"), &config)?;
 
-    // Create lockfile with entries for all features
+    // Create lockfile with entries for all features.
+    //
+    // The digests must be well-formed 64-hex and `integrity` must be a string. This
+    // fixture previously used `"resolved": "…@sha256:abc1"` and `"integrity": null`,
+    // both of which fail lockfile validation — and the test still passed, because
+    // `outdated` swallowed the validation error and continued as though no lockfile
+    // existed (#406). So a test named `..._with_lockfile` was measuring the WITHOUT
+    // path and never parsed a lockfile at all. Now that the error surfaces, the
+    // fixture has to be valid for the test to measure what it claims.
     let mut lockfile_features = Vec::new();
     for i in 1..=15 {
+        // Deterministic, well-formed 64-hex digest, distinct per feature.
+        let digest = format!("{i:02}").repeat(32);
         lockfile_features.push(format!(
-            r#"    "ghcr.io/devcontainers/features/feature{}": {{
+            r#"    "ghcr.io/devcontainers/features/feature{i}": {{
       "version": "1.0.0",
-      "resolved": "ghcr.io/devcontainers/features/feature{}@sha256:abc{}",
-      "integrity": null
-    }}"#,
-            i, i, i
+      "resolved": "ghcr.io/devcontainers/features/feature{i}@sha256:{digest}",
+      "integrity": "sha256:{digest}"
+    }}"#
         ));
     }
     let lockfile = format!(

@@ -213,6 +213,16 @@
       ]
     },
     {
+      "id": "src-obs-outdated-malformed-lockfile",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "`outdated` against a workspace whose `devcontainer-lock.json` fails validation (`resolved` is not an OCI digest reference), compared with `devcontainer outdated` on the same workspace",
+      "summary": "Whether a present-but-invalid lockfile is an error or is silently ignored, given that the lockfile determines the reported `current` version.",
+      "behaviors": [
+        "bhv-outdated-malformed-lockfile-rejected"
+      ]
+    },
+    {
       "id": "src-obs-port-attributes-authored-keys",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",

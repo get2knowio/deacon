@@ -21,6 +21,14 @@
       ]
     },
     {
+      "id": "odp-bhv-c5b125aa",
+      "obligation": "obl-bhv-c5b125aa",
+      "disposition": "case",
+      "cases": [
+        "case-outdated-malformed-lockfile-rejected"
+      ]
+    },
+    {
       "id": "odp-bhv-cd232792",
       "obligation": "obl-bhv-cd232792",
       "disposition": "case",

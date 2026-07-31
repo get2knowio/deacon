@@ -716,6 +716,56 @@
       "notes": "FR-040 malformed class: the Feature set to report on comes from the configuration, so an unparseable document leaves nothing to resolve versions for."
     },
     {
+      "id": "case-outdated-malformed-lockfile-rejected",
+      "behaviors": [
+        "bhv-outdated-malformed-lockfile-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "outdated",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "malformed",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-outdated-malformed-lockfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-outdated",
+          "assertion": {
+            "contains": "devcontainer-lock.json"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Regression evidence for #406. The lockfile is present and fails validation (`resolved` is not an OCI digest reference). Before the fix the error was swallowed at `debug!` and the command reported `current` from the configuration instead of the lockfile, exit 0 \u2014 indistinguishable from having no lockfile at all, which is precisely the state it must NOT be confused with. Exit code and a stderr diagnostic naming the file are both asserted: exiting non-zero without saying which file is wrong leaves the user no better off than the silent version. Deliberately spec-expectation and waiver-backed rather than a live differential: the reference exits 0 on this same input because it never reads the lockfile for `outdated` at all (#407 divergence 3), so the difference is deacon consuming an input the reference does not, characterized by wvr-outdated-malformed-lockfile-rejected."
+    },
+    {
       "id": "case-outdated-no-features-empty-report",
       "behaviors": [
         "bhv-outdated-reports-feature-versions"

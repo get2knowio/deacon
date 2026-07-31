@@ -2,7 +2,7 @@
 // This implements configuration discovery, feature extraction (preserving order),
 // computing wanted/current/latest using core helpers, and rendering a text table.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use deacon_core::config::{ConfigLoader, DiscoveryResult};
 use deacon_core::errors::{ConfigError, DeaconError};
 use deacon_core::lockfile as core_lockfile;
@@ -159,15 +159,29 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
     }
     let features_map = features_map_opt.unwrap();
 
-    // Read lockfile if present
+    // Read the lockfile if present. `read_lockfile` already distinguishes the two
+    // states that matter: an ABSENT lockfile is `Ok(None)` and stays silent, because
+    // most workspaces have none. A PRESENT but unreadable or invalid one is an error
+    // and must stay one (#406).
+    //
+    // This used to swallow the error at `debug!` and continue as though no lockfile
+    // existed. That is not equivalent: the lockfile supplies `current` (see
+    // `derive_current_version`), so a typo in it silently changed the reported answer —
+    // a configuration declaring `git:1` reported `current: 1` instead of the locked
+    // `1.3.0`, exit 0, indistinguishable from having no lockfile at all. The validator's
+    // message is precise and was being discarded.
     let lockfile_path = core_lockfile::get_lockfile_path(&base_config_path);
-    let lockfile_opt = match core_lockfile::read_lockfile(&lockfile_path).await {
-        Ok(opt) => opt,
-        Err(e) => {
-            debug!(error = ?e, "Failed to read lockfile - proceeding without it");
-            None
-        }
-    };
+    let lockfile_opt = core_lockfile::read_lockfile(&lockfile_path)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to read lockfile at '{}'. \
+                 The file may be corrupted or contain invalid JSON. \
+                 Remove it to report versions from the configuration alone, \
+                 or run `deacon upgrade` to regenerate it.",
+                lockfile_path.display()
+            )
+        })?;
 
     // Prepare results vector
     let mut results: Vec<core_outdated::FeatureVersionInfo> = Vec::new();

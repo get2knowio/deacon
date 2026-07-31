@@ -123,7 +123,12 @@ const TODAY: &str = "2026-07-19";
 /// and dropped one silently with exit 0. No existing case could have caught it: every other
 /// fixture declares each Feature once, so canonical and declared keys coincide. No record was
 /// removed.
-const MIGRATED_CASE_COUNT: usize = 230;
+/// **230 → 231** (#406): a present-but-invalid `devcontainer-lock.json`. The failure was
+/// swallowed at `debug!` and the command continued as though the file were absent — which is
+/// exactly the state it must not be confused with, since the lockfile supplies the reported
+/// `current` version. Absent and invalid produced the same observation, so no existing case
+/// could have separated them. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 231;
 
 #[test]
 fn real_registry_is_structurally_valid() {

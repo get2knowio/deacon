@@ -1,0 +1,7 @@
+{
+	"name": "ConformanceOutdatedMalformedLockfile",
+	"image": "alpine:3.19",
+	"features": {
+		"ghcr.io/devcontainers/features/git:1": {}
+	}
+}
