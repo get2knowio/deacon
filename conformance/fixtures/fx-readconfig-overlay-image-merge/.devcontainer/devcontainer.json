@@ -1,0 +1,5 @@
+{
+	"name": "base-name",
+	"image": "alpine:3.19",
+	"remoteUser": "root"
+}

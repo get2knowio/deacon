@@ -1,0 +1,9 @@
+{
+ "name": "compose-depends-overlay",
+ "dockerComposeFile": "docker-compose.yml",
+ "service": "app",
+ "workspaceFolder": "/workspace",
+ "features": {
+  "./features/needs-base-tool": {}
+ }
+}

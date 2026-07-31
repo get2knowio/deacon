@@ -49,7 +49,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-040 boundary class: `doctor` diagnoses the HOST and the runtime, so a workspace with no devcontainer configuration is a perfectly ordinary input for it. Succeeding here is the behavior — an implementation that required a configuration would be useless in the situation the command exists for."
+      "notes": "FR-040 boundary class: `doctor` diagnoses the HOST and the runtime, so a workspace with no devcontainer configuration is a perfectly ordinary input for it. Succeeding here is the behavior \u2014 an implementation that required a configuration would be useless in the situation the command exists for."
     },
     {
       "id": "case-doctor-compose-workspace",
@@ -199,7 +199,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-005 for `doctor`, human rendering. The pinned reference has no `doctor` command at all, so this is evaluated against the declared expectation and the per-operation report states the substitution — the alternative would be an operation that looks under-tested for a reason nobody recorded."
+      "notes": "FR-005 for `doctor`, human rendering. The pinned reference has no `doctor` command at all, so this is evaluated against the declared expectation and the per-operation report states the substitution \u2014 the alternative would be an operation that looks under-tested for a reason nobody recorded."
     },
     {
       "id": "case-doctor-malformed-configuration-still-diagnoses",
@@ -250,6 +250,64 @@
         "tempdir": true
       },
       "notes": "FR-040 malformed class, with the outcome that is easy to get backwards: an unparseable configuration must NOT stop the diagnosis. `doctor` is the command a user reaches for when something is wrong, so refusing to run because the workspace is broken would remove it exactly when it is needed."
+    },
+    {
+      "id": "case-doctor-structured-compose-workspace",
+      "behaviors": [
+        "bhv-doctor-diagnostics-report"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "doctor",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-doctor",
+          "subcommand": "doctor",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--json"
+          ],
+          "fixtures": [
+            "fx-tier1-compose-array"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-doctor",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-doctor",
+          "assertion": {
+            "jsonSubset": {
+              "host_os": {
+                "name": "linux"
+              },
+              "config_discovery": {
+                "primary_config": ".devcontainer/devcontainer.json"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes the `config-source=compose` x `output-mode=structured` pair, the companion to the Dockerfile case above and the structured counterpart of `case-doctor-compose-workspace`. A Compose workspace carries `docker-compose.yml` and an override beside its `devcontainer.json`, and the diagnosis still reports the devcontainer configuration as primary rather than being drawn into resolving the Compose project. The assertion names `config_discovery.primary_config` rather than only `host_os`, which is the whole point of the pair: `host_os` would hold for any workspace and would leave the configuration-source dimension declared but unobserved \u2014 the `jsonSubset: {}` failure mode 024 found in committed cases. `cli_version` and every probed path are deliberately excluded: they move with the release and with the machine, and a case whose verdict moved with either would be measuring the environment rather than the behavior."
     },
     {
       "id": "case-doctor-structured-diagnostics",
@@ -307,6 +365,64 @@
       "notes": "The structured rendering of the same diagnosis. The assertion deliberately avoids `cli_version` and every probed path: those change with the release and with the machine, and a case whose verdict moved with either would be measuring the environment rather than the behavior."
     },
     {
+      "id": "case-doctor-structured-dockerfile-workspace",
+      "behaviors": [
+        "bhv-doctor-diagnostics-report"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "doctor",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-doctor",
+          "subcommand": "doctor",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--json"
+          ],
+          "fixtures": [
+            "fx-tier1-dockerfile-build"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-doctor",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-doctor",
+          "assertion": {
+            "jsonSubset": {
+              "host_os": {
+                "name": "linux"
+              },
+              "config_discovery": {
+                "primary_config": ".devcontainer/devcontainer.json"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes the `config-source=dockerfile` x `output-mode=structured` pair. `case-doctor-dockerfile-workspace` already shows the human rendering over a Dockerfile-based workspace and `case-doctor-structured-diagnostics` shows the structured rendering over an image-based one; neither shows that the two dimensions are independent, which is exactly what a pairwise obligation asks. `doctor` diagnoses the HOST and the runtime, so the structured document reports the configuration it FOUND without resolving the build \u2014 an implementation that resolved it would be slower and would fail where the diagnosis is most needed. The assertion names `config_discovery.primary_config` rather than only `host_os`, which is the whole point of the pair: `host_os` would hold for any workspace and would leave the configuration-source dimension declared but unobserved \u2014 the `jsonSubset: {}` failure mode 024 found in committed cases. `cli_version` and every probed path are deliberately excluded: they move with the release and with the machine, and a case whose verdict moved with either would be measuring the environment rather than the behavior."
+    },
+    {
       "id": "case-doctor-unsupported-values-still-diagnoses",
       "behaviors": [
         "bhv-doctor-diagnostics-report"
@@ -354,7 +470,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-040 unsupported class: a configuration naming values outside the schema's closed sets is likewise no obstacle to a host diagnosis. Same ground as the malformed case, different input class — both are here because `doctor`'s independence from the workspace configuration is the property worth pinning."
+      "notes": "FR-040 unsupported class: a configuration naming values outside the schema's closed sets is likewise no obstacle to a host diagnosis. Same ground as the malformed case, different input class \u2014 both are here because `doctor`'s independence from the workspace configuration is the property worth pinning."
     }
   ]
 }

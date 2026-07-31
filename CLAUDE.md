@@ -740,6 +740,19 @@ real, both were in committed cases, and only the injected run found them. **SC-0
 floor** — no channel below three covering cases — exists for the same reason: a channel
 carried by one case is one authoring mistake from unobserved.
 
+**Before authoring cases for a gap pair, check the value is REACHABLE for that operation.**
+A `gap` obligation asserts nothing was covered; it does not assert coverage is possible.
+`templates-apply` × `output-mode=structured` was counted as a gap for a subcommand that has
+no `--output-format`, writes nothing to stdout, and whose every case observes only
+exit-code / filesystem / file-content / stderr — eight uncoverable pairs sitting in the
+denominator as if they were work. The instrument for those is an **applicability rule**
+(`rule-` in `applicability.json`, with a `ground` naming the mechanism), NOT five cases that
+declare `structured` while observing the filesystem; that would satisfy the mechanical
+`scenarioContext` match and cover nothing, which is precisely why explicit dispositions
+outrank the evidence. The cheap way to find candidates: a `(dimension, value)` appearing in
+that operation's gap pairs and in **none** of its covered pairs. Most such values are
+genuinely uncovered and do want cases — but that list is where the unreachable ones hide.
+
 See `specs/024-deterministic-conformance-coverage/quickstart.md` for the add-a-case,
 find-what-is-missing, disposition-the-queue, and drift workflows.
 

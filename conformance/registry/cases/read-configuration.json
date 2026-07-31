@@ -1607,6 +1607,265 @@
       "notes": "FR-040 boundary class: every collection-valued field is present and EMPTY \u2014 `features`, `forwardPorts`, `containerEnv`, `remoteEnv`, `mounts`, `runArgs`, `customizations`. An empty collection is the edge of the accepted domain and is distinct from an omitted field, which is exactly the distinction the `null_preserving` rule exists to keep visible. STRENGTHENED BY #398, which is what made the strengthening possible: until deacon wrapped the eleven bare-collection properties in `Option`, it emitted these keys whether or not the author wrote them, `drop_absent_optional` elided them from deacon's side, and observing `chan-structured-output` here would have compared a document with the fields removed \u2014 the case would have been green while proving nothing about the very boundary it names. deacon now emits exactly the authored eight and the rule no longer touches this block, so the channel is added and the boundary is actually compared. Measured at oracle 0.87.0: both CLIs emit the same ten keys, with no tolerance."
     },
     {
+      "id": "case-readconfig-compose-depends-overlay",
+      "behaviors": [
+        "bhv-readconfig-feature-resolution-order"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-dependency-order",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration",
+            "--additional-features",
+            "{\"./features/base-tool\":{}}"
+          ],
+          "fixtures": [
+            "fx-readconfig-compose-depends-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "featuresConfiguration": {
+                "featureSets": [
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/base-tool"
+                    }
+                  },
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/needs-base-tool"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes `config-source=compose` x `features=multiple-dependency-order`. The Compose counterpart of `case-readconfig-overlay-dockerfile-depends`: the configuration declares only `needs-base-tool`, and `base-tool` \u2014 which it `installsAfter` \u2014 arrives ONLY through `--additional-features`, so dependency order has to be decided across the configuration and the overlay together. Positional for the same reason as its Dockerfile sibling. Its existence is the pairwise question stated plainly: the Dockerfile case proves nothing about whether a Compose-shaped configuration resolves the same way, which is why the pair was counted as a hole rather than assumed covered."
+    },
+    {
+      "id": "case-readconfig-compose-lockfile-merged",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile",
+        "sdim-layering": "image-metadata",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-compose-lockfile-merged"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "name": "compose-lockfile-merged",
+                "service": "app",
+                "workspaceFolder": "/workspace",
+                "remoteUser": "root",
+                "features": {
+                  "ghcr.io/devcontainers/features/git:1.3.2": {}
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes `features=lockfile` x `layering=image-metadata`, the last pair reachable only through the merged document. The merged configuration for a Compose project layers the pinned Feature's own metadata onto the authored configuration, and the assertion names the Compose identity (`service`, `workspaceFolder`) beside the Feature pin so a merge that resolved the Feature while losing the service binding could not pass. The Feature's contributed `customizations` are deliberately NOT asserted: they are the FEATURE's published content, they change when the pinned version's metadata changes upstream, and a case whose verdict moved with that would be measuring the Feature rather than the merge."
+    },
+    {
+      "id": "case-readconfig-compose-lockfile-overlay",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--merge-config",
+            "${WORKSPACE}/overlay.json"
+          ],
+          "fixtures": [
+            "fx-readconfig-compose-lockfile-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "name": "compose-lockfile-overlaid",
+                "service": "app",
+                "features": {
+                  "ghcr.io/devcontainers/features/git:1.3.2": {}
+                },
+                "containerEnv": {
+                  "FROM_OVERLAY": "1"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes three pairs at once \u2014 `config-source=compose` x `features=lockfile`, `config-source=compose` x `layering=cli-overlay`, and `features=lockfile` x `layering=cli-overlay`. A Compose project whose Feature is pinned by a committed `devcontainer-lock.json`, read through a merge-fragment overlay. The assertion keeps the pinned Feature id alongside the overlaid `name`: an overlay that silently dropped the Feature set while applying its own keys would pass an assertion naming only the overlaid value, and dropping Features is exactly the failure a Compose-plus-lockfile read invites. Reading reports the DECLARED Feature set \u2014 consuming the lockfile belongs to `upgrade` and `up` \u2014 so the case makes the combination reachable without claiming the read resolves the pin."
+    },
+    {
+      "id": "case-readconfig-compose-single-overlay",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "compose",
+        "sdim-container-state": "none",
+        "sdim-features": "single",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration",
+            "--merge-config",
+            "${WORKSPACE}/overlay.json"
+          ],
+          "fixtures": [
+            "fx-readconfig-compose-single-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "name": "compose-single-overlaid",
+                "service": "app"
+              },
+              "featuresConfiguration": {
+                "featureSets": [
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/solo-tool"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes `features=single` x `layering=cli-overlay`. One Feature, one merge fragment: the fragment renames the configuration and the single declared Feature survives untouched. The pairing matters because a merge fragment and a Feature set are the two things an overlay can most easily get wrong together \u2014 replacing the base wholesale would drop the Feature, and deep-merging the `features` map wrongly would duplicate it \u2014 so the assertion names both the overlaid `name` and the surviving Feature id rather than either alone."
+    },
+    {
       "id": "case-readconfig-decl-basic",
       "behaviors": [
         "bhv-readconfig-basic-parse",
@@ -1891,6 +2150,141 @@
         "tempdir": true
       },
       "notes": "FR-027 discovery: `.devcontainer.json` at the workspace ROOT is one of the three locations the spec names, and both CLIs find it. The differential is on the exit code alone, which is what 'the location was searched' actually shows; the resolved document is pinned by the sibling spec-expectation cases."
+    },
+    {
+      "id": "case-readconfig-dockerfile-declared-order-overlay",
+      "behaviors": [
+        "bhv-readconfig-feature-resolution-order"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration",
+            "--merge-config",
+            "${WORKSPACE}/overlay.json"
+          ],
+          "fixtures": [
+            "fx-readconfig-dockerfile-declared-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "featuresConfiguration": {
+                "featureSets": [
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/beta-tool"
+                    }
+                  },
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/alpha-tool"
+                    }
+                  }
+                ]
+              },
+              "configuration": {
+                "containerEnv": {
+                  "FROM_OVERLAY": "1"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes `config-source=dockerfile` x `features=multiple-declared-order` and `features=multiple-declared-order` x `layering=cli-overlay`. Two local Features with no dependency between them, so the order is DECLARED rather than derived: `overrideFeatureInstallOrder` names `beta-tool` first while the `features` map lists `alpha-tool` first, and the resolved order must follow the override. The array assertion is positional for the reason `case-readconfig-overlay-dockerfile-depends` records \u2014 a `jsonSubset` over an array matches without regard to order, so a non-positional assertion would pass for an implementation that ignored the override entirely. The overlay is a merge fragment rather than `--additional-features` so the declared order stays two Features long and the case measures ordering, not arrival."
+    },
+    {
+      "id": "case-readconfig-dockerfile-lockfile-extends",
+      "behaviors": [
+        "bhv-readconfig-extends-merged"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "lockfile",
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-dockerfile-lockfile-extends"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "name": "dockerfile-lockfile-child",
+                "build": {
+                  "dockerfile": "Dockerfile"
+                },
+                "features": {
+                  "ghcr.io/devcontainers/features/git:1.3.2": {}
+                },
+                "remoteUser": "root"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes `config-source=dockerfile` x `features=lockfile` and `features=lockfile` x `layering=extends-chain`. The child document carries nothing but `extends` and a `name`; the Dockerfile build, the version-pinned Feature and `remoteUser` all reach the merged result through the base. Asserting all four together is the point \u2014 a chain that resolved the child's own keys but dropped the base's `features` would satisfy an assertion naming only `name`, and that is the failure mode an extends chain carrying a pinned Feature actually has. `--include-merged-configuration` is required because a plain read ECHOES `extends` rather than resolving it, which is deacon's characterized behavior, not an accident of this fixture."
     },
     {
       "id": "case-readconfig-extends-compose-features",
@@ -2440,6 +2834,67 @@
         "tempdir": true
       },
       "notes": "The ORDER half of the triple case above, kept separate because it needs a different channel: `jsonSubset` over an array is an order-insensitive containment check by design, so pinning that the dependency arrives BEFORE its dependant has to be done on the raw document. A regex over stdout is the narrowest assertion that expresses 'this identifier precedes that one'."
+    },
+    {
+      "id": "case-readconfig-overlay-image-merge",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--merge-config",
+            "${WORKSPACE}/overlay.json"
+          ],
+          "fixtures": [
+            "fx-readconfig-overlay-image-merge"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "name": "overlay-name",
+                "image": "alpine:3.19",
+                "remoteUser": "root",
+                "containerEnv": {
+                  "FROM_OVERLAY": "1"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes the `config-source=image` x `layering=cli-overlay` and `features=none` x `layering=cli-overlay` pairs. Every command-line overlay the registry carried until now arrived as `--additional-features`, which cannot express either pair: adding a Feature moves the scenario out of `features=none` by construction. `--merge-config` is the overlay that layers a fragment WITHOUT touching the Feature set, so it is the only way these two combinations are reachable at all. The assertion pins all three merge outcomes in one match \u2014 `name` overridden by the fragment, `containerEnv` contributed by it, `remoteUser` surviving from the base \u2014 because an assertion on the overridden key alone would also pass for an implementation that REPLACED the base rather than merging onto it, which is what `--override-config` does and what this flag must not."
     },
     {
       "id": "case-readconfig-parity-exit",

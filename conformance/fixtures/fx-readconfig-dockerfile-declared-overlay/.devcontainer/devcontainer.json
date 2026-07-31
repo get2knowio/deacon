@@ -1,0 +1,14 @@
+{
+ "name": "dockerfile-declared-order",
+ "build": {
+  "dockerfile": "Dockerfile"
+ },
+ "features": {
+  "./features/alpha-tool": {},
+  "./features/beta-tool": {}
+ },
+ "overrideFeatureInstallOrder": [
+  "./features/beta-tool",
+  "./features/alpha-tool"
+ ]
+}
