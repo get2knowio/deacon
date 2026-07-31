@@ -234,14 +234,18 @@
     {
       "id": "odp-cmb-f1dbca6e",
       "obligation": "obl-cmb-f1dbca6e",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-structured-dockerfile-workspace"
+      ]
     },
     {
       "id": "odp-cmb-f783037b",
       "obligation": "obl-cmb-f783037b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-doctor"
+      "disposition": "case",
+      "cases": [
+        "case-doctor-structured-compose-workspace"
+      ]
     },
     {
       "id": "odp-cmb-f8bfac02",

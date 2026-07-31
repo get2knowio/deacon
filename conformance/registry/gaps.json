@@ -9,13 +9,6 @@
       "tracking": "specs/024-deterministic-conformance-coverage/tasks.md#phase-5-user-story-3---deterministic-coverage-of-the-shared-consumer-workflow-priority-p2"
     },
     {
-      "id": "gap-pairwise-doctor",
-      "kind": "coverage",
-      "behaviors": [],
-      "description": "Pairwise scenario combinations under the `doctor` operation that no declarative case covers. The count is deliberately NOT restated here: `coverage report` recomputes it on every run and writes it to `target/conformance/coverage-pairwise.md`, which is the authoritative live number; a count copied into this description drifts silently the moment a case lands and makes the record read as worse (or better) than reality. This is missing COVERAGE, not missing representation: the pairs are enumerated and valid, and no program, waiver, or argument stands behind the uncovered ones. Each authored case re-dispositions the pairs it covers from this gap to `case` (flip the `odp-cmb-*` records in the same commit, or the report keeps counting a hole that is filled); this record is deleted once none remain.",
-      "tracking": "specs/024-deterministic-conformance-coverage/tasks.md#phase-5-user-story-3---deterministic-coverage-of-the-shared-consumer-workflow-priority-p2"
-    },
-    {
       "id": "gap-pairwise-down",
       "kind": "coverage",
       "behaviors": [],
