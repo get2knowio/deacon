@@ -1684,7 +1684,7 @@
         "sdim-operation": "read-configuration",
         "sdim-config-source": "compose",
         "sdim-container-state": "none",
-        "sdim-features": "lockfile",
+        "sdim-features": "single",
         "sdim-layering": "image-metadata",
         "sdim-output-mode": "structured"
       },
@@ -1733,7 +1733,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Closes `features=lockfile` x `layering=image-metadata`, the last pair reachable only through the merged document. The merged configuration for a Compose project layers the pinned Feature's own metadata onto the authored configuration, and the assertion names the Compose identity (`service`, `workspaceFolder`) beside the Feature pin so a merge that resolved the Feature while losing the service binding could not pass. The Feature's contributed `customizations` are deliberately NOT asserted: they are the FEATURE's published content, they change when the pinned version's metadata changes upstream, and a case whose verdict moved with that would be measuring the Feature rather than the merge."
+      "notes": "Closes `features=lockfile` x `layering=image-metadata`, the last pair reachable only through the merged document. The merged configuration for a Compose project layers the pinned Feature's own metadata onto the authored configuration, and the assertion names the Compose identity (`service`, `workspaceFolder`) beside the Feature pin so a merge that resolved the Feature while losing the service binding could not pass. The Feature's contributed `customizations` are deliberately NOT asserted: they are the FEATURE's published content, they change when the pinned version's metadata changes upstream, and a case whose verdict moved with that would be measuring the Feature rather than the merge. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
     },
     {
       "id": "case-readconfig-compose-lockfile-overlay",
@@ -1745,7 +1745,7 @@
         "sdim-operation": "read-configuration",
         "sdim-config-source": "compose",
         "sdim-container-state": "none",
-        "sdim-features": "lockfile",
+        "sdim-features": "single",
         "sdim-layering": "cli-overlay",
         "sdim-output-mode": "structured"
       },
@@ -1796,7 +1796,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Closes three pairs at once \u2014 `config-source=compose` x `features=lockfile`, `config-source=compose` x `layering=cli-overlay`, and `features=lockfile` x `layering=cli-overlay`. A Compose project whose Feature is pinned by a committed `devcontainer-lock.json`, read through a merge-fragment overlay. The assertion keeps the pinned Feature id alongside the overlaid `name`: an overlay that silently dropped the Feature set while applying its own keys would pass an assertion naming only the overlaid value, and dropping Features is exactly the failure a Compose-plus-lockfile read invites. Reading reports the DECLARED Feature set \u2014 consuming the lockfile belongs to `upgrade` and `up` \u2014 so the case makes the combination reachable without claiming the read resolves the pin."
+      "notes": "Closes three pairs at once \u2014 `config-source=compose` x `features=lockfile`, `config-source=compose` x `layering=cli-overlay`, and `features=lockfile` x `layering=cli-overlay`. A Compose project whose Feature is pinned by a committed `devcontainer-lock.json`, read through a merge-fragment overlay. The assertion keeps the pinned Feature id alongside the overlaid `name`: an overlay that silently dropped the Feature set while applying its own keys would pass an assertion naming only the overlaid value, and dropping Features is exactly the failure a Compose-plus-lockfile read invites. Reading reports the DECLARED Feature set \u2014 consuming the lockfile belongs to `upgrade` and `up` \u2014 so the case makes the combination reachable without claiming the read resolves the pin. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
     },
     {
       "id": "case-readconfig-compose-single-overlay",
@@ -2234,7 +2234,7 @@
         "sdim-operation": "read-configuration",
         "sdim-config-source": "dockerfile",
         "sdim-container-state": "none",
-        "sdim-features": "lockfile",
+        "sdim-features": "single",
         "sdim-layering": "extends-chain",
         "sdim-output-mode": "structured"
       },
@@ -2284,7 +2284,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Closes `config-source=dockerfile` x `features=lockfile` and `features=lockfile` x `layering=extends-chain`. The child document carries nothing but `extends` and a `name`; the Dockerfile build, the version-pinned Feature and `remoteUser` all reach the merged result through the base. Asserting all four together is the point \u2014 a chain that resolved the child's own keys but dropped the base's `features` would satisfy an assertion naming only `name`, and that is the failure mode an extends chain carrying a pinned Feature actually has. `--include-merged-configuration` is required because a plain read ECHOES `extends` rather than resolving it, which is deacon's characterized behavior, not an accident of this fixture."
+      "notes": "Closes `config-source=dockerfile` x `features=lockfile` and `features=lockfile` x `layering=extends-chain`. The child document carries nothing but `extends` and a `name`; the Dockerfile build, the version-pinned Feature and `remoteUser` all reach the merged result through the base. Asserting all four together is the point \u2014 a chain that resolved the child's own keys but dropped the base's `features` would satisfy an assertion naming only `name`, and that is the failure mode an extends chain carrying a pinned Feature actually has. `--include-merged-configuration` is required because a plain read ECHOES `extends` rather than resolving it, which is deacon's characterized behavior, not an accident of this fixture. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
     },
     {
       "id": "case-readconfig-extends-compose-features",
@@ -2501,7 +2501,7 @@
         "sdim-operation": "read-configuration",
         "sdim-config-source": "image",
         "sdim-container-state": "none",
-        "sdim-features": "lockfile",
+        "sdim-features": "single",
         "sdim-layering": "single",
         "sdim-output-mode": "structured"
       },
@@ -2545,7 +2545,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "A workspace whose Features are already pinned by a committed `devcontainer-lock.json`. Reading the configuration reports the DECLARED Feature set \u2014 resolution against the lockfile belongs to `upgrade` and `up`, not to a configuration read \u2014 so this case is what makes the `lockfile` value reachable under `read-configuration` without claiming the read consumes it."
+      "notes": "A workspace whose Features are already pinned by a committed `devcontainer-lock.json`. Reading the configuration reports the DECLARED Feature set \u2014 resolution against the lockfile belongs to `upgrade` and `up`, not to a configuration read \u2014 so this case is what makes the `lockfile` value reachable under `read-configuration` without claiming the read consumes it. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
     },
     {
       "id": "case-readconfig-malformed-json-differential",
