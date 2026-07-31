@@ -29,7 +29,7 @@ fn test_mount_parsing_from_config() {
     });
 
     let config: DevContainerConfig = serde_json::from_value(config_json).unwrap();
-    let mounts = MountParser::parse_mounts_from_json(&config.mounts);
+    let mounts = MountParser::parse_mounts_from_json(config.mounts());
 
     assert_eq!(mounts.len(), 4);
 
@@ -93,7 +93,7 @@ fn test_mount_variable_substitution() {
     let context = SubstitutionContext::new(workspace_path).unwrap();
     let (substituted_config, _) = config.apply_variable_substitution(&context);
 
-    let mounts = MountParser::parse_mounts_from_json(&substituted_config.mounts);
+    let mounts = MountParser::parse_mounts_from_json(substituted_config.mounts());
     assert_eq!(mounts.len(), 2);
 
     // Verify first mount has variable substituted
@@ -288,8 +288,8 @@ async fn test_mount_from_fixture_config() {
     let config = ConfigLoader::load_from_path(fixture_path).await.unwrap();
 
     // Verify mount from fixture is parsed correctly
-    assert_eq!(config.mounts.len(), 1);
-    let mounts = MountParser::parse_mounts_from_json(&config.mounts);
+    assert_eq!(config.mounts().len(), 1);
+    let mounts = MountParser::parse_mounts_from_json(config.mounts());
     assert_eq!(mounts.len(), 1);
 
     let mount = &mounts[0];
@@ -332,7 +332,7 @@ async fn test_mount_with_variables_fixture() {
     let (substituted_config, _) = config.apply_variable_substitution(&context);
 
     // Parse mounts with variable substitution applied
-    let mounts = MountParser::parse_mounts_from_json(&substituted_config.mounts);
+    let mounts = MountParser::parse_mounts_from_json(substituted_config.mounts());
     assert_eq!(mounts.len(), 3);
 
     // Verify that variables were substituted

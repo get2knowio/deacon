@@ -19,7 +19,7 @@ fn test_compose_multiservice_project_creation() {
         name: Some("Multi-service Test".to_string()),
         docker_compose_file: Some(json!("docker-compose.yml")),
         service: Some("app".to_string()),
-        run_services: vec!["db".to_string(), "redis".to_string()],
+        run_services: Some(vec!["db".to_string(), "redis".to_string()]),
         workspace_folder: Some("/workspace".to_string()),
         ..Default::default()
     };
@@ -32,7 +32,7 @@ fn test_compose_multiservice_project_creation() {
         .expect("Should create compose project");
 
     assert_eq!(project.service, "app");
-    assert_eq!(project.run_services, vec!["db", "redis"]);
+    assert_eq!(project.run_services, ["db", "redis"]);
 
     let all_services = project.get_all_services();
     assert_eq!(all_services, vec!["app", "db", "redis"]);
@@ -43,16 +43,16 @@ fn test_compose_security_options_detection() {
     // Test that security options are detected and warnings would be emitted
     let config_with_security = DevContainerConfig {
         privileged: Some(true),
-        cap_add: vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
-        security_opt: vec!["seccomp=unconfined".to_string()],
+        cap_add: Some(vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()]),
+        security_opt: Some(vec!["seccomp=unconfined".to_string()]),
         ..Default::default()
     };
 
     // This would emit warnings in actual usage - we can't easily test log output in unit tests
     // but we can verify the config has security options that would trigger warnings
     assert!(config_with_security.privileged.unwrap_or(false));
-    assert!(!config_with_security.cap_add.is_empty());
-    assert!(!config_with_security.security_opt.is_empty());
+    assert!(!config_with_security.cap_add().is_empty());
+    assert!(!config_with_security.security_opt().is_empty());
 
     // Test that the warning function exists and doesn't panic
     ComposeCommand::warn_security_options_for_compose(&config_with_security);
@@ -76,10 +76,10 @@ async fn test_multiservice_fixture_loading() {
 
         assert!(config.uses_compose());
         assert_eq!(config.service.as_ref().unwrap(), "app");
-        assert_eq!(config.run_services, vec!["db", "redis"]);
+        assert_eq!(config.run_services(), ["db", "redis"]);
         assert!(config.privileged.unwrap_or(false));
-        assert!(!config.cap_add.is_empty());
-        assert!(!config.security_opt.is_empty());
+        assert!(!config.cap_add().is_empty());
+        assert!(!config.security_opt().is_empty());
 
         // Test that all services are included
         let all_services = config.get_all_services();
@@ -199,20 +199,20 @@ fn test_port_attributes_for_multiservice() {
     );
 
     let config = DevContainerConfig {
-        forward_ports: vec![
+        forward_ports: Some(vec![
             PortSpec::Number(3000),
             PortSpec::Number(5432),
             PortSpec::Number(6379),
-        ],
-        ports_attributes,
+        ]),
+        ports_attributes: Some(ports_attributes),
         ..Default::default()
     };
 
-    assert_eq!(config.forward_ports.len(), 3);
-    assert_eq!(config.ports_attributes.len(), 3);
-    assert!(config.ports_attributes.contains_key("3000"));
-    assert!(config.ports_attributes.contains_key("5432"));
-    assert!(config.ports_attributes.contains_key("6379"));
+    assert_eq!(config.forward_ports().len(), 3);
+    assert_eq!(config.ports_attributes().len(), 3);
+    assert!(config.ports_attributes().contains_key("3000"));
+    assert!(config.ports_attributes().contains_key("5432"));
+    assert!(config.ports_attributes().contains_key("6379"));
 }
 
 #[tokio::test]

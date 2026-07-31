@@ -65,7 +65,7 @@ fn create_test_devcontainer_config(compose_file: &str, service: &str) -> DevCont
         name: Some("Test Compose Container".to_string()),
         docker_compose_file: Some(json!(compose_file)),
         service: Some(service.to_string()),
-        run_services: vec!["db".to_string()],
+        run_services: Some(vec!["db".to_string()]),
         shutdown_action: Some("stopCompose".to_string()),
         workspace_folder: Some("/workspace".to_string()),
         ..Default::default()
@@ -86,7 +86,7 @@ fn test_compose_project_creation() {
         .expect("Failed to create compose project");
 
     assert_eq!(project.service, "app");
-    assert_eq!(project.run_services, vec!["db"]);
+    assert_eq!(project.run_services, ["db"]);
     assert_eq!(project.get_all_services(), vec!["app", "db"]);
     assert_eq!(project.compose_files.len(), 1);
     assert!(project.compose_files[0].ends_with("docker-compose.yml"));
@@ -114,7 +114,7 @@ services:
     let config = DevContainerConfig {
         docker_compose_file: Some(json!(["docker-compose.yml", "docker-compose.override.yml"])),
         service: Some("app".to_string()),
-        run_services: vec!["db".to_string(), "redis".to_string()],
+        run_services: Some(vec!["db".to_string(), "redis".to_string()]),
         ..Default::default()
     };
 
@@ -255,7 +255,7 @@ async fn test_config_loading_from_file() {
     );
     assert!(loaded_config.uses_compose());
     assert_eq!(loaded_config.service, Some("app".to_string()));
-    assert_eq!(loaded_config.run_services, vec!["db", "redis"]);
+    assert_eq!(loaded_config.run_services(), ["db", "redis"]);
     assert!(loaded_config.has_stop_compose_shutdown());
     assert_eq!(
         loaded_config.workspace_folder,
@@ -338,7 +338,7 @@ services:
     assert_eq!(config.name, Some("Full Stack Development".to_string()));
     assert!(config.uses_compose());
     assert_eq!(config.service, Some("app".to_string()));
-    assert_eq!(config.run_services, vec!["db", "redis"]);
+    assert_eq!(config.run_services(), ["db", "redis"]);
     assert_eq!(config.workspace_folder, Some("/workspace".to_string()));
     assert!(config.has_stop_compose_shutdown());
 
@@ -360,7 +360,7 @@ services:
         expected_project_name_for_config(&devcontainer_dir, &config)
     );
     assert_eq!(project.service, "app");
-    assert_eq!(project.run_services, vec!["db", "redis"]);
+    assert_eq!(project.run_services, ["db", "redis"]);
     assert_eq!(project.get_all_services(), vec!["app", "db", "redis"]);
 
     // Verify relative path resolution

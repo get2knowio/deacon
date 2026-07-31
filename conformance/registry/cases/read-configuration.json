@@ -1595,12 +1595,16 @@
         {
           "channel": "chan-exit-code",
           "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
         }
       ],
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-040 boundary class: every collection-valued field is present and EMPTY \u2014 `features`, `forwardPorts`, `containerEnv`, `remoteEnv`, `mounts`, `runArgs`, `customizations`. An empty collection is the edge of the accepted domain and is distinct from an omitted field, which is exactly the distinction the `null_preserving` rule exists to keep visible."
+      "notes": "FR-040 boundary class: every collection-valued field is present and EMPTY \u2014 `features`, `forwardPorts`, `containerEnv`, `remoteEnv`, `mounts`, `runArgs`, `customizations`. An empty collection is the edge of the accepted domain and is distinct from an omitted field, which is exactly the distinction the `null_preserving` rule exists to keep visible. STRENGTHENED BY #398, which is what made the strengthening possible: until deacon wrapped the eleven bare-collection properties in `Option`, it emitted these keys whether or not the author wrote them, `drop_absent_optional` elided them from deacon's side, and observing `chan-structured-output` here would have compared a document with the fields removed \u2014 the case would have been green while proving nothing about the very boundary it names. deacon now emits exactly the authored eight and the rule no longer touches this block, so the channel is added and the boundary is actually compared. Measured at oracle 0.87.0: both CLIs emit the same ten keys, with no tolerance."
     },
     {
       "id": "case-readconfig-decl-basic",
@@ -2201,7 +2205,7 @@
     {
       "id": "case-readconfig-null-empty-omitted",
       "behaviors": [
-        "bhv-readconfig-authored-empty-omitted-collapsed"
+        "bhv-readconfig-authored-null-omitted-collapsed"
       ],
       "context": [],
       "scenarioContext": {
@@ -2245,7 +2249,7 @@
                 "forwardPorts": "empty",
                 "containerEnv": "empty",
                 "image": "present",
-                "mounts": "empty"
+                "mounts": "omitted"
               }
             }
           }
@@ -2254,12 +2258,12 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-055, deacon's side pinned outright. Four states in one document: an authored `null`, two authored empty collections, a populated property, and `mounts`, which the configuration does NOT author \u2014 named in the fixture's `.conformance-observed-properties` sidecar, because nothing inside a document can name a property that is not in it. `mounts: \"empty\"` IS the defect: the reference reports `omitted` there, and deacon cannot tell an omission from an authored empty. Pinning deacon's side means the differential below cannot lose the direction if the difference ever stops reproducing."
+      "notes": "FR-055, deacon's side pinned outright. Four states in one document: an authored `null`, two authored empty collections, a populated property, and `mounts`, which the configuration does NOT author \u2014 named in the fixture's `.conformance-observed-properties` sidecar, because nothing inside a document can name a property that is not in it. UPDATED BY #398: the three collection states now match the reference \u2014 `forwardPorts` and `containerEnv` are emitted because the author wrote them, and the unauthored `mounts` reports `omitted` where it previously reported `empty`, which WAS the defect. `name: \"omitted\"` is what remains: the author wrote `null` and deacon cannot tell that from an omission. Pinning deacon's side means the differential below cannot lose the direction if the difference ever stops reproducing."
     },
     {
       "id": "case-readconfig-null-empty-omitted-differential",
       "behaviors": [
-        "bhv-readconfig-authored-empty-omitted-collapsed"
+        "bhv-readconfig-authored-null-omitted-collapsed"
       ],
       "context": [],
       "scenarioContext": {
@@ -2297,35 +2301,14 @@
       ],
       "allowedDifferences": [
         {
-          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
-          "context": [],
-          "observablePath": "chan-structured-output.configuration.forwardPorts",
-          "rationale": "The author wrote `\"forwardPorts\": []`. The reference echoes it; deacon emits the same `[]` it would emit unauthored, so the compensating normalization elides it.",
-          "waiverId": "wvr-readconfig-authored-empty-omitted"
-        },
-        {
-          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
-          "context": [],
-          "observablePath": "chan-structured-output.configuration.containerEnv",
-          "rationale": "The author wrote `\"containerEnv\": {}`. The reference echoes it; deacon emits the same `{}` it would emit unauthored, so the compensating normalization elides it.",
-          "waiverId": "wvr-readconfig-authored-empty-omitted"
-        },
-        {
-          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
-          "context": [],
-          "observablePath": "chan-structured-output.nullEmptyOmitted.mounts",
-          "rationale": "The author did NOT write `mounts`. The reference omits it and reports `omitted`; deacon serializes `[]` and reports `empty`. This is the direction of the defect stated positively, on a property chosen precisely because it is absent from the document.",
-          "waiverId": "wvr-readconfig-authored-empty-omitted"
-        },
-        {
-          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
+          "behavior": "bhv-readconfig-authored-null-omitted-collapsed",
           "context": [],
           "observablePath": "chan-structured-output.configuration.name",
           "rationale": "The author wrote `\"name\": null`. The reference echoes it; deacon now omits it, because #398 made unset optionals skip serialization and deacon holds an authored null and an omission in the same `None`. This is the null-vs-omitted half of the defect, which that fix deliberately left open \u2014 the boundary moved rather than closed: before the fix both CLIs emitted `null` here and agreed.",
           "waiverId": "wvr-readconfig-authored-empty-omitted"
         },
         {
-          "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
+          "behavior": "bhv-readconfig-authored-null-omitted-collapsed",
           "context": [],
           "observablePath": "chan-structured-output.nullEmptyOmitted.name",
           "rationale": "The same difference stated over the derived FR-055 field: the reference reports `null` for the authored null, deacon reports `omitted`. Named separately from `configuration.name` because the derived field is what makes the three-state distinction legible, and a tolerance on the raw key alone would leave the classification uncompared.",
@@ -2335,7 +2318,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "The cross-CLI half of FR-055, and the case the 024 US5 normalizer narrowing exists to make possible: while `drop_absent_optional` ran on both sides, all three states normalized to 'absent on both sides' and this comparison was green while proving nothing. Measured both ways \u2014 with the rule on both sides the tolerances below are reported STALE (the differences do not reproduce, which is the suppression stated as evidence); with it narrowed to deacon's `configuration`, they are consumed. Three tolerances, each naming one path and all backed by the same waiver: two where deacon elides an authored EMPTY collection it cannot distinguish from an omission, and one where deacon reports `empty` for a property the author never wrote. The authored NULL is deliberately NOT tolerated: `name` is not an enumerated absent-optional, so both CLIs report it as `null` and the two agree \u2014 which is the boundary of the defect, and a tolerance there would be stale."
+      "notes": "The cross-CLI half of FR-055, and the case the 024 US5 normalizer narrowing exists to make possible: while `drop_absent_optional` ran on both sides, all three states normalized to 'absent on both sides' and this comparison was green while proving nothing. UPDATED BY #398, which retired that rule on the `configuration` block entirely \u2014 nothing is compensated here now, so every tolerance below names a difference the two CLIs really produce. THREE TOLERANCES WERE DELETED, not narrowed: `configuration.forwardPorts`, `configuration.containerEnv` and `nullEmptyOmitted.mounts` stopped reproducing once deacon began emitting only what the author wrote, and a tolerance whose difference no longer reproduces is reported STALE by design. The two that remain both concern the authored `\"name\": null`, stated on the raw key and on the derived FR-055 classification, because a tolerance on the raw key alone would leave the classification uncompared."
     },
     {
       "id": "case-readconfig-overlay-dockerfile-depends",

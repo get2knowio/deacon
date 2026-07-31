@@ -110,7 +110,7 @@ pub(crate) async fn build_image_with_features(
 
     // Parse features from config
     let features_obj = config
-        .features
+        .features()
         .as_object()
         .ok_or_else(|| DeaconError::Runtime("Features must be an object".to_string()))?;
 
@@ -278,7 +278,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     );
 
     let features_obj = config
-        .features
+        .features()
         .as_object()
         .ok_or_else(|| DeaconError::Runtime("Features must be an object".to_string()))?;
     if features_obj.is_empty() {
@@ -488,7 +488,7 @@ async fn resolve_and_stage_features(
     config_path: &Path,
 ) -> Result<StagedFeatures> {
     let features_obj = config
-        .features
+        .features()
         .as_object()
         .ok_or_else(|| DeaconError::Runtime("Features must be an object".to_string()))?;
 

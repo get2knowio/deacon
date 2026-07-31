@@ -128,7 +128,7 @@ pub(crate) async fn resolve_features_ordered<C: HttpClient>(
     config_dir: &Path,
     fetcher: &FeatureFetcher<C>,
 ) -> Result<Vec<ResolvedFeature>> {
-    let features_map = match config.features.as_object() {
+    let features_map = match config.features().as_object() {
         Some(map) if !map.is_empty() => map,
         _ => return Ok(Vec::new()),
     };

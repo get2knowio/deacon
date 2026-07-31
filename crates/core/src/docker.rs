@@ -2303,7 +2303,7 @@ impl ContainerOps for CliRuntime {
         // fails with code 127. The feature/base image ENV already carries the
         // correctly-expanded value (Docker expanded `${PATH}` at image-build
         // time), so we leave the image's env to stand for these.
-        for (key, value) in &config.container_env {
+        for (key, value) in config.container_env() {
             if value.contains("${") {
                 debug!(
                     key = %key,
@@ -2405,16 +2405,16 @@ impl ContainerOps for CliRuntime {
         let effective_user = config
             .remote_user
             .clone()
-            .or_else(|| Self::find_user_arg(&config.run_args))
+            .or_else(|| Self::find_user_arg(config.run_args()))
             .or_else(|| config.container_user.clone());
         args.extend(Self::podman_create_args(
             self.is_podman(),
             effective_user.as_deref(),
-            &config.run_args,
+            config.run_args(),
         ));
 
         // Add runArgs if present
-        args.extend(config.run_args.iter().cloned());
+        args.extend(config.run_args().iter().cloned());
 
         // Add image
         let image = config.image.as_ref().ok_or_else(|| {
@@ -4494,7 +4494,7 @@ mod tests {
         // var (applied at exec/lifecycle time instead). Values with an
         // unexpanded `${...}` shell reference are skipped (image ENV stands).
         // Mirrors create_container.
-        for (key, value) in &config.container_env {
+        for (key, value) in config.container_env() {
             if value.contains("${") {
                 continue;
             }
@@ -4503,7 +4503,7 @@ mod tests {
         }
 
         // runArgs — must appear after Deacon flags and before image
-        args.extend(config.run_args.iter().cloned());
+        args.extend(config.run_args().iter().cloned());
 
         // Image
         if let Some(ref image) = config.image {
@@ -4517,7 +4517,7 @@ mod tests {
     fn test_run_args_forwarded_to_docker_create() {
         let config = DevContainerConfig {
             image: Some("ubuntu:22.04".to_string()),
-            run_args: vec!["--memory=2g".to_string(), "--cpus=2".to_string()],
+            run_args: Some(vec!["--memory=2g".to_string(), "--cpus=2".to_string()]),
             ..Default::default()
         };
         let args = build_create_args(&config);
@@ -4551,12 +4551,13 @@ mod tests {
             image: Some("debian:bookworm-slim".to_string()),
             ..Default::default()
         };
-        config.container_env.insert(
+        config.container_env.get_or_insert_default().insert(
             "PATH".to_string(),
             "/usr/local/share/nvm/current/bin:${PATH}".to_string(),
         );
         config
             .container_env
+            .get_or_insert_default()
             .insert("NODE_ENV".to_string(), "development".to_string());
 
         let args = build_create_args(&config);
@@ -4586,8 +4587,9 @@ mod tests {
         };
         config
             .container_env
+            .get_or_insert_default()
             .insert("NODE_ENV".to_string(), "development".to_string());
-        config.remote_env.insert(
+        config.remote_env.get_or_insert_default().insert(
             "PATH".to_string(),
             Some("${containerEnv:PATH}:/custom/bin".to_string()),
         );
@@ -4706,10 +4708,10 @@ mod tests {
 
         let config = DevContainerConfig {
             // forwardPorts are forwarding hints — never statically published.
-            forward_ports: vec![
+            forward_ports: Some(vec![
                 PortSpec::Number(3000),
                 PortSpec::String("9000:90".to_string()),
-            ],
+            ]),
             app_port: Some(AppPort::Single(PortSpec::Number(8080))),
             ..Default::default()
         };
@@ -4726,7 +4728,7 @@ mod tests {
         use crate::config::PortSpec;
 
         let config = DevContainerConfig {
-            forward_ports: vec![PortSpec::Number(3000), PortSpec::Number(8080)],
+            forward_ports: Some(vec![PortSpec::Number(3000), PortSpec::Number(8080)]),
             ..Default::default()
         };
         // forwardPorts alone publish nothing.

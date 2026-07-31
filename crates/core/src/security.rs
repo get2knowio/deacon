@@ -93,8 +93,8 @@ impl SecurityOptions {
 
         // Start with configuration options (normalized)
         result.privileged = config.privileged.unwrap_or(false);
-        result.cap_add = Self::normalize_capabilities(&config.cap_add);
-        result.security_opt = Self::normalize_security_opts(&config.security_opt);
+        result.cap_add = Self::normalize_capabilities(config.cap_add());
+        result.security_opt = Self::normalize_security_opts(config.security_opt());
 
         // Track sources for conflict detection
         let mut privileged_sources = Vec::new();
@@ -352,8 +352,8 @@ mod tests {
     fn test_merge_config_only() {
         let config = DevContainerConfig {
             privileged: Some(true),
-            cap_add: vec!["SYS_PTRACE".to_string(), "net_admin".to_string()], // Test normalization
-            security_opt: vec!["seccomp=unconfined".to_string()],
+            cap_add: Some(vec!["SYS_PTRACE".to_string(), "net_admin".to_string()]), // Test normalization
+            security_opt: Some(vec!["seccomp=unconfined".to_string()]),
             ..Default::default()
         };
 
@@ -387,7 +387,7 @@ mod tests {
     #[test]
     fn test_merge_duplicate_capabilities() {
         let config = DevContainerConfig {
-            cap_add: vec!["SYS_PTRACE".to_string()],
+            cap_add: Some(vec!["SYS_PTRACE".to_string()]),
             ..Default::default()
         };
 
@@ -438,11 +438,11 @@ mod tests {
     fn test_capability_normalization() {
         // Test case-insensitive deduplication and normalization
         let config = DevContainerConfig {
-            cap_add: vec![
+            cap_add: Some(vec![
                 "net_admin".to_string(),
                 "NET_ADMIN".to_string(),
                 " sys_ptrace ".to_string(),
-            ],
+            ]),
             ..Default::default()
         };
 
@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn test_security_opt_conflict() {
         let config = DevContainerConfig {
-            security_opt: vec!["seccomp=unconfined".to_string()],
+            security_opt: Some(vec!["seccomp=unconfined".to_string()]),
             ..Default::default()
         };
 

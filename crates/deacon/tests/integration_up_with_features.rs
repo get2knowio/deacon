@@ -28,10 +28,10 @@ fn test_enriched_config_serializes_feature_metadata() {
     let base_config = DevContainerConfig {
         name: Some("test-project".to_string()),
         image: Some("alpine:3.18".to_string()),
-        features: serde_json::json!({
+        features: Some(serde_json::json!({
             "ghcr.io/devcontainers/features/node:1": {"version": "20"},
             "ghcr.io/devcontainers/features/python:1": {}
-        }),
+        })),
         ..Default::default()
     };
 
@@ -132,11 +132,11 @@ fn test_all_features_have_metadata_entries_even_if_empty() {
     let base_config = DevContainerConfig {
         name: Some("minimal-test".to_string()),
         image: Some("alpine:3.18".to_string()),
-        features: serde_json::json!({
+        features: Some(serde_json::json!({
             "ghcr.io/devcontainers/features/git:1": {},
             "ghcr.io/devcontainers/features/github-cli:1": {},
             "./local-feature": {}
-        }),
+        })),
         ..Default::default()
     };
 
@@ -311,11 +311,11 @@ fn test_feature_metadata_preserves_declaration_order() {
         name: Some("ordering-test".to_string()),
         image: Some("alpine:3.18".to_string()),
         // Declaration order: zebra, apple, mango
-        features: serde_json::json!({
+        features: Some(serde_json::json!({
             "zebra-feature": {},
             "apple-feature": {},
             "mango-feature": {}
-        }),
+        })),
         ..Default::default()
     };
 

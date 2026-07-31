@@ -471,6 +471,7 @@ mod tests {
             // Modify the container environment for testing
             config
                 .container_env
+                .get_or_insert_default()
                 .insert("PLUGIN_TEST".to_string(), self.test_value.clone());
             Ok(())
         }
@@ -552,24 +553,24 @@ mod tests {
             build: None,
             docker_compose_file: None,
             service: None,
-            run_services: Vec::new(),
-            features: serde_json::Value::Object(Default::default()),
+            run_services: Some(Vec::new()),
+            features: Some(serde_json::Value::Object(Default::default())),
             override_feature_install_order: None,
-            customizations: serde_json::Value::Object(Default::default()),
+            customizations: Some(serde_json::Value::Object(Default::default())),
             workspace_folder: None,
             workspace_mount: None,
-            mounts: Vec::new(),
-            container_env: std::collections::HashMap::new(),
-            remote_env: std::collections::HashMap::new(),
+            mounts: Some(Vec::new()),
+            container_env: Some(std::collections::HashMap::new()),
+            remote_env: Some(std::collections::HashMap::new()),
             container_user: None,
             remote_user: None,
             update_remote_user_uid: None,
             user_env_probe: None,
-            forward_ports: Vec::new(),
+            forward_ports: Some(Vec::new()),
             app_port: None,
-            ports_attributes: std::collections::HashMap::new(),
+            ports_attributes: Some(std::collections::HashMap::new()),
             other_ports_attributes: None,
-            run_args: Vec::new(),
+            run_args: Some(Vec::new()),
             shutdown_action: None,
             override_command: None,
             wait_for: None,
@@ -582,8 +583,8 @@ mod tests {
             host_requirements: None,
             privileged: None,
             init: None,
-            cap_add: Vec::new(),
-            security_opt: Vec::new(),
+            cap_add: Some(Vec::new()),
+            security_opt: Some(Vec::new()),
             secrets: None,
             extra: Default::default(),
         };
@@ -591,7 +592,7 @@ mod tests {
         PluginManager::augment_config(&mut config).unwrap();
 
         assert_eq!(
-            config.container_env.get("PLUGIN_TEST"),
+            config.container_env().get("PLUGIN_TEST"),
             Some(&"test_value".to_string())
         );
 
@@ -631,24 +632,24 @@ mod tests {
             build: None,
             docker_compose_file: None,
             service: None,
-            run_services: Vec::new(),
-            features: serde_json::Value::Object(Default::default()),
+            run_services: Some(Vec::new()),
+            features: Some(serde_json::Value::Object(Default::default())),
             override_feature_install_order: None,
-            customizations: serde_json::Value::Object(Default::default()),
+            customizations: Some(serde_json::Value::Object(Default::default())),
             workspace_folder: None,
             workspace_mount: None,
-            mounts: Vec::new(),
-            container_env: std::collections::HashMap::new(),
-            remote_env: std::collections::HashMap::new(),
+            mounts: Some(Vec::new()),
+            container_env: Some(std::collections::HashMap::new()),
+            remote_env: Some(std::collections::HashMap::new()),
             container_user: None,
             remote_user: None,
             update_remote_user_uid: None,
             user_env_probe: None,
-            forward_ports: Vec::new(),
+            forward_ports: Some(Vec::new()),
             app_port: None,
-            ports_attributes: std::collections::HashMap::new(),
+            ports_attributes: Some(std::collections::HashMap::new()),
             other_ports_attributes: None,
-            run_args: Vec::new(),
+            run_args: Some(Vec::new()),
             shutdown_action: None,
             override_command: None,
             wait_for: None,
@@ -661,8 +662,8 @@ mod tests {
             host_requirements: None,
             privileged: None,
             init: None,
-            cap_add: Vec::new(),
-            security_opt: Vec::new(),
+            cap_add: Some(Vec::new()),
+            security_opt: Some(Vec::new()),
             secrets: None,
             extra: Default::default(),
         };

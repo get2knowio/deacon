@@ -374,9 +374,9 @@ fn test_enriched_differs_from_base_only_by_enrichment() {
         name: Some("test-project".to_string()),
         image: Some("node:18".to_string()),
         remote_user: Some("developer".to_string()),
-        features: serde_json::json!({
+        features: Some(serde_json::json!({
             "ghcr.io/devcontainers/features/node:1": {"version": "20"}
-        }),
+        })),
         ..Default::default()
     };
 
@@ -425,9 +425,9 @@ fn test_enriched_schema_compliance() {
     let base = DevContainerConfig {
         name: Some("schema-test".to_string()),
         image: Some("alpine:3.18".to_string()),
-        features: serde_json::json!({
+        features: Some(serde_json::json!({
             "ghcr.io/devcontainers/features/git:1": {}
-        }),
+        })),
         ..Default::default()
     };
 
@@ -487,11 +487,11 @@ fn test_field_ordering_consistency() {
     let config = DevContainerConfig {
         name: Some("ordering-test".to_string()),
         image: Some("node:18".to_string()),
-        features: serde_json::json!({
+        features: Some(serde_json::json!({
             "feature-a": {},
             "feature-b": {},
             "feature-c": {}
-        }),
+        })),
         ..Default::default()
     };
 
@@ -578,12 +578,12 @@ fn test_enriched_merged_configuration_preserves_feature_declaration_order() {
     let config = DevContainerConfig {
         name: Some("order-test".to_string()),
         image: Some("node:18".to_string()),
-        features: serde_json::json!({
+        features: Some(serde_json::json!({
             "ghcr.io/devcontainers/features/python:1": {"version": "3.11"},
             "ghcr.io/devcontainers/features/node:1": {"version": "20"},
             "ghcr.io/devcontainers/features/go:1": {},
             "ghcr.io/devcontainers/features/rust:1": true
-        }),
+        })),
         ..Default::default()
     };
 

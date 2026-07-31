@@ -402,13 +402,25 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      independent claims.",
     ),
     (
-        "bhv-readconfig-authored-empty-omitted-collapsed",
+        "bhv-readconfig-authored-null-omitted-collapsed",
         "Whether a resolved-configuration result distinguishes an authored `null`, an authored \
      empty collection, and an OMITTED property. Structurally unrecordable before 024 US5: \
      `drop_absent_optional` ran on both sides, so all three states normalized to the same \
      observation and no pre-migration unit could have reported a difference. Not a variant \
      of the readconfig strictness family — those are REJECTIONS of malformed input; this is \
      a fidelity loss on input both sides accept.",
+    ),
+    (
+        "bhv-readconfig-merged-computed-empties-omitted",
+        "Which computed-empty properties the reference synthesizes into `mergedConfiguration` for a \
+     configuration that authors none. Unobservable before #398 in either direction: deacon emitted \
+     its own empties there, `drop_absent_optional` ran on both sides of that block, and the two \
+     documents normalized to the same observation, so no pre-migration unit could have reported a \
+     difference. Not a variant of `bhv-readconfig-authored-null-omitted-collapsed`: that one is \
+     about ECHOING what the author wrote in `configuration`, where an empty value is authorship \
+     information; this is about SYNTHESIZING defaults in `mergedConfiguration`, where it is not. \
+     An implementation could echo faithfully and still synthesize differently, or the reverse, so \
+     the two are independent claims.",
     ),
 ];
 

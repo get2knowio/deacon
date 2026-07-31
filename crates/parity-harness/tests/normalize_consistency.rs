@@ -60,16 +60,25 @@ struct Row {
 
 fn table() -> Vec<Row> {
     vec![
-        // Equal after the named rules: the reference's wrapper is unwrapped and an
-        // ENUMERATED absent optional (`customizations: {}`) is elided by
-        // `drop_absent_optional`; nothing else differs. (023 T062 — `prune` used to
-        // drop ANY empty value and `configFilePath` too; both are now compared unless
-        // the key is on the enumerated list.)
+        // Equal after the named rules: the reference's wrapper is unwrapped and a
+        // `${devcontainerId}` digest is tokenized by `devcontainer_id_token`; nothing
+        // else differs. (023 T062 — `prune` used to drop ANY empty value and
+        // `configFilePath` too; both are compared now.)
         Row {
             name: "equal-after-named-rules",
             deacon: r#"{ "name": "demo" }"#,
-            reference: r#"{ "configuration": { "name": "demo", "customizations": {} } }"#,
+            reference: r#"{ "configuration": { "name": "demo" } }"#,
             expected: Verdict::Equal,
+        },
+        // #398: an authored empty on the `configuration` block is now COMPARED. The
+        // reference echoes what the author wrote, and deacon does too — so a side that
+        // emits `customizations: {}` while the other omits it is a real difference, not
+        // a serializer artifact to be normalized away.
+        Row {
+            name: "authored-empty-is-compared",
+            deacon: r#"{ "name": "demo" }"#,
+            reference: r#"{ "configuration": { "name": "demo", "customizations": {} } }"#,
+            expected: Verdict::Divergent(vec![DiffKind::RefOnly]),
         },
         // An UNLISTED empty value is now compared rather than silently dropped — the
         // regression `prune` made invisible (023 T062).
@@ -170,13 +179,18 @@ fn config_verdict_is_identical_across_caller_contexts() {
 
 #[test]
 fn merged_config_agrees_with_config_on_the_shared_block() {
-    // For any configuration body, the block extracted by `merged_config` from a
-    // `{mergedConfiguration: body}` document must normalize IDENTICALLY to the body
-    // unwrapped by `config` from a `{configuration: body}` document — the same named
-    // rule chain, the same dynamic-id tokenization. Reusing the equivalence-table
-    // bodies keeps the two entry points provably in lockstep on the shared block.
+    // For a configuration body carrying no enumerated ABSENT optional, the block
+    // extracted by `merged_config` from a `{mergedConfiguration: body}` document must
+    // normalize IDENTICALLY to the body unwrapped by `config` from a
+    // `{configuration: body}` document — the same named rule chain, the same dynamic-id
+    // tokenization.
+    //
+    // Bodies that DO carry one are excluded and covered by
+    // `the_absent_optional_drop_no_longer_touches_the_configuration_block` instead: since
+    // #398 `drop_absent_optional` runs on `mergedConfiguration` alone, so demanding
+    // identical output there would be demanding the narrowing be undone.
     let bodies = [
-        json!({ "name": "demo", "customizations": {}, "image": null, "unlisted": {} }),
+        json!({ "name": "demo", "unlisted": {} }),
         json!({ "name": "demo", "remoteUser": "vscode" }),
         json!({ "mounts": ["vol_0123456789ab_data"], "name": "${devcontainerId}" }),
         json!({ "forwardPorts": [3000, 8080], "runArgs": ["--rm"] }),
@@ -349,51 +363,76 @@ fn every_config_entry_point_routes_through_one_rule_chain() {
     )["configuration"]
         .clone();
 
-    assert_eq!(
-        via_config, via_merged,
-        "the two legacy entry points must share one definition of equivalence"
+    let merged_wrapped = Value::Object(
+        [("mergedConfiguration".to_string(), body.clone())]
+            .into_iter()
+            .collect(),
     );
+    let via_merged_rules = normalize::config_document_rules(
+        &merged_wrapped,
+        Side::Deacon,
+        DocumentBlock::Wrapper,
+    )["mergedConfiguration"]
+        .clone();
+
+    // Each legacy entry point must agree with the declarative channel ON ITS OWN BLOCK.
+    // The two blocks legitimately differ — `drop_absent_optional` runs on
+    // `mergedConfiguration` and, since #398, never on `configuration` — so asserting the
+    // two entry points equal EACH OTHER would be asserting the narrowing away. What must
+    // hold is that there is one rule chain, not two implementations (Constitution VIII,
+    // FR-030).
     assert_eq!(
         via_config, via_rules,
-        "the legacy entry points and the declarative channel must share ONE rule chain — \
-         a second implementation is what Constitution VIII forbids (FR-030)"
+        "the legacy `configuration` entry point and the declarative channel must share \
+         ONE rule chain"
+    );
+    assert_eq!(
+        via_merged, via_merged_rules,
+        "the legacy `mergedConfiguration` entry point and the declarative channel must \
+         share ONE rule chain"
+    );
+    assert_ne!(
+        via_config, via_merged,
+        "the blocks are expected to differ: an authored empty is authorship information \
+         on `configuration` and a computed default on `mergedConfiguration`"
     );
 }
 
-/// 024 US5 (T123): `drop_absent_optional` is narrowed to the SIDE whose serializer defect
-/// it compensates. On the reference's `configuration` block — an echo of the authored
-/// document — nothing is elided, because an empty value there is the AUTHOR's.
+/// #398: `drop_absent_optional` no longer touches the `configuration` block on EITHER
+/// side. It existed because deacon serialized every modeled optional unconditionally;
+/// deacon now omits what the author did not write, so an empty value on that block is the
+/// author's on both sides — and dropping it from deacon's copy alone would turn an
+/// agreement into a reported divergence.
 #[test]
-fn the_absent_optional_drop_applies_to_deacons_configuration_only() {
+fn the_absent_optional_drop_no_longer_touches_the_configuration_block() {
     let raw = json!({ "configuration": { "name": "demo", "forwardPorts": [], "image": null } })
         .to_string();
 
-    let deacon = normalize::config("side", &raw, Side::Deacon).expect("normalize");
-    let reference = normalize::config("side", &raw, Side::Oracle).expect("normalize");
+    let authored = json!({ "name": "demo", "forwardPorts": [], "image": null });
+    for side in [Side::Deacon, Side::Oracle] {
+        assert_eq!(
+            normalize::config("side", &raw, side).expect("normalize"),
+            authored,
+            "an authored empty survives on {side:?}'s configuration block — eliding it \
+             is what made an authored empty, an authored null and an omission the same \
+             observation (FR-055)"
+        );
+    }
 
-    assert_eq!(
-        deacon,
-        json!({ "name": "demo" }),
-        "deacon's side still elides the enumerated absent optionals it serializes \
-         unconditionally"
-    );
-    assert_eq!(
-        reference,
-        json!({ "name": "demo", "forwardPorts": [], "image": null }),
-        "the reference's side keeps them — eliding them there is what made an authored \
-         empty, an authored null and an omission the same observation (FR-055)"
-    );
-
-    // `mergedConfiguration` is synthesized by BOTH CLIs, so the rule still applies to
-    // both there: the pinned reference emits its own computed `containerEnv: {}` /
-    // `remoteEnv: {}` / `portsAttributes: {}`, which carry no authorship signal.
+    // `mergedConfiguration` is SYNTHESIZED rather than echoed, and the rule still applies
+    // to both sides there: the pinned reference emits computed `containerEnv: {}` /
+    // `remoteEnv: {}` / `portsAttributes: {}` that deacon omits
+    // (`bhv-readconfig-merged-computed-empties-omitted`), and neither carries an
+    // authorship signal.
     let merged =
         json!({ "mergedConfiguration": { "name": "demo", "containerEnv": {} } }).to_string();
-    assert_eq!(
-        normalize::merged_config("side", &merged, Side::Oracle).expect("normalize"),
-        json!({ "name": "demo" }),
-        "the merged block is a computed default on both sides"
-    );
+    for side in [Side::Deacon, Side::Oracle] {
+        assert_eq!(
+            normalize::merged_config("side", &merged, side).expect("normalize"),
+            json!({ "name": "demo" }),
+            "the merged block is a computed default on {side:?}'s side"
+        );
+    }
 }
 
 /// No second implementation of a comparison or normalization rule exists in the tree.
@@ -482,11 +521,14 @@ fn no_second_normalization_or_comparison_implementation_exists() {
 /// both sides" — one observation where the requirement asks for three, and a comparison that
 /// was green while proving nothing about any of them.
 ///
-/// Checked on the REFERENCE side, because that is the side that has the information: its
-/// `configuration` is an echo of the authored document. The deacon side is asserted too, and
-/// deliberately: it collapses two of the three, which is the characterized defect
-/// (`bhv-readconfig-authored-empty-omitted-collapsed`) and must stay visible here rather than
-/// being quietly re-hidden by a future widening of the rule.
+/// Checked on BOTH sides. Since #398 retired `drop_absent_optional` on the `configuration`
+/// block, the normalizer preserves all three states on either side — so what a verdict shows
+/// is now exactly what the two CLIs actually emitted, with no compensation in between.
+///
+/// The residual deacon defect is narrower than it was and is asserted against deacon's REAL
+/// output, not simulated by feeding the reference's document to deacon's side: deacon now
+/// preserves an authored empty collection (it agrees with the reference), and collapses only
+/// an authored `null` into an omission — `bhv-readconfig-authored-null-omitted-collapsed`.
 #[test]
 fn null_empty_and_omitted_are_three_distinguishable_observations() {
     let doc = |body: &str| format!(r#"{{ "configuration": {{ "name": "demo"{body} }} }}"#);
@@ -513,42 +555,46 @@ fn null_empty_and_omitted_are_three_distinguishable_observations() {
     assert_eq!(ref_empty["forwardPorts"], json!([]));
     assert!(ref_omitted.get("forwardPorts").is_none());
 
-    // deacon's side: the characterized collapse, pinned so it cannot widen unnoticed.
-    let d_null = observe(&authored_null, Side::Deacon);
-    let d_empty = observe(&authored_empty, Side::Deacon);
-    let d_omitted = observe(&omitted, Side::Deacon);
-    assert_eq!(
-        d_null, d_omitted,
-        "deacon cannot distinguish an authored null from an omission — the defect the \
-         differential must now SHOW rather than normalize away"
+    // The normalizer no longer collapses anything on this block, so deacon's side keeps
+    // whatever deacon emitted — the three documents stay three observations there too.
+    assert_ne!(
+        observe(&authored_null, Side::Deacon),
+        observe(&omitted, Side::Deacon),
+        "the normalizer must not re-merge an authored null with an omission on deacon's \
+         side either; what deacon's SERIALIZER does is measured separately below"
     );
-    assert_eq!(d_empty, d_omitted, "…nor an authored empty collection");
 
-    // And therefore the three states yield three distinguishable VERDICTS: two divergences
-    // that differ in what the reference held, and one agreement.
-    let verdict = |raw: &str| {
-        let d = observe(raw, Side::Deacon);
-        let r = observe(raw, Side::Oracle);
+    // Now against the documents deacon ACTUALLY emits (measured against the pinned oracle
+    // at #398). An authored empty collection is preserved and agrees; an authored `null`
+    // is still collapsed into an omission, which is the one remaining half of #398 and is
+    // characterized as `bhv-readconfig-authored-null-omitted-collapsed`.
+    let deacon_doc = |body: &str| format!(r#"{{ "configuration": {{ "name": "demo"{body} }} }}"#);
+    let verdict = |deacon_raw: &str, reference_raw: &str| {
+        let d = observe(deacon_raw, Side::Deacon);
+        let r = observe(reference_raw, Side::Oracle);
         normalize::diff(&d, &r)
             .iter()
             .map(|x| format!("{:?}:{}", x.kind, x.path))
             .collect::<Vec<_>>()
     };
-    let v_null = verdict(&authored_null);
-    let v_empty = verdict(&authored_empty);
-    let v_omitted = verdict(&omitted);
     assert!(
-        v_omitted.is_empty(),
-        "an omitted property agrees on both sides: {v_omitted:?}"
+        verdict(&deacon_doc(""), &omitted).is_empty(),
+        "an omitted property agrees on both sides"
     );
-    assert_eq!(v_null, vec!["RefOnly:forwardPorts".to_string()]);
-    assert_eq!(v_empty, vec!["RefOnly:forwardPorts".to_string()]);
-    // The two divergences agree on SHAPE, so the recorded evidence is what separates them.
-    assert_ne!(
-        ref_null["forwardPorts"], ref_empty["forwardPorts"],
-        "the two divergences are told apart by the value the reference reported, which is \
-         retained in the normalized evidence"
+    assert!(
+        verdict(&deacon_doc(r#", "forwardPorts": []"#), &authored_empty).is_empty(),
+        "an authored empty collection now agrees — deacon emits it, the reference emits \
+         it, and nothing in between hides either"
     );
+    assert_eq!(
+        verdict(&deacon_doc(""), &authored_null),
+        vec!["RefOnly:forwardPorts".to_string()],
+        "an authored null is the residual divergence: deacon omits the key, the reference \
+         reports `null`"
+    );
+    // The reference's own answer is what tells the two authored states apart, and it is
+    // retained in the normalized evidence rather than normalized away.
+    assert_ne!(ref_null["forwardPorts"], ref_empty["forwardPorts"]);
 }
 
 /// **T113 / FR-056, US5 acceptance scenario 4.** A normalization rule that removes or

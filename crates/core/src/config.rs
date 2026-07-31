@@ -28,6 +28,7 @@ use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitut
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use tracing::{debug, instrument, warn};
 
 /// Maximum allowed depth of the extends chain; deeper chains almost certainly
@@ -38,10 +39,22 @@ use tracing::{debug, instrument, warn};
 /// mirror of upstream behavior.
 const MAX_EXTENDS_DEPTH: usize = 32;
 
-/// Default function to return an empty JSON object for serde defaults.
-fn default_empty_object() -> serde_json::Value {
-    serde_json::Value::Object(Default::default())
-}
+/// The value the borrowing accessors hand back for an unauthored object-shaped
+/// property, so a reader can treat "absent" and "empty" alike without the field
+/// itself losing the distinction.
+static EMPTY_OBJECT: LazyLock<serde_json::Value> =
+    LazyLock::new(|| serde_json::Value::Object(serde_json::Map::new()));
+
+/// Empty map handed back by [`DevContainerConfig::container_env`].
+static EMPTY_STRING_MAP: LazyLock<HashMap<String, String>> = LazyLock::new(HashMap::new);
+
+/// Empty map handed back by [`DevContainerConfig::remote_env`].
+static EMPTY_OPTIONAL_STRING_MAP: LazyLock<HashMap<String, Option<String>>> =
+    LazyLock::new(HashMap::new);
+
+/// Empty map handed back by [`DevContainerConfig::ports_attributes`].
+static EMPTY_PORT_ATTRIBUTES: LazyLock<HashMap<String, PortAttributes>> =
+    LazyLock::new(HashMap::new);
 
 /// Human-readable name for a JSON value's type, for type-mismatch diagnostics.
 fn json_type_name(v: &serde_json::Value) -> &'static str {
@@ -64,21 +77,42 @@ fn json_type_name(v: &serde_json::Value) -> &'static str {
 /// it surfaces as a confusing late error. We instead fail fast with a precise
 /// message — the same strictness `forwardPorts` (a typed `Vec`) already enforces.
 /// This keeps deacon's type-checking *consistent* across modeled fields.
-fn deserialize_object_value<'de, D>(
+///
+/// Only invoked when the key is *present*: an absent key takes the field's
+/// `default` (`None`) without reaching here, which is what preserves the
+/// authored-empty vs omitted distinction (#398). A present `null` is still a
+/// type error, exactly as it was before the field became optional.
+fn deserialize_optional_object_value<'de, D>(
     deserializer: D,
-) -> std::result::Result<serde_json::Value, D::Error>
+) -> std::result::Result<Option<serde_json::Value>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let value = serde_json::Value::deserialize(deserializer)?;
     if value.is_object() {
-        Ok(value)
+        Ok(Some(value))
     } else {
         Err(serde::de::Error::custom(format!(
             "expected an object (map), found {}",
             json_type_name(&value)
         )))
     }
+}
+
+/// Combine two optional collection properties, staying `None` when neither side
+/// authored one.
+///
+/// Merging is where the authored-vs-absent distinction is easiest to lose: a
+/// straight `union(base.cap_add(), overlay.cap_add())` returns an empty `Vec`
+/// when neither config wrote `capAdd`, and storing that as `Some(vec![])` would
+/// make `read-configuration` emit a key nobody wrote (#398). Wrapping the
+/// combination in this guard keeps the merged config as silent as its inputs.
+fn combine_if_authored<T, U>(
+    base: &Option<T>,
+    overlay: &Option<T>,
+    combine: impl FnOnce() -> U,
+) -> Option<U> {
+    (base.is_some() || overlay.is_some()).then(combine)
 }
 
 /// Deep-merge two flattened "extra" maps of unmodeled fields, with the overlay
@@ -625,19 +659,26 @@ pub struct DevContainerConfig {
     /// Array of additional Docker Compose services to start alongside the primary service.
     ///
     /// Reference: [Container Configuration - runServices](https://containers.dev/implementors/json_reference/#run-services)
-    #[serde(default)]
-    pub run_services: Vec<String>,
+    ///
+    /// `None` means the author wrote no `runServices`; `Some(vec![])` means they
+    /// wrote an empty array. Read it through [`Self::run_services`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_services: Option<Vec<String>>,
 
     /// Features to install in the container.
     ///
     /// Kept as raw JSON value for initial implementation. Will be strongly typed in future iterations.
     ///
     /// Reference: [Features](https://containers.dev/implementors/json_reference/#features)
+    ///
+    /// `None` means the author wrote no `features`; `Some({})` means they wrote an
+    /// empty object. Read it through [`Self::features`].
     #[serde(
-        default = "default_empty_object",
-        deserialize_with = "deserialize_object_value"
+        default,
+        deserialize_with = "deserialize_optional_object_value",
+        skip_serializing_if = "Option::is_none"
     )]
-    pub features: serde_json::Value,
+    pub features: Option<serde_json::Value>,
 
     /// Override the default feature installation order.
     ///
@@ -653,11 +694,15 @@ pub struct DevContainerConfig {
     /// Kept as raw JSON value for initial implementation.
     ///
     /// Reference: [Customizations](https://containers.dev/implementors/json_reference/#customizations)
+    ///
+    /// `None` means the author wrote no `customizations`; `Some({})` means they
+    /// wrote an empty object. Read it through [`Self::customizations`].
     #[serde(
-        default = "default_empty_object",
-        deserialize_with = "deserialize_object_value"
+        default,
+        deserialize_with = "deserialize_optional_object_value",
+        skip_serializing_if = "Option::is_none"
     )]
-    pub customizations: serde_json::Value,
+    pub customizations: Option<serde_json::Value>,
 
     /// Path to workspace folder inside the container.
     ///
@@ -674,20 +719,29 @@ pub struct DevContainerConfig {
     /// Additional mount points for the container.
     ///
     /// Reference: [Container Configuration - mounts](https://containers.dev/implementors/json_reference/#mounts)
-    #[serde(default)]
-    pub mounts: Vec<serde_json::Value>,
+    ///
+    /// `None` means the author wrote no `mounts`; `Some(vec![])` means they wrote
+    /// an empty array. Read it through [`Self::mounts`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mounts: Option<Vec<serde_json::Value>>,
 
     /// Environment variables to set in the container.
     ///
     /// Reference: [Environment Variables - containerEnv](https://containers.dev/implementors/json_reference/#container-env)
-    #[serde(default)]
-    pub container_env: HashMap<String, String>,
+    ///
+    /// `None` means the author wrote no `containerEnv`; `Some({})` means they
+    /// wrote an empty object. Read it through [`Self::container_env`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_env: Option<HashMap<String, String>>,
 
     /// Environment variables to set in the remote environment.
     ///
     /// Reference: [Environment Variables - remoteEnv](https://containers.dev/implementors/json_reference/#remote-env)
-    #[serde(default)]
-    pub remote_env: HashMap<String, Option<String>>,
+    ///
+    /// `None` means the author wrote no `remoteEnv`; `Some({})` means they wrote
+    /// an empty object. Read it through [`Self::remote_env`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_env: Option<HashMap<String, Option<String>>>,
 
     /// User to run commands as inside the container.
     ///
@@ -719,8 +773,11 @@ pub struct DevContainerConfig {
     /// Ports to forward from the container.
     ///
     /// Reference: [Port Configuration - forwardPorts](https://containers.dev/implementors/json_reference/#forward-ports)
-    #[serde(default)]
-    pub forward_ports: Vec<PortSpec>,
+    ///
+    /// `None` means the author wrote no `forwardPorts`; `Some(vec![])` means they
+    /// wrote an empty array. Read it through [`Self::forward_ports`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_ports: Option<Vec<PortSpec>>,
 
     /// Primary application port.
     ///
@@ -732,8 +789,11 @@ pub struct DevContainerConfig {
     ///
     /// Maps port specifications to their attributes. Keys are port numbers or
     /// port/protocol combinations (e.g., "3000", "3000/tcp").
-    #[serde(default)]
-    pub ports_attributes: HashMap<String, PortAttributes>,
+    ///
+    /// `None` means the author wrote no `portsAttributes`; `Some({})` means they
+    /// wrote an empty object. Read it through [`Self::ports_attributes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ports_attributes: Option<HashMap<String, PortAttributes>>,
 
     /// Default attributes for ports not explicitly configured.
     ///
@@ -745,8 +805,11 @@ pub struct DevContainerConfig {
     /// Additional arguments to pass to docker run.
     ///
     /// Reference: [Container Configuration - runArgs](https://containers.dev/implementors/json_reference/#run-args)
-    #[serde(default)]
-    pub run_args: Vec<String>,
+    ///
+    /// `None` means the author wrote no `runArgs`; `Some(vec![])` means they wrote
+    /// an empty array. Read it through [`Self::run_args`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_args: Option<Vec<String>>,
 
     /// Action to take when shutting down the container.
     ///
@@ -824,14 +887,24 @@ pub struct DevContainerConfig {
     /// Linux capabilities to add to the container.
     ///
     /// Reference: [Container Configuration - capAdd](https://containers.dev/implementors/json_reference/#cap-add)
-    #[serde(default, rename = "capAdd")]
-    pub cap_add: Vec<String>,
+    ///
+    /// `None` means the author wrote no `capAdd`; `Some(vec![])` means they wrote
+    /// an empty array. Read it through [`Self::cap_add`].
+    #[serde(default, rename = "capAdd", skip_serializing_if = "Option::is_none")]
+    pub cap_add: Option<Vec<String>>,
 
     /// Security options for the container.
     ///
     /// Reference: [Container Configuration - securityOpt](https://containers.dev/implementors/json_reference/#security-opt)
-    #[serde(default, rename = "securityOpt")]
-    pub security_opt: Vec<String>,
+    ///
+    /// `None` means the author wrote no `securityOpt`; `Some(vec![])` means they
+    /// wrote an empty array. Read it through [`Self::security_opt`].
+    #[serde(
+        default,
+        rename = "securityOpt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub security_opt: Option<Vec<String>>,
 
     /// Declarative secrets metadata.
     ///
@@ -876,7 +949,78 @@ pub struct SecretMetadata {
     pub documentation_url: Option<String>,
 }
 
+/// Borrowing accessors for the collection-shaped properties.
+///
+/// Each of these properties is stored as an `Option` so that the configuration
+/// remembers whether the author wrote it at all — `read-configuration` must emit
+/// an authored `"capAdd": []` and omit an unauthored one, and a bare `Vec` cannot
+/// tell those apart (#398). Nothing that *consumes* the configuration cares about
+/// the difference, though: an absent `capAdd` and an authored empty one both add
+/// no capabilities. These accessors give consumers the flat view, so the
+/// distinction stays confined to the field and to serialization.
+///
+/// Field and method share a name; `config.cap_add` is the authored-or-not `Option`,
+/// `config.cap_add()` is the flat view.
 impl DevContainerConfig {
+    /// Compose services to start alongside the primary one, empty when unauthored.
+    pub fn run_services(&self) -> &[String] {
+        self.run_services.as_deref().unwrap_or(&[])
+    }
+
+    /// Features to install, an empty object when unauthored.
+    pub fn features(&self) -> &serde_json::Value {
+        self.features.as_ref().unwrap_or(&EMPTY_OBJECT)
+    }
+
+    /// Tool-specific customizations, an empty object when unauthored.
+    pub fn customizations(&self) -> &serde_json::Value {
+        self.customizations.as_ref().unwrap_or(&EMPTY_OBJECT)
+    }
+
+    /// Additional mounts, empty when unauthored.
+    pub fn mounts(&self) -> &[serde_json::Value] {
+        self.mounts.as_deref().unwrap_or(&[])
+    }
+
+    /// Container environment variables, empty when unauthored.
+    pub fn container_env(&self) -> &HashMap<String, String> {
+        self.container_env.as_ref().unwrap_or(&EMPTY_STRING_MAP)
+    }
+
+    /// Remote environment variables, empty when unauthored.
+    pub fn remote_env(&self) -> &HashMap<String, Option<String>> {
+        self.remote_env
+            .as_ref()
+            .unwrap_or(&EMPTY_OPTIONAL_STRING_MAP)
+    }
+
+    /// Ports to forward, empty when unauthored.
+    pub fn forward_ports(&self) -> &[PortSpec] {
+        self.forward_ports.as_deref().unwrap_or(&[])
+    }
+
+    /// Per-port attributes, empty when unauthored.
+    pub fn ports_attributes(&self) -> &HashMap<String, PortAttributes> {
+        self.ports_attributes
+            .as_ref()
+            .unwrap_or(&EMPTY_PORT_ATTRIBUTES)
+    }
+
+    /// Extra `docker run` arguments, empty when unauthored.
+    pub fn run_args(&self) -> &[String] {
+        self.run_args.as_deref().unwrap_or(&[])
+    }
+
+    /// Linux capabilities to add, empty when unauthored.
+    pub fn cap_add(&self) -> &[String] {
+        self.cap_add.as_deref().unwrap_or(&[])
+    }
+
+    /// Security options, empty when unauthored.
+    pub fn security_opt(&self) -> &[String] {
+        self.security_opt.as_deref().unwrap_or(&[])
+    }
+
     /// Apply variable substitution to configuration fields
     ///
     /// This method applies variable substitution to the following fields:
@@ -971,12 +1115,12 @@ impl DevContainerConfig {
         // `terminal.integrated.cwd = "${localWorkspaceFolder}/src"`) are resolved by
         // the reference CLI; deacon emitted them literally (#312). Recursively
         // substitute string leaves. (Unmodeled `extra` passthrough stays verbatim.)
-        if !config.customizations.is_null() {
-            config.customizations = VariableSubstitution::substitute_json_value(
-                &config.customizations,
+        if let Some(ref customizations) = config.customizations {
+            config.customizations = Some(VariableSubstitution::substitute_json_value(
+                customizations,
                 context,
                 &mut report,
-            );
+            ));
         }
 
         // Substitute workspace_folder
@@ -998,43 +1142,49 @@ impl DevContainerConfig {
         }
 
         // Substitute mounts (JSON values that may contain strings)
-        config.mounts = config
-            .mounts
-            .iter()
-            .map(|mount| VariableSubstitution::substitute_json_value(mount, context, &mut report))
-            .collect();
+        config.mounts = config.mounts.as_ref().map(|mounts| {
+            mounts
+                .iter()
+                .map(|mount| {
+                    VariableSubstitution::substitute_json_value(mount, context, &mut report)
+                })
+                .collect()
+        });
 
         // Substitute run_args
-        config.run_args = config
-            .run_args
-            .iter()
-            .map(|arg| VariableSubstitution::substitute_string(arg, context, &mut report))
-            .collect();
+        config.run_args = config.run_args.as_ref().map(|run_args| {
+            run_args
+                .iter()
+                .map(|arg| VariableSubstitution::substitute_string(arg, context, &mut report))
+                .collect()
+        });
 
         // Substitute container_env values
-        config.container_env = config
-            .container_env
-            .iter()
-            .map(|(key, value)| {
-                (
-                    key.clone(),
-                    VariableSubstitution::substitute_string(value, context, &mut report),
-                )
-            })
-            .collect();
+        config.container_env = config.container_env.as_ref().map(|container_env| {
+            container_env
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        VariableSubstitution::substitute_string(value, context, &mut report),
+                    )
+                })
+                .collect()
+        });
 
         // Substitute remote_env values (per spec, variables expand inside any
         // string value; remote_env values are strings — keys are not).
-        config.remote_env = config
-            .remote_env
-            .iter()
-            .map(|(key, value)| {
-                let substituted_value = value
-                    .as_ref()
-                    .map(|v| VariableSubstitution::substitute_string(v, context, &mut report));
-                (key.clone(), substituted_value)
-            })
-            .collect();
+        config.remote_env = config.remote_env.as_ref().map(|remote_env| {
+            remote_env
+                .iter()
+                .map(|(key, value)| {
+                    let substituted_value = value
+                        .as_ref()
+                        .map(|v| VariableSubstitution::substitute_string(v, context, &mut report));
+                    (key.clone(), substituted_value)
+                })
+                .collect()
+        });
 
         // Substitute container_user
         if let Some(ref container_user) = config.container_user {
@@ -1215,55 +1365,66 @@ impl DevContainerConfig {
         }
 
         // Substitute customizations — see apply_variable_substitution (#312).
-        if !config.customizations.is_null() {
-            config.customizations = VariableSubstitution::substitute_json_value_with_options(
-                &config.customizations,
+        if let Some(ref customizations) = config.customizations {
+            config.customizations = Some(VariableSubstitution::substitute_json_value_with_options(
+                customizations,
                 context,
                 options,
                 report,
-            )?;
-        }
-
-        // Substitute mounts (JSON values that may contain strings)
-        let mut substituted_mounts = Vec::new();
-        for mount in &config.mounts {
-            substituted_mounts.push(VariableSubstitution::substitute_json_value_with_options(
-                mount, context, options, report,
             )?);
         }
-        config.mounts = substituted_mounts;
+
+        // Substitute mounts (JSON values that may contain strings). Each of these
+        // rebuilds through the `Option` so an unauthored property stays absent
+        // rather than becoming an authored empty collection (#398).
+        if let Some(ref mounts) = config.mounts {
+            let mut substituted_mounts = Vec::new();
+            for mount in mounts {
+                substituted_mounts.push(VariableSubstitution::substitute_json_value_with_options(
+                    mount, context, options, report,
+                )?);
+            }
+            config.mounts = Some(substituted_mounts);
+        }
 
         // Substitute run_args
-        let mut substituted_run_args = Vec::new();
-        for arg in &config.run_args {
-            substituted_run_args.push(VariableSubstitution::substitute_string_advanced(
-                arg, context, options, report,
-            )?);
+        if let Some(ref run_args) = config.run_args {
+            let mut substituted_run_args = Vec::new();
+            for arg in run_args {
+                substituted_run_args.push(VariableSubstitution::substitute_string_advanced(
+                    arg, context, options, report,
+                )?);
+            }
+            config.run_args = Some(substituted_run_args);
         }
-        config.run_args = substituted_run_args;
 
         // Substitute container environment variables
-        let mut substituted_container_env = HashMap::new();
-        for (key, value) in &config.container_env {
-            let substituted_value =
-                VariableSubstitution::substitute_string_advanced(value, context, options, report)?;
-            substituted_container_env.insert(key.clone(), substituted_value);
+        if let Some(ref container_env) = config.container_env {
+            let mut substituted_container_env = HashMap::new();
+            for (key, value) in container_env {
+                let substituted_value = VariableSubstitution::substitute_string_advanced(
+                    value, context, options, report,
+                )?;
+                substituted_container_env.insert(key.clone(), substituted_value);
+            }
+            config.container_env = Some(substituted_container_env);
         }
-        config.container_env = substituted_container_env;
 
         // Substitute remote environment variables
-        let mut substituted_remote_env = HashMap::new();
-        for (key, value) in &config.remote_env {
-            if let Some(val) = value {
-                let substituted_value = VariableSubstitution::substitute_string_advanced(
-                    val, context, options, report,
-                )?;
-                substituted_remote_env.insert(key.clone(), Some(substituted_value));
-            } else {
-                substituted_remote_env.insert(key.clone(), None);
+        if let Some(ref remote_env) = config.remote_env {
+            let mut substituted_remote_env = HashMap::new();
+            for (key, value) in remote_env {
+                if let Some(val) = value {
+                    let substituted_value = VariableSubstitution::substitute_string_advanced(
+                        val, context, options, report,
+                    )?;
+                    substituted_remote_env.insert(key.clone(), Some(substituted_value));
+                } else {
+                    substituted_remote_env.insert(key.clone(), None);
+                }
             }
+            config.remote_env = Some(substituted_remote_env);
         }
-        config.remote_env = substituted_remote_env;
 
         // Substitute container_user
         if let Some(ref container_user) = config.container_user {
@@ -1407,7 +1568,7 @@ impl DevContainerConfig {
         if let Some(ref service) = self.service {
             services.push(service.clone());
         }
-        services.extend(self.run_services.clone());
+        services.extend(self.run_services().iter().cloned());
         services
     }
 
@@ -1457,24 +1618,24 @@ impl Default for DevContainerConfig {
             build: None,
             docker_compose_file: None,
             service: None,
-            run_services: Vec::new(),
-            features: default_empty_object(),
+            run_services: None,
+            features: None,
             override_feature_install_order: None,
-            customizations: default_empty_object(),
+            customizations: None,
             workspace_folder: None,
             workspace_mount: None,
-            mounts: Vec::new(),
-            container_env: HashMap::new(),
-            remote_env: HashMap::new(),
+            mounts: None,
+            container_env: None,
+            remote_env: None,
             container_user: None,
             remote_user: None,
             update_remote_user_uid: None,
             user_env_probe: None,
-            forward_ports: Vec::new(),
+            forward_ports: None,
             app_port: None,
-            ports_attributes: HashMap::new(),
+            ports_attributes: None,
             other_ports_attributes: None,
-            run_args: Vec::new(),
+            run_args: None,
             shutdown_action: None,
             override_command: None,
             wait_for: None,
@@ -1487,8 +1648,8 @@ impl Default for DevContainerConfig {
             host_requirements: None,
             privileged: None,
             init: None,
-            cap_add: Vec::new(),
-            security_opt: Vec::new(),
+            cap_add: None,
+            security_opt: None,
             secrets: None,
             extra: serde_json::Map::new(),
         }
@@ -1577,13 +1738,17 @@ impl ConfigMerger {
                 .or_else(|| base.docker_compose_file.clone()),
             service: overlay.service.clone().or_else(|| base.service.clone()),
             // runServices: replace-if-non-empty (Compose-specific, not in upstream merge spec)
-            run_services: if overlay.run_services.is_empty() {
-                base.run_services.clone()
-            } else {
-                overlay.run_services.clone()
-            },
+            run_services: combine_if_authored(&base.run_services, &overlay.run_services, || {
+                if overlay.run_services().is_empty() {
+                    base.run_services().to_vec()
+                } else {
+                    overlay.run_services().to_vec()
+                }
+            }),
             // Features: deep merge as objects
-            features: Self::merge_json_objects(&base.features, &overlay.features),
+            features: combine_if_authored(&base.features, &overlay.features, || {
+                Self::merge_json_objects(base.features(), overlay.features())
+            }),
 
             // Override feature install order: last writer wins
             override_feature_install_order: overlay
@@ -1592,14 +1757,22 @@ impl ConfigMerger {
                 .or_else(|| base.override_feature_install_order.clone()),
 
             // Customizations: deep merge as objects
-            customizations: Self::merge_json_objects(&base.customizations, &overlay.customizations),
+            customizations: combine_if_authored(
+                &base.customizations,
+                &overlay.customizations,
+                || Self::merge_json_objects(base.customizations(), overlay.customizations()),
+            ),
 
             // Mounts: dedupe per container-side target, last-wins in declaration order
             // (matches upstream `mergeMounts` in devcontainers/cli's mergeConfiguration).
             // forwardPorts: dedupe with `localhost:N` ↔ Number(N) normalization, preserving
             // first-seen order (matches upstream `mergeForwardPorts`).
-            mounts: crate::mount::union_mounts_by_target(&base.mounts, &overlay.mounts),
-            forward_ports: Self::union_forward_ports(&base.forward_ports, &overlay.forward_ports),
+            mounts: combine_if_authored(&base.mounts, &overlay.mounts, || {
+                crate::mount::union_mounts_by_target(base.mounts(), overlay.mounts())
+            }),
+            forward_ports: combine_if_authored(&base.forward_ports, &overlay.forward_ports, || {
+                Self::union_forward_ports(base.forward_ports(), overlay.forward_ports())
+            }),
             on_create_command: overlay
                 .on_create_command
                 .clone()
@@ -1626,8 +1799,12 @@ impl ConfigMerger {
                 .or_else(|| base.update_content_command.clone()),
 
             // Maps: last writer wins for env vars
-            container_env: Self::merge_string_maps(&base.container_env, &overlay.container_env),
-            remote_env: Self::merge_optional_string_maps(&base.remote_env, &overlay.remote_env),
+            container_env: combine_if_authored(&base.container_env, &overlay.container_env, || {
+                Self::merge_string_maps(base.container_env(), overlay.container_env())
+            }),
+            remote_env: combine_if_authored(&base.remote_env, &overlay.remote_env, || {
+                Self::merge_optional_string_maps(base.remote_env(), overlay.remote_env())
+            }),
 
             // User configuration: last writer wins
             container_user: overlay
@@ -1644,12 +1821,20 @@ impl ConfigMerger {
             user_env_probe: overlay.user_env_probe.or(base.user_env_probe),
 
             // runArgs: concatenate arrays
-            run_args: Self::concat_string_arrays(&base.run_args, &overlay.run_args),
+            run_args: combine_if_authored(&base.run_args, &overlay.run_args, || {
+                Self::concat_string_arrays(base.run_args(), overlay.run_args())
+            }),
 
             // Port attributes: deep merge maps
-            ports_attributes: Self::merge_port_attributes_maps(
+            ports_attributes: combine_if_authored(
                 &base.ports_attributes,
                 &overlay.ports_attributes,
+                || {
+                    Self::merge_port_attributes_maps(
+                        base.ports_attributes(),
+                        overlay.ports_attributes(),
+                    )
+                },
             ),
             other_ports_attributes: overlay
                 .other_ports_attributes
@@ -1671,8 +1856,12 @@ impl ConfigMerger {
             // are dropped while preserving first-seen order across the metadata chain.
             privileged: Self::merge_bool_or(base.privileged, overlay.privileged),
             init: Self::merge_bool_or(base.init, overlay.init),
-            cap_add: Self::union_arrays(&base.cap_add, &overlay.cap_add),
-            security_opt: Self::union_arrays(&base.security_opt, &overlay.security_opt),
+            cap_add: combine_if_authored(&base.cap_add, &overlay.cap_add, || {
+                Self::union_arrays(base.cap_add(), overlay.cap_add())
+            }),
+            security_opt: combine_if_authored(&base.security_opt, &overlay.security_opt, || {
+                Self::union_arrays(base.security_opt(), overlay.security_opt())
+            }),
 
             // secrets: key-level merge, leaf wins on conflict (matches
             // containerEnv semantics; #72). Parent keys not redeclared in
@@ -1971,14 +2160,21 @@ impl ConfigMerger {
 
         // Merge image labels into remote_env if they use the special prefix
         if let Some(labels) = image_labels {
-            let mut merged_remote = resolved.remote_env.clone();
+            let mut merged_remote = resolved.remote_env().clone();
+            let mut contributed = false;
             for (k, v) in labels {
                 if let Some(stripped) = k.strip_prefix("deacon.remoteEnv.") {
                     // Treat as remoteEnv entry - label value always wins
                     merged_remote.insert(stripped.to_string(), Some(v.clone()));
+                    contributed = true;
                 }
             }
-            resolved.remote_env = merged_remote;
+            // Only materialize `remoteEnv` if a label actually contributed one:
+            // labels that carry no `deacon.remoteEnv.` prefix must not turn an
+            // unauthored property into an authored empty map (#398).
+            if contributed || resolved.remote_env.is_some() {
+                resolved.remote_env = Some(merged_remote);
+            }
         }
 
         // Apply variable substitution to a selection of string fields
@@ -1998,20 +2194,22 @@ impl ConfigMerger {
         }
 
         // Substitute remote_env values
-        let mut substituted_remote: HashMap<String, Option<String>> = HashMap::new();
-        for (k, v_opt) in &resolved.remote_env {
-            match v_opt {
-                Some(v) => {
-                    let sub = VariableSubstitution::substitute_string(v, &context, &mut report);
-                    substituted_remote.insert(k.clone(), Some(sub));
-                }
-                None => {
-                    // Preserve explicit None (means empty string at runtime)
-                    substituted_remote.insert(k.clone(), None);
+        if let Some(ref remote_env) = resolved.remote_env {
+            let mut substituted_remote: HashMap<String, Option<String>> = HashMap::new();
+            for (k, v_opt) in remote_env {
+                match v_opt {
+                    Some(v) => {
+                        let sub = VariableSubstitution::substitute_string(v, &context, &mut report);
+                        substituted_remote.insert(k.clone(), Some(sub));
+                    }
+                    None => {
+                        // Preserve explicit None (means empty string at runtime)
+                        substituted_remote.insert(k.clone(), None);
+                    }
                 }
             }
+            resolved.remote_env = Some(substituted_remote);
         }
-        resolved.remote_env = substituted_remote;
 
         Ok((resolved, report))
     }
@@ -3049,7 +3247,7 @@ impl ConfigLoader {
     /// This method checks that all ports specified in `ports_attributes` have corresponding
     /// entries in `forward_ports` or match the `app_port`. Issues warnings for missing references.
     fn validate_port_attributes(config: &DevContainerConfig) -> Result<()> {
-        if config.ports_attributes.is_empty() {
+        if config.ports_attributes().is_empty() {
             return Ok(());
         }
 
@@ -3057,7 +3255,7 @@ impl ConfigLoader {
         let mut valid_ports = std::collections::HashSet::new();
 
         // Add ports from forward_ports
-        for port_spec in &config.forward_ports {
+        for port_spec in config.forward_ports() {
             if let Some(port_num) = port_spec.primary_port() {
                 valid_ports.insert(port_num.to_string());
                 // Also add with /tcp suffix which is common
@@ -3079,7 +3277,7 @@ impl ConfigLoader {
         }
 
         // Check each port attribute reference
-        for port_key in config.ports_attributes.keys() {
+        for port_key in config.ports_attributes().keys() {
             if !valid_ports.contains(port_key) {
                 // Try parsing as just a port number
                 if let Ok(port_num) = port_key.parse::<u16>() {
@@ -3114,13 +3312,13 @@ mod tests {
         assert_eq!(config.name, None);
         assert_eq!(config.image, None);
         assert_eq!(config.dockerfile, None);
-        assert_eq!(config.mounts.len(), 0);
-        assert_eq!(config.container_env.len(), 0);
-        assert_eq!(config.remote_env.len(), 0);
-        assert_eq!(config.forward_ports.len(), 0);
-        assert_eq!(config.run_args.len(), 0);
-        assert!(config.features.is_object());
-        assert!(config.customizations.is_object());
+        assert_eq!(config.mounts().len(), 0);
+        assert_eq!(config.container_env().len(), 0);
+        assert_eq!(config.remote_env().len(), 0);
+        assert_eq!(config.forward_ports().len(), 0);
+        assert_eq!(config.run_args().len(), 0);
+        assert!(config.features().is_object());
+        assert!(config.customizations().is_object());
         assert!(config.extra.is_empty());
     }
 
@@ -3215,7 +3413,7 @@ mod tests {
             "features": { "ghcr.io/devcontainers/features/node:1": { "version": "20" } }
         }))
         .expect("a proper features map must still parse");
-        assert!(config.features.is_object());
+        assert!(config.features().is_object());
     }
 
     /// Merging deep-merges `extra`: overlay wins on conflicts, base-only keys
@@ -3323,12 +3521,12 @@ mod tests {
         assert_eq!(config.name, Some("Test Container".to_string()));
         assert_eq!(config.image, Some("ubuntu:20.04".to_string()));
         assert_eq!(config.dockerfile, None);
-        assert_eq!(config.forward_ports.len(), 2);
+        assert_eq!(config.forward_ports().len(), 2);
         assert_eq!(
-            config.container_env.get("ENVIRONMENT"),
+            config.container_env().get("ENVIRONMENT"),
             Some(&"development".to_string())
         );
-        assert_eq!(config.run_args, vec!["--init"]);
+        assert_eq!(config.run_args(), ["--init"]);
 
         Ok(())
     }
@@ -3642,17 +3840,17 @@ mod tests {
         let config = ConfigLoader::load_from_path(temp_file.path()).await?;
 
         // Arrays should default to empty
-        assert_eq!(config.mounts.len(), 0);
-        assert_eq!(config.forward_ports.len(), 0);
-        assert_eq!(config.run_args.len(), 0);
+        assert_eq!(config.mounts().len(), 0);
+        assert_eq!(config.forward_ports().len(), 0);
+        assert_eq!(config.run_args().len(), 0);
 
         // Maps should default to empty
-        assert_eq!(config.container_env.len(), 0);
-        assert_eq!(config.remote_env.len(), 0);
+        assert_eq!(config.container_env().len(), 0);
+        assert_eq!(config.remote_env().len(), 0);
 
         // JSON objects should default to empty objects
-        assert!(config.features.is_object());
-        assert!(config.customizations.is_object());
+        assert!(config.features().is_object());
+        assert!(config.customizations().is_object());
 
         Ok(())
     }
@@ -4043,15 +4241,15 @@ mod tests {
         // Check container env substitution
         assert!(
             config
-                .container_env
+                .container_env()
                 .get("WORKSPACE_ROOT")
                 .unwrap()
                 .starts_with(workspace_canonical_str)
         );
 
         // Check mounts substitution
-        if !config.mounts.is_empty() {
-            if let serde_json::Value::String(mount_str) = &config.mounts[0] {
+        if !config.mounts().is_empty() {
+            if let serde_json::Value::String(mount_str) = &config.mounts()[0] {
                 assert!(mount_str.contains(workspace_canonical_str));
             }
         }
@@ -4104,11 +4302,11 @@ mod tests {
         for entries in [&from_object, &from_array] {
             let entry = &entries[0];
             assert_eq!(
-                entry.container_env.get("R4_PREBUILT"),
+                entry.container_env().get("R4_PREBUILT"),
                 Some(&"object".to_string())
             );
             assert_eq!(
-                entry.remote_env.get("R4_PREBUILT_REMOTE"),
+                entry.remote_env().get("R4_PREBUILT_REMOTE"),
                 Some(&Some("remote".to_string()))
             );
             assert_eq!(entry.init, Some(true));
@@ -4173,7 +4371,7 @@ mod tests {
         context.container_workspace_folder = Some("/workspaces/proj".to_string());
 
         let config = DevContainerConfig {
-            customizations: serde_json::json!({
+            customizations: Some(serde_json::json!({
                 "vscode": {
                     "settings": {
                         "terminal.integrated.cwd": "${localWorkspaceFolder}/src",
@@ -4182,13 +4380,13 @@ mod tests {
                         "literal": "plain"
                     }
                 }
-            }),
+            })),
             ..Default::default()
         };
 
         // Basic pass.
         let (substituted, _) = config.clone().apply_variable_substitution(&context);
-        let s = &substituted.customizations["vscode"]["settings"];
+        let s = &substituted.customizations()["vscode"]["settings"];
         assert_eq!(s["some.user"].as_str(), Some("alice"));
         assert_eq!(s["some.container"].as_str(), Some("/workspaces/proj/x"));
         assert_eq!(s["literal"].as_str(), Some("plain"));
@@ -4198,7 +4396,7 @@ mod tests {
                 .unwrap()
                 .contains("${localWorkspaceFolder}")
         );
-        assert!(!substituted.customizations.to_string().contains("${"));
+        assert!(!substituted.customizations().to_string().contains("${"));
 
         // Advanced pass mirrors it.
         use crate::variable::{SubstitutionOptions, SubstitutionReport};
@@ -4207,7 +4405,7 @@ mod tests {
         let advanced = config
             .apply_variable_substitution_advanced(&context, &options, &mut report)
             .unwrap();
-        assert!(!advanced.customizations.to_string().contains("${"));
+        assert!(!advanced.customizations().to_string().contains("${"));
     }
 
     #[test]
@@ -4277,7 +4475,7 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(
-            config.container_env.get("APP_DIR").map(String::as_str),
+            config.container_env().get("APP_DIR").map(String::as_str),
             Some("/srv/app")
         );
     }
@@ -4303,16 +4501,16 @@ mod tests {
             remote_user: Some("${localEnv:MY_VAR:fallback}".to_string()),
             ..Default::default()
         };
-        config.remote_env.insert(
+        config.remote_env.get_or_insert_default().insert(
             "FROM_LOCAL".to_string(),
             Some("${localEnv:MY_VAR:default}".to_string()),
         );
-        config.remote_env.insert(
+        config.remote_env.get_or_insert_default().insert(
             "WS".to_string(),
             Some("${localWorkspaceFolderBasename}".to_string()),
         );
         // Literal unset → resolve via default branch
-        config.remote_env.insert(
+        config.remote_env.get_or_insert_default().insert(
             "UNSET".to_string(),
             Some("${localEnv:NOT_SET:fallback}".to_string()),
         );
@@ -4325,15 +4523,19 @@ mod tests {
         assert_eq!(substituted.container_user.as_deref(), Some("hello"));
         assert_eq!(substituted.remote_user.as_deref(), Some("hello"));
         assert_eq!(
-            substituted.remote_env.get("FROM_LOCAL").unwrap().as_deref(),
+            substituted
+                .remote_env()
+                .get("FROM_LOCAL")
+                .unwrap()
+                .as_deref(),
             Some("hello")
         );
         assert_eq!(
-            substituted.remote_env.get("WS").unwrap().as_deref(),
+            substituted.remote_env().get("WS").unwrap().as_deref(),
             Some(basename.as_str())
         );
         assert_eq!(
-            substituted.remote_env.get("UNSET").unwrap().as_deref(),
+            substituted.remote_env().get("UNSET").unwrap().as_deref(),
             Some("fallback")
         );
     }
@@ -4528,16 +4730,16 @@ mod tests {
         let config = ConfigLoader::load_from_path(temp_file.path()).await?;
 
         assert_eq!(config.name, Some("Test Container".to_string()));
-        assert_eq!(config.forward_ports.len(), 2);
+        assert_eq!(config.forward_ports().len(), 2);
         assert_eq!(
             config.app_port,
             Some(AppPort::Single(PortSpec::Number(3000)))
         );
 
         // Check port attributes
-        assert_eq!(config.ports_attributes.len(), 2);
+        assert_eq!(config.ports_attributes().len(), 2);
 
-        let port_3000_attrs = config.ports_attributes.get("3000").unwrap();
+        let port_3000_attrs = config.ports_attributes().get("3000").unwrap();
         assert_eq!(port_3000_attrs.label, Some("Web Server".to_string()));
         assert_eq!(
             port_3000_attrs.on_auto_forward,
@@ -4548,7 +4750,7 @@ mod tests {
             Some("Main web application".to_string())
         );
 
-        let port_8080_attrs = config.ports_attributes.get("8080").unwrap();
+        let port_8080_attrs = config.ports_attributes().get("8080").unwrap();
         assert_eq!(port_8080_attrs.label, Some("API Server".to_string()));
         assert_eq!(port_8080_attrs.on_auto_forward, Some(OnAutoForward::Notify));
 
@@ -4602,7 +4804,7 @@ mod tests {
 
         // This should not fail validation
         let config = ConfigLoader::load_from_path(temp_file.path()).await?;
-        assert_eq!(config.ports_attributes.len(), 3);
+        assert_eq!(config.ports_attributes().len(), 3);
 
         Ok(())
     }
@@ -4623,7 +4825,7 @@ mod tests {
         temp_file.write_all(config_content.as_bytes())?;
 
         let config = ConfigLoader::load_from_path(temp_file.path()).await?;
-        assert_eq!(config.ports_attributes.len(), 2);
+        assert_eq!(config.ports_attributes().len(), 2);
 
         Ok(())
     }
@@ -4645,7 +4847,7 @@ mod tests {
 
         // This should load but log warnings about missing port 8080
         let config = ConfigLoader::load_from_path(temp_file.path()).await?;
-        assert_eq!(config.ports_attributes.len(), 2);
+        assert_eq!(config.ports_attributes().len(), 2);
 
         Ok(())
     }
@@ -4653,9 +4855,9 @@ mod tests {
     #[test]
     fn test_config_default_includes_new_fields() {
         let config = DevContainerConfig::default();
-        assert_eq!(config.ports_attributes.len(), 0);
+        assert_eq!(config.ports_attributes().len(), 0);
         assert_eq!(config.other_ports_attributes, None);
-        assert_eq!(config.forward_ports.len(), 0);
+        assert_eq!(config.forward_ports().len(), 0);
         assert_eq!(config.app_port, None);
         assert_eq!(config.container_user, None);
         assert_eq!(config.remote_user, None);
@@ -5088,26 +5290,26 @@ mod tests {
     #[test]
     fn test_merge_configs_forward_ports_dedupes_through_full_chain() {
         let layer_a = DevContainerConfig {
-            forward_ports: vec![PortSpec::Number(3000)],
+            forward_ports: Some(vec![PortSpec::Number(3000)]),
             ..Default::default()
         };
         let layer_b = DevContainerConfig {
-            forward_ports: vec![
+            forward_ports: Some(vec![
                 PortSpec::String("localhost:3000".to_string()),
                 PortSpec::Number(8080),
-            ],
+            ]),
             ..Default::default()
         };
         let layer_c = DevContainerConfig {
-            forward_ports: vec![PortSpec::String("localhost:8080".to_string())],
+            forward_ports: Some(vec![PortSpec::String("localhost:8080".to_string())]),
             ..Default::default()
         };
 
         let merged = ConfigMerger::merge_configs(&[layer_a, layer_b, layer_c]);
 
         assert_eq!(
-            merged.forward_ports,
-            vec![PortSpec::Number(3000), PortSpec::Number(8080)]
+            merged.forward_ports(),
+            [PortSpec::Number(3000), PortSpec::Number(8080)]
         );
     }
 
@@ -5535,41 +5737,41 @@ mod tests {
         let b = json!({"source": "/b", "target": "/mnt/b", "type": "bind"});
         let c = json!({"source": "/c", "target": "/mnt/c", "type": "bind"});
         let c1 = DevContainerConfig {
-            mounts: vec![a.clone()],
+            mounts: Some(vec![a.clone()]),
             ..Default::default()
         };
         let c2 = DevContainerConfig {
-            mounts: vec![b.clone()],
+            mounts: Some(vec![b.clone()]),
             ..Default::default()
         };
         let c3 = DevContainerConfig {
-            mounts: vec![c.clone()],
+            mounts: Some(vec![c.clone()]),
             ..Default::default()
         };
         let step1 = ConfigMerger::merge_two_configs(&c1, &c2);
         let step2 = ConfigMerger::merge_two_configs(&step1, &c3);
-        assert_eq!(step2.mounts, vec![a, b, c]);
+        assert_eq!(step2.mounts(), [a, b, c]);
     }
 
     #[test]
     fn test_merge_chain_forward_ports_union() {
         let c1 = DevContainerConfig {
-            forward_ports: vec![PortSpec::Number(3000)],
+            forward_ports: Some(vec![PortSpec::Number(3000)]),
             ..Default::default()
         };
         let c2 = DevContainerConfig {
-            forward_ports: vec![PortSpec::Number(8080)],
+            forward_ports: Some(vec![PortSpec::Number(8080)]),
             ..Default::default()
         };
         let c3 = DevContainerConfig {
-            forward_ports: vec![PortSpec::Number(5432)],
+            forward_ports: Some(vec![PortSpec::Number(5432)]),
             ..Default::default()
         };
         let step1 = ConfigMerger::merge_two_configs(&c1, &c2);
         let step2 = ConfigMerger::merge_two_configs(&step1, &c3);
         assert_eq!(
-            step2.forward_ports,
-            vec![
+            step2.forward_ports(),
+            [
                 PortSpec::Number(3000),
                 PortSpec::Number(8080),
                 PortSpec::Number(5432),
@@ -5605,34 +5807,34 @@ mod tests {
         overlay_env.insert("B".to_string(), "override".to_string());
         overlay_env.insert("C".to_string(), "3".to_string());
         let base2 = DevContainerConfig {
-            container_env: base_env,
+            container_env: Some(base_env),
             ..Default::default()
         };
         let overlay2 = DevContainerConfig {
-            container_env: overlay_env,
+            container_env: Some(overlay_env),
             ..Default::default()
         };
         let merged2 = ConfigMerger::merge_two_configs(&base2, &overlay2);
-        assert_eq!(merged2.container_env.get("A"), Some(&"1".to_string()));
+        assert_eq!(merged2.container_env().get("A"), Some(&"1".to_string()));
         assert_eq!(
-            merged2.container_env.get("B"),
+            merged2.container_env().get("B"),
             Some(&"override".to_string())
         );
-        assert_eq!(merged2.container_env.get("C"), Some(&"3".to_string()));
+        assert_eq!(merged2.container_env().get("C"), Some(&"3".to_string()));
 
         // Concat arrays: run_args concatenates
         let base3 = DevContainerConfig {
-            run_args: vec!["--network=host".to_string()],
+            run_args: Some(vec!["--network=host".to_string()]),
             ..Default::default()
         };
         let overlay3 = DevContainerConfig {
-            run_args: vec!["--privileged".to_string()],
+            run_args: Some(vec!["--privileged".to_string()]),
             ..Default::default()
         };
         let merged3 = ConfigMerger::merge_two_configs(&base3, &overlay3);
         assert_eq!(
-            merged3.run_args,
-            vec!["--network=host".to_string(), "--privileged".to_string()]
+            merged3.run_args(),
+            ["--network=host".to_string(), "--privileged".to_string()]
         );
     }
 
@@ -6318,19 +6520,23 @@ pub mod merge {
             let base_config = DevContainerConfig {
                 name: Some("Base".to_string()),
                 image: Some("ubuntu:20.04".to_string()),
-                container_env: [("BASE_VAR".to_string(), "base_value".to_string())]
-                    .iter()
-                    .cloned()
-                    .collect(),
+                container_env: Some(
+                    [("BASE_VAR".to_string(), "base_value".to_string())]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                ),
                 ..Default::default()
             };
 
             let app_config = DevContainerConfig {
                 name: Some("App".to_string()),
-                container_env: [("APP_VAR".to_string(), "app_value".to_string())]
-                    .iter()
-                    .cloned()
-                    .collect(),
+                container_env: Some(
+                    [("APP_VAR".to_string(), "app_value".to_string())]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                ),
                 ..Default::default()
             };
 
@@ -6345,11 +6551,11 @@ pub mod merge {
             assert_eq!(result.config.name, Some("App".to_string())); // Override
             assert_eq!(result.config.image, Some("ubuntu:20.04".to_string())); // From base
             assert_eq!(
-                result.config.container_env.get("BASE_VAR"),
+                result.config.container_env().get("BASE_VAR"),
                 Some(&"base_value".to_string())
             );
             assert_eq!(
-                result.config.container_env.get("APP_VAR"),
+                result.config.container_env().get("APP_VAR"),
                 Some(&"app_value".to_string())
             );
 
@@ -6391,19 +6597,23 @@ pub mod merge {
 
             let config1 = DevContainerConfig {
                 name: Some("Config1".to_string()),
-                container_env: [("VAR".to_string(), "value1".to_string())]
-                    .iter()
-                    .cloned()
-                    .collect(),
+                container_env: Some(
+                    [("VAR".to_string(), "value1".to_string())]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                ),
                 ..Default::default()
             };
 
             let config2 = DevContainerConfig {
                 name: Some("Config2".to_string()),
-                container_env: [("VAR".to_string(), "value2".to_string())]
-                    .iter()
-                    .cloned()
-                    .collect(),
+                container_env: Some(
+                    [("VAR".to_string(), "value2".to_string())]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                ),
                 ..Default::default()
             };
 
@@ -6424,7 +6634,7 @@ pub mod merge {
             assert_eq!(result.config.name, Some("Config3".to_string()));
             // VAR should be from Config2 (Config3 doesn't override it)
             assert_eq!(
-                result.config.container_env.get("VAR"),
+                result.config.container_env().get("VAR"),
                 Some(&"value2".to_string())
             );
 

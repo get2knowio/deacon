@@ -1,0 +1,17 @@
+{
+  "id": "wvr-readconfig-merged-computed-empties",
+  "behaviors": [
+    "bhv-readconfig-merged-computed-empties-omitted"
+  ],
+  "scope": {
+    "kind": "corpus_case",
+    "corpus": "us5",
+    "case": "readconfig-merged-computed-empties"
+  },
+  "expect": {
+    "kind": "reference-stricter"
+  },
+  "rationale": "Made visible by #398 rather than caused by it. `mergedConfiguration` is SYNTHESIZED by both CLIs, so an empty value there is a computed default rather than authorship information \u2014 which is exactly why `drop_absent_optional` still runs on BOTH sides of that block and why #398 retired it only on `configuration`. Until #398, deacon emitted its own empties there too and the rule absorbed the difference symmetrically; now deacon omits them and the reference does not, so the difference has a direction and is recorded here instead of being only compensated. Measured at oracle 0.87.0 for `{\"image\": \"alpine:3.19\"}`: the reference emits `remoteEnv: {}`, `containerEnv: {}`, `portsAttributes: {}` and `hostRequirements: {cpus: null, memory: \"-Infinity\", storage: \"-Infinity\"}`; deacon emits none of the four. The two documents describe the same merged configuration \u2014 no consumer can act differently on an absent `containerEnv` than on an empty one \u2014 so the divergence is tolerated rather than treated as a defect to rush a fix for. The `hostRequirements` values in particular are upstream's `Math.max()` over an empty set serialized as the strings `\"-Infinity\"`, and reproducing that shape uncritically would be adopting a quirk, not achieving parity. Self-invalidates the moment the difference stops reproducing.",
+  "added": "2026-07-31",
+  "expires": "2027-01-31"
+}

@@ -147,12 +147,6 @@
       "context": []
     },
     {
-      "id": "obl-bhv-5b81aa11",
-      "kind": "behavior",
-      "behavior": "bhv-readconfig-authored-empty-omitted-collapsed",
-      "context": []
-    },
-    {
       "id": "obl-bhv-66556fa0",
       "kind": "behavior",
       "behavior": "bhv-readconfig-unsupported-enum-rejected",
@@ -375,6 +369,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-dd8004f3",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-authored-null-omitted-collapsed",
+      "context": []
+    },
+    {
       "id": "obl-bhv-de6e65f1",
       "kind": "behavior",
       "behavior": "bhv-doctor-diagnostics-report",
@@ -390,6 +390,12 @@
       "id": "obl-bhv-e4edcb80",
       "kind": "behavior",
       "behavior": "bhv-host-ca-injection",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-e815f2af",
+      "kind": "behavior",
+      "behavior": "bhv-readconfig-merged-computed-empties-omitted",
       "context": []
     },
     {

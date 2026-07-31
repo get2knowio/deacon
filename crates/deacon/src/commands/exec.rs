@@ -665,7 +665,7 @@ where
             };
 
             config_remote_user = resolved.remote_user.clone();
-            config_remote_env = Some(resolved.remote_env.clone());
+            config_remote_env = Some(resolved.remote_env().clone());
         } else {
             // #322: `exec --container-id` (no --workspace-folder/--config) has no
             // workspace config, so recover `remoteUser`/`remoteEnv` from the
@@ -681,7 +681,7 @@ where
                 ) {
                     Ok(Some(meta)) => {
                         config_remote_user = meta.remote_user.clone();
-                        config_remote_env = Some(meta.remote_env.clone());
+                        config_remote_env = Some(meta.remote_env().clone());
                     }
                     Ok(None) => {}
                     Err(e) => tracing::warn!(
@@ -860,7 +860,7 @@ mod tests {
         let compose_config = DevContainerConfig {
             docker_compose_file: Some(json!("docker-compose.yml")),
             service: Some("web".to_string()),
-            run_services: vec!["db".to_string(), "redis".to_string()],
+            run_services: Some(vec!["db".to_string(), "redis".to_string()]),
             ..Default::default()
         };
 
@@ -1234,11 +1234,11 @@ mod tests {
         let config = DevContainerConfig {
             docker_compose_file: Some(json!("docker-compose.yml")),
             service: Some("app".to_string()),
-            run_services: vec![
+            run_services: Some(vec![
                 "postgres".to_string(),
                 "redis".to_string(),
                 "elasticsearch".to_string(),
-            ],
+            ]),
             ..Default::default()
         };
 

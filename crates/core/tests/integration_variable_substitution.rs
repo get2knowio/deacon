@@ -69,23 +69,23 @@ async fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
     }
 
     // Check container environment variable substitution
-    let workspace_root = config.container_env.get("WORKSPACE_ROOT").unwrap();
+    let workspace_root = config.container_env().get("WORKSPACE_ROOT").unwrap();
     assert!(workspace_root.starts_with(workspace_canon_str));
 
-    let container_id = config.container_env.get("CONTAINER_ID").unwrap();
+    let container_id = config.container_env().get("CONTAINER_ID").unwrap();
     assert_eq!(container_id.len(), 12); // Should be 12-character deterministic ID
 
     // Check host USER environment variable (if set)
     if let Ok(host_user) = env::var("USER") {
-        assert_eq!(config.container_env.get("HOST_USER").unwrap(), &host_user);
+        assert_eq!(config.container_env().get("HOST_USER").unwrap(), &host_user);
     }
 
     // Check missing environment variable becomes empty string
-    assert_eq!(config.container_env.get("MISSING_VAR").unwrap(), "");
+    assert_eq!(config.container_env().get("MISSING_VAR").unwrap(), "");
 
     // Check mounts substitution
-    assert!(!config.mounts.is_empty());
-    for mount in &config.mounts {
+    assert!(!config.mounts().is_empty());
+    for mount in config.mounts() {
         if let serde_json::Value::String(mount_str) = mount {
             if mount_str.contains("source=") || mount_str.contains(":") {
                 assert!(mount_str.contains(workspace_canon_str));
@@ -94,9 +94,9 @@ async fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
     }
 
     // Check run args substitution
-    assert!(!config.run_args.is_empty());
+    assert!(!config.run_args().is_empty());
     let devcontainer_name = config
-        .run_args
+        .run_args()
         .iter()
         .find(|arg| arg.starts_with("devcontainer-"))
         .unwrap();

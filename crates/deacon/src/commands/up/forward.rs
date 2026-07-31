@@ -55,7 +55,7 @@ pub fn declared_port_specs(
             specs.push(s);
         }
     };
-    for ps in &config.forward_ports {
+    for ps in config.forward_ports() {
         push(port_spec_to_string(ps));
     }
     if let Some(app) = &config.app_port {
@@ -269,10 +269,10 @@ mod tests {
     #[test]
     fn collects_and_dedups_declared_specs() {
         let config = DevContainerConfig {
-            forward_ports: vec![
+            forward_ports: Some(vec![
                 PortSpec::Number(3000),
                 PortSpec::String("db:5432".to_string()),
-            ],
+            ]),
             app_port: Some(AppPort::Single(PortSpec::Number(8080))),
             ..DevContainerConfig::default()
         };

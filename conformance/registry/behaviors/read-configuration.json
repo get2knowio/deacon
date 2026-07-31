@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "records": [
     {
-      "id": "bhv-readconfig-authored-empty-omitted-collapsed",
+      "id": "bhv-readconfig-authored-null-omitted-collapsed",
       "area": "read-configuration",
-      "statement": "deacon's resolved-configuration output reports the same value for a property the author left OUT as for one the author wrote as empty, while the reference reports the author's document faithfully and omits what was not written.",
+      "statement": "deacon's resolved-configuration output omits a property the author wrote as `null`, reporting it identically to one the author left out, while the reference echoes the authored `null` and omits only what was not written.",
       "applicability": [],
       "spec": "unspecified",
       "reference": "divergent",
       "decision": "intentional-divergence",
-      "notes": "Surfaced by the 024 US5 de-suppression; HALF FIXED under #398. deacon models the configuration as a typed struct and used to serialize every modeled optional unconditionally, so an unauthored `mounts` and an authored `\"mounts\": []` were the same bytes on the way out, while the reference echoes the authored document and can tell them apart. #398 applied `skip_serializing_if` to every `Option<_>` field, which took deacon from ~40 emitted keys to 13 for a configuration authoring one property and closed the omitted half for those. TWO HALVES REMAIN, and the split is the useful part of this record. (1) EMPTY COLLECTIONS: 11 fields are still non-`Option` (`features`, `customizations`, `capAdd`, `runServices`, `containerEnv`, `remoteEnv`, `portsAttributes`, `mounts`, `forwardPorts`, `runArgs`, `securityOpt`), so an authored `[]`/`{}` is still indistinguishable from an omission; the fix is to wrap them in `Option`, not to add a `Vec::is_empty` skip, which would collapse the distinction from the other side. (2) AUTHORED NULL: deacon holds an authored `\"name\": null` and an omission in the same `None`, so #398 MOVED this boundary rather than closing it \u2014 before, both CLIs emitted `null` and agreed; now deacon omits and the reference echoes. That is a net improvement (the common case became correct and the newly-wrong case is schema-invalid input), not a clean win, and saying so is the point. `spec: unspecified` because the spec does not define this CLI's result document at all. Tracked at #398; characterized by `wvr-readconfig-authored-empty-omitted`."
+      "notes": "Surfaced by the 024 US5 de-suppression as a THREE-state collapse (authored null, authored empty, omitted); #398 closed the empty half and this record was renamed from `bhv-readconfig-authored-empty-omitted-collapsed` to say what actually remains. #398 made every modeled optional genuinely optional \u2014 `Option<_>` plus `skip_serializing_if`, including the eleven properties previously typed as bare collections \u2014 so an authored `\"forwardPorts\": []` is now emitted and an unauthored one omitted, matching the reference byte for byte. Measured at oracle 0.87.0 on `fx-us5-null-empty-omitted`: `forwardPorts`, `containerEnv` and the unauthored `mounts` all AGREE now; only `name` diverges. WHAT REMAINS: deacon holds an authored `\"name\": null` and an omission in the same `None`, so omitting unauthored optionals necessarily omits authored nulls too. The boundary MOVED rather than closed \u2014 before #398 both CLIs emitted `null` here and agreed; now deacon omits. That is a net improvement (the common case became correct; the newly-wrong case is schema-invalid input, since `null` on a typed property is not valid against the devcontainer schema), not a clean win, and saying so is the point. Closing it properly needs a three-state representation (`Option<Option<T>>` with a double-option deserializer, or authored-key tracking); REJECTING an authored null under constitution IV (\"strict on mistakes\") is a defensible alternative and the decision is open. `spec: unspecified` because the spec does not define this CLI's result document at all. Tracked at #398; characterized by `wvr-readconfig-authored-empty-omitted`."
     },
     {
       "id": "bhv-readconfig-bad-config-path",
@@ -119,6 +119,16 @@
       "reference": "divergent",
       "decision": "intentional-divergence",
       "notes": "deacon fails fast (constitution IV, no silent fallbacks); the reference is lenient at read-configuration. Backed by case-errors-malformed-json and wvr-malformed-json."
+    },
+    {
+      "id": "bhv-readconfig-merged-computed-empties-omitted",
+      "area": "read-configuration",
+      "statement": "deacon's `mergedConfiguration` omits the computed-empty properties the reference synthesizes there \u2014 `containerEnv`, `remoteEnv`, `portsAttributes` and `hostRequirements` \u2014 for a configuration that authors none of them.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Made VISIBLE by #398, not caused by it. `mergedConfiguration` is SYNTHESIZED rather than echoed, so unlike `configuration` an empty value there is a computed default rather than authorship information. The reference materializes those defaults; deacon, having made every modeled optional skip serialization when unset, now omits them. Measured at oracle 0.87.0 for `{\"image\": \"alpine:3.19\"}`: the reference emits `remoteEnv: {}`, `containerEnv: {}`, `portsAttributes: {}` and `hostRequirements: {cpus: null, memory: \"-Infinity\", storage: \"-Infinity\"}`; deacon emits none of the four. This was previously absorbed by `drop_absent_optional`, which ran on BOTH sides of the merged block \u2014 and still does, which is why that rule survives #398 on the merged block alone. The two documents describe the same merged configuration, and the reference's `hostRequirements` values are a `Math.max()` over an empty set serialized as the strings `\"-Infinity\"`, which deacon should not reproduce uncritically. Recorded so the difference is characterized rather than only compensated; the compensation is scoped to the merged block and named in `normalize.rs`."
     },
     {
       "id": "bhv-readconfig-merged-configuration",

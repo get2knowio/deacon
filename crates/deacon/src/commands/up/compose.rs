@@ -169,10 +169,10 @@ pub(crate) async fn execute_compose_up(
     // compose override `environment:` block is deterministic run-to-run —
     // otherwise the IndexMap (whose whole point is stable ordering) inherits
     // the HashMap's nondeterminism for the containerEnv-derived lines.
-    let mut config_env_keys: Vec<&String> = config.container_env.keys().collect();
+    let mut config_env_keys: Vec<&String> = config.container_env().keys().collect();
     config_env_keys.sort();
     for key in config_env_keys {
-        merged_container_env.insert(key.clone(), config.container_env[key].clone());
+        merged_container_env.insert(key.clone(), config.container_env()[key].clone());
     }
     for (key, value) in effective_env {
         merged_container_env.insert(key.clone(), value.clone());
@@ -483,7 +483,7 @@ pub(crate) async fn execute_compose_up(
         .as_ref()
         .map(|fb| fb.resolved_features.as_slice())
         .unwrap_or(&[]);
-    if !config.mounts.is_empty() || !resolved_features_for_mounts.is_empty() {
+    if !config.mounts().is_empty() || !resolved_features_for_mounts.is_empty() {
         let mount_substitution_context = {
             let mut ctx = deacon_core::variable::SubstitutionContext::new(workspace_folder)?;
             let id_labels: Vec<(String, String)> = identity.id_hash_labels();
@@ -491,7 +491,7 @@ pub(crate) async fn execute_compose_up(
             ctx
         };
         let merged_config_mounts = deacon_core::mount::merge_mounts(
-            &config.mounts,
+            config.mounts(),
             resolved_features_for_mounts,
             Some(&mount_substitution_context),
         )
@@ -894,7 +894,7 @@ pub(crate) async fn resolve_compose_feature_image(
     cli: &deacon_core::docker::CliRuntime,
 ) -> Result<Option<FeatureBuildOutput>> {
     // Nothing to install when features is missing or an empty object.
-    let features_obj = match config.features.as_object() {
+    let features_obj = match config.features().as_object() {
         Some(o) if !o.is_empty() => o,
         _ => {
             debug!("No features declared on compose config; skipping feature build");

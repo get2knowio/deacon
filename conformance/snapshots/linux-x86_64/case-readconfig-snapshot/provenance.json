@@ -14,6 +14,6 @@
   "dockerVersion": "29.6.2-1",
   "composeVersion": "2.40.3",
   "imageDigests": {},
-  "normalizerVersion": "6",
+  "normalizerVersion": "7",
   "capturedAt": "2026-07-26T20:50:09Z"
 }

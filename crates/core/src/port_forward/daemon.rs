@@ -524,9 +524,9 @@ fn resolve_attributes(cfg: Option<&DevContainerConfig>, port: u16) -> ResolvedPo
     let key_plain = port.to_string();
     let key_tcp = format!("{port}/tcp");
     if let Some(pa) = cfg
-        .ports_attributes
+        .ports_attributes()
         .get(&key_plain)
-        .or_else(|| cfg.ports_attributes.get(&key_tcp))
+        .or_else(|| cfg.ports_attributes().get(&key_tcp))
     {
         return to_resolved(pa);
     }
@@ -679,6 +679,7 @@ mod tests {
         let mut cfg = DevContainerConfig::default();
         for (key, oaf) in ports {
             cfg.ports_attributes
+                .get_or_insert_default()
                 .insert(key.to_string(), attrs(Some(&format!("label-{key}")), oaf));
         }
         cfg.other_ports_attributes = other.map(|oaf| attrs(None, oaf));
@@ -735,7 +736,9 @@ mod tests {
         let mut cfg = DevContainerConfig::default();
         let mut pa = attrs(None, OnAutoForward::OpenBrowser);
         pa.protocol = Some("https".to_string());
-        cfg.ports_attributes.insert("3000".to_string(), pa);
+        cfg.ports_attributes
+            .get_or_insert_default()
+            .insert("3000".to_string(), pa);
         assert_eq!(
             resolve_attributes(Some(&cfg), 3000).protocol.as_deref(),
             Some("https")

@@ -262,10 +262,11 @@ async fn read_only_raw_dir_fails_the_run_not_pass() {
 /// reviewer can always ask "what did the CLI actually emit?" independently of "what did
 /// we compare?".
 ///
-/// This matters most exactly where US4 tightens the rules: the named
-/// `drop_absent_optional` rule elides an absent optional from the COMPARISON, and the raw
-/// evidence must still show that deacon emitted it. If normalization overwrote the raw
-/// record, retiring a rule later would be unreviewable.
+/// This matters most exactly where US4 tightens the rules: `path_token` rewrites a host
+/// path out of the COMPARISON, and the raw evidence must still show what deacon actually
+/// emitted. If normalization overwrote the raw record, retiring a rule later would be
+/// unreviewable — which is precisely what #398 then did to `drop_absent_optional` on the
+/// `configuration` block.
 #[test]
 fn raw_and_normalized_evidence_are_both_preserved_and_separately_locatable() {
     use parity_harness::evidence::{CaseEvidence, RawChannelEvidence};
@@ -274,8 +275,8 @@ fn raw_and_normalized_evidence_are_both_preserved_and_separately_locatable() {
     let workspace = Path::new("/tmp/some-run-1234/ws");
     let tokens = TokenMap::workspace(workspace);
 
-    // A structured-output document exercising BOTH kinds of rule: a path that
-    // `path_token` rewrites, and an absent optional that `drop_absent_optional` elides.
+    // A structured-output document exercising a path that `path_token` rewrites plus
+    // values no rule touches, so the raw-vs-normalized separation is visible.
     let raw_value = serde_json::json!({
         "configuration": {
             "name": "demo",
@@ -320,7 +321,7 @@ fn raw_and_normalized_evidence_are_both_preserved_and_separately_locatable() {
     assert_eq!(
         stored_raw.value["configuration"]["workspaceMount"],
         serde_json::Value::Null,
-        "an optional elided from the COMPARISON must remain visible in the RAW record"
+        "an authored null must remain visible in the RAW record"
     );
     assert!(
         stored_raw.value["configuration"]["mounts"][0]
@@ -329,15 +330,15 @@ fn raw_and_normalized_evidence_are_both_preserved_and_separately_locatable() {
         "the raw record keeps the un-tokenized path"
     );
 
-    // The normalized record is the compared form: path tokenized, enumerated absent
-    // optionals elided, everything else preserved.
-    assert!(
-        stored_norm.value["configuration"]["workspaceMount"].is_null()
-            && stored_norm.value["configuration"]
-                .get("workspaceMount")
-                .is_none(),
-        "`workspaceMount` is on the enumerated list and absent, so it is elided from the \
-         comparison"
+    // The normalized record is the compared form: path tokenized, everything else
+    // preserved. Since #398 the `configuration` block loses NOTHING to
+    // `drop_absent_optional` — deacon emits only what the author wrote, so an authored
+    // null is the author's and is compared.
+    assert_eq!(
+        stored_norm.value["configuration"]["workspaceMount"],
+        serde_json::Value::Null,
+        "an authored null survives into the comparison — eliding it is what made an \
+         authored null and an omission the same observation (FR-055)"
     );
     assert_eq!(
         stored_norm.value["configuration"]["unlistedProperty"],
