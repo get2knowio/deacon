@@ -641,16 +641,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-07ef9122",
-      "kind": "combination",
-      "operation": "outdated",
-      "assignment": {
-        "sdim-features": "multiple-dependency-order",
-        "sdim-output-mode": "structured"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-07ff6676",
       "kind": "combination",
       "operation": "exec",
@@ -3145,16 +3135,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-67c58787",
-      "kind": "combination",
-      "operation": "outdated",
-      "assignment": {
-        "sdim-features": "multiple-dependency-order",
-        "sdim-layering": "single"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-687d5488",
       "kind": "combination",
       "operation": "up",
@@ -3943,16 +3923,6 @@
       "assignment": {
         "sdim-config-source": "dockerfile",
         "sdim-container-state": "running-stale-config"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-81246c5a",
-      "kind": "combination",
-      "operation": "outdated",
-      "assignment": {
-        "sdim-features": "multiple-dependency-order",
-        "sdim-output-mode": "human"
       },
       "arity": 2
     },
@@ -4759,16 +4729,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-9ca129e7",
-      "kind": "combination",
-      "operation": "outdated",
-      "assignment": {
-        "sdim-container-state": "none",
-        "sdim-features": "multiple-dependency-order"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-9cf6eb47",
       "kind": "combination",
       "operation": "run-user-commands",
@@ -5220,16 +5180,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-ad876a56",
-      "kind": "combination",
-      "operation": "outdated",
-      "assignment": {
-        "sdim-features": "multiple-dependency-order",
-        "sdim-layering": "extends-chain"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-ae22c784",
       "kind": "combination",
       "operation": "templates-apply",
@@ -5661,16 +5611,6 @@
       "arity": 2
     },
     {
-      "id": "obl-cmb-bbd92f0e",
-      "kind": "combination",
-      "operation": "outdated",
-      "assignment": {
-        "sdim-config-source": "image",
-        "sdim-features": "multiple-dependency-order"
-      },
-      "arity": 2
-    },
-    {
       "id": "obl-cmb-bc0f8004",
       "kind": "combination",
       "operation": "read-configuration",
@@ -5798,16 +5738,6 @@
       "assignment": {
         "sdim-container-state": "stopped",
         "sdim-features": "single"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-bef16666",
-      "kind": "combination",
-      "operation": "outdated",
-      "assignment": {
-        "sdim-config-source": "compose",
-        "sdim-features": "multiple-dependency-order"
       },
       "arity": 2
     },
@@ -5998,16 +5928,6 @@
       "assignment": {
         "sdim-container-state": "none",
         "sdim-layering": "image-metadata"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-c4fa4ad3",
-      "kind": "combination",
-      "operation": "outdated",
-      "assignment": {
-        "sdim-config-source": "dockerfile",
-        "sdim-features": "multiple-dependency-order"
       },
       "arity": 2
     },
@@ -6479,16 +6399,6 @@
       "assignment": {
         "sdim-features": "none",
         "sdim-layering": "image-metadata"
-      },
-      "arity": 2
-    },
-    {
-      "id": "obl-cmb-d57b8752",
-      "kind": "combination",
-      "operation": "outdated",
-      "assignment": {
-        "sdim-features": "multiple-dependency-order",
-        "sdim-layering": "cli-overlay"
       },
       "arity": 2
     },
