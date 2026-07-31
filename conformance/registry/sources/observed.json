@@ -243,6 +243,16 @@
       ]
     },
     {
+      "id": "src-obs-upgrade-cli-config-overlay",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "`deacon upgrade --dry-run` with `--merge-config` and with `--override-config`, compared against the same run without them; and `devcontainer upgrade --help`, which lists neither flag",
+      "summary": "Whether the regenerated lockfile reflects the command-line configuration overlays, and whether the reference offers any comparable surface on this subcommand.",
+      "behaviors": [
+        "bhv-upgrade-cli-config-overlay-honored"
+      ]
+    },
+    {
       "id": "src-obs-upgrade-empty-feature-set",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",

@@ -12,6 +12,16 @@
       ]
     },
     {
+      "id": "odp-bhv-45551f67",
+      "obligation": "obl-bhv-45551f67",
+      "disposition": "case",
+      "cases": [
+        "case-upgrade-compose-merge-config-adds-feature",
+        "case-upgrade-dockerfile-override-config-removes-features",
+        "case-upgrade-image-merge-config-contributes-only-feature"
+      ]
+    },
+    {
       "id": "odp-bhv-6a2d5301",
       "obligation": "obl-bhv-6a2d5301",
       "disposition": "case",
@@ -48,27 +58,12 @@
       ]
     },
     {
-      "id": "odp-cmb-0b194953",
-      "obligation": "obl-cmb-0b194953",
-      "disposition": "case",
-      "cases": [
-        "case-upgrade-extends-chain-lockfile",
-        "case-upgrade-regenerates-lockfile"
-      ]
-    },
-    {
       "id": "odp-cmb-0cb4effa",
       "obligation": "obl-cmb-0cb4effa",
       "disposition": "case",
       "cases": [
         "case-upgrade-compose-workspace"
       ]
-    },
-    {
-      "id": "odp-cmb-0cfe1f76",
-      "obligation": "obl-cmb-0cfe1f76",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
     },
     {
       "id": "odp-cmb-15cfc44a",
@@ -124,8 +119,8 @@
       ]
     },
     {
-      "id": "odp-cmb-30357cd3",
-      "obligation": "obl-cmb-30357cd3",
+      "id": "odp-cmb-3073e0a2",
+      "obligation": "obl-cmb-3073e0a2",
       "disposition": "case",
       "cases": [
         "case-upgrade-extends-chain-lockfile"
@@ -146,14 +141,6 @@
       "gap": "gap-pairwise-upgrade"
     },
     {
-      "id": "odp-cmb-48a3d9eb",
-      "obligation": "obl-cmb-48a3d9eb",
-      "disposition": "case",
-      "cases": [
-        "case-upgrade-regenerates-lockfile"
-      ]
-    },
-    {
       "id": "odp-cmb-53668210",
       "obligation": "obl-cmb-53668210",
       "disposition": "gap",
@@ -172,12 +159,6 @@
       ]
     },
     {
-      "id": "odp-cmb-5e00fbe8",
-      "obligation": "obl-cmb-5e00fbe8",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
       "id": "odp-cmb-68fa56a9",
       "obligation": "obl-cmb-68fa56a9",
       "disposition": "case",
@@ -188,12 +169,6 @@
         "case-upgrade-no-features-empty-lockfile",
         "case-upgrade-unsupported-values-rejected"
       ]
-    },
-    {
-      "id": "odp-cmb-6ca77f90",
-      "obligation": "obl-cmb-6ca77f90",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
     },
     {
       "id": "odp-cmb-6d28294c",
@@ -210,12 +185,6 @@
       "cases": [
         "case-upgrade-dockerfile-workspace"
       ]
-    },
-    {
-      "id": "odp-cmb-76286197",
-      "obligation": "obl-cmb-76286197",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
     },
     {
       "id": "odp-cmb-7693352b",
@@ -247,29 +216,8 @@
       "gap": "gap-pairwise-upgrade"
     },
     {
-      "id": "odp-cmb-7dd34b50",
-      "obligation": "obl-cmb-7dd34b50",
-      "disposition": "case",
-      "cases": [
-        "case-upgrade-extends-chain-lockfile",
-        "case-upgrade-regenerates-lockfile"
-      ]
-    },
-    {
       "id": "odp-cmb-8004dcb5",
       "obligation": "obl-cmb-8004dcb5",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
-      "id": "odp-cmb-835fa8aa",
-      "obligation": "obl-cmb-835fa8aa",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
-      "id": "odp-cmb-84b01b94",
-      "obligation": "obl-cmb-84b01b94",
       "disposition": "gap",
       "gap": "gap-pairwise-upgrade"
     },
@@ -280,12 +228,6 @@
       "cases": [
         "case-upgrade-extends-chain-lockfile"
       ]
-    },
-    {
-      "id": "odp-cmb-883530a6",
-      "obligation": "obl-cmb-883530a6",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
     },
     {
       "id": "odp-cmb-89498bda",
@@ -355,14 +297,6 @@
       ]
     },
     {
-      "id": "odp-cmb-9d8f9594",
-      "obligation": "obl-cmb-9d8f9594",
-      "disposition": "case",
-      "cases": [
-        "case-upgrade-extends-chain-lockfile"
-      ]
-    },
-    {
       "id": "odp-cmb-9f83485f",
       "obligation": "obl-cmb-9f83485f",
       "disposition": "gap",
@@ -381,15 +315,6 @@
       ]
     },
     {
-      "id": "odp-cmb-b3f4795c",
-      "obligation": "obl-cmb-b3f4795c",
-      "disposition": "case",
-      "cases": [
-        "case-upgrade-extends-chain-lockfile",
-        "case-upgrade-regenerates-lockfile"
-      ]
-    },
-    {
       "id": "odp-cmb-b5573eb6",
       "obligation": "obl-cmb-b5573eb6",
       "disposition": "case",
@@ -404,26 +329,8 @@
       "gap": "gap-pairwise-upgrade"
     },
     {
-      "id": "odp-cmb-ba2615ba",
-      "obligation": "obl-cmb-ba2615ba",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
-      "id": "odp-cmb-c21c09c0",
-      "obligation": "obl-cmb-c21c09c0",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
       "id": "odp-cmb-c5083a84",
       "obligation": "obl-cmb-c5083a84",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
-      "id": "odp-cmb-c71b7d4f",
-      "obligation": "obl-cmb-c71b7d4f",
       "disposition": "gap",
       "gap": "gap-pairwise-upgrade"
     },
@@ -442,12 +349,6 @@
     {
       "id": "odp-cmb-d123620b",
       "obligation": "obl-cmb-d123620b",
-      "disposition": "gap",
-      "gap": "gap-pairwise-upgrade"
-    },
-    {
-      "id": "odp-cmb-de50e6b0",
-      "obligation": "obl-cmb-de50e6b0",
       "disposition": "gap",
       "gap": "gap-pairwise-upgrade"
     },

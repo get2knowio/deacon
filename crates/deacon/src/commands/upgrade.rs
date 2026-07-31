@@ -43,6 +43,17 @@ pub struct UpgradeArgs {
     pub workspace_folder: Option<PathBuf>,
     /// Optional `--config <PATH>`.
     pub config_path: Option<PathBuf>,
+    /// REPLACE base (`--override-config`). Threaded through in #409: these
+    /// three inputs were previously hard-coded away here, so a user pinning a
+    /// configuration got a lockfile regenerated from a DIFFERENT configuration
+    /// with exit 0 and no warning. The sibling `outdated` honored them all
+    /// along, which is what made the omission visible.
+    pub override_config: Option<PathBuf>,
+    /// Settings/profile-sourced merge fragments (root `mergeConfig` then the
+    /// selected profile's), lowest→highest precedence.
+    pub settings_merge_paths: Vec<PathBuf>,
+    /// CLI `--merge-config` fragments, in given order (later wins).
+    pub cli_merge_paths: Vec<PathBuf>,
     /// Docker CLI path; default `"docker"`. Spec §2 surface parity only —
     /// upgrade itself does not invoke docker (the OCI fetcher uses HTTP).
     #[allow(dead_code)]
@@ -80,9 +91,9 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
     let initial = load_config(ConfigLoadArgs {
         workspace_folder: args.workspace_folder.as_deref(),
         config_path: args.config_path.as_deref(),
-        settings_merge_paths: &[],
-        cli_merge_paths: &[],
-        override_config_path: None,
+        settings_merge_paths: &args.settings_merge_paths,
+        cli_merge_paths: &args.cli_merge_paths,
+        override_config_path: args.override_config.as_deref(),
         secrets_files: &[],
         resolve_devcontainer_id: true,
     })
@@ -108,9 +119,9 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
         load_config(ConfigLoadArgs {
             workspace_folder: args.workspace_folder.as_deref(),
             config_path: args.config_path.as_deref(),
-            settings_merge_paths: &[],
-            cli_merge_paths: &[],
-            override_config_path: None,
+            settings_merge_paths: &args.settings_merge_paths,
+            cli_merge_paths: &args.cli_merge_paths,
+            override_config_path: args.override_config.as_deref(),
             secrets_files: &[],
             resolve_devcontainer_id: true,
         })
@@ -801,6 +812,9 @@ mod tests {
         let args = UpgradeArgs {
             workspace_folder: None,
             config_path: None,
+            override_config: None,
+            settings_merge_paths: Vec::new(),
+            cli_merge_paths: Vec::new(),
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             dry_run: false,
@@ -810,5 +824,13 @@ mod tests {
         assert!(!args.dry_run);
         assert!(args.feature.is_none());
         assert!(args.target_version.is_none());
+        // #409: these three were hard-coded away at the load sites, so the
+        // struct could not even express an overlay. A default-constructed
+        // args value carrying none of them is the *absence* case, not proof
+        // the wiring works — that lives in the conformance cases, which run
+        // the real binary with the flags set.
+        assert!(args.override_config.is_none());
+        assert!(args.cli_merge_paths.is_empty());
+        assert!(args.settings_merge_paths.is_empty());
     }
 }

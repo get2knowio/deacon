@@ -10,6 +10,14 @@
       "docs": "specs/015-auto-forward-ports/spec.md"
     },
     {
+      "id": "ext-cli-config-overlay",
+      "behaviors": [
+        "bhv-upgrade-cli-config-overlay-honored"
+      ],
+      "description": "deacon accepts `--merge-config <PATH>` (deep-overlay fragments, later wins) on every configuration-consuming subcommand, and extends `--override-config` to subcommands where the reference CLI does not offer it, including `upgrade`. The reference has no `--merge-config` anywhere in its surface, and its `upgrade` takes neither flag.",
+      "docs": "docs/DIFFERENTIATORS.md"
+    },
+    {
       "id": "ext-container-identity-labels",
       "behaviors": [
         "bhv-container-identity-labels"
