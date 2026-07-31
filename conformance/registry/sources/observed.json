@@ -8,7 +8,7 @@
       "locator": "read-configuration over a configuration authoring `name: null` / `forwardPorts: []` / `containerEnv: {}` and omitting `mounts`",
       "summary": "Whether a resolved-configuration result distinguishes an authored null, an authored empty collection, and an omitted property.",
       "behaviors": [
-        "bhv-readconfig-authored-empty-omitted-collapsed"
+        "bhv-readconfig-authored-null-omitted-collapsed"
       ]
     },
     {
@@ -160,6 +160,16 @@
       "summary": "The reference CLI recovers from a hard JSONC syntax error by dropping the broken property and accepting the file.",
       "behaviors": [
         "bhv-readconfig-malformed-jsonc-rejected"
+      ]
+    },
+    {
+      "id": "src-obs-merged-computed-empties",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "read-configuration --include-merged-configuration over a configuration authoring only `image`",
+      "summary": "Which computed-empty properties the reference synthesizes into `mergedConfiguration` (`containerEnv`, `remoteEnv`, `portsAttributes`, `hostRequirements`) for a configuration that authors none of them.",
+      "behaviors": [
+        "bhv-readconfig-merged-computed-empties-omitted"
       ]
     },
     {

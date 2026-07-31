@@ -97,7 +97,10 @@ pub(crate) async fn execute_container_up(
     // containerEnv values win (FR-024). The canonical bundle is written by the
     // runtime install step below; these vars point at it.
     if host_ca_set.is_some() {
-        apply_ca_env_vars(&mut config.container_env, HOST_CA_BUNDLE_PATH);
+        apply_ca_env_vars(
+            config.container_env.get_or_insert_default(),
+            HOST_CA_BUNDLE_PATH,
+        );
     }
 
     // Warn if workspace_mount_consistency is specified but workspace_mount is already defined
@@ -180,7 +183,7 @@ pub(crate) async fn execute_container_up(
             // Parse port specification using shared parser
             match PortSpec::parse(port_str) {
                 Ok(port_spec) => {
-                    config.forward_ports.push(port_spec);
+                    config.forward_ports.get_or_insert_default().push(port_spec);
                 }
                 Err(err) => {
                     warn!(
@@ -263,7 +266,7 @@ pub(crate) async fn execute_container_up(
 
     // Install features if present in configuration
     let resolved_features = if config
-        .features
+        .features()
         .as_object()
         .map(|o| !o.is_empty())
         .unwrap_or(false)
@@ -301,7 +304,11 @@ pub(crate) async fn execute_container_up(
         // 024 US5). Ordering AMONG features is unaffected — `combined_env` is already
         // built in install order so a later Feature wins there.
         for (key, value) in feature_build.combined_env {
-            config.container_env.entry(key).or_insert(value);
+            config
+                .container_env
+                .get_or_insert_default()
+                .entry(key)
+                .or_insert(value);
         }
 
         config.image = Some(feature_build.image_tag.clone());
@@ -364,7 +371,7 @@ pub(crate) async fn execute_container_up(
         .iter()
         .map(|f| f.metadata.mounts.len())
         .sum();
-    let config_mount_count = config.mounts.len();
+    let config_mount_count = config.mounts().len();
 
     debug!(
         feature_mounts = feature_mount_count,
@@ -385,7 +392,7 @@ pub(crate) async fn execute_container_up(
         ctx
     };
     let merged_mounts = merge_mounts(
-        &config.mounts,
+        config.mounts(),
         resolved_features.as_deref().unwrap_or(&[]),
         Some(&mount_substitution_context),
     )
@@ -569,7 +576,7 @@ pub(crate) async fn execute_container_up(
     let stripped_config;
     let config_for_create: &DevContainerConfig = if args.auto_forward {
         let mut c = config.clone();
-        c.forward_ports.clear();
+        c.forward_ports = None;
         c.app_port = None;
         stripped_config = c;
         &stripped_config
@@ -726,7 +733,7 @@ pub(crate) async fn execute_container_up(
         None,
         config_user.clone(),
         config.user_env_probe.unwrap_or(args.default_user_env_probe),
-        Some(&config.remote_env),
+        Some(config.remote_env()),
         cli_remote_env,
         cache_folder.as_deref(),
     )

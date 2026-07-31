@@ -649,7 +649,7 @@ impl MergedSecurityOptions {
 ///
 /// let config = DevContainerConfig {
 ///     privileged: Some(true),
-///     cap_add: vec!["SYS_PTRACE".to_string()],
+///     cap_add: Some(vec!["SYS_PTRACE".to_string()]),
 ///     ..Default::default()
 /// };
 /// let features = vec![];
@@ -671,7 +671,7 @@ pub fn merge_security_options(
 
     // Rule 3: Capabilities (Union + Deduplicate + Uppercase)
     // Collect all capabilities from config and features
-    let all_caps = std::iter::once(config.cap_add.as_slice())
+    let all_caps = std::iter::once(config.cap_add())
         .chain(features.iter().map(|f| f.metadata.cap_add.as_slice()))
         .flatten()
         .map(|s| s.as_str());
@@ -683,7 +683,7 @@ pub fn merge_security_options(
     let mut security_opt = Vec::new();
 
     // First add from config
-    for opt in &config.security_opt {
+    for opt in config.security_opt() {
         if seen.insert(opt.clone()) {
             security_opt.push(opt.clone());
         }
@@ -3205,8 +3205,8 @@ mod security_merge_tests {
         DevContainerConfig {
             privileged,
             init,
-            cap_add,
-            security_opt,
+            cap_add: Some(cap_add),
+            security_opt: Some(security_opt),
             // All other fields use defaults
             ..Default::default()
         }

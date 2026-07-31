@@ -11,7 +11,7 @@ fn test_resolve_effective_config_merges_labels_and_substitutes() -> anyhow::Resu
             let mut m = std::collections::HashMap::new();
             m.insert("BASE_VAR".to_string(), Some("base".to_string()));
             m.insert("EMPTY_VAR".to_string(), None);
-            m
+            Some(m)
         },
         ..Default::default()
     };
@@ -31,14 +31,14 @@ fn test_resolve_effective_config_merges_labels_and_substitutes() -> anyhow::Resu
         ConfigMerger::resolve_effective_config(&base, Some(&labels), workspace_path)?;
 
     // Workspace folder substitution should replace variable
-    let wf = resolved.workspace_folder.unwrap();
+    let wf = resolved.workspace_folder.clone().unwrap();
     assert!(wf.ends_with("/project"));
     assert!(wf.contains(&workspace_path.canonicalize()?.to_string_lossy().to_string()));
 
     // Label should have overridden BASE_VAR
     assert_eq!(
         resolved
-            .remote_env
+            .remote_env()
             .get("BASE_VAR")
             .unwrap()
             .as_ref()
@@ -47,11 +47,11 @@ fn test_resolve_effective_config_merges_labels_and_substitutes() -> anyhow::Resu
     );
 
     // EMPTY_VAR should be preserved as None
-    assert!(resolved.remote_env.contains_key("EMPTY_VAR"));
-    assert!(resolved.remote_env.get("EMPTY_VAR").unwrap().is_none());
+    assert!(resolved.remote_env().contains_key("EMPTY_VAR"));
+    assert!(resolved.remote_env().get("EMPTY_VAR").unwrap().is_none());
 
     // Non-prefixed labels shouldn't be included (the label with slash shouldn't match prefix)
-    assert!(!resolved.remote_env.contains_key("IGNORED"));
+    assert!(!resolved.remote_env().contains_key("IGNORED"));
 
     Ok(())
 }

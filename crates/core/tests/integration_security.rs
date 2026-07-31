@@ -27,10 +27,10 @@ async fn test_security_options_in_config_parsing() -> anyhow::Result<()> {
 
     // Verify security options are parsed correctly
     assert_eq!(config.privileged, Some(true));
-    assert_eq!(config.cap_add, vec!["SYS_PTRACE", "NET_ADMIN"]);
+    assert_eq!(config.cap_add(), ["SYS_PTRACE", "NET_ADMIN"]);
     assert_eq!(
-        config.security_opt,
-        vec!["seccomp=unconfined", "apparmor=unconfined"]
+        config.security_opt(),
+        ["seccomp=unconfined", "apparmor=unconfined"]
     );
 
     Ok(())
@@ -41,7 +41,7 @@ fn test_security_options_merge_with_features() -> anyhow::Result<()> {
     // Create config with some security options
     let config = DevContainerConfig {
         privileged: Some(true),
-        cap_add: vec!["SYS_PTRACE".to_string()],
+        cap_add: Some(vec!["SYS_PTRACE".to_string()]),
         ..Default::default()
     };
 
@@ -83,8 +83,8 @@ fn test_security_options_merge_with_features() -> anyhow::Result<()> {
 
     // Verify merged options
     assert!(security.privileged);
-    assert_eq!(security.cap_add, vec!["NET_ADMIN", "SYS_PTRACE"]); // Sorted and deduped
-    assert_eq!(security.security_opt, vec!["seccomp=unconfined"]);
+    assert_eq!(security.cap_add, ["NET_ADMIN", "SYS_PTRACE"]); // Sorted and deduped
+    assert_eq!(security.security_opt, ["seccomp=unconfined"]);
     assert!(security.has_security_options());
 
     // Verify Docker args generation
@@ -150,15 +150,15 @@ fn test_config_merge_security_options() -> anyhow::Result<()> {
     // Base config with some security options
     let base_config = DevContainerConfig {
         privileged: Some(false),
-        cap_add: vec!["SYS_PTRACE".to_string()],
+        cap_add: Some(vec!["SYS_PTRACE".to_string()]),
         ..Default::default()
     };
 
     // Overlay config with additional security options
     let overlay_config = DevContainerConfig {
-        privileged: Some(true),                 // This should override
-        cap_add: vec!["NET_ADMIN".to_string()], // Set-union with base
-        security_opt: vec!["seccomp=unconfined".to_string()],
+        privileged: Some(true),                       // This should override
+        cap_add: Some(vec!["NET_ADMIN".to_string()]), // Set-union with base
+        security_opt: Some(vec!["seccomp=unconfined".to_string()]),
         ..Default::default()
     };
 
@@ -167,8 +167,8 @@ fn test_config_merge_security_options() -> anyhow::Result<()> {
 
     // Verify merged security options
     assert_eq!(merged.privileged, Some(true)); // Last writer wins
-    assert_eq!(merged.cap_add, vec!["SYS_PTRACE", "NET_ADMIN"]); // Union, base order preserved
-    assert_eq!(merged.security_opt, vec!["seccomp=unconfined"]);
+    assert_eq!(merged.cap_add(), ["SYS_PTRACE", "NET_ADMIN"]); // Union, base order preserved
+    assert_eq!(merged.security_opt(), ["seccomp=unconfined"]);
 
     Ok(())
 }
@@ -181,31 +181,31 @@ fn test_config_merge_security_options_dedupes_overlapping_entries() -> anyhow::R
     use deacon_core::config::ConfigMerger;
 
     let base = DevContainerConfig {
-        cap_add: vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
-        security_opt: vec!["seccomp=unconfined".to_string()],
+        cap_add: Some(vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()]),
+        security_opt: Some(vec!["seccomp=unconfined".to_string()]),
         ..Default::default()
     };
 
     // Overlay overlaps with base on SYS_PTRACE and seccomp=unconfined and adds new entries.
     let overlay = DevContainerConfig {
-        cap_add: vec![
+        cap_add: Some(vec![
             "SYS_PTRACE".to_string(), // already in base — must dedupe
             "SYS_ADMIN".to_string(),
-        ],
-        security_opt: vec![
+        ]),
+        security_opt: Some(vec![
             "seccomp=unconfined".to_string(), // already in base — must dedupe
             "apparmor=unconfined".to_string(),
-        ],
+        ]),
         ..Default::default()
     };
 
     let merged = ConfigMerger::merge_configs(&[base, overlay]);
 
     // Base order preserved; overlay-only entries appended in order; duplicates dropped.
-    assert_eq!(merged.cap_add, vec!["SYS_PTRACE", "NET_ADMIN", "SYS_ADMIN"]);
+    assert_eq!(merged.cap_add(), ["SYS_PTRACE", "NET_ADMIN", "SYS_ADMIN"]);
     assert_eq!(
-        merged.security_opt,
-        vec!["seccomp=unconfined", "apparmor=unconfined"]
+        merged.security_opt(),
+        ["seccomp=unconfined", "apparmor=unconfined"]
     );
 
     Ok(())
@@ -218,24 +218,24 @@ fn test_config_merge_security_options_dedupes_across_multi_layer_chain() -> anyh
     use deacon_core::config::ConfigMerger;
 
     let layer_a = DevContainerConfig {
-        cap_add: vec!["NET_ADMIN".to_string()],
+        cap_add: Some(vec!["NET_ADMIN".to_string()]),
         ..Default::default()
     };
     let layer_b = DevContainerConfig {
-        cap_add: vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
-        security_opt: vec!["label=disable".to_string()],
+        cap_add: Some(vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()]),
+        security_opt: Some(vec!["label=disable".to_string()]),
         ..Default::default()
     };
     let layer_c = DevContainerConfig {
-        cap_add: vec!["SYS_ADMIN".to_string(), "SYS_PTRACE".to_string()],
-        security_opt: vec!["label=disable".to_string()],
+        cap_add: Some(vec!["SYS_ADMIN".to_string(), "SYS_PTRACE".to_string()]),
+        security_opt: Some(vec!["label=disable".to_string()]),
         ..Default::default()
     };
 
     let merged = ConfigMerger::merge_configs(&[layer_a, layer_b, layer_c]);
 
-    assert_eq!(merged.cap_add, vec!["NET_ADMIN", "SYS_PTRACE", "SYS_ADMIN"]);
-    assert_eq!(merged.security_opt, vec!["label=disable"]);
+    assert_eq!(merged.cap_add(), ["NET_ADMIN", "SYS_PTRACE", "SYS_ADMIN"]);
+    assert_eq!(merged.security_opt(), ["label=disable"]);
 
     Ok(())
 }

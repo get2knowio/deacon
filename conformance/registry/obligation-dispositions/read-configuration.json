@@ -85,15 +85,6 @@
       ]
     },
     {
-      "id": "odp-bhv-5b81aa11",
-      "obligation": "obl-bhv-5b81aa11",
-      "disposition": "case",
-      "cases": [
-        "case-readconfig-null-empty-omitted",
-        "case-readconfig-null-empty-omitted-differential"
-      ]
-    },
-    {
       "id": "odp-bhv-66556fa0",
       "obligation": "obl-bhv-66556fa0",
       "disposition": "case",
@@ -265,6 +256,21 @@
         "case-errors-decl-bad-config-path",
         "case-errors-decl-bad-config-path-decision"
       ]
+    },
+    {
+      "id": "odp-bhv-dd8004f3",
+      "obligation": "obl-bhv-dd8004f3",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-null-empty-omitted",
+        "case-readconfig-null-empty-omitted-differential"
+      ]
+    },
+    {
+      "id": "odp-bhv-e815f2af",
+      "obligation": "obl-bhv-e815f2af",
+      "disposition": "waived",
+      "waiver": "wvr-readconfig-merged-computed-empties"
     },
     {
       "id": "odp-bhv-ecfffaa7",

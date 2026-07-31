@@ -1017,6 +1017,20 @@ unmodeled"):** two-sided, applied consistently.
   Nested-struct unknown-field preservation (HostRequirements/PortAttributes/SecretMetadata)
   is a deferred follow-up (~43 exhaustive-literal edits); top-level + untyped passthrough
   (`build`, `gpu`) already cover the real forward-compat surface.
+- **Every modeled optional is `Option<T>` + `skip_serializing_if`, including the
+  collections** (#398/#400). `read-configuration` must emit an authored `"capAdd": []` and
+  omit an unauthored one; a bare `Vec` cannot tell those apart, and a
+  `skip_serializing_if = "Vec::is_empty"` on a bare field collapses the distinction from
+  the *other* direction and makes the defect permanent. Read the flat view through the
+  same-named borrowing accessor (`config.cap_add()` → `&[String]`); the field
+  (`config.cap_add`) is the authored-or-not `Option`. When *writing*, materialize only on a
+  real contribution — `get_or_insert_default()` inside a guard, never before an `extend`
+  that may be a no-op, or you re-create a key nobody wrote. Merging goes through
+  `combine_if_authored`, which stays `None` when neither side authored the property.
+  `mergedConfiguration` is the exception and is SYNTHESIZED, not echoed: the reference
+  materializes `containerEnv`/`remoteEnv`/`portsAttributes`/`hostRequirements` there and
+  deacon omits them (`bhv-readconfig-merged-computed-empties-omitted`), which is why
+  `drop_absent_optional` survives on that block alone.
 
 **Dockerfile location parity:** the canonical containers.dev form is nested
 `build.dockerfile`; the top-level `dockerFile` is legacy. Any code resolving the Dockerfile

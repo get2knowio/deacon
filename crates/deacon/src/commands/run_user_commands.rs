@@ -162,6 +162,7 @@ pub async fn execute_run_user_commands(
             for name in deacon_core::host_ca::CA_ENV_VARS {
                 config
                     .container_env
+                    .get_or_insert_default()
                     .entry(name.to_string())
                     .or_insert_with(|| bundle_path.clone());
             }
@@ -223,7 +224,7 @@ async fn execute_lifecycle_commands(
             .clone()
             .or_else(|| config.container_user.clone()),
         container_workspace_folder,
-        container_env: config.container_env.clone(),
+        container_env: config.container_env().clone(),
         skip_post_create: args.skip_post_create,
         skip_non_blocking_commands: args.skip_non_blocking_commands,
         non_blocking_timeout: Duration::from_secs(300), // 5 minutes default timeout

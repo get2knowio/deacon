@@ -284,10 +284,10 @@ pub(crate) async fn apply_user_mapping<R: deacon_core::docker::Docker + Send + S
     if config.privileged.unwrap_or(false) {
         debug!("Container will run in privileged mode");
     }
-    if !config.cap_add.is_empty() {
+    if !config.cap_add().is_empty() {
         debug!("Container capabilities to add: {:?}", config.cap_add);
     }
-    if !config.security_opt.is_empty() {
+    if !config.security_opt().is_empty() {
         debug!("Container security options: {:?}", config.security_opt);
     }
 

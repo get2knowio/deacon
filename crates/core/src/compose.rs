@@ -410,8 +410,8 @@ impl ComposeCommand {
         // For now, only check config options. Features would require access to resolved features.
         let security = SecurityOptions {
             privileged: config.privileged.unwrap_or(false),
-            cap_add: SecurityOptions::normalize_capabilities(&config.cap_add),
-            security_opt: SecurityOptions::normalize_security_opts(&config.security_opt),
+            cap_add: SecurityOptions::normalize_capabilities(config.cap_add()),
+            security_opt: SecurityOptions::normalize_security_opts(config.security_opt()),
             conflicts: Vec::new(),
         };
 
@@ -442,10 +442,10 @@ impl ComposeCommand {
             warn!("Please add these options to your docker-compose.yml service definition.");
         }
 
-        if !config.run_args.is_empty() {
+        if !config.run_args().is_empty() {
             warn!(
                 "runArgs ({:?}) are ignored in Docker Compose mode. These flags only apply to single-container (docker run) workflows.",
-                config.run_args
+                config.run_args()
             );
         }
     }
@@ -859,7 +859,7 @@ impl ComposeManager {
             base_path: base_path.to_path_buf(),
             compose_files: resolved_files,
             service: service.clone(),
-            run_services: config.run_services.clone(),
+            run_services: config.run_services().to_vec(),
             env_files: Vec::new(),
             additional_mounts: Vec::new(), // Will be populated from CLI --mount flags
             profiles: Vec::new(),          // Will be populated from service profiles
@@ -1907,7 +1907,7 @@ mod tests {
         // Test multiple compose files
         config.docker_compose_file =
             Some(json!(["docker-compose.yml", "docker-compose.override.yml"]));
-        config.run_services = vec!["db".to_string(), "redis".to_string()];
+        config.run_services = Some(vec!["db".to_string(), "redis".to_string()]);
 
         assert_eq!(
             config.get_compose_files(),
@@ -1925,8 +1925,8 @@ mod tests {
         // Test config with security options
         let config = DevContainerConfig {
             privileged: Some(true),
-            cap_add: vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()],
-            security_opt: vec!["seccomp=unconfined".to_string()],
+            cap_add: Some(vec!["SYS_PTRACE".to_string(), "NET_ADMIN".to_string()]),
+            security_opt: Some(vec!["seccomp=unconfined".to_string()]),
             ..Default::default()
         };
 

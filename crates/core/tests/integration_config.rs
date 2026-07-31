@@ -35,28 +35,28 @@ async fn test_load_basic_fixture() {
 
     // Verify environment variables
     assert_eq!(
-        config.container_env.get("RUST_LOG"),
+        config.container_env().get("RUST_LOG"),
         Some(&"debug".to_string())
     );
     assert_eq!(
-        config.container_env.get("ENVIRONMENT"),
+        config.container_env().get("ENVIRONMENT"),
         Some(&"development".to_string())
     );
 
     // Verify remote environment
     assert_eq!(
-        config.remote_env.get("PATH"),
+        config.remote_env().get("PATH"),
         Some(&Some(
             "${containerEnv:PATH}:/usr/local/cargo/bin".to_string()
         ))
     );
 
     // Verify port configuration
-    assert_eq!(config.forward_ports.len(), 2);
+    assert_eq!(config.forward_ports().len(), 2);
     assert!(config.app_port.is_some());
 
     // Verify run arguments
-    assert_eq!(config.run_args, vec!["--init", "--privileged"]);
+    assert_eq!(config.run_args(), ["--init", "--privileged"]);
 
     // Verify shutdown action
     assert_eq!(config.shutdown_action, Some("stopContainer".to_string()));
@@ -69,11 +69,11 @@ async fn test_load_basic_fixture() {
     assert!(config.post_attach_command.is_some());
 
     // Verify features and customizations are present and are objects
-    assert!(config.features.is_object());
-    assert!(config.customizations.is_object());
+    assert!(config.features().is_object());
+    assert!(config.customizations().is_object());
 
     // Verify mounts
-    assert_eq!(config.mounts.len(), 1);
+    assert_eq!(config.mounts().len(), 1);
 }
 
 #[tokio::test]
@@ -105,8 +105,8 @@ async fn test_load_copied_fixture() {
     assert_eq!(config.image, Some("rust:1.70".to_string()));
 
     // Verify that JSON5 parsing worked (file contains comments and trailing commas)
-    assert!(config.features.is_object());
-    assert!(config.customizations.is_object());
+    assert!(config.features().is_object());
+    assert!(config.customizations().is_object());
 }
 
 #[tokio::test]
@@ -146,7 +146,7 @@ async fn test_loads_additional_developer_facing_spec_fields() {
         Some(ContainerProbeMode::InteractiveShell)
     );
     assert_eq!(config.wait_for.as_deref(), Some("postCreateCommand"));
-    let attrs = config.ports_attributes.get("3000").unwrap();
+    let attrs = config.ports_attributes().get("3000").unwrap();
     assert_eq!(attrs.protocol.as_deref(), Some("https"));
     assert_eq!(attrs.elevate_if_needed, Some(true));
     let host = config.host_requirements.unwrap();

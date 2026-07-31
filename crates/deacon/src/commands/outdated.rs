@@ -129,7 +129,7 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
         };
 
     // Extract features map preserving declaration order
-    let features_map_opt = config.features.as_object();
+    let features_map_opt = config.features().as_object();
     if features_map_opt.is_none() || features_map_opt.unwrap().is_empty() {
         // No features: print header and exit 0 (T016)
         if matches!(args.output, OutputFormat::Json) {

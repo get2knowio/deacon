@@ -326,7 +326,7 @@ async fn execute_lifecycle_hooks(
     // spec §3 normalization). The lifecycle helper consumes container_env
     // separately, so we fold the CLI env into the config's container_env
     // for the duration of this exec.
-    let mut container_env = merged_config.container_env.clone();
+    let mut container_env = merged_config.container_env().clone();
     for (k, v) in &remote_env_pairs {
         container_env.insert(k.clone(), v.clone());
     }
@@ -535,10 +535,10 @@ fn collect_env_pairs(
     merged_config: &DevContainerConfig,
 ) -> Vec<(String, String)> {
     let mut env: HashMap<String, String> = HashMap::new();
-    for (k, v) in &merged_config.container_env {
+    for (k, v) in merged_config.container_env() {
         env.insert(k.clone(), v.clone());
     }
-    for (k, v) in &merged_config.remote_env {
+    for (k, v) in merged_config.remote_env() {
         if let Some(value) = v {
             env.insert(k.clone(), value.clone());
         }
@@ -788,7 +788,7 @@ mod tests {
         let cfg = extract_image_metadata_config(&container).unwrap().unwrap();
         assert_eq!(cfg.remote_user.as_deref(), Some("vscode"));
         assert_eq!(
-            cfg.container_env.get("FOO").map(|s| s.as_str()),
+            cfg.container_env().get("FOO").map(|s| s.as_str()),
             Some("bar")
         );
     }
@@ -831,6 +831,7 @@ mod tests {
         };
         meta_cfg
             .container_env
+            .get_or_insert_default()
             .insert("META_VAR".to_string(), "meta".to_string());
 
         // Per spec §4: file config wins over metadata on scalar fields.
@@ -838,7 +839,7 @@ mod tests {
         assert_eq!(merged.remote_user.as_deref(), Some("file-user"));
         // Metadata env still flows through via the merger's map overlay.
         assert_eq!(
-            merged.container_env.get("META_VAR").map(|s| s.as_str()),
+            merged.container_env().get("META_VAR").map(|s| s.as_str()),
             Some("meta")
         );
     }
@@ -1000,13 +1001,13 @@ mod tests {
                 let mut m = std::collections::HashMap::new();
                 m.insert("FROM_CONTAINER".to_string(), "c".to_string());
                 m.insert("OVERRIDDEN".to_string(), "from-config".to_string());
-                m
+                Some(m)
             },
             remote_env: {
                 let mut m = std::collections::HashMap::new();
                 m.insert("FROM_REMOTE".to_string(), Some("r".to_string()));
                 m.insert("DROPPED".to_string(), None); // None-valued keys are skipped
-                m
+                Some(m)
             },
             ..DevContainerConfig::default()
         };
@@ -1043,7 +1044,7 @@ mod tests {
                 m.insert("ZED".to_string(), "z".to_string());
                 m.insert("ALPHA".to_string(), "a".to_string());
                 m.insert("MID".to_string(), "m".to_string());
-                m
+                Some(m)
             },
             ..DevContainerConfig::default()
         };

@@ -43,8 +43,13 @@ use serde_json::Value;
 /// joined the registry. The observers also gained derived fields (`envMap`,
 /// `pathSegments`, `mountSources`, `labelNamespaces`, `userSpec`,
 /// `composeProjectResources`, `nullEmptyOmitted`), which change what a recorded snapshot
-/// contains.
-pub const NORMALIZER_VERSION: &str = "6";
+/// contains. #398 set it to `"7"`: `drop_absent_optional` no longer applies to the
+/// `configuration` block at all. deacon now omits the properties the author did not
+/// write, so the compensation had nothing left to compensate — and worse, once both CLIs
+/// emit an authored `"capAdd": []`, a deacon-side-only drop reports that agreement as a
+/// divergence. The rule survives only on `mergedConfiguration`, where the reference still
+/// synthesizes computed empties deacon omits.
+pub const NORMALIZER_VERSION: &str = "7";
 
 /// The `provenance.json` record — the FR-017 identity/environment elements (data-model
 /// §7, contract snapshot-provenance.md). Thirteen fields: twelve identity/environment

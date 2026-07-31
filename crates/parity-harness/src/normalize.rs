@@ -567,52 +567,46 @@ pub fn config_document_rules(value: &Value, side: Side, block: DocumentBlock) ->
 /// `prune` made invisible. The value guard means a populated `appPort` is always
 /// compared; only an absent one is elided.
 ///
-/// **It compensates for a deacon defect and is deleted when that defect is fixed** —
-/// deacon should apply `skip_serializing_if` so absent optionals are omitted, matching
-/// the reference. Tracked at #398 (formerly
-/// `specs/023-migrate-parity-to-conformance/tasks.md#T111`).
+/// # The `configuration` half is RETIRED (#398)
 ///
-/// # SHRINKING, not yet gone (#398)
+/// #398 made every modeled optional genuinely optional — `Option<_>` plus
+/// `skip_serializing_if`, including the eleven properties that had been typed as bare
+/// collections (`capAdd`, `containerEnv`, `customizations`, `features`, `forwardPorts`,
+/// `mounts`, `portsAttributes`, `remoteEnv`, `runArgs`, `runServices`, `securityOpt`).
+/// deacon now emits exactly the keys the author wrote, so on the `configuration` block
+/// the compensation has nothing left to compensate. [`applies_to`] returns `false` there.
 ///
-/// #398 applied `skip_serializing_if` to every `Option<_>` field, so deacon now emits 13
-/// keys where it emitted ~40 for a configuration authoring one property. On deacon's
-/// `configuration` block this rule is consequently a no-op for those keys — there is
-/// nothing left to drop.
+/// Retiring it was not merely tidying. Once deacon emits an authored `"capAdd": []` and
+/// the reference emits the same, a deacon-side-only drop turns that AGREEMENT into a
+/// reported divergence. A compensation kept past its defect does not go quiet; it starts
+/// lying in the other direction.
 ///
-/// **The list is NOT pruned to match, and that is deliberate.** Two reasons:
-/// - On `mergedConfiguration` the rule runs on BOTH sides, because both CLIs synthesize
-///   that block and both emit computed empties in it. Every name here is still
-///   load-bearing there, so removing one would change a live comparison rather than
-///   delete dead weight.
-/// - The 11 names that are still live on deacon's `configuration` block —
-///   `capAdd`, `containerEnv`, `customizations`, `features`, `forwardPorts`, `mounts`,
-///   `portsAttributes`, `remoteEnv`, `runArgs`, `runServices`, `securityOpt` — are the
-///   fields typed as bare collections rather than `Option`, which is the remaining half
-///   of #398. Wrapping them in `Option` is what retires this rule; adding a
-///   `Vec::is_empty` skip instead would collapse authored-empty into unset from the other
-///   direction and make the defect permanent.
+/// # What the rule still does: `mergedConfiguration`, both sides
 ///
-/// # NARROWED in 024 US5 (T123): deacon's `configuration` block only
+/// `mergedConfiguration` is SYNTHESIZED rather than echoed, and there the two CLIs still
+/// disagree — but the other way around. For a configuration authoring only `image`, the
+/// pinned reference emits computed empties deacon omits:
 ///
-/// The rule used to run on BOTH sides of every differential. That is what made the
-/// three FR-055 states indistinguishable: an authored `"forwardPorts": null`, an authored
+/// ```text
+/// reference   remoteEnv {}   containerEnv {}   portsAttributes {}
+///             hostRequirements { cpus: null, memory: "-Infinity", storage: "-Infinity" }
+/// deacon      (all four omitted)
+/// ```
+///
+/// That is a distinct deacon gap from the one this rule was written for, and it is
+/// characterized in the registry rather than papered over here — see
+/// `bhv-readconfig-merged-computed-empties-omitted`. Until it is closed the rule keeps
+/// the merged comparison legible; every name in [`ABSENT_OPTIONAL_KEYS`] is load-bearing
+/// on that block, which is why the list is not pruned to match the retired half.
+///
+/// # The FR-055 narrowing this preserves (024 US5, T123)
+///
+/// The rule used to run on BOTH sides of every differential, which made the three FR-055
+/// states indistinguishable: an authored `"forwardPorts": null`, an authored
 /// `"forwardPorts": []`, and an omitted `forwardPorts` all ended as "the key is absent on
-/// both sides", so the comparison could not tell them apart and neither could a reader of
-/// the evidence. The rule was, in effect, deleting the reference's answer to the question.
-///
-/// It now applies only where its own justification holds:
-/// - **`configuration`, deacon's side** — the block deacon serializes unconditionally.
-///   The reference's `configuration` is an ECHO of the authored document, so an empty
-///   value there is the author's, and eliding it destroys information the reference took
-///   care to preserve.
-/// - **`mergedConfiguration`, both sides** — both CLIs synthesize this block and both
-///   emit computed empties in it (the pinned reference emits `containerEnv: {}`,
-///   `remoteEnv: {}`, `portsAttributes: {}` for a configuration that authors none), so an
-///   empty value there is a default on either side rather than an authorship signal.
-///
-/// The consequence is deliberate and is the point of the narrowing: a configuration that
-/// AUTHORS an empty or null property now surfaces a divergence, because deacon cannot
-/// distinguish it from an omission and the reference can.
+/// both sides". It was, in effect, deleting the reference's answer to the question. On
+/// `mergedConfiguration` that objection does not apply — an empty value there is a
+/// computed default on either side, never an authorship signal.
 pub fn drop_absent_optional(value: &Value, side: Side, block: DocumentBlock) -> Value {
     // ANCHOR the rule at its declared scope — `field:/configuration` and
     // `field:/mergedConfiguration` — not at whatever object it happens to be handed.
@@ -657,9 +651,14 @@ pub fn drop_absent_optional(value: &Value, side: Side, block: DocumentBlock) -> 
 
 /// Whether [`drop_absent_optional`] applies to `block` on `side` — the whole of the 024
 /// US5 narrowing, in one place a reviewer can read.
-fn applies_to(side: Side, block: DocumentBlock) -> bool {
+fn applies_to(_side: Side, block: DocumentBlock) -> bool {
     match block {
-        DocumentBlock::Configuration => side == Side::Deacon,
+        // RETIRED in #398. The rule compensated for deacon serializing every modeled
+        // optional unconditionally; deacon now omits what the author did not write, so
+        // there is nothing left here to elide — and leaving the rule on would MANUFACTURE
+        // divergences: an authored `"capAdd": []` is now emitted by both CLIs, and a
+        // deacon-side-only drop would report the agreement as a difference.
+        DocumentBlock::Configuration => false,
         DocumentBlock::Merged => true,
         // A wrapper reaching here has neither block key, so there is nothing to elide.
         DocumentBlock::Wrapper => false,
@@ -1594,13 +1593,13 @@ mod tests {
     #[test]
     fn normalizer_version_is_bumped_for_named_rules() {
         assert_eq!(
-            NORMALIZER_VERSION, "6",
-            "024 US5 (T123) narrowed `drop_noise_env` from capture to the legacy \
-             comparison, added `container_hostname_token`, narrowed \
-             `drop_absent_optional` to deacon's `configuration` block, and registered the \
-             previously unregistered `compose_project_prefix` / `user_default_root` — a \
-             change to what \"equal\" means, so every recorded snapshot must go stale and \
-             be re-reviewed"
+            NORMALIZER_VERSION, "7",
+            "#398 retired `drop_absent_optional` on the `configuration` block entirely — \
+             deacon now omits the properties the author did not write, so the \
+             compensation had nothing left to compensate, and keeping it would report an \
+             authored `\"capAdd\": []` that both CLIs emit as a divergence. A change to \
+             what \"equal\" means, so every recorded snapshot must go stale and be \
+             re-reviewed"
         );
     }
 
@@ -1704,7 +1703,9 @@ mod tests {
             "hostRequirements": { "gpu": null, "cpus": 4 },
             "list_keeps_nulls": [1, null, ""]
         }"#;
-        let normalized = config("drop", raw, Side::Deacon).expect("normalize");
+        // Through `mergedConfiguration`, the block the rule still applies to (#398).
+        let wrapped = format!(r#"{{ "mergedConfiguration": {raw} }}"#);
+        let normalized = merged_config("drop", &wrapped, Side::Deacon).expect("normalize");
         let obj = normalized.as_object().expect("object");
 
         // Enumerated + absent → removed.
@@ -1743,7 +1744,10 @@ mod tests {
             "hostRequirements": { "gpu": null, "cpus": 4 },
             "portsAttributes": { "3000": { "label": "", "protocol": "https" } }
         }"#;
-        let obj = config("bounded", raw, Side::Deacon).expect("normalize");
+        // Applied through the block the rule still runs on (#398 retired the
+        // `configuration` half); the boundedness property is the same either way.
+        let wrapped = format!(r#"{{ "mergedConfiguration": {raw} }}"#);
+        let obj = merged_config("bounded", &wrapped, Side::Deacon).expect("normalize");
 
         // Root: enumerated + absent → elided.
         assert!(!obj.as_object().expect("object").contains_key("image"));
@@ -1877,12 +1881,35 @@ mod tests {
     }
 
     #[test]
-    fn an_absent_enumerated_optional_no_longer_diverges() {
-        // `image` IS on the enumerated list: absent on one side, omitted on the other →
-        // the same resolved configuration, so no divergence.
+    fn an_absent_enumerated_optional_no_longer_diverges_on_the_merged_block() {
+        // `image` IS on the enumerated list, and `mergedConfiguration` is synthesized by
+        // both CLIs: absent on one side, omitted on the other → the same computed
+        // configuration, so no divergence.
+        let a = merged_config(
+            "a",
+            r#"{ "mergedConfiguration": { "name": "x", "image": null } }"#,
+            Side::Deacon,
+        )
+        .unwrap();
+        let b = merged_config(
+            "b",
+            r#"{ "mergedConfiguration": { "name": "x" } }"#,
+            Side::Deacon,
+        )
+        .unwrap();
+        assert!(diff(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn an_absent_enumerated_optional_still_diverges_on_the_configuration_block() {
+        // #398: the `configuration` block is an ECHO, so an authored `"image": null` is
+        // the author's and must be compared against the side that wrote no `image` at
+        // all. Eliding it is what made those two documents indistinguishable (FR-055).
         let a = config("a", r#"{ "name": "x", "image": null }"#, Side::Deacon).unwrap();
         let b = config("b", r#"{ "name": "x" }"#, Side::Deacon).unwrap();
-        assert!(diff(&a, &b).is_empty());
+        let divs = diff(&a, &b);
+        assert_eq!(divs.len(), 1, "{divs:?}");
+        assert_eq!(divs[0].path, "image");
     }
 
     #[test]

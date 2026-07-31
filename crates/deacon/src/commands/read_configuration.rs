@@ -357,11 +357,14 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             None,                      // No install order override in this context
             skip_feature_auto_mapping, // Respect CLI flag for auto-mapping behavior
         );
-        config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
+        config.features = Some(FeatureMerger::merge_features(
+            config.features(),
+            &merge_config,
+        )?);
     }
 
     // Extract features from config
-    let features_map_opt = config.features.as_object();
+    let features_map_opt = config.features().as_object();
     if features_map_opt.is_none() || features_map_opt.unwrap().is_empty() {
         // No features, return empty configuration
         return Ok(FeaturesConfiguration {
@@ -1155,7 +1158,10 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                 // config's (and image-label) env, never un-built feature env.
 
                 for mount in &metadata.mounts {
-                    derived_config.mounts.push(mount.clone());
+                    derived_config
+                        .mounts
+                        .get_or_insert_default()
+                        .push(mount.clone());
                 }
 
                 // Customizations are emitted as per-tool arrays in the final output
@@ -1178,11 +1184,22 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                 derived_config.privileged =
                     or_merge_bool(derived_config.privileged, metadata.privileged);
 
-                derived_config.cap_add.extend(metadata.cap_add.clone());
+                // Guarded so a feature that declares no capabilities does not
+                // materialize an empty `capAdd` the author never wrote (#398):
+                // `get_or_insert_default()` allocates even when the extend is a no-op.
+                if !metadata.cap_add.is_empty() {
+                    derived_config
+                        .cap_add
+                        .get_or_insert_default()
+                        .extend(metadata.cap_add.clone());
+                }
 
-                derived_config
-                    .security_opt
-                    .extend(metadata.security_opt.clone());
+                if !metadata.security_opt.is_empty() {
+                    derived_config
+                        .security_opt
+                        .get_or_insert_default()
+                        .extend(metadata.security_opt.clone());
+                }
             }
         }
 
@@ -1211,9 +1228,9 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         // Per upstream `getDevcontainerMetadata`, the base config's `customizations` is the
         // final entry in the metadata chain (pickConfigProperties includes `customizations`).
         let mut base_customizations: Vec<serde_json::Value> = Vec::new();
-        if let serde_json::Value::Object(map) = &base_config.customizations {
+        if let Some(serde_json::Value::Object(map)) = &base_config.customizations {
             if !map.is_empty() {
-                base_customizations.push(base_config.customizations.clone());
+                base_customizations.push(base_config.customizations().clone());
             }
         }
 
@@ -1306,9 +1323,9 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
             }
         }
         let mut base_customizations: Vec<serde_json::Value> = Vec::new();
-        if let serde_json::Value::Object(map) = &base_config.customizations {
+        if let Some(serde_json::Value::Object(map)) = &base_config.customizations {
             if !map.is_empty() {
-                base_customizations.push(base_config.customizations.clone());
+                base_customizations.push(base_config.customizations().clone());
             }
         }
         // No features in this branch: `[...image, base]`.
@@ -2960,8 +2977,8 @@ API_KEY=another-secret
         let temp_dir = TempDir::new().unwrap();
         let base_config = DevContainerConfig {
             image: Some("ubuntu:24.04".to_string()),
-            cap_add: vec!["NET_ADMIN".to_string()],
-            security_opt: vec!["seccomp=unconfined".to_string()],
+            cap_add: Some(vec!["NET_ADMIN".to_string()]),
+            security_opt: Some(vec!["seccomp=unconfined".to_string()]),
             ..Default::default()
         };
 
@@ -3030,9 +3047,9 @@ API_KEY=another-secret
         let temp_dir = TempDir::new().unwrap();
         let base_config = DevContainerConfig {
             image: Some("ubuntu:24.04".to_string()),
-            customizations: serde_json::json!({
+            customizations: Some(serde_json::json!({
                 "vscode": { "extensions": ["base.ext-should-not-leak"] }
-            }),
+            })),
             ..Default::default()
         };
 
@@ -3105,9 +3122,9 @@ API_KEY=another-secret
     async fn test_base_only_customizations_collapse_to_single_entry_arrays() {
         let base_config = DevContainerConfig {
             image: Some("ubuntu:24.04".to_string()),
-            customizations: serde_json::json!({
+            customizations: Some(serde_json::json!({
                 "vscode": { "extensions": ["from-base"] }
-            }),
+            })),
             ..Default::default()
         };
         let fetcher =
@@ -3270,7 +3287,7 @@ API_KEY=another-secret
         let temp_dir = TempDir::new().unwrap();
         let base_config = DevContainerConfig {
             image: Some("ubuntu:24.04".to_string()),
-            forward_ports: vec![deacon_core::config::PortSpec::Number(3000)],
+            forward_ports: Some(vec![deacon_core::config::PortSpec::Number(3000)]),
             ..Default::default()
         };
 
@@ -3327,11 +3344,11 @@ API_KEY=another-secret
         let temp_dir = TempDir::new().unwrap();
         let base_config = DevContainerConfig {
             image: Some("ubuntu:24.04".to_string()),
-            mounts: vec![serde_json::json!({
+            mounts: Some(vec![serde_json::json!({
                 "type": "bind",
                 "source": "/host/base",
                 "target": "/data"
-            })],
+            })]),
             ..Default::default()
         };
 

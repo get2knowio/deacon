@@ -124,7 +124,7 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
         "Loaded configuration from '{}' (features: {:?})",
         config_path.display(),
         config
-            .features
+            .features()
             .as_object()
             .map(|m| m.keys().collect::<Vec<_>>())
     );
@@ -299,7 +299,7 @@ fn is_valid_target_version(version: &str) -> bool {
 /// converted into a `LockfileFeature` entry keyed by the user-provided ID
 /// per upstream `generateLockfile`.
 async fn resolve_lockfile_from_config(config: &DevContainerConfig) -> Result<Lockfile> {
-    let features_obj = match config.features.as_object() {
+    let features_obj = match config.features().as_object() {
         Some(obj) => obj,
         // Per spec §5: an empty/missing features map is not an error;
         // upgrade just produces an empty lockfile.
@@ -596,11 +596,11 @@ mod tests {
         // Pre-fix, ./, ../, and /abs/path entries flunked
         // `parse_registry_reference` with "Invalid feature ID".
         let config = DevContainerConfig {
-            features: serde_json::json!({
+            features: Some(serde_json::json!({
                 "./local-feature": {},
                 "../shared/another-local": {},
                 "/abs/path/feature": {},
-            }),
+            })),
             ..DevContainerConfig::default()
         };
         let lockfile = resolve_lockfile_from_config(&config).await.unwrap();
@@ -611,7 +611,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_lockfile_returns_empty_for_empty_features_object() {
         let config = DevContainerConfig {
-            features: serde_json::json!({}),
+            features: Some(serde_json::json!({})),
             ..DevContainerConfig::default()
         };
         let lockfile = resolve_lockfile_from_config(&config).await.unwrap();

@@ -127,7 +127,7 @@ fn test_compose_config_detection() {
     compose_config.name = Some("Test Compose".to_string());
     compose_config.docker_compose_file = Some(json!("docker-compose.yml"));
     compose_config.service = Some("app".to_string());
-    compose_config.run_services = vec!["db".to_string()];
+    compose_config.run_services = Some(vec!["db".to_string()]);
     compose_config.shutdown_action = Some("stopCompose".to_string());
     compose_config.post_create_command = Some(json!("echo 'Container ready'"));
 
@@ -152,7 +152,7 @@ fn test_cli_forward_ports_merging() {
 
     // Start with a config that has some ports
     let mut config = DevContainerConfig {
-        forward_ports: vec![PortSpec::Number(3000), PortSpec::Number(4000)],
+        forward_ports: Some(vec![PortSpec::Number(3000), PortSpec::Number(4000)]),
         ..Default::default()
     };
 
@@ -162,17 +162,17 @@ fn test_cli_forward_ports_merging() {
     // Merge CLI ports into config using shared parser
     for port_str in &cli_ports {
         if let Ok(port_spec) = PortSpec::parse(port_str) {
-            config.forward_ports.push(port_spec);
+            config.forward_ports.get_or_insert_default().push(port_spec);
         }
     }
 
     // Verify merged ports
-    assert_eq!(config.forward_ports.len(), 4);
-    assert!(matches!(config.forward_ports[0], PortSpec::Number(3000)));
-    assert!(matches!(config.forward_ports[1], PortSpec::Number(4000)));
-    assert!(matches!(config.forward_ports[2], PortSpec::Number(8080)));
+    assert_eq!(config.forward_ports().len(), 4);
+    assert!(matches!(config.forward_ports()[0], PortSpec::Number(3000)));
+    assert!(matches!(config.forward_ports()[1], PortSpec::Number(4000)));
+    assert!(matches!(config.forward_ports()[2], PortSpec::Number(8080)));
     assert!(matches!(
-        config.forward_ports[3],
+        config.forward_ports()[3],
         PortSpec::String(ref s) if s == "5000:5000"
     ));
 }

@@ -61,16 +61,16 @@ async fn test_simple_extends() -> Result<()> {
 
     // Environment variables should merge
     assert_eq!(
-        merged_config.container_env.get("BASE_VAR"),
+        merged_config.container_env().get("BASE_VAR"),
         Some(&"base_value".to_string())
     );
     assert_eq!(
-        merged_config.container_env.get("APP_VAR"),
+        merged_config.container_env().get("APP_VAR"),
         Some(&"app_value".to_string())
     );
 
     // runArgs should concatenate
-    assert_eq!(merged_config.run_args, vec!["--base-arg", "--app-arg"]);
+    assert_eq!(merged_config.run_args(), ["--base-arg", "--app-arg"]);
 
     // extends should be removed from final config
     assert_eq!(merged_config.extends, None);
@@ -134,22 +134,22 @@ async fn test_multi_level_extends() -> Result<()> {
 
     // Environment variables should merge with proper precedence
     assert_eq!(
-        merged_config.container_env.get("BASE_VAR"),
+        merged_config.container_env().get("BASE_VAR"),
         Some(&"overridden_base_value".to_string())
     );
     assert_eq!(
-        merged_config.container_env.get("MIDDLE_VAR"),
+        merged_config.container_env().get("MIDDLE_VAR"),
         Some(&"middle_value".to_string())
     );
     assert_eq!(
-        merged_config.container_env.get("APP_VAR"),
+        merged_config.container_env().get("APP_VAR"),
         Some(&"app_value".to_string())
     );
 
     // runArgs should concatenate in order: base -> middle -> app
     assert_eq!(
-        merged_config.run_args,
-        vec!["--base-arg", "--middle-arg", "--app-arg"]
+        merged_config.run_args(),
+        ["--base-arg", "--middle-arg", "--app-arg"]
     );
 
     Ok(())
@@ -210,22 +210,22 @@ async fn test_multiple_extends_array() -> Result<()> {
 
     // Environment variables should merge with proper precedence
     assert_eq!(
-        merged_config.container_env.get("BASE1_VAR"),
+        merged_config.container_env().get("BASE1_VAR"),
         Some(&"overridden_by_base2".to_string())
     );
     assert_eq!(
-        merged_config.container_env.get("BASE2_VAR"),
+        merged_config.container_env().get("BASE2_VAR"),
         Some(&"base2_value".to_string())
     );
     assert_eq!(
-        merged_config.container_env.get("APP_VAR"),
+        merged_config.container_env().get("APP_VAR"),
         Some(&"app_value".to_string())
     );
 
     // runArgs should concatenate in order: base1 -> base2 -> app
     assert_eq!(
-        merged_config.run_args,
-        vec!["--base1-arg", "--base2-arg", "--app-arg"]
+        merged_config.run_args(),
+        ["--base1-arg", "--base2-arg", "--app-arg"]
     );
 
     Ok(())
@@ -319,7 +319,7 @@ async fn test_features_merge() -> Result<()> {
     let merged_config = ConfigLoader::load_with_extends(&config_path).await?;
 
     // Features should deep merge
-    let features = &merged_config.features;
+    let features = merged_config.features();
     assert!(features.is_object());
 
     let features_obj = features.as_object().unwrap();
@@ -434,42 +434,46 @@ fn test_config_merger_single_config() {
 #[test]
 fn test_config_merger_runargs_concatenation() {
     let config1 = DevContainerConfig {
-        run_args: vec!["--arg1".to_string(), "--arg2".to_string()],
+        run_args: Some(vec!["--arg1".to_string(), "--arg2".to_string()]),
         ..Default::default()
     };
 
     let config2 = DevContainerConfig {
-        run_args: vec!["--arg3".to_string()],
+        run_args: Some(vec!["--arg3".to_string()]),
         ..Default::default()
     };
 
     let configs = vec![config1, config2];
     let merged = ConfigMerger::merge_configs(&configs);
 
-    assert_eq!(merged.run_args, vec!["--arg1", "--arg2", "--arg3"]);
+    assert_eq!(merged.run_args(), ["--arg1", "--arg2", "--arg3"]);
 }
 
 #[test]
 fn test_config_merger_env_merge() {
     let config1 = DevContainerConfig {
-        container_env: [
-            ("VAR1".to_string(), "value1".to_string()),
-            ("VAR2".to_string(), "value2".to_string()),
-        ]
-        .iter()
-        .cloned()
-        .collect(),
+        container_env: Some(
+            [
+                ("VAR1".to_string(), "value1".to_string()),
+                ("VAR2".to_string(), "value2".to_string()),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+        ),
         ..Default::default()
     };
 
     let config2 = DevContainerConfig {
-        container_env: [
-            ("VAR2".to_string(), "overridden_value2".to_string()),
-            ("VAR3".to_string(), "value3".to_string()),
-        ]
-        .iter()
-        .cloned()
-        .collect(),
+        container_env: Some(
+            [
+                ("VAR2".to_string(), "overridden_value2".to_string()),
+                ("VAR3".to_string(), "value3".to_string()),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+        ),
         ..Default::default()
     };
 
@@ -477,15 +481,15 @@ fn test_config_merger_env_merge() {
     let merged = ConfigMerger::merge_configs(&configs);
 
     assert_eq!(
-        merged.container_env.get("VAR1"),
+        merged.container_env().get("VAR1"),
         Some(&"value1".to_string())
     );
     assert_eq!(
-        merged.container_env.get("VAR2"),
+        merged.container_env().get("VAR2"),
         Some(&"overridden_value2".to_string())
     );
     assert_eq!(
-        merged.container_env.get("VAR3"),
+        merged.container_env().get("VAR3"),
         Some(&"value3".to_string())
     );
 }

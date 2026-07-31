@@ -53,7 +53,7 @@ pub(crate) fn build_merged_configuration_with_options(
     let feature_metadata = if let Some(ref resolved) = options.resolved_features {
         extract_feature_metadata_from_resolved(resolved, options.service_name.clone())
     } else {
-        extract_feature_metadata_from_config(&config.features)
+        extract_feature_metadata_from_config(config.features())
     };
 
     // Create enriched configuration with feature metadata
@@ -1043,7 +1043,7 @@ mod image_metadata_merge_tests {
             container_env.insert((*k).to_string(), (*v).to_string());
         }
         DevContainerConfig {
-            container_env,
+            container_env: Some(container_env),
             ..DevContainerConfig::default()
         }
     }
@@ -1070,17 +1070,17 @@ mod image_metadata_merge_tests {
         let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
 
         assert_eq!(
-            merged.container_env.get("IMAGE_LAYER"),
+            merged.container_env().get("IMAGE_LAYER"),
             Some(&"from-image".to_string()),
             "image-only containerEnv key must survive the merge (#70)"
         );
         assert_eq!(
-            merged.container_env.get("CONFIG_LAYER"),
+            merged.container_env().get("CONFIG_LAYER"),
             Some(&"from-user".to_string()),
             "user containerEnv key must survive the merge"
         );
         assert_eq!(
-            merged.container_env.get("MERGED_LAYER"),
+            merged.container_env().get("MERGED_LAYER"),
             Some(&"user-wins".to_string()),
             "on conflict, user devcontainer.json wins over image metadata (#70)"
         );
@@ -1120,12 +1120,12 @@ mod image_metadata_merge_tests {
         let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
 
         assert_eq!(
-            merged.container_env.get("R4_PREBUILT"),
+            merged.container_env().get("R4_PREBUILT"),
             Some(&"object".to_string())
         );
         assert_eq!(
             merged
-                .remote_env
+                .remote_env()
                 .get("R4_PREBUILT_REMOTE")
                 .and_then(|v| v.as_deref()),
             Some("remote")

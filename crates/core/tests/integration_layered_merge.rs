@@ -58,17 +58,14 @@ async fn test_enhanced_merge_with_metadata() -> Result<()> {
     assert_eq!(merged_result.config.name, Some("App Container".to_string()));
     assert_eq!(merged_result.config.image, Some("ubuntu:20.04".to_string()));
     assert_eq!(
-        merged_result.config.container_env.get("BASE_VAR"),
+        merged_result.config.container_env().get("BASE_VAR"),
         Some(&"base_value".to_string())
     );
     assert_eq!(
-        merged_result.config.container_env.get("APP_VAR"),
+        merged_result.config.container_env().get("APP_VAR"),
         Some(&"app_value".to_string())
     );
-    assert_eq!(
-        merged_result.config.run_args,
-        vec!["--base-arg", "--app-arg"]
-    );
+    assert_eq!(merged_result.config.run_args(), ["--base-arg", "--app-arg"]);
 
     // Check the metadata
     assert!(merged_result.meta.is_some());
@@ -228,15 +225,15 @@ async fn test_multi_level_extends_with_metadata() -> Result<()> {
 
     // Check all environment variables are merged
     assert_eq!(
-        merged_result.config.container_env.get("BASE_VAR"),
+        merged_result.config.container_env().get("BASE_VAR"),
         Some(&"base_value".to_string())
     );
     assert_eq!(
-        merged_result.config.container_env.get("MIDDLE_VAR"),
+        merged_result.config.container_env().get("MIDDLE_VAR"),
         Some(&"middle_value".to_string())
     );
     assert_eq!(
-        merged_result.config.container_env.get("APP_VAR"),
+        merged_result.config.container_env().get("APP_VAR"),
         Some(&"app_value".to_string())
     );
 

@@ -41,12 +41,12 @@ fn test_port_event_generation_with_attributes() {
     let mut config = DevContainerConfig::default();
     config.name = Some("Test Container".to_string());
     config.image = Some("node:18".to_string());
-    config.forward_ports = vec![
+    config.forward_ports = Some(vec![
         PortSpec::Number(3000),
         PortSpec::String("8080:8080".to_string()),
-    ];
+    ]);
     config.app_port = Some(AppPort::Single(PortSpec::Number(4000)));
-    config.ports_attributes = ports_attributes;
+    config.ports_attributes = Some(ports_attributes);
     config.other_ports_attributes = Some(PortAttributes {
         label: Some("Default Service".to_string()),
         on_auto_forward: Some(OnAutoForward::Silent),
@@ -198,7 +198,7 @@ fn test_port_attribute_fallback_behavior() {
     let mut config = DevContainerConfig::default();
     config.name = Some("Test Container".to_string());
     config.image = Some("node:18".to_string());
-    config.forward_ports = vec![PortSpec::Number(3000)];
+    config.forward_ports = Some(vec![PortSpec::Number(3000)]);
     config.other_ports_attributes = Some(PortAttributes {
         label: Some("Generic Service".to_string()),
         on_auto_forward: Some(OnAutoForward::Silent),
@@ -251,7 +251,7 @@ fn test_exposed_ports_without_mappings() {
     let mut config = DevContainerConfig::default();
     config.name = Some("Test Container".to_string());
     config.image = Some("node:18".to_string());
-    config.forward_ports = vec![PortSpec::Number(3000)];
+    config.forward_ports = Some(vec![PortSpec::Number(3000)]);
 
     let container_info = ContainerInfo {
         id: "test-container-123".to_string(),
@@ -342,8 +342,8 @@ fn test_port_event_redaction() {
     );
 
     let config_with_secrets = DevContainerConfig {
-        forward_ports: vec![PortSpec::Number(3000)],
-        ports_attributes: port_attrs,
+        forward_ports: Some(vec![PortSpec::Number(3000)]),
+        ports_attributes: Some(port_attrs),
         ..Default::default()
     };
 

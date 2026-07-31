@@ -660,7 +660,10 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
         );
 
         // Merge features
-        config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
+        config.features = Some(FeatureMerger::merge_features(
+            config.features(),
+            &merge_config,
+        )?);
         debug!("Applied feature merging");
 
         // Update override feature install order if provided
@@ -690,9 +693,9 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     // - Compose builds resolve the target service's shape and build a
     //   feature-extended image via `execute_compose_build_with_features`
     //   (the same `resolve_compose_feature_image` helper the `up` flow uses).
-    let features_present = !config.features.is_null()
+    let features_present = !config.features().is_null()
         && config
-            .features
+            .features()
             .as_object()
             .is_some_and(|obj| !obj.is_empty());
 

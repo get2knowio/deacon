@@ -229,7 +229,7 @@ pub(crate) async fn execute_up_with_runtime(
     let identity_config = config.clone();
 
     // T029: Check for disallowed features before any runtime operations
-    check_for_disallowed_features(&config.features)?;
+    check_for_disallowed_features(config.features())?;
     debug!("Validated features - no disallowed features found");
 
     // Frozen-lockfile pre-build validation (graduated in 1.0).
@@ -261,7 +261,7 @@ pub(crate) async fn execute_up_with_runtime(
 
         // Validate lockfile against config features
         let validation_result =
-            validate_lockfile_against_config(lockfile.as_ref(), &config.features, &lockfile_path);
+            validate_lockfile_against_config(lockfile.as_ref(), config.features(), &lockfile_path);
 
         match &validation_result {
             LockfileValidationResult::Matched => {
@@ -311,14 +311,14 @@ pub(crate) async fn execute_up_with_runtime(
 
     // Apply CLI mounts to configuration mounts so runtime receives them
     if !args.mount.is_empty() {
-        let mut mounts = config.mounts.clone();
+        let mut mounts = config.mounts().to_vec();
         for mount_str in &args.mount {
             // Already validated earlier; parse again to normalize and re-emit
             if let Ok(mount) = NormalizedMount::parse(mount_str) {
                 mounts.push(serde_json::Value::String(mount.to_spec_string()));
             }
         }
-        config.mounts = mounts;
+        config.mounts = Some(mounts);
     }
 
     // T029: Merge image metadata into configuration
@@ -332,6 +332,7 @@ pub(crate) async fn execute_up_with_runtime(
         cli_remote_env.insert(env.name.clone(), env.value.clone());
         config
             .remote_env
+            .get_or_insert_default()
             .insert(env.name.clone(), Some(env.value.clone()));
     }
 
@@ -356,6 +357,7 @@ pub(crate) async fn execute_up_with_runtime(
                 .or_insert_with(|| value.clone());
             config
                 .remote_env
+                .get_or_insert_default()
                 .entry(key.clone())
                 .or_insert_with(|| Some(value.clone()));
         }
@@ -380,24 +382,28 @@ pub(crate) async fn execute_up_with_runtime(
     if let Some(ref container_data) = args.container_data_folder {
         config
             .container_env
+            .get_or_insert_default()
             .entry("DEACON_CONTAINER_DATA_FOLDER".to_string())
             .or_insert(container_data.display().to_string());
     }
     if let Some(ref container_system_data) = args.container_system_data_folder {
         config
             .container_env
+            .get_or_insert_default()
             .entry("DEACON_CONTAINER_SYSTEM_DATA_FOLDER".to_string())
             .or_insert(container_system_data.display().to_string());
     }
     if let Some(ref user_data) = args.user_data_folder {
         config
             .remote_env
+            .get_or_insert_default()
             .entry("DEACON_USER_DATA_FOLDER".to_string())
             .or_insert(Some(user_data.display().to_string()));
     }
     if let Some(ref session_data) = args.container_session_data_folder {
         config
             .container_env
+            .get_or_insert_default()
             .entry("DEACON_CONTAINER_SESSION_DATA_FOLDER".to_string())
             .or_insert(session_data.display().to_string());
     }
@@ -405,6 +411,7 @@ pub(crate) async fn execute_up_with_runtime(
     if args.force_tty_if_json {
         config
             .container_env
+            .get_or_insert_default()
             .entry(ENV_FORCE_TTY_IF_JSON.to_string())
             .or_insert_with(|| "true".to_string());
     }
@@ -472,7 +479,10 @@ pub(crate) async fn execute_up_with_runtime(
         );
 
         // Merge features
-        config.features = FeatureMerger::merge_features(&config.features, &merge_config)?;
+        config.features = Some(FeatureMerger::merge_features(
+            config.features(),
+            &merge_config,
+        )?);
         debug!("Applied feature merging");
 
         // Update override feature install order if provided

@@ -78,28 +78,28 @@ UNUSED_SECRET=ignored-value
     );
 
     // Verify environment variables are merged and substituted
-    assert!(config.container_env.contains_key("BASE_VAR"));
-    assert!(config.container_env.contains_key("OVERRIDE_VAR"));
+    assert!(config.container_env().contains_key("BASE_VAR"));
+    assert!(config.container_env().contains_key("OVERRIDE_VAR"));
     assert_eq!(
-        config.container_env.get("BASE_VAR"),
+        config.container_env().get("BASE_VAR"),
         Some(&"base-value".to_string())
     );
     assert_eq!(
-        config.container_env.get("OVERRIDE_VAR"),
+        config.container_env().get("OVERRIDE_VAR"),
         Some(&"override-value".to_string())
     );
 
     // Verify secrets were substituted
     assert_eq!(
-        config.container_env.get("DB_PASSWORD"),
+        config.container_env().get("DB_PASSWORD"),
         Some(&"super-secret-password".to_string())
     );
     assert_eq!(
-        config.container_env.get("API_URL"),
+        config.container_env().get("API_URL"),
         Some(&"https://api.example.com/v1".to_string())
     );
     assert_eq!(
-        config.container_env.get("SECRET_TOKEN"),
+        config.container_env().get("SECRET_TOKEN"),
         Some(&"abc123xyz789".to_string())
     );
 

@@ -112,7 +112,7 @@ impl PortForwardingManager {
         let mut ports = HashMap::new();
 
         // Add ports from forwardPorts
-        for port_spec in &config.forward_ports {
+        for port_spec in config.forward_ports() {
             if let Some(port_num) = port_spec.primary_port() {
                 ports.insert(port_num, port_spec);
             }
@@ -136,7 +136,7 @@ impl PortForwardingManager {
         configured_ports: &HashMap<u16, &PortSpec>,
     ) {
         // Check each port attribute reference
-        for port_key in config.ports_attributes.keys() {
+        for port_key in config.ports_attributes().keys() {
             let mut found = false;
 
             // Try direct port number match
@@ -228,13 +228,13 @@ impl PortForwardingManager {
 
         // Override with specific port attributes
         let port_key = port.to_string();
-        if let Some(specific_attrs) = config.ports_attributes.get(&port_key) {
+        if let Some(specific_attrs) = config.ports_attributes().get(&port_key) {
             Self::merge_port_attributes(&mut attrs, specific_attrs);
         }
 
         // Also try with transport protocol suffix
         let port_key_with_protocol = format!("{}/{}", port, transport_protocol);
-        if let Some(specific_attrs) = config.ports_attributes.get(&port_key_with_protocol) {
+        if let Some(specific_attrs) = config.ports_attributes().get(&port_key_with_protocol) {
             Self::merge_port_attributes(&mut attrs, specific_attrs);
         }
 
@@ -351,10 +351,10 @@ mod tests {
     #[allow(clippy::field_reassign_with_default)]
     fn test_collect_configured_ports() {
         let mut config = DevContainerConfig::default();
-        config.forward_ports = vec![
+        config.forward_ports = Some(vec![
             PortSpec::Number(3000),
             PortSpec::String("8080:8080".to_string()),
-        ];
+        ]);
         config.app_port = Some(AppPort::Single(PortSpec::Number(4000)));
 
         let ports = PortForwardingManager::collect_configured_ports(&config);
@@ -383,7 +383,7 @@ mod tests {
         );
 
         let mut config = DevContainerConfig::default();
-        config.ports_attributes = ports_attributes;
+        config.ports_attributes = Some(ports_attributes);
         config.other_ports_attributes = Some(PortAttributes {
             label: Some("Default Service".to_string()),
             on_auto_forward: Some(OnAutoForward::Silent),
@@ -441,7 +441,7 @@ mod tests {
         );
 
         let mut config = DevContainerConfig::default();
-        config.ports_attributes = ports_attributes;
+        config.ports_attributes = Some(ports_attributes);
 
         let event = PortForwardingManager::create_port_event(
             &exposed_port,
@@ -502,8 +502,8 @@ mod tests {
         );
 
         let mut config = DevContainerConfig::default();
-        config.forward_ports = vec![PortSpec::Number(8443)];
-        config.ports_attributes = ports_attributes;
+        config.forward_ports = Some(vec![PortSpec::Number(8443)]);
+        config.ports_attributes = Some(ports_attributes);
 
         let event = PortForwardingManager::create_port_event(
             &exposed_port,
@@ -548,8 +548,8 @@ mod tests {
         );
 
         let mut config = DevContainerConfig::default();
-        config.forward_ports = vec![PortSpec::Number(3000)]; // Only 3000 is configured
-        config.ports_attributes = ports_attributes;
+        config.forward_ports = Some(vec![PortSpec::Number(3000)]); // Only 3000 is configured
+        config.ports_attributes = Some(ports_attributes);
 
         let container_info = ContainerInfo {
             id: "test-container-123".to_string(),

@@ -702,9 +702,11 @@ mod tests {
 
         config
             .remote_env
+            .get_or_insert_default()
             .insert("ALPHA".to_string(), Some("1".to_string()));
         config
             .remote_env
+            .get_or_insert_default()
             .insert("BETA".to_string(), Some("2".to_string()));
 
         let hash1 = ContainerIdentity::hash_config(&config);
