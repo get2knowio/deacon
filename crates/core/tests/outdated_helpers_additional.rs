@@ -56,11 +56,15 @@ fn test_derive_current_version_lockfile_behavior() {
     );
 
     // Derive from lockfile
-    let current = derive_current_version("ghcr.io/devcontainers/features/sample:9.9.9", Some(&lf));
+    let current = derive_current_version(
+        "ghcr.io/devcontainers/features/sample:9.9.9",
+        Some(&lf),
+        &[],
+    );
     assert_eq!(current.as_deref(), Some("0.1.2"));
 
     // No lockfile -> fallback to wanted
     let current_no_lock =
-        derive_current_version("ghcr.io/devcontainers/features/sample:9.9.9", None);
+        derive_current_version("ghcr.io/devcontainers/features/sample:9.9.9", None, &[]);
     assert_eq!(current_no_lock.as_deref(), Some("9.9.9"));
 }

@@ -199,7 +199,10 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
         declared_refs.push(feature_key.clone());
     }
 
-    // Bounded parallel fetching of latest versions with timeout and deterministic ordering
+    // Bounded parallel fetching of the published tag list, with timeout and deterministic
+    // ordering. The list serves BOTH `latest` (its first element) and `wanted` (the
+    // highest entry satisfying the declared pin), so resolving ranges costs no extra
+    // request — the tags were already being fetched for `latest` alone (#407).
     let concurrency_limit = std::env::var("DEACON_OUTDATED_CONCURRENCY")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
@@ -239,19 +242,19 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
                 // Use core helper; enforce timeout per attempt
                 let attempt_result = tokio::time::timeout(
                     timeout_dur,
-                    core_outdated::fetch_latest_stable_version(&dr_clone),
+                    core_outdated::fetch_stable_tags_descending(&dr_clone),
                 )
                 .await;
 
                 match attempt_result {
-                    Ok(latest_opt) => {
+                    Ok(tags_opt) => {
                         // Either Some or None returned by fetcher; treat as final
-                        break latest_opt;
+                        break tags_opt;
                     }
                     Err(_) => {
                         // Timeout during fetch
                         let canonical = core_outdated::canonical_feature_id(&dr_clone);
-                        debug!(feature = %canonical, attempt, "Timeout fetching latest version (attempt {})", attempt);
+                        debug!(feature = %canonical, attempt, "Timeout fetching published tags (attempt {})", attempt);
 
                         if attempt >= max_retries {
                             // Give up after max retries
@@ -270,13 +273,13 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
     }
 
     // Await handles in order to preserve deterministic output ordering
-    let mut latests: Vec<Option<String>> = Vec::with_capacity(handles.len());
+    let mut tag_lists: Vec<Option<Vec<String>>> = Vec::with_capacity(handles.len());
     for h in handles {
         match h.await {
-            Ok(latest_opt) => latests.push(latest_opt),
+            Ok(tags_opt) => tag_lists.push(tags_opt),
             Err(e) => {
-                debug!(error = ?e, "Task join error when fetching latest");
-                latests.push(None);
+                debug!(error = ?e, "Task join error when fetching published tags");
+                tag_lists.push(None);
             }
         }
     }
@@ -284,9 +287,13 @@ pub async fn run(args: OutdatedArgs) -> Result<()> {
     // Build results preserving original declaration order
     for (i, declared_ref) in declared_refs.iter().enumerate() {
         let declared_ref = declared_ref.as_str();
-        let wanted = core_outdated::compute_wanted_version(declared_ref);
-        let current = core_outdated::derive_current_version(declared_ref, lockfile_opt.as_ref());
-        let latest = latests.get(i).cloned().unwrap_or(None);
+        // `wanted` is the newest published version satisfying the declared pin, not the
+        // pin's literal text (#407 divergence 2). Both fields come from one tag list.
+        let tags: &[String] = tag_lists.get(i).and_then(|o| o.as_deref()).unwrap_or(&[]);
+        let wanted = core_outdated::resolve_wanted_version(declared_ref, tags);
+        let current =
+            core_outdated::derive_current_version(declared_ref, lockfile_opt.as_ref(), tags);
+        let latest = tags.first().cloned();
 
         let wanted_major = core_outdated::wanted_major(&wanted);
         let latest_major = core_outdated::latest_major(&latest);

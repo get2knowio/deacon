@@ -39,7 +39,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Assertions pin `current` and `wanted`, which the configuration's exact version reference fixes; `latest` is deliberately unpinned because it is whatever the registry publishes next and an assertion on it would decay into a false failure."
+      "notes": "Assertions pin `current` and `wanted`, which the configuration's exact version reference fixes; `latest` is deliberately unpinned because it is whatever the registry publishes next and an assertion on it would decay into a false failure. The `reference: aligned` claim was only made true by #407 divergence 2. Until then deacon reported the DECLARED TEXT of a partial pin as both `current` and `wanted` \u2014 `\"wanted\": \"1\"`, which is not a version and cannot answer whether an upgrade is available \u2014 while the reference resolved the pin to the newest published version satisfying it. The two agreed only on exactly-pinned references, which is what every case happened to use. deacon's own `upgrade` already resolved ranges correctly, so the two subcommands disagreed with each other as well as with the reference; that settled the direction without needing a spec reading."
     }
   ]
 }

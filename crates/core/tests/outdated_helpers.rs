@@ -40,17 +40,18 @@ fn test_derive_current_version_from_lockfile() {
     );
 
     // When lockfile has entry, derive_current_version should return the locked version
-    let current = derive_current_version("ghcr.io/devcontainers/features/node:10.0.0", Some(&lf));
+    let current =
+        derive_current_version("ghcr.io/devcontainers/features/node:10.0.0", Some(&lf), &[]);
     assert_eq!(current.as_deref(), Some("7.8.9"));
 
     // When lockfile is absent, it should fall back to the wanted tag
     let current_no_lock =
-        derive_current_version("ghcr.io/devcontainers/features/node:10.0.0", None);
+        derive_current_version("ghcr.io/devcontainers/features/node:10.0.0", None, &[]);
     assert_eq!(current_no_lock.as_deref(), Some("10.0.0"));
 
     // Digest-based reference with no lockfile should yield None
     let digest_ref = "ghcr.io/devcontainers/features/node@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-    let current_digest = derive_current_version(digest_ref, None);
+    let current_digest = derive_current_version(digest_ref, None, &[]);
     assert!(current_digest.is_none());
 }
 
