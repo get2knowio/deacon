@@ -207,7 +207,7 @@ pub fn wanted_major(version: &Option<String>) -> Option<String> {
 ///
 /// // Without lockfile, falls back to wanted version
 /// let reference = "ghcr.io/devcontainers/features/node:18";
-/// assert_eq!(derive_current_version(reference, None), Some("18".to_string()));
+/// assert_eq!(derive_current_version(reference, None, &[]), Some("18".to_string()));
 ///
 /// // With lockfile entry
 /// let mut features = HashMap::new();
@@ -221,11 +221,12 @@ pub fn wanted_major(version: &Option<String>) -> Option<String> {
 ///     }
 /// );
 /// let lockfile = Lockfile { features };
-/// assert_eq!(derive_current_version(reference, Some(&lockfile)), Some("16.0.0".to_string()));
+/// assert_eq!(derive_current_version(reference, Some(&lockfile), &[]), Some("16.0.0".to_string()));
 /// ```
 pub fn derive_current_version(
     reference: &str,
     lockfile_opt: Option<&lockfile::Lockfile>,
+    stable_tags: &[String],
 ) -> Option<String> {
     let canonical = canonical_feature_id(reference);
     if let Some(ld) = lockfile_opt {
@@ -234,8 +235,11 @@ pub fn derive_current_version(
         }
     }
 
-    // Fallback
-    compute_wanted_version(reference)
+    // No lockfile entry: what is installed is whatever the declared reference resolves
+    // to, which for a partial pin is the newest published version satisfying it — the
+    // same resolution `wanted` performs (#407). Returning the pin's literal text here
+    // reported `"current": "1"`, which is not a version.
+    resolve_wanted_version(reference, stable_tags)
 }
 
 /// Fetch the latest stable semver tag for the given declared feature reference.
@@ -243,7 +247,7 @@ pub fn derive_current_version(
 /// This performs a registry `list_tags` via the core `FeatureFetcher` and uses
 /// `semver_utils` to filter and sort tags. Returns `None` on any error or if
 /// no stable semver tags are present.
-pub async fn fetch_latest_stable_version(reference: &str) -> Option<String> {
+pub async fn fetch_stable_tags_descending(reference: &str) -> Option<Vec<String>> {
     // Build a FeatureRef for listing tags. We make a best-effort parse: registry is the
     // first path segment, repository is the remainder. For nested namespaces we keep them.
     let canonical = canonical_feature_id(reference);
@@ -289,9 +293,63 @@ pub async fn fetch_latest_stable_version(reference: &str) -> Option<String> {
         return None;
     }
     semver_utils::sort_tags_descending(&mut semver_tags);
+    Some(semver_tags)
+}
 
-    // First element is the highest stable semver
-    semver_tags.into_iter().next()
+/// The highest stable published version, i.e. the first of
+/// [`fetch_stable_tags_descending`].
+pub async fn fetch_latest_stable_version(reference: &str) -> Option<String> {
+    fetch_stable_tags_descending(reference)
+        .await?
+        .into_iter()
+        .next()
+}
+
+/// Resolve the version the declared reference ASKS FOR, given the published stable tags
+/// in descending order.
+///
+/// `wanted` means "the newest published version satisfying what the configuration
+/// declared" — which is what the neighbouring `latest` and `wantedMajor` fields imply,
+/// and what the reference CLI reports. deacon used to return the declared tag STRING
+/// verbatim, so a configuration pinning `git:1` reported `"wanted": "1"` — not a version
+/// at all, and unusable for deciding whether an upgrade is available (#407 divergence 2).
+///
+/// An exactly-pinned reference resolves to itself and needs no tag list; only a partial
+/// pin (`1`, `1.3`) has to consult the registry. Non-numeric tags (`latest`, a named
+/// channel) are returned as declared: they name a moving target the registry alone
+/// resolves, and guessing would be worse than echoing.
+///
+/// deacon's own `upgrade` already resolved ranges this way, so the two subcommands
+/// disagreed with each other as well as with the reference — which is what settled the
+/// direction.
+pub fn resolve_wanted_version(reference: &str, stable_tags: &[String]) -> Option<String> {
+    let declared = compute_wanted_version(reference)?;
+
+    // A full `major.minor.patch` pin is already the answer.
+    let parts: Vec<&str> = declared.split('.').collect();
+    if parts.len() >= 3 || !parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit())) {
+        return Some(declared);
+    }
+    if parts.iter().any(|p| p.is_empty()) {
+        return Some(declared);
+    }
+
+    // A partial pin selects the highest published version sharing its prefix. Tags are
+    // already sorted descending, so the first match wins.
+    let prefix: Vec<&str> = parts;
+    let matched = stable_tags.iter().find(|tag| {
+        let tag_parts: Vec<&str> = tag.trim_start_matches('v').split('.').collect();
+        tag_parts.len() >= prefix.len()
+            && prefix
+                .iter()
+                .zip(tag_parts.iter())
+                .all(|(want, have)| want == have)
+    });
+
+    // No published tag satisfies the pin (or the registry was unreachable): echo what was
+    // declared rather than reporting nothing. Degrading to today's answer is better than
+    // turning a transient lookup failure into a missing field.
+    Some(matched.cloned().unwrap_or(declared))
 }
 
 /// Return the major portion of the latest stable version string.
@@ -441,6 +499,96 @@ mod tests {
     }
 
     // wanted_major tests
+    // -- resolve_wanted_version (#407 divergence 2) ---------------------------------
+
+    fn tags(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// A partial pin resolves to the newest published version satisfying it — NOT the
+    /// pin's literal text, which is what deacon used to report.
+    #[test]
+    fn wanted_resolves_a_major_only_pin_to_the_newest_matching_version() {
+        let published = tags(&["2.1.0", "1.7.1", "1.6.0", "1.3.2"]);
+        assert_eq!(
+            resolve_wanted_version("ghcr.io/x/y/node:1", &published),
+            Some("1.7.1".to_string())
+        );
+    }
+
+    #[test]
+    fn wanted_resolves_a_minor_pin_within_that_minor() {
+        let published = tags(&["1.7.1", "1.3.8", "1.3.2"]);
+        assert_eq!(
+            resolve_wanted_version("ghcr.io/x/y/git:1.3", &published),
+            Some("1.3.8".to_string())
+        );
+    }
+
+    /// An exact pin is already the answer and must not drift to a newer patch.
+    #[test]
+    fn wanted_leaves_an_exact_pin_alone() {
+        let published = tags(&["1.3.8", "1.3.2"]);
+        assert_eq!(
+            resolve_wanted_version("ghcr.io/x/y/git:1.3.2", &published),
+            Some("1.3.2".to_string())
+        );
+    }
+
+    /// `1` must not match `10.x`: the comparison is per component, not textual prefix.
+    #[test]
+    fn wanted_does_not_match_a_longer_major() {
+        let published = tags(&["10.0.0", "1.2.0"]);
+        assert_eq!(
+            resolve_wanted_version("ghcr.io/x/y/z:1", &published),
+            Some("1.2.0".to_string())
+        );
+    }
+
+    /// An unreachable registry (or a pin nothing published satisfies) degrades to the
+    /// declared text rather than reporting nothing — a transient lookup failure must not
+    /// turn into a missing field.
+    #[test]
+    fn wanted_falls_back_to_the_declared_pin_when_nothing_matches() {
+        assert_eq!(
+            resolve_wanted_version("ghcr.io/x/y/z:9", &tags(&["1.0.0"])),
+            Some("9".to_string())
+        );
+        assert_eq!(
+            resolve_wanted_version("ghcr.io/x/y/z:1", &[]),
+            Some("1".to_string())
+        );
+    }
+
+    /// A non-numeric tag names a moving target only the registry resolves; echoing it is
+    /// better than guessing which published version it points at.
+    #[test]
+    fn wanted_echoes_a_non_numeric_tag() {
+        assert_eq!(
+            resolve_wanted_version("ghcr.io/x/y/z:latest", &tags(&["2.0.0"])),
+            Some("latest".to_string())
+        );
+    }
+
+    /// A digest reference carries no version to want.
+    #[test]
+    fn wanted_is_none_for_a_digest_reference() {
+        assert_eq!(
+            resolve_wanted_version("ghcr.io/x/y/z@sha256:abc", &tags(&["2.0.0"])),
+            None
+        );
+    }
+
+    /// Without a lockfile, `current` resolves the same way `wanted` does — reporting the
+    /// pin's literal text said `"current": "1"`, which is not a version.
+    #[test]
+    fn current_without_a_lockfile_resolves_the_pin() {
+        assert_eq!(
+            derive_current_version("ghcr.io/x/y/node:1", None, &tags(&["1.7.1", "1.6.0"])),
+            Some("1.7.1".to_string())
+        );
+    }
+
     #[test]
     fn test_wanted_major_valid() {
         assert_eq!(
@@ -492,7 +640,7 @@ mod tests {
     fn test_derive_current_version_no_lockfile() {
         let reference = "ghcr.io/devcontainers/features/node:18";
         assert_eq!(
-            derive_current_version(reference, None),
+            derive_current_version(reference, None, &[]),
             Some("18".to_string())
         );
     }
@@ -514,7 +662,7 @@ mod tests {
 
         // Should return lockfile version, not wanted version
         assert_eq!(
-            derive_current_version(reference, Some(&lockfile)),
+            derive_current_version(reference, Some(&lockfile), &[]),
             Some("18.5.0".to_string())
         );
     }
@@ -536,7 +684,7 @@ mod tests {
 
         // No match in lockfile, should fall back to wanted
         assert_eq!(
-            derive_current_version(reference, Some(&lockfile)),
+            derive_current_version(reference, Some(&lockfile), &[]),
             Some("3.11".to_string())
         );
     }
@@ -545,7 +693,7 @@ mod tests {
     fn test_derive_current_version_digest_no_lockfile() {
         let reference = "ghcr.io/devcontainers/features/node@sha256:abcdef";
         // Digest with no lockfile should return None (can't derive version)
-        assert_eq!(derive_current_version(reference, None), None);
+        assert_eq!(derive_current_version(reference, None, &[]), None);
     }
 
     // FeatureVersionInfo serialization tests

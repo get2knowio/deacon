@@ -127,7 +127,7 @@ down a column is reliable; reading along a row needs that in mind.
 <tr><td>❌</td><td>`outdated` resolves the full extends chain before reporting versions, so a Feature…</td><td>·</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>·</td><td>❌</td><td>·</td><td>❌</td><td>·</td><td>·</td><td>❌</td><td>#389</td></tr>
 <tr><td>⚠️</td><td>`outdated` fails with a non-zero exit and a diagnostic naming the file when a…</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#406 #407</td></tr>
 <tr><td>◐</td><td>`outdated` keys each report entry by the Feature reference the configuration DECLARED,…</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#407 #411</td></tr>
-<tr><td>✅</td><td>`outdated` reports each configured Feature's current, wanted, and latest version, and…</td><td>✅</td><td>◐</td><td>◐</td><td>◐</td><td>◐</td><td>✅</td><td>·</td><td>◐</td><td>✅</td><td>◐</td><td>◐</td><td>◐</td><td></td></tr>
+<tr><td>✅</td><td>`outdated` reports each configured Feature's current, wanted, and latest version, and…</td><td>✅</td><td>◐</td><td>◐</td><td>◐</td><td>◐</td><td>✅</td><td>·</td><td>◐</td><td>✅</td><td>◐</td><td>◐</td><td>◐</td><td>#407</td></tr>
 </tbody>
 </table>
 
