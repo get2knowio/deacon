@@ -93,6 +93,12 @@ struct Dim {
     values: &'static [(&'static str, &'static str)],
 }
 
+/// A dimension narrowed to the values its operations actually permit.
+struct ActiveDim<'a> {
+    key: &'a str,
+    values: Vec<(&'a str, &'a str)>,
+}
+
 const DIMS: &[Dim] = &[
     Dim {
         key: "sdim-config-source",
@@ -171,9 +177,24 @@ pub fn render(registry: &Registry) -> String {
                     .extend(values.iter().copied());
             }
         }
-        let active: Vec<&Dim> = DIMS
+        // Render only the values the applicability rules PERMIT for this area's
+        // operations. Filtering the dimension but not its values rendered columns that
+        // can never be anything but `·` — `outdated` never resolves a dependency graph,
+        // so a `deps` column there reads as an untested hole where the truth is that the
+        // scenario cannot exist. That is the inverse of the projection problem: it makes
+        // coverage look WORSE than it is, and is just as dishonest.
+        let active: Vec<ActiveDim<'_>> = DIMS
             .iter()
-            .filter(|d| permitted.get(d.key).is_some_and(|vs| vs.len() > 1))
+            .filter_map(|d| {
+                let allowed = permitted.get(d.key)?;
+                let values: Vec<(&str, &str)> = d
+                    .values
+                    .iter()
+                    .filter(|(value, _)| allowed.contains(value))
+                    .copied()
+                    .collect();
+                (values.len() > 1).then_some(ActiveDim { key: d.key, values })
+            })
             .collect();
 
         let _ = writeln!(out, "\n### {}\n", area_title(area));
@@ -208,7 +229,7 @@ pub fn render(registry: &Registry) -> String {
 }
 
 fn grid(
-    active: &[&Dim],
+    active: &[ActiveDim<'_>],
     behaviors: &[&crate::model::BehaviorUnit],
     coverage: &BTreeMap<&str, Vec<(&TestCase, bool)>>,
 ) -> String {
@@ -407,10 +428,19 @@ A further {deacon_only} are deacon-only, with nothing to compare against.
 Columns are the scenarios a behavior was checked in: the configuration's shape
 (**img**age / **dkr** Dockerfile / **cmp** Compose) crossed with how many Features it
 declares (**–** none / **1** one / **many** several / **deps** several with dependency
-ordering / **lock** with a lockfile). Areas only show the columns their evidence varies.
+ordering / **lock** with a lockfile).
+
+**A column only appears where that scenario is possible.** `outdated` never resolves a
+dependency graph, so it has no **deps** column at all rather than a column of `·` implying
+an untested hole. So a `·` means genuinely not yet checked — with one caveat below.
 
 A cell says a case exercised that scenario — not that the case's assertions were strong.
 The leading glyph rolls the row up; where a row is mostly `·`, that is the honest signal.
+
+The caveat: columns are dropped per AREA, not per behavior. A behavior that is inherently
+about one configuration shape — deriving a Compose project name, say — still shows `·`
+under **img** and **dkr**, where the truth is that the question does not arise. Reading
+down a column is reliable; reading along a row needs that in mind.
 "#,
         oracle = pin_of(registry, RevisionKind::Oracle),
         spec = pin_of(registry, RevisionKind::Spec),
@@ -492,6 +522,60 @@ mod tests {
         assert!(
             !page.contains("✅") && !page.contains("◐"),
             "a vacuous assertion must leave the row unchecked:\n{page}"
+        );
+    }
+
+    /// A scenario value the applicability RULES exclude for an operation must not render
+    /// a column. Such a column can only ever be `·`, which reads as "we have not tested
+    /// this" when the truth is "this cannot happen" — making coverage look worse than it
+    /// is, exactly as damaging as making it look better.
+    #[test]
+    fn a_rule_excluded_value_renders_no_column() {
+        use crate::model::Condition;
+        use crate::scenario::{ApplicabilityRule, ScenarioDimension, ScenarioDimensionKind};
+
+        let mut reg = Registry {
+            behaviors: vec![behavior()],
+            cases: vec![case_with(serde_json::json!({"equals": 0}))],
+            ..Registry::default()
+        };
+        reg.scenario = vec![
+            ScenarioDimension {
+                id: "sdim-operation".into(),
+                kind: ScenarioDimensionKind::Scenario,
+                description: "operation".into(),
+                values: vec!["up".into()],
+            },
+            ScenarioDimension {
+                id: "sdim-features".into(),
+                kind: ScenarioDimensionKind::Scenario,
+                description: "features".into(),
+                values: vec!["none".into(), "single".into(), "lockfile".into()],
+            },
+        ];
+        reg.applicability = vec![ApplicabilityRule {
+            id: "rule-x".into(),
+            excludes: vec![
+                Condition {
+                    dimension: "sdim-operation".into(),
+                    values: vec!["up".into()],
+                },
+                Condition {
+                    dimension: "sdim-features".into(),
+                    values: vec!["lockfile".into()],
+                },
+            ],
+            ground: "the operation never reads a lockfile".into(),
+        }];
+
+        let page = render(&reg);
+        assert!(
+            page.contains("<th>1</th>"),
+            "a permitted value must still render:\n{page}"
+        );
+        assert!(
+            !page.contains("<th>lock</th>"),
+            "a rule-excluded value must render no column:\n{page}"
         );
     }
 
