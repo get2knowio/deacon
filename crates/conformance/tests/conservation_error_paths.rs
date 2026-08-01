@@ -153,7 +153,8 @@ fn a_reference_side_rejection_does_not_require_a_deacon_diagnostic() {
     // the REFERENCE: deacon resolves the extends chain where the reference errors. Its
     // counterpart pins deacon at success, so demanding a deacon stderr diagnostic would
     // demand a message deacon never emits — the reference-side diagnostic is carried by
-    // the preserved `wvr-extends-child-merged` record instead.
+    // the `ext-extends-resolution` record instead (the `wvr-extends-child-merged` waiver
+    // that used to duplicate it was retired 2026-08-01).
     let report = Fixture::real().report().expect("report computes");
     assert!(
         !report

@@ -32,7 +32,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Both CLIs reject an explicit --config that does not exist (waiver wvr-bad-config-path, both-reject). Migrated as a live differential: the two CLIs agree on the rejection, so the exit-code channel compares clean. Paired with `case-errors-decl-bad-config-path-decision`, which pins deacon's own rejection: this case alone would assert only that the two CLIs agree, which is not the same as asserting that they reject (023 T072).",
+      "notes": "Both CLIs reject an explicit --config that does not exist (a both-reject agreement; the migrated waiver wvr-bad-config-path was retired 2026-08-01 as tolerating no difference). Migrated as a live differential: the two CLIs agree on the rejection, so the exit-code channel compares clean. Paired with `case-errors-decl-bad-config-path-decision`, which pins deacon's own rejection: this case alone would assert only that the two CLIs agree, which is not the same as asserting that they reject (023 T072).",
       "inputClass": "malformed"
     },
     {
@@ -120,7 +120,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Both CLIs accept duplicate top-level JSON keys with last-wins semantics and must resolve to the same document (waiver wvr-duplicate-keys, both-accept). The structured-output channel is compared under the declarative normalizer, which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values (research D3); differences it surfaces are characterized in US4/T064, never re-hidden.",
+      "notes": "Both CLIs accept duplicate top-level JSON keys with last-wins semantics and must resolve to the same document (a both-accept agreement; the migrated waiver wvr-duplicate-keys was retired 2026-08-01 as tolerating no difference). The structured-output channel is compared under the declarative normalizer, which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values (research D3); differences it surfaces are characterized in US4/T064, never re-hidden.",
       "inputClass": "boundary"
     },
     {
@@ -170,7 +170,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "deacon rejects a cyclic extends chain where the reference leniently accepts it \u2014 an intentional divergence characterized by waiver wvr-extends-cycle (deacon-stricter). Expressed as a spec-expectation on deacon's own decision: the exit-code channel is scalar, so a live-differential divergence there would need a bare-channel tolerance, which is rejected as a global ignore (FR-032).",
+      "notes": "deacon rejects a cyclic extends chain where the reference leniently accepts it \u2014 an ahead-of-spec capability characterized by ext-extends-resolution (the duplicate waiver wvr-extends-cycle was retired 2026-08-01). Expressed as a spec-expectation on deacon's own decision: the exit-code channel is scalar, so a live-differential divergence there would need a bare-channel tolerance, which is rejected as a global ignore (FR-032).",
       "inputClass": "malformed"
     },
     {
@@ -220,7 +220,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "deacon rejects an extends target that does not exist where the reference leniently accepts it \u2014 waiver wvr-extends-missing (deacon-stricter). See case-errors-decl-extends-cycle for why this is a spec-expectation.",
+      "notes": "deacon rejects an extends target that does not exist where the reference leniently accepts it \u2014 characterized by ext-extends-resolution (the duplicate waiver wvr-extends-missing was retired 2026-08-01). See case-errors-decl-extends-cycle for why this is a spec-expectation.",
       "inputClass": "malformed"
     },
     {
@@ -302,7 +302,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Both CLIs reject a workspace with no devcontainer configuration (waiver wvr-missing-config, both-reject). Paired with `case-errors-decl-missing-config-decision`, which pins deacon's own rejection: this case alone would assert only that the two CLIs agree, which is not the same as asserting that they reject (023 T072).",
+      "notes": "Both CLIs reject a workspace with no devcontainer configuration (a both-reject agreement; the migrated waiver wvr-missing-config was retired 2026-08-01 as tolerating no difference). Paired with `case-errors-decl-missing-config-decision`, which pins deacon's own rejection: this case alone would assert only that the two CLIs agree, which is not the same as asserting that they reject (023 T072).",
       "inputClass": "malformed"
     },
     {
@@ -388,7 +388,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Both CLIs accept an unknown top-level field and preserve it verbatim (waiver wvr-unknown-field-preserved, both-accept). See the D3 note on case-errors-decl-duplicate-keys for the structured-output channel."
+      "notes": "Both CLIs accept an unknown top-level field and preserve it verbatim (a both-accept agreement; the migrated waiver wvr-unknown-field-preserved was retired 2026-08-01 as tolerating no difference). See the D3 note on case-errors-decl-duplicate-keys for the structured-output channel."
     },
     {
       "id": "case-errors-decl-wrong-type-features",
@@ -894,7 +894,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `extends-child`, and the one unit whose recorded expectation is a REFERENCE rejection: deacon resolves the full `extends` chain eagerly under --include-merged-configuration where the reference errors \u2014 the ahead-of-spec capability recorded as ext-extends-resolution and characterized by waiver wvr-extends-child-merged, preserved unchanged (023 T044). Expressed as a spec-expectation, NOT a live-differential: a differential asserts the two sides are EQUAL, which both inverts this expectation into a guaranteed failure and pins nothing about deacon's own side. It pins deacon succeeding and resolving the base image from the extends chain \u2014 the waiver's recorded `image` signal \u2014 so the ahead-of-spec resolution cannot silently regress (023 T072). The reference-side rejection stays characterized by the waiver."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `extends-child`, and the one unit whose recorded expectation is a REFERENCE rejection: deacon resolves the full `extends` chain eagerly under --include-merged-configuration where the reference errors \u2014 the ahead-of-spec capability recorded as ext-extends-resolution and characterized by that record alone (the duplicate waiver wvr-extends-child-merged was retired 2026-08-01). Expressed as a spec-expectation, NOT a live-differential: a differential asserts the two sides are EQUAL, which both inverts this expectation into a guaranteed failure and pins nothing about deacon's own side. It pins deacon succeeding and resolving the base image from the extends chain \u2014 the recorded `image` signal \u2014 so the ahead-of-spec resolution cannot silently regress (023 T072). The reference-side rejection stays characterized by ext-extends-resolution."
     },
     {
       "id": "case-merged-decl-feature-order",

@@ -30,12 +30,14 @@ express on its own.
 make test-parity            # cargo nextest run --profile parity, then the aggregator
 ```
 
-Each case's accept/reject expectation remains a `corpus_case`-scoped `wvr-<name>` record
-in the **conformance registry** (`conformance/registry/waivers/wvr-<name>.json`), linked
-to a `bhv-readconfig-<name>` behavior with its three-axis disposition — as of
-019-conformance-registry, not a per-case `expect.json`. A waiver whose difference stops
-reproducing still fails as *stale* (FR-011); the migration changed what runs the
-comparison, not the self-invalidating discipline.
+Each case's accept/reject expectation lives in the **conformance registry** as a
+`bhv-readconfig-<name>` behavior with its three-axis disposition — as of
+019-conformance-registry, not a per-case `expect.json`. Where the two CLIs genuinely
+differ, a `corpus_case`-scoped `wvr-<name>` waiver characterizes the difference and
+fails as *stale* once it stops reproducing (FR-011). Where they **agree**, there is no
+waiver: six of the nine migrated records were retired on 2026-08-01 because a
+`both-accept` / `both-reject` expectation records agreement, and agreement is asserted
+by the case, not tolerated by a waiver.
 
 ## Headline finding
 
@@ -90,8 +92,9 @@ characterized divergences**, not parity bugs:
 - `extends` → missing / cyclic target: `deacon-stricter` (deacon resolves
   eagerly and rejects; reference never resolves). Recorded as behaviors
   `bhv-readconfig-extends-missing-rejected` / `bhv-readconfig-extends-cycle-rejected`
-  (waivers `wvr-extends-missing` / `wvr-extends-cycle`), linked from the
-  `ext-extends-resolution` extension in the conformance registry.
+  linked from the `ext-extends-resolution` extension in the conformance registry, which
+  is their single characterization (the duplicate `wvr-extends-*` waivers were retired
+  2026-08-01).
 - `extends` → valid target (conformance case 44): both succeed, but deacon
   merges the base config (e.g. the base `containerEnv` appears in the resolved
   config / created container) while the reference drops it. This is a
@@ -115,7 +118,7 @@ cases (`both-reject`, `both-accept`) guard the other direction.
 
 ## Waiver records
 
-Each case's accept/reject expectation is a `wvr-<name>` record in the
+A case whose two sides genuinely differ carries a `wvr-<name>` record in the
 **conformance registry** (`conformance/registry/waivers/wvr-<name>.json`), loaded
 by `parity_harness::waiver` through `deacon-conformance` — the single waiver schema
 now lives there (`crates/conformance/src/model.rs`; contract
@@ -133,11 +136,16 @@ three-axis disposition (spec / reference / decision).
   Carries an optional `"signal": ["substr", …]` of informational stderr
   substrings (not part of the pass/fail decision).
 
-The nine records are `wvr-bad-config-path`, `wvr-duplicate-keys`,
-`wvr-extends-cycle`, `wvr-extends-missing`, `wvr-malformed-json`,
-`wvr-missing-config`, `wvr-unknown-field-preserved`, `wvr-wrong-type-features`,
-and `wvr-wrong-type-forwardports`. `config` (optional, string) carries an explicit
-`--config` argument for a case and plays no part in waiver semantics.
+Three records survive — `wvr-malformed-json`, `wvr-wrong-type-features`, and
+`wvr-wrong-type-forwardports` — all `deacon-stricter`. The six that carried a
+`both-accept` / `both-reject` expectation (`wvr-bad-config-path`, `wvr-duplicate-keys`,
+`wvr-extends-cycle`, `wvr-extends-missing`, `wvr-missing-config`,
+`wvr-unknown-field-preserved`) were retired on 2026-08-01: the first four recorded
+agreement rather than divergence, and the two `extends` records duplicated
+`ext-extends-resolution`. Each retirement is dispositioned in
+`conformance/migration/mapping.json`, so the pre-migration inventory is still auditable.
+`config` (optional, string) carries an explicit `--config` argument for a case and plays
+no part in waiver semantics.
 
 ## Adding a case
 
@@ -146,8 +154,9 @@ under this directory any more.
 
 1. `conformance/fixtures/fx-errors-<name>/.devcontainer/devcontainer.json` (or supporting
    files; a deliberately "no config" case just omits the `.devcontainer/`).
-2. A `bhv-readconfig-<name>` behavior and a `wvr-<name>` waiver in the conformance
-   registry (see `conformance/RULES.md` and
+2. A `bhv-readconfig-<name>` behavior in the conformance registry — plus a `wvr-<name>`
+   waiver ONLY if the two CLIs genuinely differ and the difference is one we accept
+   (see `conformance/RULES.md` and
    `specs/019-conformance-registry/quickstart.md` for the record-a-divergence recipe).
 3. A `case-errors-decl-<name>` record in `conformance/registry/cases.json` with
    `operations` + `oracleType` + `expected`. Use `live-differential` when the interesting

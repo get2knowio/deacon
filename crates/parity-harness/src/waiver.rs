@@ -159,7 +159,9 @@ mod tests {
     use serde_json::json;
 
     /// A schema-valid registry waiver (corpus-case, deacon-stricter), mirroring the
-    /// migrated `wvr-extends-missing.json` shape (behaviors + expires present).
+    /// shape of the migrated `wvr-extends-missing.json` (behaviors + expires present).
+    /// Synthetic: that record was retired 2026-08-01, so this exercises the SCHEMA
+    /// rather than any live registry entry.
     fn valid_corpus_record() -> &'static str {
         r#"{
           "id": "wvr-extends-missing",
@@ -243,23 +245,19 @@ mod tests {
 
     #[test]
     fn loads_real_registry_waivers() {
-        // The migrated registry waivers (9 errors + 1 tier1) must load, validate,
-        // and be discoverable against the live repository registry.
+        // The surviving migrated registry waivers must load, validate, and be
+        // discoverable against the live repository registry. Six of the nine original
+        // `errors` records — and the one tier1 record — have since been retired as
+        // characterizing no divergence, so this asserts lookup works, not a census.
         let set = WaiverSet::load(&crate::conformance_registry_root())
             .expect("real registry waivers must load");
-        assert!(
-            set.corpus_cases("errors").len() >= 9,
-            "expected >= 9 errors waivers, got {}",
-            set.corpus_cases("errors").len()
-        );
-        assert!(set.corpus_case("errors", "extends-missing").is_some());
-        assert!(set.corpus_case("errors", "duplicate-keys").is_some());
+        assert!(!set.corpus_cases("errors").is_empty());
 
-        let child = set
-            .corpus_case("tier1", "extends-child")
-            .expect("extends-child waiver must be present");
-        assert_eq!(child.id, "wvr-extends-child-merged");
-        assert!(matches!(child.expect, Expect::ReferenceStricter { .. }));
+        let malformed = set
+            .corpus_case("errors", "malformed-json")
+            .expect("malformed-json waiver must be present");
+        assert_eq!(malformed.id, "wvr-malformed-json");
+        assert!(matches!(malformed.expect, Expect::DeaconStricter { .. }));
     }
 
     #[test]
@@ -378,13 +376,14 @@ mod tests {
         let errors: Vec<&Waiver> = set.records().iter().filter(|w| in_scope(w)).collect();
         assert_eq!(
             errors.len(),
-            9,
-            "the 9 migrated error-corpus expectations must all be corpus_case-scoped"
+            3,
+            "every surviving error-corpus expectation must be corpus_case-scoped \
+             (6 of the original 9 were retired as characterizing no divergence)"
         );
 
         let none = HashSet::new();
         let stale = set.stale_among(in_scope, &none);
-        assert_eq!(stale.len(), 9, "each is independently self-invalidating");
+        assert_eq!(stale.len(), 3, "each is independently self-invalidating");
     }
 
     #[test]

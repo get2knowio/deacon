@@ -2194,8 +2194,9 @@ fn error_path_accounting(
 
         // DIAGNOSTIC is required only when DEACON is the rejecting side. When the case
         // pins deacon at success, the reference is the rejecting side and the diagnostic
-        // is the reference's — characterized by the preserved `wvr-` exception, whose
-        // direction V21/T045 already forbids widening. Demanding a deacon stderr
+        // is the reference's — characterized by the exception covering the behavior (a
+        // `wvr-` waiver, or an `ext-` record when the difference is a deacon capability),
+        // whose direction V21/T045 already forbids widening. Demanding a deacon stderr
         // assertion there would demand a diagnostic deacon never emits.
         let deacon_rejects = destinations.iter().any(|c| asserts_rejection(c));
         let diagnostic = !deacon_rejects || destinations.iter().any(|c| asserts_diagnostic(c));

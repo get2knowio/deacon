@@ -16,24 +16,42 @@ use deacon_conformance::load::Registry;
 use deacon_conformance::model::{BehaviorUnit, Decision, Waiver};
 use deacon_conformance::{default_registry_dir, workspace_root};
 
-/// The nine error-corpus cases (research Decision 6 item 2). Each was migrated from
-/// `fixtures/parity-corpus/errors/<case>/expect.json` into a corpus-case-scoped
-/// `wvr-<case>` record linking a `bhv-readconfig-*` behavior with all three axes.
-const ERROR_CASES: &[&str] = &[
-    "bad-config-path",
-    "duplicate-keys",
-    "extends-cycle",
-    "extends-missing",
+/// The error-corpus cases (research Decision 6 item 2) whose migrated `wvr-<case>`
+/// record is still the mechanism carrying them: each was migrated from
+/// `fixtures/parity-corpus/errors/<case>/expect.json` into a corpus-case-scoped waiver
+/// linking a `bhv-readconfig-*` behavior with all three axes.
+const ERROR_CASES_WAIVED: &[&str] = &[
     "malformed-json",
-    "missing-config",
-    "unknown-field-preserved",
     "wrong-type-features",
     "wrong-type-forwardports",
 ];
 
-/// The one tier1 parity waiver (research Decision 6 item 1), migrated from
-/// `fixtures/parity-corpus/waivers/extends-child-merged.json`.
-const TIER1_WAIVER: &str = "wvr-extends-child-merged";
+/// The day-one divergences whose waiver was **withdrawn** after review, paired with the
+/// behavior each characterized.
+///
+/// Seeding completeness is about the divergence, not the record kind: a waiver may be
+/// retired (`ExceptionDisposition::Retired` in `migration/mapping.json`) once something
+/// else carries the same knowledge. Six recorded an agreement between the two CLIs or a
+/// difference already carried by `ext-extends-resolution`, so what must survive is the
+/// BEHAVIOR and its case coverage — asserted below — not the waiver.
+const RETIRED_WITH_BEHAVIOR: &[(&str, &str)] = &[
+    ("wvr-bad-config-path", "bhv-readconfig-bad-config-path"),
+    ("wvr-duplicate-keys", "bhv-readconfig-duplicate-keys"),
+    ("wvr-extends-cycle", "bhv-readconfig-extends-cycle-rejected"),
+    (
+        "wvr-extends-missing",
+        "bhv-readconfig-extends-missing-rejected",
+    ),
+    ("wvr-missing-config", "bhv-readconfig-missing-config"),
+    (
+        "wvr-unknown-field-preserved",
+        "bhv-readconfig-unknown-field-preserved",
+    ),
+    // The one tier1 parity waiver (research Decision 6 item 1), migrated from
+    // `fixtures/parity-corpus/waivers/extends-child-merged.json` and since retired in
+    // favour of `ext-extends-resolution`.
+    ("wvr-extends-child-merged", "bhv-readconfig-extends-merged"),
+];
 
 /// The shipped-feature Deacon extensions (research Decision 6 items 3 & 5). Each is
 /// an `ext-` record whose linked behaviors carry decision `deacon-extension`, so an
@@ -93,18 +111,40 @@ fn assert_behaviors_have_all_axes(registry: &Registry, behaviors: &[String], con
 #[test]
 fn error_corpus_waivers_are_fully_migrated_with_three_axes() {
     let registry = load_registry();
-    for case in ERROR_CASES {
+    for case in ERROR_CASES_WAIVED {
         let id = format!("wvr-{case}");
         let waiver = unique_waiver(&registry, &id);
         assert_behaviors_have_all_axes(&registry, &waiver.behaviors, &id);
     }
 }
 
+/// A retired waiver must be gone AND its divergence must still be carried — otherwise
+/// "retired" is indistinguishable from "dropped", which is the loss FR-028 exists to
+/// catch. The surviving carrier is the behavior plus at least one case observing it.
 #[test]
-fn tier1_parity_waiver_is_migrated_with_three_axes() {
+fn a_retired_waivers_divergence_is_still_carried_by_a_behavior_and_a_case() {
     let registry = load_registry();
-    let waiver = unique_waiver(&registry, TIER1_WAIVER);
-    assert_behaviors_have_all_axes(&registry, &waiver.behaviors, TIER1_WAIVER);
+    for (waiver_id, behavior_id) in RETIRED_WITH_BEHAVIOR {
+        assert!(
+            !registry.waivers.iter().any(|w| w.id == *waiver_id),
+            "`{waiver_id}` is recorded as retired; the record must be gone"
+        );
+        assert_behaviors_have_all_axes(
+            &registry,
+            std::slice::from_ref(&(*behavior_id).to_string()),
+            waiver_id,
+        );
+        let covering = registry
+            .cases
+            .iter()
+            .filter(|c| c.behaviors.iter().any(|b| b == behavior_id))
+            .count();
+        assert!(
+            covering > 0,
+            "retiring `{waiver_id}` left `{behavior_id}` with no case; the divergence \
+             would be recorded nowhere"
+        );
+    }
 }
 
 #[test]

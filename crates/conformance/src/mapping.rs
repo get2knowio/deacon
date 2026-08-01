@@ -114,6 +114,17 @@ pub enum ExceptionDisposition {
     /// The post-migration system has no counterpart concept. Requires a `rationale`;
     /// reported explicitly so the loss is a decision, never an omission (FR-028).
     NoCounterpart,
+    /// The exception was deliberately retired AFTER the migration, because review
+    /// found it tolerated no divergence — it recorded an agreement between the two
+    /// CLIs, or duplicated a characterization another record already carries. Requires
+    /// a `rationale` and names no mechanism.
+    ///
+    /// Distinct from [`NoCounterpart`](Self::NoCounterpart), which says the
+    /// post-migration system never had a place to put it. This says it had one and the
+    /// record was withdrawn on purpose. `preservedDirection`/`preservedScope` stay
+    /// populated: what it tolerated pre-migration is still true history, and keeping it
+    /// is what makes the retirement auditable rather than an erasure.
+    Retired,
 }
 
 impl ExceptionDisposition {
@@ -122,7 +133,17 @@ impl ExceptionDisposition {
         match self {
             ExceptionDisposition::Preserved => "preserved",
             ExceptionDisposition::NoCounterpart => "no-counterpart",
+            ExceptionDisposition::Retired => "retired",
         }
+    }
+
+    /// Whether the exception must still resolve to a record in the current registry.
+    ///
+    /// Only `preserved` does. The other two describe an exception that is deliberately
+    /// ABSENT from it — `no-counterpart` never entered, `retired` was withdrawn — so
+    /// demanding it resolve is unsatisfiable and made both dispositions unusable.
+    pub fn requires_a_live_record(self) -> bool {
+        matches!(self, ExceptionDisposition::Preserved)
     }
 }
 
@@ -787,7 +808,14 @@ pub fn check_exception_mappings(
                 "characterized exception has more than one mapping entry",
             ));
         }
-        if !known_exceptions.contains(entry.exception.as_str()) {
+        // Only a `preserved` entry claims its exception is still carried, so only it can
+        // be contradicted by the exception's absence. `no-counterpart` and `retired` both
+        // ASSERT that absence — running this check over them made every such entry
+        // self-refuting, which is why `no-counterpart` had zero instances despite being
+        // the model's documented way to record a deliberate loss.
+        if entry.disposition.requires_a_live_record()
+            && !known_exceptions.contains(entry.exception.as_str())
+        {
             out.push(MappingProblem::new(
                 "V21",
                 &entry.exception,
@@ -804,12 +832,12 @@ pub fn check_exception_mappings(
         }
 
         match entry.disposition {
-            ExceptionDisposition::NoCounterpart => {
+            d @ (ExceptionDisposition::NoCounterpart | ExceptionDisposition::Retired) => {
                 if !entry.mechanisms.is_empty() {
                     out.push(MappingProblem::new(
                         "V21",
                         &entry.exception,
-                        "a `no-counterpart` exception must name no mechanism",
+                        format!("a `{}` exception must name no mechanism", d.as_str()),
                     ));
                 }
                 continue;
