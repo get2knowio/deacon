@@ -157,6 +157,12 @@ pub fn render(registry: &Registry) -> String {
 
     let model = ScenarioModel::new(&registry.scenario, &registry.applicability);
 
+    let waivers: BTreeMap<&str, &str> = registry
+        .waivers
+        .iter()
+        .flat_map(|w| w.behaviors.iter().map(|b| (b.as_str(), w.id.as_str())))
+        .collect();
+
     let mut out = String::new();
     out.push_str(&header(registry));
 
@@ -220,13 +226,13 @@ pub fn render(registry: &Registry) -> String {
                     "| {} | {} | {} |",
                     cell.glyph(),
                     first_sentence(&b.statement),
-                    notes_cell(b)
+                    notes_cell(b, &waivers)
                 );
             }
             continue;
         }
 
-        out.push_str(&grid(&active, behaviors, &coverage));
+        out.push_str(&grid(&active, behaviors, &coverage, &waivers));
     }
 
     out.push_str(&footer());
@@ -237,6 +243,7 @@ fn grid(
     active: &[ActiveDim<'_>],
     behaviors: &[&crate::model::BehaviorUnit],
     coverage: &BTreeMap<&str, Vec<(&TestCase, bool)>>,
+    waivers: &BTreeMap<&str, &str>,
 ) -> String {
     // Cross product of the active dimensions' values, in declared order.
     let mut combos: Vec<Vec<(&str, &str)>> = vec![Vec::new()];
@@ -323,7 +330,7 @@ fn grid(
         for c in &cells {
             let _ = write!(s, "<td>{}</td>", c.glyph());
         }
-        let _ = writeln!(s, "<td>{}</td></tr>", notes_cell(b));
+        let _ = writeln!(s, "<td>{}</td></tr>", notes_cell(b, waivers));
     }
     s.push_str("</tbody>\n</table>\n");
     s
@@ -351,7 +358,7 @@ fn first_sentence(statement: &str) -> String {
 
 /// Issue links out of `notes`, so a reader can follow a divergence to its tracking
 /// without the page restating the rationale.
-fn notes_cell(b: &crate::model::BehaviorUnit) -> String {
+fn notes_cell(b: &crate::model::BehaviorUnit, waivers: &BTreeMap<&str, &str>) -> String {
     let notes = b.notes.as_deref().unwrap_or("");
     let mut refs: Vec<String> = Vec::new();
     for (i, c) in notes.char_indices() {
@@ -369,8 +376,23 @@ fn notes_cell(b: &crate::model::BehaviorUnit) -> String {
             }
         }
     }
-    refs.truncate(3);
-    refs.join(" ")
+    refs.truncate(2);
+
+    // A deliberate difference should be backed by a waiver: a waiver is verified to keep
+    // reproducing and fails as STALE when the difference stops, so it is what stops a
+    // characterization outliving the thing it characterized. Showing which waiver — and
+    // flagging a deliberate difference that has none — is what makes the row auditable
+    // rather than merely labelled.
+    let mut out = Vec::new();
+    match waivers.get(b.id.as_str()) {
+        Some(id) => out.push(format!("<code>{id}</code>")),
+        None if matches!(b.decision, Decision::IntentionalDivergence) => {
+            out.push("<strong>no waiver</strong>".to_string());
+        }
+        None => {}
+    }
+    out.extend(refs);
+    out.join(" ")
 }
 
 fn html_escape(s: &str) -> String {
@@ -441,6 +463,11 @@ A further {deacon_only} are deacon-only, with nothing to compare against.
 | 🔵 | deacon-only; the CLI has no equivalent |
 | · | **Not checked yet** — a real gap |
 | *(blank)* | Does not arise in this scenario |
+
+A row's Notes name the **waiver** backing a deliberate difference, or say **no waiver**
+where a deliberate difference has none. A waiver is verified to keep reproducing and fails
+as *stale* when the difference stops, so it is what prevents a characterization outliving
+the thing it characterized — a `⚠️` row with no waiver is one nothing will ever re-examine.
 
 Columns are the scenarios a behavior was checked in: the configuration's shape
 (**img**age / **dkr** Dockerfile / **cmp** Compose) crossed with how many Features it
