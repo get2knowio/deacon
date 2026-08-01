@@ -6,9 +6,16 @@
 Compared against **`@devcontainers/cli` 0.87.0** and the [containers.dev spec]\
 (https://github.com/devcontainers/spec) at commit `113500f4`.
 
-**Of 57 behaviors that both tools implement, 33 match.**
-15 differ deliberately, 9 are differences we intend to remove.
-A further 16 are deacon-only, with nothing to compare against.
+**Of 57 behaviors that both tools implement, 29 are verified to match.**
+10 are verified to differ deliberately, and 4 to differ in ways we intend
+to remove. A further 16 are deacon-only, with nothing to compare against.
+
+**14 more have never been compared against the CLI at all** — 7 assumed
+to match, 5 assumed to differ on purpose, 2 assumed to be behind.
+These are claims, not measurements: nothing has run the reference for them, so each could turn
+out to be any of the three. They are listed separately rather than folded into the totals above,
+because a claim nobody has checked is not evidence of parity — and a page that counted it as such
+would improve every time someone asserted something new.
 
 ## How to read this
 

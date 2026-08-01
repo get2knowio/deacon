@@ -125,26 +125,49 @@ fn area_title(area: &str) -> String {
     area.replace('-', " ")
 }
 
+/// Does this case check anything at all?
+///
+/// A case whose every declared assertion is vacuous checks nothing, so it must not
+/// colour a cell or count as evidence. `·` already means "not checked in this
+/// scenario", and a check that cannot fail IS not checking it. V37 makes such a case
+/// unauthorable; this keeps the page's claim true by construction rather than by that
+/// gate holding.
+fn checks_anything(case: &TestCase) -> bool {
+    case.expected.is_empty()
+        || !case.expected.iter().all(|e| {
+            e.assertion
+                .as_ref()
+                .is_some_and(crate::model::is_vacuous_assertion)
+        })
+}
+
+/// Did this case OBSERVE the reference implementation?
+///
+/// The single definition of "verified against the CLI", used by both the grid and the
+/// headline. They must not drift apart: the headline previously counted the recorded
+/// three-axis disposition — a claim — while the grid counted evidence, so a behavior
+/// asserting `reference: aligned` that nothing had ever run scored as parity. One
+/// predicate, one standard, or the page speaks in two voices.
+///
+/// A snapshot counts: `conformance-snapshot refresh` runs the reference and commits
+/// what it observed. A `spec-expectation` case does not — it compares deacon to a
+/// written assertion and never invokes the CLI.
+fn observed_the_reference(case: &TestCase) -> bool {
+    matches!(
+        case.oracle_type,
+        Some(OracleType::LiveDifferential) | Some(OracleType::Snapshot)
+    )
+}
+
 /// Render the page. Deterministic: same registry in, same bytes out.
 pub fn render(registry: &Registry) -> String {
     // behavior -> set of (scenario key tuple, live?) drawn from its covering cases.
     let mut coverage: BTreeMap<&str, Vec<(&TestCase, bool)>> = BTreeMap::new();
     for case in &registry.cases {
-        // A case whose every declared assertion is vacuous checks nothing, so it must
-        // not colour a cell. `·` already means "not checked in this scenario", and a
-        // check that cannot fail IS not checking it — this is a correction to an
-        // existing cell, not a new tier. V37 makes such a case unauthorable; this keeps
-        // the page's claim true by construction rather than by that gate holding.
-        if !case.expected.is_empty()
-            && case.expected.iter().all(|e| {
-                e.assertion
-                    .as_ref()
-                    .is_some_and(crate::model::is_vacuous_assertion)
-            })
-        {
+        if !checks_anything(case) {
             continue;
         }
-        let live = matches!(case.oracle_type, Some(OracleType::LiveDifferential));
+        let live = observed_the_reference(case);
         for b in &case.behaviors {
             coverage.entry(b.as_str()).or_default().push((case, live));
         }
@@ -414,6 +437,15 @@ fn pin_of(registry: &Registry, kind: RevisionKind) -> String {
 }
 
 fn header(registry: &Registry) -> String {
+    // Which behaviors has anything actually compared against the reference? Same
+    // predicate the grid uses, so the headline and the cells below it cannot disagree.
+    let observed: BTreeSet<&str> = registry
+        .cases
+        .iter()
+        .filter(|c| checks_anything(c) && observed_the_reference(c))
+        .flat_map(|c| c.behaviors.iter().map(String::as_str))
+        .collect();
+
     let total = registry.behaviors.len();
     let deacon_only = registry
         .behaviors
@@ -424,20 +456,33 @@ fn header(registry: &Registry) -> String {
         })
         .count();
     let comparable = total - deacon_only;
-    let deliberate = registry
-        .behaviors
-        .iter()
-        .filter(|b| matches!(b.decision, Decision::IntentionalDivergence))
-        .count();
-    let behind = registry
-        .behaviors
-        .iter()
-        .filter(|b| {
-            matches!(b.reference, ReferenceStatus::Divergent)
-                && !matches!(b.decision, Decision::IntentionalDivergence)
-        })
-        .count();
-    let same = comparable.saturating_sub(deliberate + behind);
+
+    // Split each bucket by whether its claim about the reference rests on evidence.
+    // `same` is still a residual — a behavior lands there by being in neither
+    // divergence bucket — which is exactly why it must not be reported as a
+    // measurement without saying how much of it was measured.
+    let mut counts = [[0usize; 2]; 3];
+    for b in &registry.behaviors {
+        if matches!(b.decision, Decision::DeaconExtension)
+            || matches!(b.reference, ReferenceStatus::NotApplicable)
+        {
+            continue;
+        }
+        let bucket = if matches!(b.decision, Decision::IntentionalDivergence) {
+            1
+        } else if matches!(b.reference, ReferenceStatus::Divergent) {
+            2
+        } else {
+            0
+        };
+        counts[bucket][usize::from(observed.contains(b.id.as_str()))] += 1;
+    }
+    let [
+        [same_asserted, same],
+        [delib_asserted, deliberate],
+        [behind_asserted, behind],
+    ] = counts;
+    let unverified = same_asserted + delib_asserted + behind_asserted;
 
     format!(
         r#"# Does deacon behave like the DevContainers CLI?
@@ -448,9 +493,16 @@ fn header(registry: &Registry) -> String {
 Compared against **`@devcontainers/cli` {oracle}** and the [containers.dev spec]\
 (https://github.com/devcontainers/spec) at commit `{spec}`.
 
-**Of {comparable} behaviors that both tools implement, {same} match.**
-{deliberate} differ deliberately, {behind} are differences we intend to remove.
-A further {deacon_only} are deacon-only, with nothing to compare against.
+**Of {comparable} behaviors that both tools implement, {same} are verified to match.**
+{deliberate} are verified to differ deliberately, and {behind} to differ in ways we intend
+to remove. A further {deacon_only} are deacon-only, with nothing to compare against.
+
+**{unverified} more have never been compared against the CLI at all** — {same_asserted} assumed
+to match, {delib_asserted} assumed to differ on purpose, {behind_asserted} assumed to be behind.
+These are claims, not measurements: nothing has run the reference for them, so each could turn
+out to be any of the three. They are listed separately rather than folded into the totals above,
+because a claim nobody has checked is not evidence of parity — and a page that counted it as such
+would improve every time someone asserted something new.
 
 ## How to read this
 
@@ -568,6 +620,41 @@ mod tests {
         assert!(
             !page.contains("✅") && !page.contains("◐"),
             "a vacuous assertion must leave the row unchecked:\n{page}"
+        );
+    }
+
+    /// The headline must count what was OBSERVED, not what the registry CLAIMS.
+    ///
+    /// It previously derived every total from the three-axis disposition, so a behavior
+    /// recorded `reference: aligned` scored as parity even though nothing had ever run
+    /// the reference for it. That let the page improve whenever someone asserted
+    /// something new, and split it against its own grid, which counts evidence. The two
+    /// now share `observed_the_reference`; this pins the header side of that.
+    #[test]
+    fn an_unobserved_claim_is_not_counted_as_verified_parity() {
+        let mut reg = Registry {
+            behaviors: vec![behavior()],
+            cases: vec![case_with(serde_json::json!({"contains": "x"}))],
+            ..Registry::default()
+        };
+        // The behavior claims alignment, but its only evidence never runs the reference.
+        reg.cases[0].oracle_type = Some(OracleType::SpecExpectation);
+        let page = render(&reg);
+        assert!(
+            page.contains("**Of 1 behaviors that both tools implement, 0 are verified to match.**"),
+            "a spec-expectation case must not verify a parity claim:\n{page}"
+        );
+        assert!(
+            page.contains("**1 more have never been compared against the CLI at all**"),
+            "the unobserved claim must be reported as uncompared:\n{page}"
+        );
+
+        // Same registry, same disposition — only the evidence changes.
+        reg.cases[0].oracle_type = Some(OracleType::LiveDifferential);
+        let page = render(&reg);
+        assert!(
+            page.contains("**Of 1 behaviors that both tools implement, 1 are verified to match.**"),
+            "running the reference is what must move the count:\n{page}"
         );
     }
 
