@@ -24,12 +24,12 @@
     {
       "id": "bhv-outdated-reports-declared-reference-key",
       "area": "outdated",
-      "statement": "`outdated` keys each report entry by the Feature reference the configuration DECLARED, tag included, so two Features differing only by tag are reported as two entries.",
+      "statement": "`outdated` keys each report entry by the Feature reference the configuration DECLARED, tag included, rather than by the canonical untagged id.",
       "applicability": [],
       "spec": "unspecified",
       "reference": "aligned",
       "decision": "align-with-reference",
-      "notes": "Fixes #407 divergence 1. deacon previously keyed the report by the CANONICAL untagged id, which collapsed two Features declared at different tags into a single entry and silently dropped the other \u2014 exit 0, no warning, a user asking which Features are outdated told about one of two. The reference CLI echoes the declared reference, and after the fix the two agree byte-for-byte on this shape. The canonical id is still what the LOCKFILE is keyed by (`derive_current_version`); only the report changed. A residual difference remains on the same document and is NOT covered by this behavior: deacon reports `latest` as the raw registry tag (`2.1`) where the reference normalizes to full semver (`2.1.0`), tracked on #407."
+      "notes": "Fixes #407 divergence 1. deacon previously keyed the report by the CANONICAL untagged id. The concrete harm was a collision: two Features declared at different tags are distinct keys in `devcontainer.json` but one canonical id, so one was silently dropped from the report with a zero exit. That input is no longer authorable \u2014 #411 rejects a document declaring one Feature at two versions, because installing both has no coherent meaning \u2014 so the collision is now unreachable BY CONSTRUCTION rather than merely reported correctly. What remains observable, and what this behavior claims, is the key SHAPE: the declared reference with its tag, matching the reference CLI, which a canonical-id implementation would strip. A residual difference on the same document is NOT covered here: deacon reports `latest` as the raw registry tag (`2.1`) where the reference normalizes to full semver (`2.1.0`), tracked on #407."
     },
     {
       "id": "bhv-outdated-reports-feature-versions",

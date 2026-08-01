@@ -2,6 +2,26 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "bhv-extends-feature-version-override",
+      "area": "read-configuration",
+      "statement": "When a link of an `extends` chain declares a Feature its base already declared at a different version, the later link's version REPLACES the base's entry rather than adding a second one; the base's position in declaration order and its configured options are kept.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "Fixes #411. A Feature's map key carries its version, so a child bumping an inherited version writes a DIFFERENT key; under the previous key-wise merge both survived and everything downstream treated them as two Features \u2014 `up` ran the same install script twice with the last one winning the binary, and three reporting paths each named a different winner. Bumping an inherited version is the central reason to use `extends`, so the later link wins. The reference CLI has no `extends`, so there is no reference behavior to compare against; recorded by ext-extends-resolution. Position is kept because declaration order drives install order and the overlay changed WHICH version to install, not where; options are deep-merged so a base that configured the Feature keeps that configuration through a bare version bump."
+    },
+    {
+      "id": "bhv-features-duplicate-in-one-document-rejected",
+      "area": "read-configuration",
+      "statement": "A single configuration document whose `features` map contains two keys resolving to the same canonical Feature id is rejected with a diagnostic naming both keys and the id they collide on.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "The floor under bhv-extends-feature-version-override (#411). Across merge layers a version bump has a later layer to win; within ONE document there is no later layer, nothing to break the tie, and no reading under which installing two versions of one Feature is what the author meant \u2014 so it is rejected rather than guessed at, and the merge never has to invent a winner. The reference CLI accepts such a document and reports both entries, measured at oracle 0.87.0, so deacon is stricter here in the same way it is over malformed JSONC and wrong-typed properties (constitution IV). Waived by wvr-features-duplicate-in-one-document."
+    },
+    {
       "id": "bhv-readconfig-authored-null-omitted-collapsed",
       "area": "read-configuration",
       "statement": "deacon's resolved-configuration output omits a property the author wrote as `null`, reporting it identically to one the author left out, while the reference echoes the authored `null` and omits only what was not written.",

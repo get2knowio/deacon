@@ -223,6 +223,14 @@
       ]
     },
     {
+      "id": "odp-bhv-c5445b00",
+      "obligation": "obl-bhv-c5445b00",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-duplicate-feature-one-document-rejected"
+      ]
+    },
+    {
       "id": "odp-bhv-c87a30ad",
       "obligation": "obl-bhv-c87a30ad",
       "disposition": "case",
@@ -255,6 +263,14 @@
       "cases": [
         "case-errors-decl-bad-config-path",
         "case-errors-decl-bad-config-path-decision"
+      ]
+    },
+    {
+      "id": "odp-bhv-dc7cc488",
+      "obligation": "obl-bhv-dc7cc488",
+      "disposition": "case",
+      "cases": [
+        "case-readconfig-extends-feature-version-override"
       ]
     },
     {

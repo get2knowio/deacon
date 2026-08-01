@@ -128,7 +128,13 @@ const TODAY: &str = "2026-07-19";
 /// exactly the state it must not be confused with, since the lockfile supplies the reported
 /// `current` version. Absent and invalid produced the same observation, so no existing case
 /// could have separated them. No record was removed.
-const MIGRATED_CASE_COUNT: usize = 231;
+/// **231 → 233** (#411): the extends Feature-version override and its floor. A child bumping
+/// a version its base pinned used to add a SECOND entry, so `up` ran the same install script
+/// twice and three reporting paths each named a different winner. One case pins the override
+/// end to end; the other pins that the tie-less single-document form is rejected rather than
+/// guessed at. Neither could have existed before: the old `outdated` key collapse made a real
+/// override and a reporting artifact indistinguishable. No record was removed.
+const MIGRATED_CASE_COUNT: usize = 233;
 
 #[test]
 fn real_registry_is_structurally_valid() {

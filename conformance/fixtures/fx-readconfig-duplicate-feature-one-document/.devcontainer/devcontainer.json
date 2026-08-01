@@ -1,0 +1,8 @@
+{
+	"name": "ConformanceDuplicateFeatureOneDocument",
+	"image": "alpine:3.19",
+	"features": {
+		"ghcr.io/devcontainers/features/node:16": {},
+		"ghcr.io/devcontainers/features/node:18": {}
+	}
+}

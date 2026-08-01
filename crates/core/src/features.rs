@@ -4290,3 +4290,46 @@ mod entrypoint_tests {
         assert!(script.contains("exec \"$@\""));
     }
 }
+
+/// Compute a canonical feature id with no version information.
+///
+/// Strips version tags (`:version`) and digest references (`@sha256:...`) from feature references.
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::features::canonical_feature_id;
+///
+/// // Tag reference
+/// let ref_with_tag = "ghcr.io/devcontainers/features/node:1.2.3";
+/// assert_eq!(canonical_feature_id(ref_with_tag), "ghcr.io/devcontainers/features/node");
+///
+/// // Digest reference
+/// let ref_with_digest = "ghcr.io/devcontainers/features/node@sha256:abcd1234";
+/// assert_eq!(canonical_feature_id(ref_with_digest), "ghcr.io/devcontainers/features/node");
+///
+/// // No version
+/// let ref_no_version = "ghcr.io/devcontainers/features/node";
+/// assert_eq!(canonical_feature_id(ref_no_version), "ghcr.io/devcontainers/features/node");
+/// ```
+pub fn canonical_feature_id(reference: &str) -> String {
+    // If contains '@', split there first
+    if let Some(idx) = reference.find('@') {
+        return reference[..idx].to_string();
+    }
+
+    // Otherwise, we need to strip a tag if present. Tags are separated by ':' but registry hostnames
+    // may contain ':' for ports. We decide based on the position of the last '/' vs last ':'
+    let last_slash = reference.rfind('/');
+    let last_colon = reference.rfind(':');
+
+    if let (Some(slash_idx), Some(colon_idx)) = (last_slash, last_colon) {
+        if colon_idx > slash_idx {
+            // colon after last slash -> this is a tag separator
+            return reference[..colon_idx].to_string();
+        }
+    }
+
+    // No digest or tag detected; return as-is
+    reference.to_string()
+}

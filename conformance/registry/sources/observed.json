@@ -123,6 +123,16 @@
       ]
     },
     {
+      "id": "src-obs-extends-feature-version-override",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "`read-configuration --include-merged-configuration` and `up` over an extends chain whose base declares `git:1.3.2` with options and whose child declares `git:1.3.8`",
+      "summary": "Whether a child's Feature version replaces the base's entry or adds a second one, and what the resulting container installs.",
+      "behaviors": [
+        "bhv-extends-feature-version-override"
+      ]
+    },
+    {
       "id": "src-obs-extends-missing",
       "inventory": "observed",
       "revision": "rev-oracle-0-87-0",
@@ -150,6 +160,16 @@
       "summary": "With no Features declared the reference emits no `featuresConfiguration` key under either flag; with Features declared it emits the block under `--include-merged-configuration` alone, so the flags are not exclusive on either side. Observed 2026-07-28.",
       "behaviors": [
         "bhv-readconfig-features-configuration-omitted-when-none"
+      ]
+    },
+    {
+      "id": "src-obs-features-duplicate-one-document",
+      "inventory": "observed",
+      "revision": "rev-oracle-0-87-0",
+      "locator": "a single `devcontainer.json` declaring `ghcr.io/devcontainers/features/node` at both `:16` and `:18`, loaded by deacon and by the reference CLI",
+      "summary": "Whether two keys naming one Feature at different versions in the same document are rejected or accepted.",
+      "behaviors": [
+        "bhv-features-duplicate-in-one-document-rejected"
       ]
     },
     {
