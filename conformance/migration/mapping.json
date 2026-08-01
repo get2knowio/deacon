@@ -1414,53 +1414,43 @@
     },
     {
       "exception": "wvr-bad-config-path",
-      "disposition": "preserved",
-      "mechanisms": [
-        "wvr-bad-config-path"
-      ],
+      "disposition": "retired",
+      "mechanisms": [],
       "preservedDirection": "both-reject",
       "preservedScope": "corpus_case:errors/bad-config-path",
-      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+      "rationale": "Retired 2026-08-01: this record tolerated nothing. Its `expect` was an agreement between deacon and the reference (`both-accept`/`both-reject`), not a divergence, so there was no difference for a waiver to permit. The agreement is asserted directly by the declarative case that compares the two CLIs on the exit-code channel; withdrawing the waiver removes a claim, not a check."
     },
     {
       "exception": "wvr-duplicate-keys",
-      "disposition": "preserved",
-      "mechanisms": [
-        "wvr-duplicate-keys"
-      ],
+      "disposition": "retired",
+      "mechanisms": [],
       "preservedDirection": "both-accept",
       "preservedScope": "corpus_case:errors/duplicate-keys",
-      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+      "rationale": "Retired 2026-08-01: this record tolerated nothing. Its `expect` was an agreement between deacon and the reference (`both-accept`/`both-reject`), not a divergence, so there was no difference for a waiver to permit. The agreement is asserted directly by the declarative case that compares the two CLIs on the exit-code channel; withdrawing the waiver removes a claim, not a check."
     },
     {
       "exception": "wvr-extends-child-merged",
-      "disposition": "preserved",
-      "mechanisms": [
-        "wvr-extends-child-merged"
-      ],
+      "disposition": "retired",
+      "mechanisms": [],
       "preservedDirection": "reference-stricter",
       "preservedScope": "corpus_case:tier1/extends-child",
-      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+      "rationale": "Retired 2026-08-01: the difference it characterized is already carried by `ext-extends-resolution`, the deacon-extension record naming this behavior. `extends` resolution is a capability the reference lacks, so the correct instrument is the extension record, not a tolerance deacon needs; keeping both meant one difference held two characterizations that could drift apart."
     },
     {
       "exception": "wvr-extends-cycle",
-      "disposition": "preserved",
-      "mechanisms": [
-        "wvr-extends-cycle"
-      ],
+      "disposition": "retired",
+      "mechanisms": [],
       "preservedDirection": "deacon-stricter",
       "preservedScope": "corpus_case:errors/extends-cycle",
-      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+      "rationale": "Retired 2026-08-01: the difference it characterized is already carried by `ext-extends-resolution`, the deacon-extension record naming this behavior. `extends` resolution is a capability the reference lacks, so the correct instrument is the extension record, not a tolerance deacon needs; keeping both meant one difference held two characterizations that could drift apart."
     },
     {
       "exception": "wvr-extends-missing",
-      "disposition": "preserved",
-      "mechanisms": [
-        "wvr-extends-missing"
-      ],
+      "disposition": "retired",
+      "mechanisms": [],
       "preservedDirection": "deacon-stricter",
       "preservedScope": "corpus_case:errors/extends-missing",
-      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+      "rationale": "Retired 2026-08-01: the difference it characterized is already carried by `ext-extends-resolution`, the deacon-extension record naming this behavior. `extends` resolution is a capability the reference lacks, so the correct instrument is the extension record, not a tolerance deacon needs; keeping both meant one difference held two characterizations that could drift apart."
     },
     {
       "exception": "wvr-malformed-json",
@@ -1474,23 +1464,19 @@
     },
     {
       "exception": "wvr-missing-config",
-      "disposition": "preserved",
-      "mechanisms": [
-        "wvr-missing-config"
-      ],
+      "disposition": "retired",
+      "mechanisms": [],
       "preservedDirection": "both-reject",
       "preservedScope": "corpus_case:errors/missing-config",
-      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+      "rationale": "Retired 2026-08-01: this record tolerated nothing. Its `expect` was an agreement between deacon and the reference (`both-accept`/`both-reject`), not a divergence, so there was no difference for a waiver to permit. The agreement is asserted directly by the declarative case that compares the two CLIs on the exit-code channel; withdrawing the waiver removes a claim, not a check."
     },
     {
       "exception": "wvr-unknown-field-preserved",
-      "disposition": "preserved",
-      "mechanisms": [
-        "wvr-unknown-field-preserved"
-      ],
+      "disposition": "retired",
+      "mechanisms": [],
       "preservedDirection": "both-accept",
       "preservedScope": "corpus_case:errors/unknown-field-preserved",
-      "rationale": "Preserved in place: the waiver record IS the mechanism, and the conformance registry is already its single authoritative location (019-conformance-registry). Its direction and scope are unchanged by this migration, so the tolerated difference is neither widened nor re-homed."
+      "rationale": "Retired 2026-08-01: this record tolerated nothing. Its `expect` was an agreement between deacon and the reference (`both-accept`/`both-reject`), not a divergence, so there was no difference for a waiver to permit. The agreement is asserted directly by the declarative case that compares the two CLIs on the exit-code channel; withdrawing the waiver removes a claim, not a check."
     },
     {
       "exception": "wvr-wrong-type-features",

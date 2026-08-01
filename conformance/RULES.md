@@ -159,6 +159,31 @@ differently.
 In short: a gap is a promise to do work; a waiver is a decision that no further work is
 needed. A gap can never be certified around; a waiver can.
 
+### A waiver is a maintainer decision, not a default
+
+Because a waiver ends the argument about a divergence permanently, it is the one record
+kind that may **not** be authored on the strength of the harness alone. The default
+disposition for a newly surfaced difference is a **fix** (`follow-spec` /
+`align-with-reference`, plus a `parity-drift` issue) or a **gap** — both keep pressure
+on. A waiver is appropriate only where deacon's behavior is genuinely the one we want to
+keep, and it needs a maintainer's explicit agreement on that specific item before the
+record is written. Expect very few.
+
+Two shapes that look like waivers and are not:
+
+- **An agreement is not a divergence.** A `both-accept` / `both-reject` `expect` records
+  that the two CLIs *do the same thing*. There is nothing to tolerate; the case asserts
+  the agreement directly. Six such records were retired on 2026-08-01.
+- **A capability the reference lacks is an `ext-` record**, not a waiver. Where a
+  `deacon-extension` behavior already sits under an extension, a parallel `wvr-` is a
+  second characterization of one difference, and the two can drift apart.
+
+Retiring a waiver that a pre-migration mapping entry names is not a deletion: set that
+entry's `disposition` to `retired` in `conformance/migration/mapping.json` with a
+rationale, which keeps `preservedDirection`/`preservedScope` as the auditable record of
+what it once tolerated. See
+[Migration mapping](#migration-mapping-v21--v23--transitional).
+
 ## Out of scope — non-behavioral differentiators
 
 Some ways deacon differs from the reference are **not behaviors** and therefore are
@@ -471,6 +496,28 @@ once the equivalence gate clears them, not mapped into.
 pre-migration system never observed, so it has no pre-migration form for `mapping.json` to
 preserve. The exemption covers **both** mechanisms — scoping it to extensions alone would
 make it depend on which one an author reached for rather than on when the fact was learned.
+
+### A withdrawn exception must be dispositioned, not deleted
+
+`ExceptionDisposition` has three values, and only `preserved` claims the exception is
+still carried by a record in `conformance/registry/`:
+
+| Disposition | Means | Mechanisms |
+|---|---|---|
+| `preserved` | still carried, by exactly one named mechanism | exactly one |
+| `no-counterpart` | the post-migration system never had a place for it | none |
+| `retired` | it had one, and the record was **withdrawn on purpose** after review | none |
+
+Both withdrawn forms keep `preservedDirection` / `preservedScope` populated: what the
+exception tolerated pre-migration is still true history, and keeping it is what makes the
+withdrawal auditable instead of an erasure. Deleting the entry outright is the silent
+vanishing V21 exists to catch — the entry stays, its disposition changes.
+
+The existence requirement therefore applies to `preserved` alone. Running it over all
+three made a withdrawn entry self-refuting (it names, by definition, a record the
+registry no longer has), which is why `no-counterpart` sat at zero instances for the
+whole life of the migration despite being the model's documented way to record a
+deliberate loss.
 
 **Direction and scope breadth are structural orders, not string comparisons** (FR-027).
 Direction: `none` < agreement (`both-reject`/`both-accept`) < one-directional

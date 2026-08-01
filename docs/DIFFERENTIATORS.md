@@ -69,9 +69,10 @@ kind of thing worth calling out in a blog post or on the project page.
   the reference here, so `extends` behavior is **not** covered by our
   reference-parity claims. Recorded in the conformance registry as extension
   `ext-extends-resolution` (behaviors `bhv-readconfig-extends-merged`,
-  `bhv-readconfig-extends-missing-rejected`, `bhv-readconfig-extends-cycle-rejected`;
-  waivers `wvr-extends-child-merged`, `wvr-extends-missing`, `wvr-extends-cycle`);
-  also characterized in `fixtures/parity-corpus/errors/README.md`. (Issue #297.)
+  `bhv-readconfig-extends-missing-rejected`, `bhv-readconfig-extends-cycle-rejected`),
+  which is their single characterization — the duplicate `wvr-extends-*` waivers were
+  retired 2026-08-01. Also described in `fixtures/parity-corpus/errors/README.md`.
+  (Issue #297.)
 
 ## Robustness
 
