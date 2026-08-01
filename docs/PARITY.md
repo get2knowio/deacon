@@ -1,225 +1,250 @@
-# Deacon Conformance & Parity Tracker
+# Does deacon behave like the DevContainers CLI?
 
-**Pins:** upstream [devcontainers/spec](https://github.com/devcontainers/spec) commit `113500f4` (schemas + normative prose) · reference oracle `@devcontainers/cli` **0.87.0** (exact-version verified before any live comparison).
+<!-- GENERATED FILE — do not edit.
+     Regenerate with: cargo run -q -p deacon-conformance -- parity-page --write -->
 
-**Source of this document:** the repository-owned conformance registry (`conformance/registry/`), live `deacon-conformance certify` / `coverage report` output, and open GitHub issues. Every claim traces to a committed record; nothing here is aspirational.
+Compared against **`@devcontainers/cli` 0.87.0** and the [containers.dev spec]\
+(https://github.com/devcontainers/spec) at commit `113500f4`.
 
-**Regenerate the counts:**
+**Of 57 behaviors that both tools implement, 33 match.**
+15 differ deliberately, 9 are differences we intend to remove.
+A further 16 are deacon-only, with nothing to compare against.
 
-```bash
-cargo run -q -p deacon-conformance -- certify
-cargo run -q -p deacon-conformance -- coverage report   # → target/conformance/
-```
+## How to read this
 
-## Legend
-
-Every behavior record carries **three independent axes** (`conformance/RULES.md`):
-
-| Axis | Values | Meaning |
-|---|---|---|
-| `spec` | conformant / nonconformant / unspecified / not-applicable | relation to the written spec |
-| `reference` | aligned / divergent / unknown / not-applicable | relation to the **observed** pinned reference CLI |
-| `decision` | follow-spec / align-with-reference / deacon-extension / intentional-divergence / unresolved-gap | what deacon decided to do |
-
-There is deliberately no combined "different but acceptable" state. Statuses are **evidence-backed claims**: a behavior may only claim `aligned`/`divergent` if a test case or waiver stands behind it (contradiction rules R1–R8; R8 in particular forces `reference: unknown` when neither exists).
-
-**Vocabulary**
-
-- **Divergence** — a *characterized* difference: we know what both sides do and why. Either fix-tracked (deacon behind) or accepted (`intentional-divergence` + waiver, or `deacon-extension`).
-- **Gap** (`gap-`) — an *admission of missing coverage*. No evidence stands behind it. **Always blocks release certification.**
-- **Waiver** (`wvr-`) — an accepted difference with a mandatory `expires`. The harness verifies it *keeps reproducing*: a difference that stops reproducing fails as **stale**. So a waiver is positive evidence, and it never blocks.
-- **Residual** (`res-`) — missing *representation*, not missing coverage: the coverage exists in a legacy program not yet retired. Never blocks certification; blocks deleting its carrier.
-- **Out of scope** — differences with no observable effect are recorded nowhere, by rule.
-
-**Evidence strength** (weakest → strongest)
-
-| Kind | Compares against the reference? |
+| | Meaning |
 |---|---|
-| `spec-expectation` | **No** — pins deacon's own behavior only |
-| `invariant-metamorphic` | **No** — relates ≥2 deacon runs (idempotence, restart) |
-| `snapshot` | Yes — vs a committed, provenance-checked recording |
-| legacy `parity_*` binary | Yes — live, but hand-written |
-| `live-differential` | Yes — deacon and the verified oracle side by side, per channel |
-| waiver | Yes — and self-invalidates when the difference stops reproducing |
+| ✅ | Same as the CLI, and checked against it in this scenario |
+| ◐ | Believed the same, but only deacon-side evidence here — **never compared** |
+| ⚠️ | Differs on purpose |
+| ❌ | Differs, and we intend to fix it |
+| 🔵 | deacon-only; the CLI has no equivalent |
+| · | Not checked in this scenario |
 
-## Summary
+Columns are the scenarios a behavior was checked in: the configuration's shape
+(**img**age / **dkr** Dockerfile / **cmp** Compose) crossed with how many Features it
+declares (**–** none / **1** one / **many** several / **deps** several with dependency
+ordering / **lock** with a lockfile). Areas only show the columns their evidence varies.
 
-| Metric | Value |
-|---|---|
-| Behavior records | **73** across 16 areas |
-| — `follow-spec` / `align-with-reference` | 37 / 6 |
-| — `intentional-divergence` / `deacon-extension` | 15 / 15 |
-| — `unresolved-gap` | **0** |
-| Reference axis: aligned / divergent / not-applicable / unknown | 36 / 24 / 13 / **0** |
-| Test cases | **233** — 109 live-differential, 110 spec-expectation, 11 legacy, 2 metamorphic, 1 snapshot |
-| Waivers (all with expiry, self-invalidating) | 22 |
-| Extension records (`ext-`) | 10 |
-| Open gap records | **6** — `gap-pairwise-{build,down,exec,run-user-commands,up,upgrade}` |
-| Scenario obligations | 745 — covered 446, waived 1, gap 298, undispositioned **0** |
-| Residuals | 8 queued + 6 permanent (61 units, structurally outside the model) |
-| Certification verdict | **NOT certified — by design.** The 6 gap records block, as intended. |
+A cell says a case exercised that scenario — not that the case's assertions were strong.
+The leading glyph rolls the row up; where a row is mostly `·`, that is the honest signal.
 
-### Pairwise scenario coverage per operation
+### build
 
-| Operation | Covered | Operation | Covered |
-|---|---|---|---|
-| read-configuration | 66 / 66 ✅ | run-user-commands | 31 / 112 |
-| outdated | 66 / 66 ✅ | down | 26 / 55 |
-| templates-apply | 25 / 25 ✅ | exec | 26 / 76 |
-| doctor | 24 / 24 ✅ | upgrade | 25 / 47 |
-| up | 54 / 114 | build | 31 / 87 |
+<table>
+<thead>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+</thead>
+<tbody>
+<tr><td>✅</td><td>A Dockerfile instruction that exits non-zero fails the build, and the failure is…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>`build` reports and tags the FEATURE-EXTENDED image, so a user-supplied `--image-name`…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>build produces a container image and reports the build outcome, matching the reference</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+</tbody>
+</table>
 
-## Per-area status
+### doctor
 
-**Source**: Spec = written spec text · Ref = reference-CLI contract with no spec text · Ext = deacon extension.
-**Permanent?**: waived divergences carry a re-review date; fix-tracked items do not.
+<table>
+<thead>
+<tr><th></th><th>Behavior</th><th>img</th><th>dkr</th><th>cmp</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>🔵</td><td>`doctor` reports host, platform, and runtime diagnostics in both a human rendering and…</td><td>🔵</td><td>🔵</td><td>🔵</td><td></td></tr>
+</tbody>
+</table>
 
-### read-configuration (27 behaviors — the deepest-covered area)
+### down
 
-| Behavior | Source | Status | Permanent? | Evidence | Tracking |
-|---|---|---|---|---|---|
-| Basic parse & echo | Spec | Parity | — | live-diff + snapshot | — |
-| Config discovery incl. `.devcontainer/<folder>/` | Spec | **Reference behind spec** (0.87.0 skips the nested folder without `--config`) | Waived → 2027-07-26 | live-diff + waiver | — |
-| Missing config / bad `--config` rejected | Spec | Parity (both reject) | — | live-diff + waivers | — |
-| Unknown top-level fields preserved | Spec | Parity | — | live-diff + waiver | — |
-| Duplicate JSON keys: last wins | Spec | Parity | — | live-diff + waiver | — |
-| Tier-1 corpus (24 real-world shapes) | Spec | **Deacon behind** — residual `featuresConfiguration` shape; 5 of 6 original divergence families fixed | No — fix tracked | live-diff ×24 | **#387** |
-| `--include-merged-configuration` (24 variants) | Spec | **Deacon behind** — same family | No — fix tracked | live-diff ×24 | **#387** |
-| `featuresConfiguration` document shape | Spec | **Deacon behind** | No — fix tracked | spec-exp | **#387** |
-| `configFilePath` as VS Code URI object | Ref | Parity (fixed) | — | live-diff | — |
-| Merged lifecycle slots emit `[]` when empty | Ref | Parity (fixed) | — | live-diff | — |
-| `featuresConfiguration` omitted when none resolve | Ref | Parity (fixed) | — | live-diff | — |
-| `portsAttributes` authored keys only | Ref | Parity (fixed) | — | live-diff | — |
-| `workspace` section shape | Ref | Parity (fixed, #383) | — | live-diff | — |
-| `workspaceFolder` preserves git-root subdir | Spec | Parity (fixed, #383) | — | live-diff | — |
-| Substitution in object-shaped fields | Spec | Parity | — | ⚠️ spec-exp only | — |
-| Malformed JSONC rejected (reference: lenient) | Ref | Intentional divergence — fail fast | Yes → 2027-01-19 | live-diff + waiver | — |
-| Wrong-type `features` / `forwardPorts` rejected | Ref | Intentional divergence | Yes → 2027-01-19 | live-diff + twins + waivers | — |
-| Unsupported enum values rejected | Ref | Intentional divergence | Yes → 2027-07-26 | live-diff + waiver | — |
-| Authored-null vs omitted collapsed | Ref | Intentional divergence (residue; empty half fixed) | Waived → 2027-01-26 | live-diff + waiver | #398 |
-| Merged computed empties omitted | Ref | Intentional divergence | Waived → 2027-01-31 | live-diff + waiver | — |
-| `extends` resolved eagerly; missing/cycle rejected (3) | Ext | Deacon extension | Yes → 2027-01-19 | spec-exp + waivers | `ext-extends-resolution` |
-| `extends`: child's Feature version overrides the base's | Ext | Deacon extension | Yes | spec-exp | #411 |
-| Same Feature at two versions in one document rejected | Ref | Intentional divergence (reference installs both) | Yes → 2027-02-01 | spec-exp + waiver | floor under #411 |
+<table>
+<thead>
+<tr><th></th><th>Behavior</th><th>img</th><th>dkr</th><th>cmp</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>🔵</td><td>`down --remove` on a Compose configuration removes the project it created, identifying…</td><td>·</td><td>·</td><td>🔵</td><td></td></tr>
+<tr><td>🔵</td><td>`down` over a workspace folder that has no devcontainer configuration reports that…</td><td>🔵</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>🔵</td><td>`down --remove` stops and removes the workspace's container, so a subsequent command…</td><td>🔵</td><td>🔵</td><td>·</td><td></td></tr>
+</tbody>
+</table>
 
-### up (12 behaviors)
+### exec
 
-| Behavior | Source | Status | Evidence | Tracking |
-|---|---|---|---|---|
-| `up` + `exec` end-to-end | Spec | Parity | live-diff + legacy + metamorphic | — |
-| containerEnv/remoteEnv precedence | Spec | Parity | live-diff + spec-exp | — |
-| Feature install order (dependency-sorted) | Spec | Parity | live-diff + metamorphic | — |
-| Feature install failure surfaces | Spec | Parity | live-diff | — |
-| Feature entrypoint chaining | Spec | Parity | live-diff + spec-exp | — |
-| Mount source and shape | Spec | Parity | live-diff + spec-exp | — |
-| Container PATH construction | Spec | Parity | live-diff + spec-exp | — |
-| Lifecycle command forms | Spec | Parity | live-diff + spec-exp | — |
-| Lifecycle cwd = workspace folder | Spec | Parity | ⚠️ spec-exp only | — |
-| Effective user uid/gid | Spec | Parity | ⚠️ spec-exp only | — |
-| Restart reuses container | Spec | Parity | ⚠️ metamorphic + spec-exp (deacon-only) | — |
-| Changed config recreates container (reference reattaches to stale) | Ref | Intentional divergence — safer branch | spec-exp + waiver → 2027-01-26 | adjacent #371 |
+<table>
+<thead>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+</thead>
+<tbody>
+<tr><td>✅</td><td>exec runs a command inside the target container and streams its stdout/stderr and…</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>·</td><td>exec --container-id (no --workspace-folder/--config) recovers remoteUser and remoteEnv…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#322</td></tr>
+<tr><td>·</td><td>`exec` runs the command with the environment the user-env probe captured, with the…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#370</td></tr>
+<tr><td>⚠️</td><td>The relative order of a restored image `PATH` entry against one a Feature contributed…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#370</td></tr>
+</tbody>
+</table>
 
-### build (3) · exec (4) · run-user-commands (2)
+### host ca
 
-| Behavior | Source | Status | Evidence | Tracking |
-|---|---|---|---|---|
-| build: image parity incl. compose | Spec | Parity | live-diff + legacy | — |
-| build: features layered into `--image-name` | Spec | Parity | live-diff + spec-exp | — |
-| build: failures reported | Spec | Parity | live-diff ×3 | — |
-| exec: command parity (tty, user, cwd, compose) | Spec | Parity | live-diff ×9 + legacy | — |
-| exec: image PATH preserved | Spec | Parity | live-diff | — |
-| exec: container-id metadata read-back | Spec | Parity | ⚠️ legacy binary is sole evidence | — |
-| exec: restored PATH ordering differs from reference | Ref | Intentional divergence | ⚠️ spec-exp only, **no waiver** | see weak spots |
-| run-user-commands: hook order | Spec | Parity | live-diff + spec-exp | — |
-| run-user-commands: hook failure propagates (reference exits 0) | Spec | **Reference behind spec** | live-diff + twins + waiver → 2027-01-26 | — |
-
-Not yet a behavior record: **#405** (run-user-commands ignores image/container `devcontainer.metadata` while `exec` honors it).
-
-### outdated (4) · upgrade (3)
-
-| Behavior | Source | Status | Evidence | Tracking |
-|---|---|---|---|---|
-| outdated: reports Feature versions (lockfile-aware) | Spec | Parity | live-diff ×4 + spec-exp | — |
-| outdated: keyed by declared reference (was: collision dropped a Feature) | Ref | Parity (fixed) | ⚠️ spec-exp only | #407 |
-| outdated: extends-chain Features reported | Spec | **Reference behind spec** (consequence of the extension) | spec-exp + waiver → 2027-07-26 | — |
-| outdated: malformed lockfile rejected | Ref | Intentional divergence (reference never reads it) | spec-exp + waiver → 2027-01-31 | #406 |
-| upgrade: regenerates lockfile | Spec | Parity | live-diff + spec-exp | — |
-| upgrade: empty Feature set → empty lockfile, exit 0 (reference errors) | Spec | Intentional divergence | live-diff + waiver → 2027-07-26 | — |
-| upgrade: honors `--override-config` / `--merge-config` | Ext | Deacon extension | spec-exp | #409 |
-
-Not yet a behavior record: **#389** (`--output` vs reference's `--output-format`).
-
-### observable-state (8 behaviors)
-
-| Behavior | Source | Status | Evidence | Tracking |
-|---|---|---|---|---|
-| Container state parity (labels, config, network) | Spec | Parity | legacy + spec-exp | — |
-| Normalized state diff parity | Spec | Parity | live-diff ×4 + legacy | — |
-| `devcontainer.metadata` content | Spec | Parity (fixed) | live-diff | #373 |
-| `devcontainer.metadata` byte serialization | Ref | Intentional divergence | live-diff + waiver → 2027-01-29 | **#394** (ordering nondeterminism is a bug within this row) |
-| Compose project file set (stdin `-` vs temp file) | Ref | Intentional divergence | live-diff + waiver → 2027-01-26 | — |
-| Compose project name always docker-valid | Ref | Intentional divergence — robustness | live-diff + legacy + spec-exp | #265 |
-| Keepalive command form (BusyBox-safe) | Ref | Intentional divergence | live-diff ×5 | — |
-| Five extra deacon identity labels | Ext | Deacon extension | live-diff (scoped per-label tolerances) | `ext-container-identity-labels` |
-
-Not yet a behavior record: **#399** (empty-string `dockerComposeFile` takes different provisioning paths).
-
-### Deacon extensions with no reference equivalent
-
-The reference has no surface at all for these, so `reference: not-applicable` is a classification, not an unverified claim. Evidence is deacon-only by necessity.
-
-| Capability | Evidence | Record |
+| | Behavior | Notes |
 |---|---|---|
-| `down` — teardown (3 behaviors) | spec-exp ×7 | `ext-teardown-command` |
-| `doctor` — diagnostics, human + JSON | spec-exp ×9 | `ext-doctor-diagnostics` |
-| Auto-forward ports daemon | legacy integration | `ext-auto-forward-ports` |
-| `.env`-format secrets file (superset) | legacy integration | `ext-secrets-file-env-format` |
-| Workspace-trust gate on host hooks | legacy integration | `ext-workspace-trust-gate` |
-| Host CA injection | legacy integration | `ext-host-ca-injection` |
-| User profiles from settings.json | legacy integration | `ext-user-profiles` |
-| `--merge-config` on config-consuming subcommands | spec-exp | `ext-cli-config-overlay` |
+| 🔵 | deacon can inject the host's CA certificates into the TLS trust store used for OCI… |  |
 
-### templates-apply (1 behavior)
+### observable state
 
-Scaffolds a template with option substitution — parity claimed against the spec, but **no reference comparison is structurally possible**: the reference's `--template-id` accepts only OCI refs while deacon takes the template positionally, so no shared argv exists. Evidence: spec-expectation ×8 over the scaffolded bytes.
+<table>
+<thead>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+</thead>
+<tbody>
+<tr><td>⚠️</td><td>The set of Compose files a CLI composes with, and the Compose labels derived from that…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>⚠️</td><td>deacon derives a valid, deacon-namespaced compose project name…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#265</td></tr>
+<tr><td>🔵</td><td>deacon stamps five identity/bookkeeping labels onto a created container that the…</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>⚠️</td><td>Both CLIs override the container command with a shell keep-alive that holds the…</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>The `devcontainer.metadata` label records the image metadata the configuration and…</td><td>✅</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#373</td></tr>
+<tr><td>⚠️</td><td>The BYTE FORM of the `devcontainer.metadata` label value — JSON whitespace and object…</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#373 #394</td></tr>
+<tr><td>◐</td><td>The observable container state after up (running status, labels, mounts, environment)…</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>The normalized observable-state diff between deacon and the reference is empty for the…</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+</tbody>
+</table>
 
-## Known weak spots
+### outdated
 
-Called out deliberately — this section is the point of the document.
+<table>
+<thead>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+</thead>
+<tbody>
+<tr><td>❌</td><td>`outdated` resolves the full extends chain before reporting versions, so a Feature…</td><td>·</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>❌</td><td>·</td><td>·</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>❌</td><td>#389</td></tr>
+<tr><td>⚠️</td><td>`outdated` fails with a non-zero exit and a diagnostic naming the file when a…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#406 #407</td></tr>
+<tr><td>◐</td><td>`outdated` keys each report entry by the Feature reference the configuration DECLARED,…</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#407 #411</td></tr>
+<tr><td>✅</td><td>`outdated` reports each configured Feature's current, wanted, and latest version, and…</td><td>✅</td><td>◐</td><td>◐</td><td>·</td><td>◐</td><td>◐</td><td>✅</td><td>·</td><td>·</td><td>◐</td><td>✅</td><td>◐</td><td>◐</td><td>·</td><td>◐</td><td></td></tr>
+</tbody>
+</table>
 
-1. **`aligned` claims resting on spec-expectation evidence only.** Nothing compares these against the reference on any run, so oracle drift would go undetected:
-   - `bhv-up-effective-user-uid-gid`, `bhv-up-lifecycle-command-cwd`
-   - `bhv-readconfig-substitution-object-fields`
-   - `bhv-outdated-reports-declared-reference-key`
-   - `bhv-up-restart-reuses-container` — evidence is a metamorphic relation across two *deacon* runs; the reference never enters it.
-2. **Single-carrier evidence.** `bhv-exec-container-id-metadata` is evidenced only by the legacy `parity_up_exec` binary (on record; blocks that binary's retirement).
-3. **An intentional divergence with no self-invalidating backing.** `bhv-exec-restored-path-ordering` is permitted by R8 (a case backs it), but its only case is `spec-expectation` — so if the reference changed to match, nothing would report the waiver-style *stale* signal. Its two unwaivered siblings are fine by contrast: `bhv-container-keepalive-command` has 5 live differentials and `bhv-compose-project-name-robust` has a live legacy carrier.
-4. **Thin or absent live-differential coverage.** `templates-apply` (zero, structurally impossible); `outdated` 4 of 20 cases live; `upgrade` 3 of 11. `down`/`doctor` have zero, but they are extensions with no reference side. The extension areas run on deacon-only integration tests.
-5. **Snapshot coverage is one case on one platform** (`case-readconfig-snapshot`, linux-x86_64). Other platforms report `no-reference-for-platform` — a declared coverage limit, not a silent skip.
-6. **The measured scenario hole.** 298 of 745 obligations are open gaps, concentrated in `run-user-commands` (81 uncovered pairs), `up` (60), `build` (56), `exec` (50), `down` (29), `upgrade` (22).
-7. **Corpus divergence history is fix-tracked, not hidden.** At migration time 51 of 71 read-configuration corpus cases diverged across six families. Five are fixed; the residual `featuresConfiguration` shape keeps `reference: divergent` on those records, tracked in #387.
+### ports
 
-## Open gaps (block release certification)
+| | Behavior | Notes |
+|---|---|---|
+| 🔵 | deacon can auto-forward container ports to the host via a host-side daemon backed by a… |  |
 
-`gap-pairwise-{build, down, exec, run-user-commands, up, upgrade}` — enumerated pairwise scenario combinations no declarative case covers. Live counts in `target/conformance/coverage-pairwise.md`. Each new case re-dispositions the pairs it covers; the record is deleted when none remain.
+### profiles
 
-`certify` reports **not certified** until these close. The model measures the hole rather than certifying around it.
+| | Behavior | Notes |
+|---|---|---|
+| 🔵 | deacon applies a user-defined profile from settings.json (selected via the global… |  |
 
-## Open issues
+### read configuration
 
-| Issue | Area | Summary | Registry status |
-|---|---|---|---|
-| #387 | read-configuration | `featuresConfiguration` structurally differs | characterized, fix pending |
-| #394 | observable-state | metadata label bytes nondeterministic | waiver covers whitespace; ordering fix pending |
-| #398 | read-configuration | authored-null vs omitted collapsed | record + waiver for the residue |
-| #399 | up/compose | empty-string `dockerComposeFile` | not yet a record — triage |
-| #405 | run-user-commands | ignores image/container metadata; `exec` honors it | not yet a record — triage |
-| #389 | outdated | `--output` vs `--output-format` | not yet a record — triage |
-| #376 | cross-area | triage umbrella for 024-surfaced divergences | in progress |
-| #371 / #372 | up / run-user-commands | stale container left running; markers with `config_hash: None` | bugs adjacent to characterized divergences |
+<table>
+<thead>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+</thead>
+<tbody>
+<tr><td>🔵</td><td>When a link of an `extends` chain declares a Feature its base already declared at a…</td><td>·</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#411</td></tr>
+<tr><td>⚠️</td><td>A single configuration document whose `features` map contains two keys resolving to…</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#411</td></tr>
+<tr><td>⚠️</td><td>deacon's resolved-configuration output omits a property the author wrote as `null`,…</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#398</td></tr>
+<tr><td>·</td><td>An explicit --config pointing at a file that does not exist is rejected (no silent…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>Reading a well-formed devcontainer.json exits 0 and emits the resolved configuration…</td><td>✅</td><td>◐</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>Both the `configuration` and `mergedConfiguration` documents carry `configFilePath`,…</td><td>✅</td><td>✅</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#376</td></tr>
+<tr><td>❌</td><td>Configuration discovery searches exactly the three locations the spec names —…</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>A JSON object with a duplicate top-level key is accepted with last-wins semantics,…</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>🔵</td><td>A cyclic extends chain (a -&gt; b -&gt; a) is detected and rejected during…</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#297</td></tr>
+<tr><td>🔵</td><td>read-configuration --include-merged-configuration resolves the full extends chain…</td><td>🔵</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>🔵</td><td>🔵</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>#297</td></tr>
+<tr><td>🔵</td><td>An extends chain pointing at a nonexistent target file is rejected during…</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#297</td></tr>
+<tr><td>❌</td><td>`--include-features-configuration` reports the resolved Feature set in install order,…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>❌</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>·</td><td>❌</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>`featuresConfiguration` is reported only when Feature resolution produced at least one…</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#387</td></tr>
+<tr><td>⚠️</td><td>A devcontainer.json with a hard JSONC syntax error is rejected at parse rather than…</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>·</td><td>deacon's `mergedConfiguration` omits the computed-empty properties the reference…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#398</td></tr>
+<tr><td>❌</td><td>read-configuration --include-merged-configuration over the tier1 corpus emits a merged…</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>·</td><td>❌</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>❌</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>#383 #387</td></tr>
+<tr><td>✅</td><td>`mergedConfiguration` reports all five plural lifecycle hook arrays…</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>·</td><td>A workspace folder with no devcontainer configuration at all is rejected rather than…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>A `portsAttributes` / `otherPortsAttributes` entry reports the keys the author wrote…</td><td>✅</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>◐</td><td>Variable substitution reaches the object-shaped fields that carry user templates —…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#312</td></tr>
+<tr><td>❌</td><td>Reading real-world devcontainer.json configurations from the tier1 corpus produces…</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>·</td><td>❌</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>❌</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>#383 #387</td></tr>
+<tr><td>✅</td><td>Unknown / forward-compatible top-level fields are accepted and preserved verbatim in…</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>⚠️</td><td>A modelled field whose value is outside the schema's closed enum (for example…</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>The reported `workspace.workspaceFolder` is the automatic source-code mount location…</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#273 #383</td></tr>
+<tr><td>✅</td><td>The `workspace` section carries exactly `workspaceFolder` and the optional…</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#376</td></tr>
+<tr><td>⚠️</td><td>A `features` value that is a bare string instead of an object is rejected…</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>⚠️</td><td>A `forwardPorts` value that is a bare string instead of an array is rejected (typed…</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+</tbody>
+</table>
 
-Recently closed: #406, #407, #409, #411, #370, #373, #383.
+### run user commands
+
+<table>
+<thead>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+</thead>
+<tbody>
+<tr><td>❌</td><td>A lifecycle hook that exits non-zero fails the run rather than being reported as a…</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>Lifecycle hooks run in spec order — onCreate, updateContent, postCreate, postStart —…</td><td>✅</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+</tbody>
+</table>
+
+### secrets
+
+| | Behavior | Notes |
+|---|---|---|
+| 🔵 | The --secrets-file flag auto-detects and accepts both a flat JSON object and a… |  |
+
+### templates apply
+
+<table>
+<thead>
+<tr><th></th><th>Behavior</th><th>img</th><th>dkr</th><th>cmp</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>🔵</td><td>`templates apply` scaffolds the template's files into the target directory with…</td><td>🔵</td><td>🔵</td><td>🔵</td><td></td></tr>
+</tbody>
+</table>
+
+### trust
+
+| | Behavior | Notes |
+|---|---|---|
+| 🔵 | Host-side lifecycle hooks (initializeCommand and other workspace-resident host hooks)… |  |
+
+### up
+
+<table>
+<thead>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+</thead>
+<tbody>
+<tr><td>⚠️</td><td>Re-entering a workspace whose configuration has CHANGED since its container was…</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>◐</td><td>A `containerEnv` variable declared by BOTH the configuration and a Feature takes the…</td><td>◐</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>#374</td></tr>
+<tr><td>◐</td><td>`up` applies the declared container user so the container process runs as that user…</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>up creates a container from the resolved configuration such that a subsequent exec…</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>Entrypoints contributed by multiple Features are chained and all run, in the resolved…</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>A Feature that cannot be installed — its install script exiting non-zero, or a…</td><td>·</td><td>✅</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>`up` installs the configuration's Features into the container it creates, in the…</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>◐</td><td>A lifecycle hook runs with its working directory set to the container workspace…</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>A lifecycle hook declared in the array (argv) form and one declared in the object…</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>Each declared mount is applied with both its declared source and its declared shape —…</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>A PATH segment contributed by a Feature's `containerEnv` is prepended to the image…</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>◐</td><td>Re-entering a workspace whose container already exists, with the SAME configuration,…</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+</tbody>
+</table>
+
+### upgrade
+
+<table>
+<thead>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+</thead>
+<tbody>
+<tr><td>🔵</td><td>`upgrade` regenerates the lockfile from the configuration AFTER the command-line…</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>#409</td></tr>
+<tr><td>⚠️</td><td>`upgrade` on a configuration that declares no Features regenerates an EMPTY lockfile…</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>`upgrade` regenerates the devcontainer lockfile from the effective configuration's…</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+</tbody>
+</table>
 
 ---
 
-*Verification pipeline: hermetic registry validation (`registry_valid`, classes V1–V36) on every PR · the `parity / live-certification` lane (nightly + parity-path PRs) runs the 109 live differentials against the verified oracle · `certify` gates releases on gaps and uncovered behaviors · waivers self-invalidate when their difference stops reproducing · the nightly `discovery` lane searches for differences nobody curated and gates nothing.*
+The full conformance record — the three-axis disposition behind each row, the waivers, and the scenario-coverage accounting — lives in `conformance/registry/` and `conformance/RULES.md`. This page is generated from it.

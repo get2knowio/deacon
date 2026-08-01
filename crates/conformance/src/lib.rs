@@ -37,6 +37,7 @@ pub mod mapping;
 pub mod model;
 pub mod obligation;
 pub mod parity_corpus;
+pub mod parity_page;
 pub mod prose;
 pub mod regression;
 pub mod report;

@@ -105,6 +105,19 @@ enum Command {
         #[arg(long, value_name = "DIR")]
         out_dir: Option<PathBuf>,
     },
+    /// Generate the human-facing parity page (`docs/PARITY.md`) from the registry.
+    ///
+    /// Deterministic: the same registry renders the same bytes. Prints to stdout
+    /// unless `--write` is given, so a check can diff it without a temp file.
+    ParityPage {
+        /// Write to `docs/PARITY.md` instead of printing.
+        #[arg(long)]
+        write: bool,
+        /// Exit non-zero if the committed page differs from a fresh render, naming
+        /// the drift. This is the gate that keeps the page honest.
+        #[arg(long, conflicts_with = "write")]
+        check: bool,
+    },
     /// Strict certification for the active profile (release gate).
     Certify {
         /// Emit a single JSON document
@@ -589,6 +602,7 @@ fn run(cli: Cli) -> i32 {
     match cli.command {
         Command::Validate { json } => validate(&registry_dir, &today, json),
         Command::Report { out_dir } => report(&registry_dir, &today, out_dir),
+        Command::ParityPage { write, check } => parity_page_cmd(&registry_dir, write, check),
         Command::Certify {
             json,
             report_dir,
@@ -3688,6 +3702,56 @@ fn resolve_today(flag: Option<&str>) -> anyhow::Result<String> {
                 .date();
             Ok(date.to_string())
         }
+    }
+}
+
+/// `parity-page` — render the human-facing page, or verify the committed one matches.
+///
+/// Kept out of `docs/` generation-by-hand deliberately: this page drifted twice within
+/// an hour of first publication, both times because a count was typed rather than
+/// derived. `--check` is what makes that impossible to repeat.
+fn parity_page_cmd(registry_dir: &Path, write: bool, check: bool) -> i32 {
+    let registry = match Registry::load(registry_dir) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    let rendered = deacon_conformance::parity_page::render(&registry);
+    let path = workspace_root().join("docs/PARITY.md");
+
+    if check {
+        let committed = std::fs::read_to_string(&path).unwrap_or_default();
+        if committed == rendered {
+            println!("ok: {} matches a fresh render", path.display());
+            return 0;
+        }
+        eprintln!(
+            "error: {} is stale — regenerate with `cargo run -p deacon-conformance -- \
+             parity-page --write`",
+            path.display()
+        );
+        return 1;
+    }
+
+    if write {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::write(&path, &rendered) {
+            Ok(()) => {
+                println!("wrote {}", path.display());
+                0
+            }
+            Err(e) => {
+                eprintln!("error: writing {}: {e}", path.display());
+                1
+            }
+        }
+    } else {
+        print!("{rendered}");
+        0
     }
 }
 
