@@ -46,16 +46,16 @@ There is deliberately no combined "different but acceptable" state. Statuses are
 
 | Metric | Value |
 |---|---|
-| Behavior records | **71** across 16 areas |
+| Behavior records | **73** across 16 areas |
 | — `follow-spec` / `align-with-reference` | 37 / 6 |
-| — `intentional-divergence` / `deacon-extension` | 14 / 14 |
+| — `intentional-divergence` / `deacon-extension` | 15 / 15 |
 | — `unresolved-gap` | **0** |
-| Reference axis: aligned / divergent / not-applicable / unknown | 36 / 23 / 12 / **0** |
-| Test cases | **231** — 109 live-differential, 108 spec-expectation, 11 legacy, 2 metamorphic, 1 snapshot |
-| Waivers (all with expiry, self-invalidating) | 21 |
+| Reference axis: aligned / divergent / not-applicable / unknown | 36 / 24 / 13 / **0** |
+| Test cases | **233** — 109 live-differential, 110 spec-expectation, 11 legacy, 2 metamorphic, 1 snapshot |
+| Waivers (all with expiry, self-invalidating) | 22 |
 | Extension records (`ext-`) | 10 |
 | Open gap records | **6** — `gap-pairwise-{build,down,exec,run-user-commands,up,upgrade}` |
-| Scenario obligations | 743 — covered 444, waived 1, gap 298, undispositioned **0** |
+| Scenario obligations | 745 — covered 446, waived 1, gap 298, undispositioned **0** |
 | Residuals | 8 queued + 6 permanent (61 units, structurally outside the model) |
 | Certification verdict | **NOT certified — by design.** The 6 gap records block, as intended. |
 
@@ -74,7 +74,7 @@ There is deliberately no combined "different but acceptable" state. Statuses are
 **Source**: Spec = written spec text · Ref = reference-CLI contract with no spec text · Ext = deacon extension.
 **Permanent?**: waived divergences carry a re-review date; fix-tracked items do not.
 
-### read-configuration (25 behaviors — the deepest-covered area)
+### read-configuration (27 behaviors — the deepest-covered area)
 
 | Behavior | Source | Status | Permanent? | Evidence | Tracking |
 |---|---|---|---|---|---|
@@ -99,6 +99,8 @@ There is deliberately no combined "different but acceptable" state. Statuses are
 | Authored-null vs omitted collapsed | Ref | Intentional divergence (residue; empty half fixed) | Waived → 2027-01-26 | live-diff + waiver | #398 |
 | Merged computed empties omitted | Ref | Intentional divergence | Waived → 2027-01-31 | live-diff + waiver | — |
 | `extends` resolved eagerly; missing/cycle rejected (3) | Ext | Deacon extension | Yes → 2027-01-19 | spec-exp + waivers | `ext-extends-resolution` |
+| `extends`: child's Feature version overrides the base's | Ext | Deacon extension | Yes | spec-exp | #411 |
+| Same Feature at two versions in one document rejected | Ref | Intentional divergence (reference installs both) | Yes → 2027-02-01 | spec-exp + waiver | floor under #411 |
 
 ### up (12 behaviors)
 
@@ -216,9 +218,7 @@ Called out deliberately — this section is the point of the document.
 | #376 | cross-area | triage umbrella for 024-surfaced divergences | in progress |
 | #371 / #372 | up / run-user-commands | stale container left running; markers with `config_hash: None` | bugs adjacent to characterized divergences |
 
-Recently closed: #406, #407, #409, #370, #373, #383.
-
-In flight: **#411** — a child's Feature version overriding its base's across an `extends` merge, with the tie-less single-document form rejected as its floor. Landing separately; it will add two behavior records, two cases and one waiver to the counts above.
+Recently closed: #406, #407, #409, #411, #370, #373, #383.
 
 ---
 
