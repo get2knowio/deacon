@@ -1,0 +1,8 @@
+{
+	"name": "ConformanceOutdatedDeclaredReferenceKeys",
+	"image": "alpine:3.19",
+	"features": {
+		"ghcr.io/devcontainers/features/git:1.3.2": {},
+		"ghcr.io/devcontainers/features/node:1.6.1": {}
+	}
+}

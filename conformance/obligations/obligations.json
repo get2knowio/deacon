@@ -333,6 +333,12 @@
       "context": []
     },
     {
+      "id": "obl-bhv-c5445b00",
+      "kind": "behavior",
+      "behavior": "bhv-features-duplicate-in-one-document-rejected",
+      "context": []
+    },
+    {
       "id": "obl-bhv-c5668b84",
       "kind": "behavior",
       "behavior": "bhv-up-effective-user-uid-gid",
@@ -384,6 +390,12 @@
       "id": "obl-bhv-d8b2b5e7",
       "kind": "behavior",
       "behavior": "bhv-readconfig-bad-config-path",
+      "context": []
+    },
+    {
+      "id": "obl-bhv-dc7cc488",
+      "kind": "behavior",
+      "behavior": "bhv-extends-feature-version-override",
       "context": []
     },
     {

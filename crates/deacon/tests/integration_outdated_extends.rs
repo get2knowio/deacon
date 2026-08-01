@@ -232,37 +232,36 @@ fn test_outdated_extends_feature_override() -> Result<(), Box<dyn Error>> {
 
     let features = parsed["features"].as_object().unwrap();
 
-    // BOTH node entries are reported, and that is what the merge actually produces.
+    // The child's tag overrides the base's: exactly one node entry, at the child's version.
     //
-    // This assertion used to read "exactly one node feature (the override)", and it
-    // passed only because `outdated` keyed its report by the CANONICAL untagged id:
-    // `node:16` and `node:18` collapsed onto one key and the last one won, which LOOKED
-    // like override semantics. Keying by the declared reference (#407) removed the
-    // collapse and exposed the truth — `features` is a map, `node:16` and `node:18` are
-    // distinct keys, and `merge_two_configs` unions them. `upgrade` on the same chain
-    // tries to FETCH `node:16`, which shows the two-entry map is what feeds Feature
-    // resolution, not just reporting.
-    //
-    // Whether a child declaring a different tag of a Feature its base declares should
-    // OVERRIDE it is a real open question, tracked separately — it is a config-merge
-    // decision with blast radius through `up`/`build` Feature installation, not a
-    // reporting one. This test now records what the code does; it deliberately does not
-    // bless it.
+    // This assertion has been round the houses and the history is worth keeping. It
+    // originally read "exactly one node feature (the override)" and passed — but only
+    // because `outdated` keyed its report by the CANONICAL untagged id, so `node:16` and
+    // `node:18` collapsed onto one key and the last won. That LOOKED like override
+    // semantics while the merge was actually producing both. Fixing the report key (#407)
+    // removed the collapse and exposed the truth, and this test was rewritten to record
+    // it: two entries, both installed, which is what #411 filed. Merging `features` by
+    // canonical Feature id (#411) makes the override real, so the original expectation is
+    // correct again — this time because the merge does it, not because a reporting bug
+    // hid it.
     let node_features: Vec<_> = features.keys().filter(|k| k.contains("node")).collect();
     assert_eq!(
         node_features.len(),
-        2,
-        "both declared node tags are distinct map keys and both survive the merge; got {node_features:?}"
+        1,
+        "the child's node tag must override the base's; got {node_features:?}"
     );
 
-    let node18 = features
+    let node = features
         .get("ghcr.io/devcontainers/features/node:18")
-        .expect("the child's node:18 must be reported");
-    assert_eq!(node18["current"], "18");
-    let node16 = features
-        .get("ghcr.io/devcontainers/features/node:16")
-        .expect("the base's node:16 must be reported, not silently dropped");
-    assert_eq!(node16["current"], "16");
+        .expect("the surviving entry must be the CHILD's version, keyed by its declared ref");
+    assert_eq!(
+        node["current"], "18",
+        "node version should be 18 (from the main config override), not 16 (from the base)"
+    );
+    assert!(
+        !features.contains_key("ghcr.io/devcontainers/features/node:16"),
+        "the base's superseded node:16 must not survive the merge"
+    );
 
     Ok(())
 }

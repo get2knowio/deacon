@@ -1,0 +1,20 @@
+{
+  "id": "wvr-features-duplicate-in-one-document",
+  "behaviors": [
+    "bhv-features-duplicate-in-one-document-rejected"
+  ],
+  "scope": {
+    "kind": "corpus_case",
+    "corpus": "us5",
+    "case": "features-duplicate-one-document"
+  },
+  "expect": {
+    "kind": "deacon-stricter",
+    "signal": [
+      "features"
+    ]
+  },
+  "rationale": "A `features` map with two keys resolving to one canonical Feature id has no coherent meaning: the two entries name one Feature at two versions, and installing both runs the same install script twice with the last one winning. The reference CLI accepts the document and reports both entries, measured at oracle 0.87.0 \u2014 it has no `extends`, so it never had to decide what a version bump across layers means and never grew a rule for the degenerate single-document case either. deacon rejects per constitution IV, the same strictness it applies to malformed JSONC and wrong-typed properties. This is deliberately the FLOOR under bhv-extends-feature-version-override: across merge layers the later link wins, and rejecting the tie-less case is what lets the merge rule never invent a winner. Revisit if the spec ever defines duplicate Feature entries, at which point deacon should follow it.",
+  "added": "2026-08-01",
+  "expires": "2027-02-01"
+}

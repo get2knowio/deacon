@@ -411,6 +411,26 @@ pub const POST_BRANCH_BEHAVIORS: &[(&str, &str)] = &[
      a fidelity loss on input both sides accept.",
     ),
     (
+        "bhv-extends-feature-version-override",
+        "Whether a child link of an `extends` chain that declares a Feature its base already \
+     declared at a different version REPLACES that entry or adds a second one. Unrecordable \
+     before #411: the key-wise merge produced both, `outdated` collapsed them onto one \
+     canonical key in its report, and the collapse LOOKED like override semantics, so no \
+     pre-migration unit could distinguish a real override from a reporting artifact. Not a \
+     variant of any pre-migration claim: `extends` is a deacon extension the reference has \
+     no equivalent for, recorded by ext-extends-resolution.",
+    ),
+    (
+        "bhv-features-duplicate-in-one-document-rejected",
+        "Whether a single document declaring one Feature at two versions is rejected. \
+     Unrecordable before #411: deacon accepted it and installed both, and the report \
+     collapsed them, so acceptance and rejection produced indistinguishable observations. \
+     Not a variant of the read-configuration strictness family, which rejects MALFORMED \
+     documents both CLIs parse; this document is well-formed JSON and schema-valid, and is \
+     rejected for a semantic collision the spec does not address — waived on that ground by \
+     wvr-features-duplicate-in-one-document.",
+    ),
+    (
         "bhv-outdated-malformed-lockfile-rejected",
         "Whether a PRESENT but invalid `devcontainer-lock.json` is an error for `outdated` or \
      is silently ignored. Unrecordable before #406 in either direction: deacon swallowed the \

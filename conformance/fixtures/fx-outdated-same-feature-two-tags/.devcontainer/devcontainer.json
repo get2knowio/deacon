@@ -1,8 +1,0 @@
-{
-	"name": "ConformanceOutdatedSameFeatureTwoTags",
-	"image": "alpine:3.19",
-	"features": {
-		"ghcr.io/devcontainers/features/node:1.6.1": {},
-		"ghcr.io/devcontainers/features/node:2.1.0": {}
-	}
-}

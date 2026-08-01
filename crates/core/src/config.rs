@@ -24,6 +24,7 @@
 
 use crate::container_env_probe::ContainerProbeMode;
 use crate::errors::{ConfigError, DeaconError, Result};
+use crate::features::canonical_feature_id;
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
@@ -97,6 +98,44 @@ where
             json_type_name(&value)
         )))
     }
+}
+
+/// Deserialize the `features` map: an object, like every other object-shaped field,
+/// and additionally one in which no two keys may name the SAME Feature (#411).
+///
+/// A Feature's key carries its version, so `…/node:16` and `…/node:18` are distinct
+/// map keys naming one Feature at two versions. Across an `extends` chain or a CLI
+/// overlay that is a version bump and the later layer wins
+/// ([`ConfigLoader::merge_feature_maps`]). Within a single document there is no later
+/// layer, nothing to break the tie, and no reading under which installing both is what
+/// the author meant — so it is rejected here rather than guessed at.
+///
+/// This is the floor under the merge rule: the merge never has to invent a winner,
+/// because a document that would force it to cannot be loaded.
+fn deserialize_features_value<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<serde_json::Value>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = deserialize_optional_object_value(deserializer)?;
+
+    if let Some(serde_json::Value::Object(map)) = &value {
+        let mut seen: HashMap<String, &String> = HashMap::new();
+        for key in map.keys() {
+            let canonical = canonical_feature_id(key);
+            if let Some(first) = seen.insert(canonical.clone(), key) {
+                return Err(serde::de::Error::custom(format!(
+                    "`features` declares the same Feature twice: \"{first}\" and \"{key}\" \
+                     both resolve to \"{canonical}\". Two versions of one Feature cannot both \
+                     be installed; keep the one you want. (A parent and child in an `extends` \
+                     chain MAY differ here — the child's version wins.)"
+                )));
+            }
+        }
+    }
+
+    Ok(value)
 }
 
 /// Combine two optional collection properties, staying `None` when neither side
@@ -675,7 +714,7 @@ pub struct DevContainerConfig {
     /// empty object. Read it through [`Self::features`].
     #[serde(
         default,
-        deserialize_with = "deserialize_optional_object_value",
+        deserialize_with = "deserialize_features_value",
         skip_serializing_if = "Option::is_none"
     )]
     pub features: Option<serde_json::Value>,
@@ -1745,9 +1784,9 @@ impl ConfigMerger {
                     overlay.run_services().to_vec()
                 }
             }),
-            // Features: deep merge as objects
+            // Features: merged by CANONICAL Feature id, not by literal map key (#411).
             features: combine_if_authored(&base.features, &overlay.features, || {
-                Self::merge_json_objects(base.features(), overlay.features())
+                Self::merge_feature_maps(base.features(), overlay.features())
             }),
 
             // Override feature install order: last writer wins
@@ -1916,6 +1955,76 @@ impl ConfigMerger {
             }
             (_, overlay) => overlay.clone(),
         }
+    }
+
+    /// Merge two `features` maps, keyed by CANONICAL Feature id rather than by the
+    /// literal map key (#411).
+    ///
+    /// A Feature's map key carries its version (`ghcr.io/…/node:18`), so a child that
+    /// bumps a version its base pinned writes a DIFFERENT key. Under a plain key-wise
+    /// merge both keys survive, and everything downstream then treats them as two
+    /// Features: `up` runs the same install script twice, whichever ran last winning the
+    /// binary, and three reporting paths each named a different winner. Since bumping an
+    /// inherited version is the central reason to use `extends` at all, the overlay's
+    /// entry REPLACES the base's entry for the same canonical id.
+    ///
+    /// Two deliberate details:
+    ///
+    /// - The base's POSITION is kept. Declaration order drives Feature install order, and
+    ///   the overlay is changing which version to install, not where in the sequence it
+    ///   belongs. Moving it to the overlay's position would silently reorder installs.
+    /// - The options object is deep-merged, exactly as it is for an identical key. A base
+    ///   that configured the Feature keeps that configuration when a child only bumps the
+    ///   version; the child can still override any individual option.
+    ///
+    /// Within a SINGLE document two keys sharing a canonical id is a different situation —
+    /// there is no "later" layer to win — and is rejected at parse time instead; see
+    /// [`deserialize_features_value`].
+    fn merge_feature_maps(
+        base: &serde_json::Value,
+        overlay: &serde_json::Value,
+    ) -> serde_json::Value {
+        let (base_obj, overlay_obj) = match (base, overlay) {
+            (serde_json::Value::Object(b), serde_json::Value::Object(o)) => (b, o),
+            // Not both objects: fall back to the generic rule (overlay replaces).
+            _ => return Self::merge_json_objects(base, overlay),
+        };
+
+        let mut result = base_obj.clone();
+        for (overlay_key, overlay_value) in overlay_obj {
+            let canonical = canonical_feature_id(overlay_key);
+            // Does some base key name the same Feature at a (possibly) different version?
+            let existing_key = result
+                .keys()
+                .find(|k| canonical_feature_id(k) == canonical)
+                .cloned();
+
+            match existing_key {
+                Some(existing_key) if existing_key == *overlay_key => {
+                    // Same key: the pre-existing deep-merge of the options object.
+                    let merged = Self::merge_json_objects(&result[&existing_key], overlay_value);
+                    result.insert(existing_key, merged);
+                }
+                Some(existing_key) => {
+                    // Same Feature, different version: the overlay's version wins, the
+                    // base's position and configured options are kept.
+                    let merged = Self::merge_json_objects(&result[&existing_key], overlay_value);
+                    let mut rebuilt = serde_json::Map::with_capacity(result.len());
+                    for (k, v) in &result {
+                        if k == &existing_key {
+                            rebuilt.insert(overlay_key.clone(), merged.clone());
+                        } else {
+                            rebuilt.insert(k.clone(), v.clone());
+                        }
+                    }
+                    result = rebuilt;
+                }
+                None => {
+                    result.insert(overlay_key.clone(), overlay_value.clone());
+                }
+            }
+        }
+        serde_json::Value::Object(result)
     }
 
     /// Merge string maps with overlay taking precedence
@@ -5287,6 +5396,120 @@ mod tests {
     /// End-to-end fold through `merge_configs`: a 3-layer chain must collapse all
     /// `Number(N)` / `String("localhost:N")` pairs to a single `Number(N)` regardless of
     /// which layer contributed each form.
+    /// #411: a child bumping a Feature version its base pinned OVERRIDES it rather than
+    /// adding a second entry. Two tags of one Feature are two map keys but one Feature,
+    /// and installing both runs the same install script twice with the last one winning.
+    #[test]
+    fn test_merge_features_child_version_overrides_base() {
+        let base = DevContainerConfig {
+            features: Some(serde_json::json!({
+                "ghcr.io/devcontainers/features/git:1.3.2": {"ppa": true},
+                "ghcr.io/devcontainers/features/node:1.6.1": {}
+            })),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            features: Some(serde_json::json!({
+                "ghcr.io/devcontainers/features/git:1.3.8": {}
+            })),
+            ..Default::default()
+        };
+
+        let merged = ConfigMerger::merge_configs(&[base, overlay]);
+        let features = merged.features().as_object().unwrap();
+
+        let keys: Vec<&String> = features.keys().collect();
+        assert_eq!(
+            keys,
+            vec![
+                "ghcr.io/devcontainers/features/git:1.3.8",
+                "ghcr.io/devcontainers/features/node:1.6.1"
+            ],
+            "the child's version replaces the base's IN PLACE — declaration order drives \
+             install order, and the overlay changed which version to install, not where"
+        );
+        assert_eq!(
+            features["ghcr.io/devcontainers/features/git:1.3.8"],
+            serde_json::json!({"ppa": true}),
+            "the base's configured options survive a bare version bump"
+        );
+    }
+
+    /// #411: the child can still override an individual option while bumping the version.
+    #[test]
+    fn test_merge_features_child_overrides_option_while_bumping_version() {
+        let base = DevContainerConfig {
+            features: Some(serde_json::json!({
+                "ghcr.io/devcontainers/features/git:1.3.2": {"ppa": true, "version": "latest"}
+            })),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            features: Some(serde_json::json!({
+                "ghcr.io/devcontainers/features/git:1.3.8": {"ppa": false}
+            })),
+            ..Default::default()
+        };
+
+        let merged = ConfigMerger::merge_configs(&[base, overlay]);
+        let features = merged.features().as_object().unwrap();
+        assert_eq!(
+            features["ghcr.io/devcontainers/features/git:1.3.8"],
+            serde_json::json!({"ppa": false, "version": "latest"})
+        );
+    }
+
+    /// #411: a DIFFERENT Feature is still added, not confused with an override.
+    #[test]
+    fn test_merge_features_distinct_features_both_survive() {
+        let base = DevContainerConfig {
+            features: Some(serde_json::json!({
+                "ghcr.io/devcontainers/features/git:1.3.2": {}
+            })),
+            ..Default::default()
+        };
+        let overlay = DevContainerConfig {
+            features: Some(serde_json::json!({
+                "ghcr.io/devcontainers/features/node:1.6.1": {}
+            })),
+            ..Default::default()
+        };
+
+        let merged = ConfigMerger::merge_configs(&[base, overlay]);
+        let features = merged.features().as_object().unwrap();
+        assert_eq!(features.len(), 2);
+    }
+
+    /// #411 (option B, the floor): within ONE document there is no later layer to win,
+    /// so a canonical-id collision is rejected at parse time rather than guessed at.
+    #[test]
+    fn test_features_same_feature_twice_in_one_document_is_rejected() {
+        let err = serde_json::from_str::<DevContainerConfig>(
+            r#"{"features": {
+                "ghcr.io/devcontainers/features/node:16": {},
+                "ghcr.io/devcontainers/features/node:18": {}
+            }}"#,
+        )
+        .expect_err("two tags of one Feature in one document must be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("declares the same Feature twice"), "{msg}");
+        assert!(msg.contains("node:16") && msg.contains("node:18"), "{msg}");
+        assert!(
+            msg.contains("ghcr.io/devcontainers/features/node"),
+            "the message must name the canonical id the two collide on: {msg}"
+        );
+    }
+
+    /// A local Feature path carries no tag and must not be canonicalized into a collision
+    /// with an unrelated one.
+    #[test]
+    fn test_features_local_paths_are_not_treated_as_versions() {
+        let cfg: DevContainerConfig =
+            serde_json::from_str(r#"{"features": {"./features/a": {}, "./features/b": {}}}"#)
+                .expect("distinct local Feature paths must load");
+        assert_eq!(cfg.features().as_object().unwrap().len(), 2);
+    }
+
     #[test]
     fn test_merge_configs_forward_ports_dedupes_through_full_chain() {
         let layer_a = DevContainerConfig {

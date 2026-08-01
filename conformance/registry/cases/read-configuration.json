@@ -2287,6 +2287,56 @@
       "notes": "Closes `config-source=dockerfile` x `features=lockfile` and `features=lockfile` x `layering=extends-chain`. The child document carries nothing but `extends` and a `name`; the Dockerfile build, the version-pinned Feature and `remoteUser` all reach the merged result through the base. Asserting all four together is the point \u2014 a chain that resolved the child's own keys but dropped the base's `features` would satisfy an assertion naming only `name`, and that is the failure mode an extends chain carrying a pinned Feature actually has. `--include-merged-configuration` is required because a plain read ECHOES `extends` rather than resolving it, which is deacon's characterized behavior, not an accident of this fixture. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
     },
     {
+      "id": "case-readconfig-duplicate-feature-one-document-rejected",
+      "behaviors": [
+        "bhv-features-duplicate-in-one-document-rejected"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "single",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "malformed",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-duplicate-feature-one-document"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "declares the same Feature twice"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The floor under the override rule (#411): within one document there is no later layer to win, so the collision is rejected rather than guessed at. Both the exit code and the diagnostic are asserted \u2014 a rejection that does not say WHICH two keys collided, and on what id, leaves the author hunting through a Feature map. The reference CLI accepts this document and reports both entries, so this is a characterized intentional divergence backed by wvr-features-duplicate-in-one-document, not a parity claim."
+    },
+    {
       "id": "case-readconfig-extends-compose-features",
       "behaviors": [
         "bhv-readconfig-extends-merged"
@@ -2422,6 +2472,66 @@
         "tempdir": true
       },
       "notes": "Covers the high-risk triple `hrt-readconfig-extends-chain-dockerfile-dependency-order`. The parent link declares the Dockerfile build AND one Feature; the child declares a second Feature that `installsAfter` the parent's. The assertion pins that the merged Feature map is assembled across the WHOLE chain before any ordering question is asked \u2014 an implementation that sorted the child's map alone would produce a set missing the parent's contribution and still look ordered."
+    },
+    {
+      "id": "case-readconfig-extends-feature-version-override",
+      "behaviors": [
+        "bhv-extends-feature-version-override"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "read-configuration",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "multiple-declared-order",
+        "sdim-layering": "extends-chain",
+        "sdim-output-mode": "structured"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-extends-feature-version-override"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "features": {
+                  "ghcr.io/devcontainers/features/git:1.3.8": {
+                    "ppa": true
+                  },
+                  "ghcr.io/devcontainers/features/node:1.6.1": {}
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Regression evidence for #411, and it pins three things one assertion at a time. The child's `git:1.3.8` is present, so the version bump took effect. The base's `ppa: true` is still on it, so a bare version bump does not discard the options the base configured. The base's unrelated `node:1.6.1` survives, so overriding is not confused with replacing the whole map. What CANNOT be asserted by a subset is the absence of the base's `git:1.3.2` \u2014 a jsonSubset match ignores extra keys \u2014 which is exactly the failure this case exists to catch, so the unit tests in `config.rs` assert the key SET and the ordering; this case pins the end-to-end shape those tests cannot reach."
     },
     {
       "id": "case-readconfig-extends-merge-precedence",
