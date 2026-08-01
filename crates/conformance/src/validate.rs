@@ -2603,6 +2603,27 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // V37: an assertion that constrains nothing is not an assertion. Applies to
+        // EVERY oracle type, not just spec-expectation: a live-differential may omit an
+        // assertion entirely (the reference supplies the expectation), but if it declares
+        // one it must be capable of failing.
+        for exp in &case.expected {
+            if exp
+                .assertion
+                .as_ref()
+                .is_some_and(crate::model::is_vacuous_assertion)
+            {
+                self.push(
+                    "V37",
+                    &case.id,
+                    format!(
+                        "channel {:?} carries an assertion that cannot fail (an empty                          `jsonSubset`, `contains`, or `matches`). It passes against any                          output, so it reports coverage while proving nothing — worse                          than declaring no assertion, which is at least visible as such.                          Pin what the case is for, or drop the channel.",
+                        exp.channel
+                    ),
+                );
+            }
+        }
+
         self.check_case_fs_allowlist(case);
         self.check_case_observable_channels(case);
         self.check_case_resource_group(case);
@@ -4936,6 +4957,65 @@ mod tests {
             out.iter()
                 .any(|v| v.code == "V16" && v.record == "case-spec-no-assertion"),
             "spec-expectation without an assertion must be V16, got {out:?}"
+        );
+    }
+
+    // -- V37: an assertion that cannot fail -----------------------------------------
+
+    /// The three vacuous shapes are rejected. Each passes against ANY output, so it
+    /// reports coverage while proving nothing.
+    #[test]
+    fn v37_rejects_assertions_that_cannot_fail() {
+        for (label, assertion) in [
+            ("empty-subset", serde_json::json!({"jsonSubset": {}})),
+            ("empty-contains", serde_json::json!({"contains": ""})),
+            ("empty-matches", serde_json::json!({"matches": ""})),
+        ] {
+            let mut reg = Registry::default();
+            let id = format!("case-vacuous-{label}");
+            let mut case = declarative_case(&id);
+            case.expected[0].assertion = Some(assertion);
+            reg.cases.push(case);
+            let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+            assert!(
+                out.iter().any(|v| v.code == "V37" && v.record == id),
+                "{label} must be V37, got {out:?}"
+            );
+        }
+    }
+
+    /// A *weak* assertion is not a vacuous one and must be permitted. `{"features": {}}`
+    /// still requires a `features` key to exist, so a document omitting it fails. Only
+    /// an assertion that rules out NOTHING is rejected — otherwise V37 becomes a style
+    /// rule about how tightly cases should be written, which is a judgement call the
+    /// validator has no business making.
+    #[test]
+    fn v37_permits_a_weak_but_non_vacuous_assertion() {
+        let mut reg = Registry::default();
+        let mut case = declarative_case("case-presence-only");
+        case.expected[0].assertion = Some(serde_json::json!({"jsonSubset": {"features": {}}}));
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            !out.iter().any(|v| v.code == "V37"),
+            "presence-only assertion must not be V37, got {out:?}"
+        );
+    }
+
+    /// A nested empty object is a Feature's OPTIONS map, not a vacuous assertion: both
+    /// enclosing keys must still be present for the case to pass.
+    #[test]
+    fn v37_permits_a_nested_empty_options_object() {
+        let mut reg = Registry::default();
+        let mut case = declarative_case("case-nested-empty-options");
+        case.expected[0].assertion = Some(serde_json::json!({
+            "jsonSubset": {"features": {"ghcr.io/devcontainers/features/git:1.3.2": {}}}
+        }));
+        reg.cases.push(case);
+        let out = run(&reg, "2026-07-19", Path::new("/nonexistent-root"));
+        assert!(
+            !out.iter().any(|v| v.code == "V37"),
+            "nested empty options must not be V37, got {out:?}"
         );
     }
 

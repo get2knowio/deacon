@@ -119,6 +119,20 @@ pub fn render(registry: &Registry) -> String {
     // behavior -> set of (scenario key tuple, live?) drawn from its covering cases.
     let mut coverage: BTreeMap<&str, Vec<(&TestCase, bool)>> = BTreeMap::new();
     for case in &registry.cases {
+        // A case whose every declared assertion is vacuous checks nothing, so it must
+        // not colour a cell. `·` already means "not checked in this scenario", and a
+        // check that cannot fail IS not checking it — this is a correction to an
+        // existing cell, not a new tier. V37 makes such a case unauthorable; this keeps
+        // the page's claim true by construction rather than by that gate holding.
+        if !case.expected.is_empty()
+            && case.expected.iter().all(|e| {
+                e.assertion
+                    .as_ref()
+                    .is_some_and(crate::model::is_vacuous_assertion)
+            })
+        {
+            continue;
+        }
         let live = matches!(case.oracle_type, Some(OracleType::LiveDifferential));
         for b in &case.behaviors {
             coverage.entry(b.as_str()).or_default().push((case, live));
@@ -168,13 +182,17 @@ pub fn render(registry: &Registry) -> String {
             // No scenario evidence to grid: a flat list is honest and smaller.
             out.push_str("| | Behavior | Notes |\n|---|---|---|\n");
             for b in behaviors {
-                let live = coverage
-                    .get(b.id.as_str())
-                    .is_some_and(|cs| cs.iter().any(|(_, l)| *l));
+                // No covering case at all is `·`, not a verdict. Falling through to
+                // `covered_verdict` here rendered ◐ — "believed the same" — for a
+                // behavior nothing has ever exercised, which is a claim, not a gap.
+                let cell = match coverage.get(b.id.as_str()) {
+                    None => Cell::Unchecked,
+                    Some(cs) => covered_verdict(b, cs.iter().any(|(_, l)| *l)),
+                };
                 let _ = writeln!(
                     out,
                     "| {} | {} | {} |",
-                    covered_verdict(b, live).glyph(),
+                    cell.glyph(),
                     first_sentence(&b.statement),
                     notes_cell(b)
                 );
@@ -404,4 +422,90 @@ fn footer() -> String {
      the waivers, and the scenario-coverage accounting — lives in `conformance/registry/` \
      and `conformance/RULES.md`. This page is generated from it.\n"
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{
+        BehaviorUnit, Decision, ExpectedObservable, ReferenceStatus, SpecStatus, TestCase,
+    };
+
+    fn behavior() -> BehaviorUnit {
+        BehaviorUnit {
+            id: "bhv-x".into(),
+            area: "up".into(),
+            statement: "does a thing".into(),
+            applicability: Vec::new(),
+            spec: SpecStatus::Conformant,
+            reference: ReferenceStatus::Aligned,
+            decision: Decision::FollowSpec,
+            notes: None,
+        }
+    }
+
+    fn case_with(assertion: serde_json::Value) -> TestCase {
+        let mut case = TestCase {
+            id: "case-x".into(),
+            behaviors: vec!["bhv-x".into()],
+            ..TestCase::default()
+        };
+        case.oracle_type = Some(OracleType::LiveDifferential);
+        case.scenario_context
+            .insert("sdim-operation".into(), "up".into());
+        case.scenario_context
+            .insert("sdim-config-source".into(), "image".into());
+        case.scenario_context
+            .insert("sdim-features".into(), "single".into());
+        case.expected = vec![ExpectedObservable {
+            channel: "chan-stdout".into(),
+            operation: None,
+            assertion: Some(assertion),
+        }];
+        case
+    }
+
+    /// The rendered rows only — the legend necessarily contains every glyph, so
+    /// asserting over the whole page is always true and tests nothing.
+    fn rows_of(page: &str) -> String {
+        page.lines()
+            .skip_while(|l| !l.starts_with("### "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn render_with(assertion: serde_json::Value) -> String {
+        let mut reg = Registry {
+            behaviors: vec![behavior()],
+            cases: vec![case_with(assertion)],
+            ..Registry::default()
+        };
+        reg.cases[0].id = "case-x".into();
+        render(&reg)
+    }
+
+    /// A case whose only assertion cannot fail must not colour a cell — it reports
+    /// coverage while proving nothing, and `·` already means "not checked here".
+    #[test]
+    fn a_vacuous_case_does_not_colour_a_cell() {
+        let page = rows_of(&render_with(serde_json::json!({"jsonSubset": {}})));
+        assert!(
+            !page.contains("✅") && !page.contains("◐"),
+            "a vacuous assertion must leave the row unchecked:\n{page}"
+        );
+    }
+
+    /// A weak-but-real assertion still counts: `{"features": {}}` requires the key to
+    /// exist, so a document omitting it fails. Rejecting it here would make the page a
+    /// style critic rather than an honest report.
+    #[test]
+    fn a_presence_only_case_still_colours_a_cell() {
+        let page = rows_of(&render_with(
+            serde_json::json!({"jsonSubset": {"features": {}}}),
+        ));
+        assert!(
+            page.contains("✅"),
+            "a presence-only assertion is real coverage:\n{page}"
+        );
+    }
 }

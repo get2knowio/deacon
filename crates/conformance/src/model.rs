@@ -893,6 +893,39 @@ pub struct ExpectedObservable {
     pub assertion: Option<Value>,
 }
 
+/// Whether an assertion constrains **nothing** — a check that cannot fail.
+///
+/// This is a cliff, not a slope, and the distinction matters. A *weak* assertion still
+/// rules something out: `jsonSubset: {"features": {}}` requires a `features` key to
+/// exist, which a document omitting it would fail. A *vacuous* one rules out nothing at
+/// all, so declaring it is indistinguishable from declaring no expectation while looking
+/// like coverage on every report.
+///
+/// The three vacuous shapes, from how [`crate`]'s comparator evaluates them:
+///
+/// - `jsonSubset: {}` — the matcher iterates the SUBSET's keys, so an empty object has
+///   nothing to check and passes against any object.
+/// - `contains: ""` — every string contains the empty string.
+/// - `matches: ""` — the empty pattern matches everything.
+///
+/// Nested empties are NOT vacuous: in `{"features": {"…/git:1.3.2": {}}}` the inner `{}`
+/// is a Feature's options object, and both enclosing keys must still be present.
+///
+/// What this cannot catch is an assertion that is vacuous only in EFFECT — `equals: 0`
+/// on an exit code where both implementations always exit 0 is structurally perfect and
+/// still proves nothing (#407). That is the injected-regression harness's job, not a
+/// validator's.
+pub fn is_vacuous_assertion(assertion: &Value) -> bool {
+    let Some(map) = assertion.as_object() else {
+        return false;
+    };
+    map.iter().any(|(kind, value)| match kind.as_str() {
+        "jsonSubset" => value.as_object().is_some_and(serde_json::Map::is_empty),
+        "contains" | "matches" => value.as_str().is_some_and(str::is_empty),
+        _ => false,
+    })
+}
+
 /// Resources the runner reclaims after a case runs, on success AND failure (data-model
 /// §1, contract case-schema.md). `images` is `false` | `true` | `"case-built"`; typed
 /// precisely in US5 (T052), stored as raw JSON here.
