@@ -180,10 +180,24 @@ pub fn render(registry: &Registry) -> String {
 
     let model = ScenarioModel::new(&registry.scenario, &registry.applicability);
 
-    let waivers: BTreeMap<&str, &str> = registry
+    // A waiver is LIVE only if some case tolerates it via `allowedDifferences` — that is
+    // what the declarative runner consumes and what reports it stale when the difference
+    // stops reproducing. One nothing names is enforced by nothing.
+    let consumed: BTreeSet<&str> = registry
+        .cases
+        .iter()
+        .flat_map(|c| c.allowed_differences.iter())
+        .filter_map(|d| d.waiver_id.as_deref())
+        .collect();
+    let waivers: BTreeMap<&str, (&str, bool)> = registry
         .waivers
         .iter()
-        .flat_map(|w| w.behaviors.iter().map(|b| (b.as_str(), w.id.as_str())))
+        .flat_map(|w| {
+            let live = consumed.contains(w.id.as_str());
+            w.behaviors
+                .iter()
+                .map(move |b| (b.as_str(), (w.id.as_str(), live)))
+        })
         .collect();
 
     let mut out = String::new();
@@ -266,7 +280,7 @@ fn grid(
     active: &[ActiveDim<'_>],
     behaviors: &[&crate::model::BehaviorUnit],
     coverage: &BTreeMap<&str, Vec<(&TestCase, bool)>>,
-    waivers: &BTreeMap<&str, &str>,
+    waivers: &BTreeMap<&str, (&str, bool)>,
 ) -> String {
     // Cross product of the active dimensions' values, in declared order.
     let mut combos: Vec<Vec<(&str, &str)>> = vec![Vec::new()];
@@ -381,7 +395,7 @@ fn first_sentence(statement: &str) -> String {
 
 /// Issue links out of `notes`, so a reader can follow a divergence to its tracking
 /// without the page restating the rationale.
-fn notes_cell(b: &crate::model::BehaviorUnit, waivers: &BTreeMap<&str, &str>) -> String {
+fn notes_cell(b: &crate::model::BehaviorUnit, waivers: &BTreeMap<&str, (&str, bool)>) -> String {
     let notes = b.notes.as_deref().unwrap_or("");
     let mut refs: Vec<String> = Vec::new();
     for (i, c) in notes.char_indices() {
@@ -401,14 +415,20 @@ fn notes_cell(b: &crate::model::BehaviorUnit, waivers: &BTreeMap<&str, &str>) ->
     }
     refs.truncate(2);
 
-    // A deliberate difference should be backed by a waiver: a waiver is verified to keep
-    // reproducing and fails as STALE when the difference stops, so it is what stops a
-    // characterization outliving the thing it characterized. Showing which waiver — and
-    // flagging a deliberate difference that has none — is what makes the row auditable
-    // rather than merely labelled.
+    // A deliberate difference is only auditable if something re-checks that it still
+    // reproduces — that is the whole value of a waiver, which fails as STALE when the
+    // difference stops. But EXISTING is not the same as being checked. A waiver becomes
+    // live by a case tolerating it via `allowedDifferences`, which the declarative runner
+    // consumes and reports stale when unconsumed. A waiver no case names is enforced by
+    // nothing: the `corpus_case` scope most of them carry was driven by the four corpus
+    // carriers deleted in 023, and no live binary has called `corpus_case`/`stale_among`
+    // against the real waiver set since. So the row must distinguish the two, or naming
+    // the waiver id restates the earlier defect one column over — rendering a claim in
+    // the place a reader reads evidence.
     let mut out = Vec::new();
     match waivers.get(b.id.as_str()) {
-        Some(id) => out.push(format!("<code>{id}</code>")),
+        Some((id, true)) => out.push(format!("<code>{id}</code>")),
+        Some((id, false)) => out.push(format!("<code>{id}</code> <strong>(unchecked)</strong>")),
         None if matches!(b.decision, Decision::IntentionalDivergence) => {
             out.push("<strong>no waiver</strong>".to_string());
         }
@@ -516,10 +536,16 @@ would improve every time someone asserted something new.
 | · | **Not checked yet** — a real gap |
 | *(blank)* | Does not arise in this scenario |
 
-A row's Notes name the **waiver** backing a deliberate difference, or say **no waiver**
-where a deliberate difference has none. A waiver is verified to keep reproducing and fails
-as *stale* when the difference stops, so it is what prevents a characterization outliving
-the thing it characterized — a `⚠️` row with no waiver is one nothing will ever re-examine.
+A row's Notes name the **waiver** backing a deliberate difference. A waiver's value is
+that it self-invalidates: it is re-checked against the reference and fails as *stale* the
+moment the difference stops reproducing, so a characterization cannot outlive the thing it
+characterized.
+
+That only holds while something re-checks it. A waiver becomes live by a test case
+tolerating it; one no case names is enforced by nothing, and is marked **(unchecked)**
+here. **no waiver** means a deliberate difference has none at all. Both mean the same
+thing for a reader: that difference is asserted, and nothing would notice if the CLI
+changed to match us tomorrow.
 
 Columns are the scenarios a behavior was checked in: the configuration's shape
 (**img**age / **dkr** Dockerfile / **cmp** Compose) crossed with how many Features it
@@ -655,6 +681,58 @@ mod tests {
         assert!(
             page.contains("**Of 1 behaviors that both tools implement, 1 are verified to match.**"),
             "running the reference is what must move the count:\n{page}"
+        );
+    }
+
+    /// A waiver no case tolerates is enforced by nothing, and must not read as though it
+    /// were. Naming the waiver id was itself a claim rendered where a reader reads
+    /// evidence: the id proves a record was written, not that anything re-checks it.
+    #[test]
+    fn a_waiver_no_case_consumes_is_marked_unchecked() {
+        use crate::model::{AllowedDifference, Expect, Scope, Waiver};
+        let waiver = |id: &str| Waiver {
+            id: id.into(),
+            behaviors: vec!["bhv-x".into()],
+            scope: Scope::CorpusCase {
+                corpus: "c".into(),
+                case: "k".into(),
+            },
+            expect: Expect::BothAccept {},
+            rationale: "r".into(),
+            added: "2026-01-01".into(),
+            expires: "2027-01-01".into(),
+            config: None,
+        };
+        let tolerance = |id: &str| AllowedDifference {
+            behavior: "bhv-x".into(),
+            context: Vec::new(),
+            observable_path: "chan-stdout.x".into(),
+            rationale: "r".into(),
+            waiver_id: Some(id.into()),
+            divergence_id: None,
+        };
+        let mut b = behavior();
+        b.decision = Decision::IntentionalDivergence;
+        let mut reg = Registry {
+            behaviors: vec![b],
+            cases: vec![case_with(serde_json::json!({"contains": "x"}))],
+            waivers: vec![waiver("wvr-x")],
+            ..Registry::default()
+        };
+        // Assert over the ROWS only: the legend explains the marker, so it necessarily
+        // contains the literal `(unchecked)` and a whole-page assertion is always true.
+        let rows = rows_of(&render(&reg));
+        assert!(
+            rows.contains("<code>wvr-x</code> <strong>(unchecked)</strong>"),
+            "a waiver nothing consumes must be flagged:\n{rows}"
+        );
+
+        // Same waiver, same behavior — only a case tolerance is added.
+        reg.cases[0].allowed_differences = vec![tolerance("wvr-x")];
+        let rows = rows_of(&render(&reg));
+        assert!(
+            rows.contains("<code>wvr-x</code>") && !rows.contains("(unchecked)"),
+            "a consumed waiver must render plain:\n{rows}"
         );
     }
 
