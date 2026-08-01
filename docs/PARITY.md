@@ -24,10 +24,19 @@ A further 16 are deacon-only, with nothing to compare against.
 Columns are the scenarios a behavior was checked in: the configuration's shape
 (**img**age / **dkr** Dockerfile / **cmp** Compose) crossed with how many Features it
 declares (**–** none / **1** one / **many** several / **deps** several with dependency
-ordering / **lock** with a lockfile). Areas only show the columns their evidence varies.
+ordering / **lock** with a lockfile).
+
+**A column only appears where that scenario is possible.** `outdated` never resolves a
+dependency graph, so it has no **deps** column at all rather than a column of `·` implying
+an untested hole. So a `·` means genuinely not yet checked — with one caveat below.
 
 A cell says a case exercised that scenario — not that the case's assertions were strong.
 The leading glyph rolls the row up; where a row is mostly `·`, that is the honest signal.
+
+The caveat: columns are dropped per AREA, not per behavior. A behavior that is inherently
+about one configuration shape — deriving a Compose project name, say — still shows `·`
+under **img** and **dkr**, where the truth is that the question does not arise. Reading
+down a column is reliable; reading along a row needs that in mind.
 
 ### build
 
@@ -71,14 +80,14 @@ The leading glyph rolls the row up; where a row is mostly `·`, that is the hone
 
 <table>
 <thead>
-<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
-<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="2">img</th><th colspan="2">dkr</th><th colspan="2">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>–</th><th>1</th><th>–</th><th>1</th></tr>
 </thead>
 <tbody>
-<tr><td>✅</td><td>exec runs a command inside the target container and streams its stdout/stderr and…</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
-<tr><td>·</td><td>exec --container-id (no --workspace-folder/--config) recovers remoteUser and remoteEnv…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#322</td></tr>
-<tr><td>·</td><td>`exec` runs the command with the environment the user-env probe captured, with the…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#370</td></tr>
-<tr><td>⚠️</td><td>The relative order of a restored image `PATH` entry against one a Feature contributed…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#370</td></tr>
+<tr><td>✅</td><td>exec runs a command inside the target container and streams its stdout/stderr and…</td><td>✅</td><td>·</td><td>✅</td><td>·</td><td>✅</td><td>·</td><td></td></tr>
+<tr><td>·</td><td>exec --container-id (no --workspace-folder/--config) recovers remoteUser and remoteEnv…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#322</td></tr>
+<tr><td>·</td><td>`exec` runs the command with the environment the user-env probe captured, with the…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#370</td></tr>
+<tr><td>⚠️</td><td>The relative order of a restored image `PATH` entry against one a Feature contributed…</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>#370</td></tr>
 </tbody>
 </table>
 
@@ -111,14 +120,14 @@ The leading glyph rolls the row up; where a row is mostly `·`, that is the hone
 
 <table>
 <thead>
-<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
-<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="4">img</th><th colspan="4">dkr</th><th colspan="4">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>many</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>lock</th></tr>
 </thead>
 <tbody>
-<tr><td>❌</td><td>`outdated` resolves the full extends chain before reporting versions, so a Feature…</td><td>·</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>❌</td><td>·</td><td>·</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>❌</td><td>#389</td></tr>
-<tr><td>⚠️</td><td>`outdated` fails with a non-zero exit and a diagnostic naming the file when a…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#406 #407</td></tr>
-<tr><td>◐</td><td>`outdated` keys each report entry by the Feature reference the configuration DECLARED,…</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#407 #411</td></tr>
-<tr><td>✅</td><td>`outdated` reports each configured Feature's current, wanted, and latest version, and…</td><td>✅</td><td>◐</td><td>◐</td><td>·</td><td>◐</td><td>◐</td><td>✅</td><td>·</td><td>·</td><td>◐</td><td>✅</td><td>◐</td><td>◐</td><td>·</td><td>◐</td><td></td></tr>
+<tr><td>❌</td><td>`outdated` resolves the full extends chain before reporting versions, so a Feature…</td><td>·</td><td>❌</td><td>·</td><td>·</td><td>·</td><td>·</td><td>❌</td><td>·</td><td>❌</td><td>·</td><td>·</td><td>❌</td><td>#389</td></tr>
+<tr><td>⚠️</td><td>`outdated` fails with a non-zero exit and a diagnostic naming the file when a…</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#406 #407</td></tr>
+<tr><td>◐</td><td>`outdated` keys each report entry by the Feature reference the configuration DECLARED,…</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#407 #411</td></tr>
+<tr><td>✅</td><td>`outdated` reports each configured Feature's current, wanted, and latest version, and…</td><td>✅</td><td>◐</td><td>◐</td><td>◐</td><td>◐</td><td>✅</td><td>·</td><td>◐</td><td>✅</td><td>◐</td><td>◐</td><td>◐</td><td></td></tr>
 </tbody>
 </table>
 
@@ -235,13 +244,13 @@ The leading glyph rolls the row up; where a row is mostly `·`, that is the hone
 
 <table>
 <thead>
-<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="5">img</th><th colspan="5">dkr</th><th colspan="5">cmp</th><th rowspan="2">Notes</th></tr>
-<tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
+<tr><th rowspan="2"></th><th rowspan="2">Behavior</th><th colspan="3">img</th><th colspan="3">dkr</th><th colspan="3">cmp</th><th rowspan="2">Notes</th></tr>
+<tr><th>–</th><th>1</th><th>many</th><th>–</th><th>1</th><th>many</th><th>–</th><th>1</th><th>many</th></tr>
 </thead>
 <tbody>
-<tr><td>🔵</td><td>`upgrade` regenerates the lockfile from the configuration AFTER the command-line…</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>#409</td></tr>
-<tr><td>⚠️</td><td>`upgrade` on a configuration that declares no Features regenerates an EMPTY lockfile…</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
-<tr><td>✅</td><td>`upgrade` regenerates the devcontainer lockfile from the effective configuration's…</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>🔵</td><td>`upgrade` regenerates the lockfile from the configuration AFTER the command-line…</td><td>·</td><td>🔵</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>·</td><td>🔵</td><td>#409</td></tr>
+<tr><td>⚠️</td><td>`upgrade` on a configuration that declares no Features regenerates an EMPTY lockfile…</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>✅</td><td>`upgrade` regenerates the devcontainer lockfile from the effective configuration's…</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
 </tbody>
 </table>
 
