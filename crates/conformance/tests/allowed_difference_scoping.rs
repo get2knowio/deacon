@@ -31,6 +31,7 @@ fn behavior(id: &str, decision: Decision) -> BehaviorUnit {
         reference: ReferenceStatus::Aligned,
         decision,
         notes: None,
+        scenario_applicability: Default::default(),
     }
 }
 

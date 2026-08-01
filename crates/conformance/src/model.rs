@@ -373,6 +373,20 @@ pub struct BehaviorUnit {
     /// Rationale, issue links.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// SCENARIO applicability: the `sdim-` values this behavior can be exercised under
+    /// at all. Absent (the usual case) means every value the operation permits.
+    ///
+    /// Distinct from [`Self::applicability`], which conditions on ENVIRONMENT dimensions
+    /// (os, arch, runtime, oracle) — "where does this evidence hold". This answers
+    /// "where does the question even arise". A behavior about deriving a Compose project
+    /// name has no meaning under an image configuration, and rendering it as untested
+    /// invents a gap.
+    ///
+    /// The applicability RULES already exclude values per operation; this is the finer
+    /// grain the rules cannot express, because they are keyed by operation and several
+    /// behaviors of one operation may differ.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub scenario_applicability: IndexMap<String, Vec<String>>,
 }
 
 /// The executable-test reference of a [`TestCase`] (research Decision 9). `binary`

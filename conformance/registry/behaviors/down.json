@@ -9,7 +9,12 @@
       "spec": "unspecified",
       "reference": "not-applicable",
       "decision": "deacon-extension",
-      "notes": "Same extension as bhv-down-removes-container. The risk this record exists for is a derivation that does not reproduce what `up` used — teardown then reports success and leaves the project running, silent on every channel except the container graph."
+      "notes": "Same extension as bhv-down-removes-container. The risk this record exists for is a derivation that does not reproduce what `up` used — teardown then reports success and leaves the project running, silent on every channel except the container graph.",
+      "scenarioApplicability": {
+        "sdim-config-source": [
+          "compose"
+        ]
+      }
     },
     {
       "id": "bhv-down-missing-config-idempotent",

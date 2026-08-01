@@ -50,6 +50,10 @@ enum Cell {
     DeaconOnly,
     /// No case exercises this scenario.
     Unchecked,
+    /// The behavior does not arise in this scenario — not a gap. Rendered blank rather
+    /// than with a glyph: there is no question here to answer, so any mark would invite
+    /// one.
+    NotApplicable,
 }
 
 impl Cell {
@@ -61,6 +65,7 @@ impl Cell {
             Cell::DiffersFixing => "❌",
             Cell::DeaconOnly => "🔵",
             Cell::Unchecked => "·",
+            Cell::NotApplicable => "",
         }
     }
 }
@@ -152,6 +157,12 @@ pub fn render(registry: &Registry) -> String {
 
     let model = ScenarioModel::new(&registry.scenario, &registry.applicability);
 
+    let waivers: BTreeMap<&str, &str> = registry
+        .waivers
+        .iter()
+        .flat_map(|w| w.behaviors.iter().map(|b| (b.as_str(), w.id.as_str())))
+        .collect();
+
     let mut out = String::new();
     out.push_str(&header(registry));
 
@@ -215,13 +226,13 @@ pub fn render(registry: &Registry) -> String {
                     "| {} | {} | {} |",
                     cell.glyph(),
                     first_sentence(&b.statement),
-                    notes_cell(b)
+                    notes_cell(b, &waivers)
                 );
             }
             continue;
         }
 
-        out.push_str(&grid(&active, behaviors, &coverage));
+        out.push_str(&grid(&active, behaviors, &coverage, &waivers));
     }
 
     out.push_str(&footer());
@@ -232,6 +243,7 @@ fn grid(
     active: &[ActiveDim<'_>],
     behaviors: &[&crate::model::BehaviorUnit],
     coverage: &BTreeMap<&str, Vec<(&TestCase, bool)>>,
+    waivers: &BTreeMap<&str, &str>,
 ) -> String {
     // Cross product of the active dimensions' values, in declared order.
     let mut combos: Vec<Vec<(&str, &str)>> = vec![Vec::new()];
@@ -278,6 +290,17 @@ fn grid(
         let cases = coverage.get(b.id.as_str());
         let mut cells = Vec::with_capacity(combos.len());
         for combo in &combos {
+            // A behavior can declare the scenario values it arises under at all. Without
+            // this, a Compose-only behavior showed `·` under `img`/`dkr` — indistinguishable
+            // from an untested gap, when the question does not arise.
+            if combo.iter().any(|(dim, value)| {
+                b.scenario_applicability
+                    .get(*dim)
+                    .is_some_and(|allowed| !allowed.iter().any(|a| a == value))
+            }) {
+                cells.push(Cell::NotApplicable);
+                continue;
+            }
             let hits: Vec<bool> = cases
                 .into_iter()
                 .flatten()
@@ -296,7 +319,7 @@ fn grid(
         let roll = cells
             .iter()
             .copied()
-            .find(|c| *c != Cell::Unchecked)
+            .find(|c| !matches!(c, Cell::Unchecked | Cell::NotApplicable))
             .unwrap_or(Cell::Unchecked);
         let _ = write!(
             s,
@@ -307,7 +330,7 @@ fn grid(
         for c in &cells {
             let _ = write!(s, "<td>{}</td>", c.glyph());
         }
-        let _ = writeln!(s, "<td>{}</td></tr>", notes_cell(b));
+        let _ = writeln!(s, "<td>{}</td></tr>", notes_cell(b, waivers));
     }
     s.push_str("</tbody>\n</table>\n");
     s
@@ -335,7 +358,7 @@ fn first_sentence(statement: &str) -> String {
 
 /// Issue links out of `notes`, so a reader can follow a divergence to its tracking
 /// without the page restating the rationale.
-fn notes_cell(b: &crate::model::BehaviorUnit) -> String {
+fn notes_cell(b: &crate::model::BehaviorUnit, waivers: &BTreeMap<&str, &str>) -> String {
     let notes = b.notes.as_deref().unwrap_or("");
     let mut refs: Vec<String> = Vec::new();
     for (i, c) in notes.char_indices() {
@@ -353,8 +376,23 @@ fn notes_cell(b: &crate::model::BehaviorUnit) -> String {
             }
         }
     }
-    refs.truncate(3);
-    refs.join(" ")
+    refs.truncate(2);
+
+    // A deliberate difference should be backed by a waiver: a waiver is verified to keep
+    // reproducing and fails as STALE when the difference stops, so it is what stops a
+    // characterization outliving the thing it characterized. Showing which waiver — and
+    // flagging a deliberate difference that has none — is what makes the row auditable
+    // rather than merely labelled.
+    let mut out = Vec::new();
+    match waivers.get(b.id.as_str()) {
+        Some(id) => out.push(format!("<code>{id}</code>")),
+        None if matches!(b.decision, Decision::IntentionalDivergence) => {
+            out.push("<strong>no waiver</strong>".to_string());
+        }
+        None => {}
+    }
+    out.extend(refs);
+    out.join(" ")
 }
 
 fn html_escape(s: &str) -> String {
@@ -423,7 +461,13 @@ A further {deacon_only} are deacon-only, with nothing to compare against.
 | ⚠️ | Differs on purpose |
 | ❌ | Differs, and we intend to fix it |
 | 🔵 | deacon-only; the CLI has no equivalent |
-| · | Not checked in this scenario |
+| · | **Not checked yet** — a real gap |
+| *(blank)* | Does not arise in this scenario |
+
+A row's Notes name the **waiver** backing a deliberate difference, or say **no waiver**
+where a deliberate difference has none. A waiver is verified to keep reproducing and fails
+as *stale* when the difference stops, so it is what prevents a characterization outliving
+the thing it characterized — a `⚠️` row with no waiver is one nothing will ever re-examine.
 
 Columns are the scenarios a behavior was checked in: the configuration's shape
 (**img**age / **dkr** Dockerfile / **cmp** Compose) crossed with how many Features it
@@ -432,15 +476,16 @@ ordering / **lock** with a lockfile).
 
 **A column only appears where that scenario is possible.** `outdated` never resolves a
 dependency graph, so it has no **deps** column at all rather than a column of `·` implying
-an untested hole. So a `·` means genuinely not yet checked — with one caveat below.
+an untested hole. So a `·` means genuinely not yet checked.
 
 A cell says a case exercised that scenario — not that the case's assertions were strong.
 The leading glyph rolls the row up; where a row is mostly `·`, that is the honest signal.
 
-The caveat: columns are dropped per AREA, not per behavior. A behavior that is inherently
-about one configuration shape — deriving a Compose project name, say — still shows `·`
-under **img** and **dkr**, where the truth is that the question does not arise. Reading
-down a column is reliable; reading along a row needs that in mind.
+A **blank** cell means the behavior does not arise in that scenario at all — deriving a
+Compose project name has no meaning under an image configuration. Blank rather than a
+glyph, because there is no question there to answer.
+
+So every `·` is a real gap: a scenario this behavior COULD be checked in and has not been.
 "#,
         oracle = pin_of(registry, RevisionKind::Oracle),
         spec = pin_of(registry, RevisionKind::Spec),
@@ -471,6 +516,7 @@ mod tests {
             reference: ReferenceStatus::Aligned,
             decision: Decision::FollowSpec,
             notes: None,
+            scenario_applicability: Default::default(),
         }
     }
 
@@ -592,4 +638,151 @@ mod tests {
             "a presence-only assertion is real coverage:\n{page}"
         );
     }
+}
+
+/// One untested `(behavior, scenario)` cell — a `·` on the page, and a unit of work.
+///
+/// The parity matrix doubles as a queue. A dot names something concrete to go and do:
+/// author a case for this behavior in this scenario, run it, and learn whether deacon
+/// matches. That is a better driver than the pairwise obligation counts, which say how
+/// many abstract value-pairs remain uncovered but never what to test.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenCell {
+    pub area: String,
+    pub behavior: String,
+    /// The scenario assignment, e.g. `{"sdim-config-source": "compose"}`.
+    pub scenario: std::collections::BTreeMap<String, String>,
+    /// This behavior's other scenarios that ARE covered. An empty list means the
+    /// behavior has no evidence at all anywhere, which is a different and larger
+    /// problem than one uncovered scenario.
+    pub covered_elsewhere: usize,
+    /// Whether any covering case anywhere compares against the reference. A behavior
+    /// evidenced only deacon-side is worth more attention than one already differentially
+    /// tested in a neighbouring scenario.
+    pub differentially_tested: bool,
+    /// Whether a waiver stands behind this behavior. A waiver IS evidence — it is
+    /// verified to keep reproducing and fails as stale when it stops — but it is scoped
+    /// to a difference, not to a scenario, so it never fills a cell. Without this the
+    /// queue reported a waiver-backed behavior as having no evidence at all.
+    pub waiver_backed: bool,
+}
+
+/// Enumerate every `·` on the page, in the order the page renders them.
+///
+/// Deliberately excludes blanks (the behavior does not arise there) and every non-dot
+/// cell, so the result is exactly the open work.
+pub fn open_cells(registry: &Registry) -> Vec<OpenCell> {
+    let mut coverage: BTreeMap<&str, Vec<(&TestCase, bool)>> = BTreeMap::new();
+    for case in &registry.cases {
+        if !case.expected.is_empty()
+            && case.expected.iter().all(|e| {
+                e.assertion
+                    .as_ref()
+                    .is_some_and(crate::model::is_vacuous_assertion)
+            })
+        {
+            continue;
+        }
+        let live = matches!(case.oracle_type, Some(OracleType::LiveDifferential));
+        for b in &case.behaviors {
+            coverage.entry(b.as_str()).or_default().push((case, live));
+        }
+    }
+
+    let waived: BTreeSet<&str> = registry
+        .waivers
+        .iter()
+        .flat_map(|w| w.behaviors.iter().map(String::as_str))
+        .collect();
+
+    let model = ScenarioModel::new(&registry.scenario, &registry.applicability);
+    let mut areas: BTreeMap<&str, Vec<&crate::model::BehaviorUnit>> = BTreeMap::new();
+    for b in &registry.behaviors {
+        areas.entry(b.area.as_str()).or_default().push(b);
+    }
+
+    let mut out = Vec::new();
+    for behaviors in areas.values() {
+        let operations: BTreeSet<&str> = behaviors
+            .iter()
+            .filter_map(|b| coverage.get(b.id.as_str()))
+            .flatten()
+            .filter_map(|(case, _)| case.scenario_context.get("sdim-operation"))
+            .map(String::as_str)
+            .collect();
+        let mut permitted: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for op in &operations {
+            for (dim, values) in model.applicable_dimensions(op) {
+                permitted
+                    .entry(dim.id.as_str())
+                    .or_default()
+                    .extend(values.iter().copied());
+            }
+        }
+        let active: Vec<ActiveDim<'_>> = DIMS
+            .iter()
+            .filter_map(|d| {
+                let allowed = permitted.get(d.key)?;
+                let values: Vec<(&str, &str)> = d
+                    .values
+                    .iter()
+                    .filter(|(value, _)| allowed.contains(value))
+                    .copied()
+                    .collect();
+                (values.len() > 1).then_some(ActiveDim { key: d.key, values })
+            })
+            .collect();
+        if active.is_empty() {
+            continue;
+        }
+
+        let mut combos: Vec<Vec<(&str, &str)>> = vec![Vec::new()];
+        for dim in &active {
+            let mut next = Vec::new();
+            for base in &combos {
+                for (value, _) in dim.values.iter() {
+                    let mut c = base.clone();
+                    c.push((dim.key, value));
+                    next.push(c);
+                }
+            }
+            combos = next;
+        }
+
+        for b in behaviors {
+            let cases = coverage.get(b.id.as_str());
+            let covered = cases.map_or(0, |c| c.len());
+            let differential = cases.is_some_and(|c| c.iter().any(|(_, live)| *live));
+            for combo in &combos {
+                if combo.iter().any(|(dim, value)| {
+                    b.scenario_applicability
+                        .get(*dim)
+                        .is_some_and(|allowed| !allowed.iter().any(|a| a == value))
+                }) {
+                    continue; // does not arise
+                }
+                let exercised = cases.into_iter().flatten().any(|(case, _)| {
+                    combo
+                        .iter()
+                        .all(|(k, v)| case.scenario_context.get(*k).map(String::as_str) == Some(*v))
+                });
+                if exercised {
+                    continue;
+                }
+                out.push(OpenCell {
+                    area: b.area.clone(),
+                    behavior: b.id.clone(),
+                    scenario: combo
+                        .iter()
+                        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                        .collect(),
+                    covered_elsewhere: covered,
+                    differentially_tested: differential,
+                    waiver_backed: waived.contains(b.id.as_str()),
+                });
+            }
+        }
+    }
+    out
 }

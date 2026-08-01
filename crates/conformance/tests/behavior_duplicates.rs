@@ -28,6 +28,7 @@ fn behavior(id: &str, statement: &str) -> BehaviorUnit {
         reference: ReferenceStatus::Aligned,
         decision: Decision::FollowSpec,
         notes: None,
+        scenario_applicability: Default::default(),
     }
 }
 

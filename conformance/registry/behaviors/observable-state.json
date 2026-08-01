@@ -9,6 +9,11 @@
       "spec": "unspecified",
       "reference": "divergent",
       "decision": "intentional-divergence",
+      "scenarioApplicability": {
+        "sdim-config-source": [
+          "compose"
+        ]
+      },
       "notes": "Measured at oracle 0.87.0: both CLIs layer an override on top of the workspace's Compose file, and each delivers it differently — deacon passes it on stdin (recorded as `-`), the reference writes a temporary `docker-compose.devcontainer.containerFeatures-*.yml` under its own cache directory and names that path. `config-hash` differs as a consequence, since Compose hashes the merged file set. The spec does not say how a consumer must deliver its override, and neither delivery is observable in the resulting container beyond these two bookkeeping labels — the SERVICE, the project-relative network and volume, and every mount are compared and agree. Distinct from `bhv-compose-project-name-robust`, which is about the project NAME: an implementation could adopt either CLI's naming and still deliver its override the other way. Characterized by `wvr-compose-project-file-set`."
     },
     {
@@ -19,6 +24,11 @@
       "spec": "unspecified",
       "reference": "divergent",
       "decision": "intentional-divergence",
+      "scenarioApplicability": {
+        "sdim-config-source": [
+          "compose"
+        ]
+      },
       "notes": "Robustness differentiator (issue #265; docs/DIFFERENTIATORS.md). The reference derives <folder>_devcontainer verbatim, so a folder like `-myproj` yields an invalid --project-name docker compose rejects. deacon's derived name is always valid and isolated. Backed by case-compose-project-name (parity_observable_state, which observes com.docker.compose.project)."
     },
     {
