@@ -79,6 +79,7 @@ checkable at a glance rather than by reading every section.
 | **V34** | lane integrity: a derived execution unit assigned to zero lanes; a lane naming an unknown class, program, or profile; case predicates that overlap or leave a remainder; a lane declaring `blocking: true` where FR-015/FR-019 forbid it; any lane declaring `mayWriteRecord: true`; a declared nextest profile whose filter does not select the lane's programs | [Lanes and execution units](#lanes-and-execution-units-v34) |
 | **V35** | execution-manifest integrity: absent, malformed, incomplete, produced for a different revision, stale against current hashes, or carrying an unaccounted outcome | [Execution manifest](#execution-manifest-v35) |
 | **V36** | drift-record integrity: an observation whose id is not derived from its substance; a duplicate; a `lastCompletedRun` omitting a probed kind; an upgrade-proposal section marked absent or unsorted | [Drift observations and upgrade proposals](#drift-observations-and-upgrade-proposals-v36) |
+| **V37** | an assertion that cannot fail: an empty `jsonSubset`, `contains`, or `matches` | [Assertions that cannot fail](#assertions-that-cannot-fail-v37) |
 
 **Three distinctions this file keeps apart**, because conflating any pair makes a status
 unfalsifiable:
@@ -1231,3 +1232,40 @@ or absent.
 **Only immutable revisions.** A branch name, moving tag, or distribution tag is rejected at
 load: a canary run against a moving target cannot be re-observed, so anything it finds can
 never be triaged into a durable record.
+
+## Assertions that cannot fail (V37)
+
+An assertion that constrains **nothing** is rejected. Three shapes qualify, from how the
+comparator evaluates them:
+
+- `jsonSubset: {}` — the matcher iterates the SUBSET's keys, so an empty object has
+  nothing to check and passes against any object.
+- `contains: ""` — every string contains the empty string.
+- `matches: ""` — the empty pattern matches everything.
+
+Such a case runs, evaluates, passes, and reports coverage on its channel while proving
+nothing. That is strictly worse than declaring no assertion at all, which at least shows
+up as an absence.
+
+**This is a cliff, not a slope, and the class is drawn narrowly on purpose.** A *weak*
+assertion still rules something out: `jsonSubset: {"features": {}}` requires a `features`
+key to exist, so a document omitting it fails. Only assertions that rule out nothing are
+rejected — widening V37 to "assertions that should be tighter" would make the validator a
+style critic on a judgement the case author is better placed to make.
+
+A nested empty object is likewise fine: in
+`{"features": {"ghcr.io/devcontainers/features/git:1.3.2": {}}}` the inner `{}` is a
+Feature's options map, and both enclosing keys must still be present.
+
+**What V37 cannot catch**, and does not pretend to: an assertion vacuous only in EFFECT.
+`equals: 0` on an exit code where both implementations always exit 0 on that input is
+structurally perfect and still proves nothing — three `live-differential` cases were in
+exactly that state (#407), leaving deacon's `outdated` report uncompared for the whole
+life of the registry. No validator decides that. The
+[injected-regression harness](#injected-regression-integrity-v30) does: it perturbs the
+evidence source and requires the case to go from clean to failing on that channel.
+
+The generated parity page applies the same rule from the other side — a case whose every
+assertion is vacuous does not colour a cell, because `·` ("not checked in this scenario")
+is what a check that cannot fail amounts to. V37 makes such a case unauthorable; the page
+rule keeps its claim true by construction rather than by that gate holding.
