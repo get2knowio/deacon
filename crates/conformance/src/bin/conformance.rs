@@ -110,6 +110,14 @@ enum Command {
     /// Deterministic: the same registry renders the same bytes. Prints to stdout
     /// unless `--write` is given, so a check can diff it without a temp file.
     ParityPage {
+        /// Instead of the page, list every `·` — the untested (behavior, scenario)
+        /// cells — as a work queue, most-neglected first. Each line is a thing to go
+        /// and test, unlike a coverage count.
+        #[arg(long, conflicts_with_all = ["write", "check"])]
+        open: bool,
+        /// With `--open`: emit JSON instead of the human listing.
+        #[arg(long, requires = "open")]
+        json: bool,
         /// Write to `docs/PARITY.md` instead of printing.
         #[arg(long)]
         write: bool,
@@ -602,7 +610,12 @@ fn run(cli: Cli) -> i32 {
     match cli.command {
         Command::Validate { json } => validate(&registry_dir, &today, json),
         Command::Report { out_dir } => report(&registry_dir, &today, out_dir),
-        Command::ParityPage { write, check } => parity_page_cmd(&registry_dir, write, check),
+        Command::ParityPage {
+            open,
+            json,
+            write,
+            check,
+        } => parity_page_cmd(&registry_dir, open, json, write, check),
         Command::Certify {
             json,
             report_dir,
@@ -3710,7 +3723,7 @@ fn resolve_today(flag: Option<&str>) -> anyhow::Result<String> {
 /// Kept out of `docs/` generation-by-hand deliberately: this page drifted twice within
 /// an hour of first publication, both times because a count was typed rather than
 /// derived. `--check` is what makes that impossible to repeat.
-fn parity_page_cmd(registry_dir: &Path, write: bool, check: bool) -> i32 {
+fn parity_page_cmd(registry_dir: &Path, open: bool, json: bool, write: bool, check: bool) -> i32 {
     let registry = match Registry::load(registry_dir) {
         Ok(r) => r,
         Err(e) => {
@@ -3718,6 +3731,53 @@ fn parity_page_cmd(registry_dir: &Path, write: bool, check: bool) -> i32 {
             return 1;
         }
     };
+    if open {
+        let cells = deacon_conformance::parity_page::open_cells(&registry);
+        if json {
+            match serde_json::to_string_pretty(&cells) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return 1;
+                }
+            }
+            return 0;
+        }
+        // Most-neglected first: a behavior with no evidence anywhere outranks one already
+        // covered in a neighbouring scenario, and deacon-only evidence outranks
+        // differentially-tested. Ties keep page order so the listing is stable.
+        let mut sorted = cells.clone();
+        sorted.sort_by_key(|c| {
+            (
+                c.covered_elsewhere == 0 && !c.waiver_backed,
+                c.covered_elsewhere,
+                c.differentially_tested,
+                c.area.clone(),
+                c.behavior.clone(),
+            )
+        });
+        for c in &sorted {
+            let scenario = c
+                .scenario
+                .iter()
+                .map(|(k, v)| format!("{}={v}", k.trim_start_matches("sdim-")))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let flag = if c.covered_elsewhere == 0 && !c.waiver_backed {
+                " [no evidence anywhere]"
+            } else if c.covered_elsewhere == 0 {
+                " [waiver-backed, no case]"
+            } else if !c.differentially_tested {
+                " [never compared to the CLI]"
+            } else {
+                ""
+            };
+            println!("{:<44} {scenario}{flag}", c.behavior);
+        }
+        println!("\n{} open cells", sorted.len());
+        return 0;
+    }
+
     let rendered = deacon_conformance::parity_page::render(&registry);
     let path = workspace_root().join("docs/PARITY.md");
 

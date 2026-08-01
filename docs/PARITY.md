@@ -19,7 +19,8 @@ A further 16 are deacon-only, with nothing to compare against.
 | ⚠️ | Differs on purpose |
 | ❌ | Differs, and we intend to fix it |
 | 🔵 | deacon-only; the CLI has no equivalent |
-| · | Not checked in this scenario |
+| · | **Not checked yet** — a real gap |
+| *(blank)* | Does not arise in this scenario |
 
 Columns are the scenarios a behavior was checked in: the configuration's shape
 (**img**age / **dkr** Dockerfile / **cmp** Compose) crossed with how many Features it
@@ -28,15 +29,16 @@ ordering / **lock** with a lockfile).
 
 **A column only appears where that scenario is possible.** `outdated` never resolves a
 dependency graph, so it has no **deps** column at all rather than a column of `·` implying
-an untested hole. So a `·` means genuinely not yet checked — with one caveat below.
+an untested hole. So a `·` means genuinely not yet checked.
 
 A cell says a case exercised that scenario — not that the case's assertions were strong.
 The leading glyph rolls the row up; where a row is mostly `·`, that is the honest signal.
 
-The caveat: columns are dropped per AREA, not per behavior. A behavior that is inherently
-about one configuration shape — deriving a Compose project name, say — still shows `·`
-under **img** and **dkr**, where the truth is that the question does not arise. Reading
-down a column is reliable; reading along a row needs that in mind.
+A **blank** cell means the behavior does not arise in that scenario at all — deriving a
+Compose project name has no meaning under an image configuration. Blank rather than a
+glyph, because there is no question there to answer.
+
+So every `·` is a real gap: a scenario this behavior COULD be checked in and has not been.
 
 ### build
 
@@ -70,7 +72,7 @@ down a column is reliable; reading along a row needs that in mind.
 <tr><th></th><th>Behavior</th><th>img</th><th>dkr</th><th>cmp</th><th>Notes</th></tr>
 </thead>
 <tbody>
-<tr><td>🔵</td><td>`down --remove` on a Compose configuration removes the project it created, identifying…</td><td>·</td><td>·</td><td>🔵</td><td></td></tr>
+<tr><td>🔵</td><td>`down --remove` on a Compose configuration removes the project it created, identifying…</td><td></td><td></td><td>🔵</td><td></td></tr>
 <tr><td>🔵</td><td>`down` over a workspace folder that has no devcontainer configuration reports that…</td><td>🔵</td><td>·</td><td>·</td><td></td></tr>
 <tr><td>🔵</td><td>`down --remove` stops and removes the workspace's container, so a subsequent command…</td><td>🔵</td><td>🔵</td><td>·</td><td></td></tr>
 </tbody>
@@ -105,8 +107,8 @@ down a column is reliable; reading along a row needs that in mind.
 <tr><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th><th>–</th><th>1</th><th>many</th><th>deps</th><th>lock</th></tr>
 </thead>
 <tbody>
-<tr><td>⚠️</td><td>The set of Compose files a CLI composes with, and the Compose labels derived from that…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
-<tr><td>⚠️</td><td>deacon derives a valid, deacon-namespaced compose project name…</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#265</td></tr>
+<tr><td>⚠️</td><td>The set of Compose files a CLI composes with, and the Compose labels derived from that…</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
+<tr><td>⚠️</td><td>deacon derives a valid, deacon-namespaced compose project name…</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#265</td></tr>
 <tr><td>🔵</td><td>deacon stamps five identity/bookkeeping labels onto a created container that the…</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>·</td><td>🔵</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
 <tr><td>⚠️</td><td>Both CLIs override the container command with a shell keep-alive that holds the…</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td>⚠️</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
 <tr><td>✅</td><td>The `devcontainer.metadata` label records the image metadata the configuration and…</td><td>✅</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#373</td></tr>

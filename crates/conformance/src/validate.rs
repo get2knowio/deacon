@@ -4457,6 +4457,7 @@ mod tests {
             reference,
             decision,
             notes: None,
+            scenario_applicability: Default::default(),
         }
     }
 

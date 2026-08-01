@@ -1141,6 +1141,7 @@ mod tests {
             reference: ReferenceStatus::Aligned,
             decision: Decision::FollowSpec,
             notes: None,
+            scenario_applicability: Default::default(),
         }
     }
 

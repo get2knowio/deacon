@@ -637,6 +637,7 @@ mod tests {
             reference: ReferenceStatus::Aligned,
             decision: Decision::FollowSpec,
             notes: None,
+            scenario_applicability: Default::default(),
         };
         let rendered = serde_json::to_value(&unit).expect("a behavior serializes");
         for axis in BEHAVIOR_DISPOSITION_AXES {
