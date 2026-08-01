@@ -24,15 +24,30 @@
 //! The cross product shows two cells of fifteen. The projection flatters; the product
 //! does not, so the product is what ships.
 //!
-//! Each cell carries the status **in that scenario**, from one vocabulary — an earlier
-//! draft used ✅ to mean "same as reference" in a status column and "checked against the
-//! reference" in the cells, so a deliberately-divergent row rendered as a line of green.
+//! Each cell carries how strongly the row was **checked in that scenario**, and nothing
+//! else — an earlier draft used ✅ to mean "same as reference" in a status column and
+//! "checked against the reference" in the cells, so a deliberately-divergent row rendered
+//! as a line of green.
+//!
+//! ## One symbol, one axis
+//!
+//! The record has three axes (spec × reference × decision) and the page used to fold them
+//! into a single glyph. Every fold of that kind has so far turned out to assert more than
+//! the record supports — most sharply, "the two tools differ" rendered as ❌ *"we intend
+//! to fix it"* for six behaviors where deacon matches the spec and the REFERENCE deviates.
+//!
+//! So the axes are unfolded: a **spec** column and a **CLI** column say what deacon is
+//! measured against and whether it matches, the leading glyph says what we decided, and
+//! the grid cells say only how well it has been checked. Some combinations are then
+//! redundant by construction — a behavior sourced from observing the CLI can hardly show
+//! `CLI ?` — and that is the intended trade: a redundant true cell costs a reader nothing,
+//! a collapsed one costs them the distinction between our defect and theirs.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use crate::load::Registry;
-use crate::model::{Decision, OracleType, ReferenceStatus, RevisionKind, TestCase};
+use crate::model::{Decision, OracleType, ReferenceStatus, RevisionKind, SpecStatus, TestCase};
 use crate::scenario::ScenarioModel;
 
 /// A cell's verdict: exactly one meaning per glyph.
@@ -44,7 +59,8 @@ enum Cell {
     SameUnverified,
     /// A deliberate difference, characterized.
     DiffersOnPurpose,
-    /// A difference we intend to remove.
+    /// A difference we intend to remove — deacon is the nonconformant side. Which side
+    /// is at fault is NOT inferable from "the two differ": see [`rollup`].
     DiffersFixing,
     /// deacon-only capability; the reference has no equivalent to compare against.
     DeaconOnly,
@@ -70,17 +86,57 @@ impl Cell {
     }
 }
 
-/// The per-scenario status a behavior takes wherever it IS covered, derived from its
-/// three-axis disposition. The axes are collapsed here and nowhere else.
-fn covered_verdict(b: &crate::model::BehaviorUnit, live: bool) -> Cell {
-    match (b.decision, b.reference) {
-        (Decision::DeaconExtension, _) | (_, ReferenceStatus::NotApplicable) => Cell::DeaconOnly,
-        (Decision::IntentionalDivergence, _) => Cell::DiffersOnPurpose,
-        // Divergent while intending to follow the spec or the reference means we are
-        // behind and mean to fix it — the only honest reading of R5/R6.
-        (_, ReferenceStatus::Divergent) => Cell::DiffersFixing,
+/// The row's leading glyph: what we DECIDED about this behavior, plus whether anything
+/// has checked it.
+///
+/// It deliberately does not say who deviates when the two tools differ — that is what the
+/// `spec` and `CLI` columns carry, one axis each, unfolded rather than collapsed. Folding
+/// them in is what made a divergence read as deacon's fault: R5 lets `follow-spec` stand
+/// only on `spec: conformant`, so every behavior this page has ever rendered ❌ was one
+/// where deacon matches the spec and the REFERENCE deviates from it. Only a
+/// `nonconformant` spec axis puts deacon on the wrong side, and no behavior carries one.
+fn rollup(b: &crate::model::BehaviorUnit, live: bool) -> Cell {
+    match (b.decision, b.reference, b.spec) {
+        (Decision::DeaconExtension, _, _) | (_, ReferenceStatus::NotApplicable, _) => {
+            Cell::DeaconOnly
+        }
+        (Decision::IntentionalDivergence, _, _) => Cell::DiffersOnPurpose,
+        (_, _, SpecStatus::Nonconformant) => Cell::DiffersFixing,
         _ if live => Cell::SameVerified,
         _ => Cell::SameUnverified,
+    }
+}
+
+/// A grid cell: how strong the evidence is IN THIS SCENARIO, and nothing else.
+///
+/// Cells used to repeat the row's disposition, so a deliberate difference painted ⚠️
+/// across every scenario it was covered in — including ones nothing had run. That reads
+/// as breadth of checking when it is breadth of assertion.
+fn evidence(live: bool) -> Cell {
+    if live {
+        Cell::SameVerified
+    } else {
+        Cell::SameUnverified
+    }
+}
+
+/// One axis rendered as its own column: `✔` deacon matches it, `✘` it deviates from
+/// deacon, `?` unsettled, blank where the axis does not apply.
+fn spec_mark(s: SpecStatus) -> &'static str {
+    match s {
+        SpecStatus::Conformant => "✔",
+        SpecStatus::Nonconformant => "✘",
+        SpecStatus::Unspecified => "?",
+        SpecStatus::NotApplicable => "",
+    }
+}
+
+fn reference_mark(r: ReferenceStatus) -> &'static str {
+    match r {
+        ReferenceStatus::Aligned => "✔",
+        ReferenceStatus::Divergent => "✘",
+        ReferenceStatus::Unknown => "?",
+        ReferenceStatus::NotApplicable => "",
     }
 }
 
@@ -249,20 +305,22 @@ pub fn render(registry: &Registry) -> String {
 
         if active.is_empty() {
             // No scenario evidence to grid: a flat list is honest and smaller.
-            out.push_str("| | Behavior | Notes |\n|---|---|---|\n");
+            out.push_str("| | Behavior | spec | CLI | Notes |\n|---|---|---|---|---|\n");
             for b in behaviors {
                 // No covering case at all is `·`, not a verdict. Falling through to
-                // `covered_verdict` here rendered ◐ — "believed the same" — for a
-                // behavior nothing has ever exercised, which is a claim, not a gap.
+                // `rollup` here rendered ◐ — "believed the same" — for a behavior
+                // nothing has ever exercised, which is a claim, not a gap.
                 let cell = match coverage.get(b.id.as_str()) {
                     None => Cell::Unchecked,
-                    Some(cs) => covered_verdict(b, cs.iter().any(|(_, l)| *l)),
+                    Some(cs) => rollup(b, cs.iter().any(|(_, l)| *l)),
                 };
                 let _ = writeln!(
                     out,
-                    "| {} | {} | {} |",
+                    "| {} | {} | {} | {} | {} |",
                     cell.glyph(),
                     first_sentence(&b.statement),
+                    spec_mark(b.spec),
+                    reference_mark(b.reference),
                     notes_cell(b, &waivers)
                 );
             }
@@ -301,7 +359,10 @@ fn grid(
     if active.len() > 1 {
         // Two header rows: the outer dimension spans the inner one's width.
         let inner: usize = active[1..].iter().map(|d| d.values.len()).product();
-        s.push_str("<tr><th rowspan=\"2\"></th><th rowspan=\"2\">Behavior</th>");
+        s.push_str(
+            "<tr><th rowspan=\"2\"></th><th rowspan=\"2\">Behavior</th>\
+             <th rowspan=\"2\">spec</th><th rowspan=\"2\">CLI</th>",
+        );
         for (_, label) in active[0].values.iter() {
             let _ = write!(s, "<th colspan=\"{inner}\">{label}</th>");
         }
@@ -315,7 +376,7 @@ fn grid(
     } else {
         // One dimension: a single header row. Emitting the two-row form anyway left an
         // empty second row of `<th></th>` under every column.
-        s.push_str("<tr><th></th><th>Behavior</th>");
+        s.push_str("<tr><th></th><th>Behavior</th><th>spec</th><th>CLI</th>");
         for (_, label) in active[0].values.iter() {
             let _ = write!(s, "<th>{label}</th>");
         }
@@ -350,19 +411,27 @@ fn grid(
                 .collect();
             cells.push(match hits.iter().any(|l| *l) {
                 _ if hits.is_empty() => Cell::Unchecked,
-                live => covered_verdict(b, live),
+                live => evidence(live),
             });
         }
-        let roll = cells
+        // The rollup comes from the RECORD, not from scanning the cells: cells now carry
+        // evidence strength only, so deriving it from them would report every covered row
+        // as ✅ regardless of what we decided about it.
+        let anything_covered = cells
             .iter()
-            .copied()
-            .find(|c| !matches!(c, Cell::Unchecked | Cell::NotApplicable))
-            .unwrap_or(Cell::Unchecked);
+            .any(|c| !matches!(c, Cell::Unchecked | Cell::NotApplicable));
+        let roll = if anything_covered {
+            rollup(b, cells.iter().any(|c| matches!(c, Cell::SameVerified)))
+        } else {
+            Cell::Unchecked
+        };
         let _ = write!(
             s,
-            "<tr><td>{}</td><td>{}</td>",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td>",
             roll.glyph(),
-            first_sentence(&b.statement)
+            first_sentence(&b.statement),
+            spec_mark(b.spec),
+            reference_mark(b.reference)
         );
         for c in &cells {
             let _ = write!(s, "<td>{}</td>", c.glyph());
@@ -481,15 +550,20 @@ fn header(registry: &Registry) -> String {
     // `same` is still a residual — a behavior lands there by being in neither
     // divergence bucket — which is exactly why it must not be reported as a
     // measurement without saying how much of it was measured.
-    let mut counts = [[0usize; 2]; 3];
+    let mut counts = [[0usize; 2]; 4];
     for b in &registry.behaviors {
         if matches!(b.decision, Decision::DeaconExtension)
             || matches!(b.reference, ReferenceStatus::NotApplicable)
         {
             continue;
         }
+        // Same order of tests as `rollup`, so the headline cannot claim a fault the row
+        // does not show. "The two differ" is split by WHOSE deviation it is: only a
+        // nonconformant spec axis is deacon's.
         let bucket = if matches!(b.decision, Decision::IntentionalDivergence) {
             1
+        } else if matches!(b.spec, SpecStatus::Nonconformant) {
+            3
         } else if matches!(b.reference, ReferenceStatus::Divergent) {
             2
         } else {
@@ -500,9 +574,10 @@ fn header(registry: &Registry) -> String {
     let [
         [same_asserted, same],
         [delib_asserted, deliberate],
+        [spec_backed_asserted, spec_backed],
         [behind_asserted, behind],
     ] = counts;
-    let unverified = same_asserted + delib_asserted + behind_asserted;
+    let unverified = same_asserted + delib_asserted + spec_backed_asserted + behind_asserted;
 
     format!(
         r#"# Does deacon behave like the DevContainers CLI?
@@ -514,25 +589,53 @@ Compared against **`@devcontainers/cli` {oracle}** and the [containers.dev spec]
 (https://github.com/devcontainers/spec) at commit `{spec}`.
 
 **Of {comparable} behaviors that both tools implement, {same} are verified to match.**
-{deliberate} are verified to differ deliberately, and {behind} to differ in ways we intend
-to remove. A further {deacon_only} are deacon-only, with nothing to compare against.
+{deliberate} are verified to differ deliberately, and {spec_backed} differ because deacon
+follows the spec where the CLI does not — those are the CLI's deviation, not work we owe.
+{behind} are differences where deacon is the nonconformant side. A further {deacon_only}
+are deacon-only, with nothing to compare against.
 
 **{unverified} more have never been compared against the CLI at all** — {same_asserted} assumed
-to match, {delib_asserted} assumed to differ on purpose, {behind_asserted} assumed to be behind.
-These are claims, not measurements: nothing has run the reference for them, so each could turn
-out to be any of the three. They are listed separately rather than folded into the totals above,
-because a claim nobody has checked is not evidence of parity — and a page that counted it as such
-would improve every time someone asserted something new.
+to match, {delib_asserted} assumed to differ on purpose, {spec_backed_asserted} assumed to be the
+CLI deviating from the spec, {behind_asserted} assumed to be deacon's fault. These are claims, not
+measurements: nothing has run the reference for them, so each could turn out to be any of the
+four. They are listed separately rather than folded into the totals above, because a claim nobody
+has checked is not evidence of parity — and a page that counted it as such would improve every
+time someone asserted something new.
 
 ## How to read this
 
-| | Meaning |
+Two columns carry the two things deacon is measured against, one axis each — **spec** is
+the containers.dev specification, **CLI** is the reference implementation:
+
+| | **spec** / **CLI** column |
 |---|---|
-| ✅ | Same as the CLI, and checked against it in this scenario |
-| ◐ | Believed the same, but only deacon-side evidence here — **never compared** |
+| ✔ | deacon matches it |
+| ✘ | it and deacon differ |
+| ? | unsettled — the spec is silent, or nothing has compared us to the CLI |
+| *(blank)* | no equivalent exists to compare against |
+
+Read them together: `✔ ✘` is a difference where **the spec is on deacon's side and the
+CLI is the one deviating** — it is not work we owe. `✘ ✘` would be deacon being wrong; no
+behavior currently carries it. `? ✘` is a difference the spec does not settle either way,
+which is where a deliberate decision — and only there, a waiver — belongs.
+
+The leading glyph is what we **decided**, and the grid cells are how strongly it has been
+**checked**. They are kept apart on purpose: a decision repeated across every scenario
+column reads as breadth of testing when it is breadth of assertion.
+
+| | Leading glyph — our decision |
+|---|---|
+| ✅ | Follow the spec / match the CLI, and something has compared us |
+| ◐ | The same intent, but only deacon-side evidence — **never compared** |
 | ⚠️ | Differs on purpose |
-| ❌ | Differs, and we intend to fix it |
+| ❌ | deacon is the nonconformant side, and we intend to fix it |
 | 🔵 | deacon-only; the CLI has no equivalent |
+| · | **Not checked yet** — a real gap |
+
+| | Grid cell — evidence in that scenario |
+|---|---|
+| ✅ | Checked against the CLI here |
+| ◐ | Exercised here, but only deacon-side evidence |
 | · | **Not checked yet** — a real gap |
 | *(blank)* | Does not arise in this scenario |
 
@@ -682,6 +785,52 @@ mod tests {
             page.contains("**Of 1 behaviors that both tools implement, 1 are verified to match.**"),
             "running the reference is what must move the count:\n{page}"
         );
+    }
+
+    /// R5 permits `follow-spec` only on `spec: conformant`, so "the two tools differ"
+    /// never by itself means deacon is wrong. Collapsing both axes into one glyph
+    /// reported the CLI's deviation from the spec as deacon's defect — for every ❌ the
+    /// page had ever rendered.
+    #[test]
+    fn a_difference_where_the_spec_backs_deacon_is_not_reported_as_deacons_fault() {
+        let mut b = behavior();
+        b.reference = ReferenceStatus::Divergent; // deacon and the CLI differ …
+        b.spec = SpecStatus::Conformant; // … and the spec is on deacon's side.
+        let reg = Registry {
+            behaviors: vec![b],
+            cases: vec![case_with(serde_json::json!({"contains": "x"}))],
+            ..Registry::default()
+        };
+        let page = render(&reg);
+        assert!(
+            page.contains("0 are differences where deacon is the nonconformant side"),
+            "the spec backs deacon here; nothing is owed:\n{page}"
+        );
+        assert!(
+            page.contains("1 differ because deacon\nfollows the spec where the CLI does not"),
+            "the difference must be attributed to the CLI:\n{page}"
+        );
+        let rows = rows_of(&page);
+        assert!(!rows.contains('❌'), "no row is deacon's fault:\n{rows}");
+        assert!(
+            rows.contains("✔") && rows.contains("✘"),
+            "both axes must be shown unfolded, one column each:\n{rows}"
+        );
+
+        // Flip only the spec axis: now deacon IS the nonconformant side.
+        let mut b = behavior();
+        b.reference = ReferenceStatus::Divergent;
+        b.spec = SpecStatus::Nonconformant;
+        let reg = Registry {
+            behaviors: vec![b],
+            ..reg
+        };
+        let page = render(&reg);
+        assert!(
+            page.contains("1 are differences where deacon is the nonconformant side"),
+            "a nonconformant spec axis is the one thing that makes it ours:\n{page}"
+        );
+        assert!(rows_of(&page).contains('❌'), "{page}");
     }
 
     /// A waiver no case tolerates is enforced by nothing, and must not read as though it
