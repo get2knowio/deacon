@@ -24,11 +24,11 @@ alone. Where a row has no scenario yet, it says so.
 
 Of **83 recorded behaviors**:
 
-- **4** — open nonconformance — [#430](https://github.com/get2knowio/deacon/issues/430), [#436](https://github.com/get2knowio/deacon/issues/436), [#437](https://github.com/get2knowio/deacon/issues/437), [#438](https://github.com/get2knowio/deacon/issues/438)
+- **3** — open nonconformance — [#430](https://github.com/get2knowio/deacon/issues/430), [#436](https://github.com/get2knowio/deacon/issues/436), [#438](https://github.com/get2knowio/deacon/issues/438)
 - **10** — deacon follows the spec where the CLI does not
 - **11** — documented choice
 - **19** — deacon extension
-- **39** — conformant and matching
+- **40** — conformant and matching
 
 ## Coverage this document does *not* claim
 
@@ -109,7 +109,7 @@ oversight nobody noticed.
 
 | Behavior | Status | Evidence | Notes |
 |---|---|---|---|
-| On the Compose path, `devcontainer.metadata` records mount sources as the author wrote them, with `${localWorkspaceFolder}` left unsubstituted. | **open nonconformance** | 1 scenario | OPEN — filed as #437. Measured against oracle 0.87.0 on fx-state-compose-feature-mounts: for `source=${localWorkspaceFolder}/sib` the reference records… |
+| On the Compose path, `devcontainer.metadata` records mount sources as the author wrote them, with `${localWorkspaceFolder}` left unsubstituted. | matches the reference | 1 scenario | CLOSED — #437, a compose-path-only regression of #373. Both CLIs record the template on fx-state-compose-feature-mounts, verified at oracle 0.87.0. deacon built the label from the pre-substitution config all along; Docker Compose then interpolated `${localWorkspaceFolder}` in the generated override to the empty string, so `source=${localWorkspaceFolder}/sib` reached the container as `source=/sib`. The override now doubles every `$` in the values it emits, which is why the single-container path was never affected. |
 | The set of Compose files a CLI composes with, and the Compose labels derived from that set (`com.docker.compose.project.config_files`, `com.docker.compose.config-hash`). | documented choice | 3 scenarios | Measured at oracle 0.87.0: both CLIs layer an override on top of the workspace's Compose file, and each delivers it differently — deacon passes it on stdin (recorded as… |
 | deacon derives a valid, deacon-namespaced compose project name (deacon_<workspaceHash>_<configHash>) that docker compose always accepts and that does not collide with… | documented choice | 4 scenarios | Robustness differentiator (issue #265; docs/DIFFERENTIATORS.md). The reference derives <folder>_devcontainer verbatim, so a folder like `-myproj` yields an invalid… |
 | When a Compose service's image is extended with Features, each CLI builds that image itself, so Compose's `com.docker.compose.image` label records a different content… | documented choice | 1 scenario | Measured against oracle 0.87.0 on fx-state-compose-feature-mounts: deacon `sha256:2badca10…`, reference `sha256:35612053…`. The label carries a DIGEST of an image each… |
