@@ -14,10 +14,14 @@
 //! - (d) crash stub (nonzero exit) → `OracleFailure` (stderr preserved);
 //! - (e) garbage-output stub → `MalformedOutput`;
 //! - (f) hang stub past a shortened bound → `OracleTimeout` (partial output kept);
-//! - (g) injected differing documents → unwaived-divergence failure;
-//! - (h) + matching waiver fixture → `pass-waived` naming the record id;
-//! - (i) difference removed, waiver kept → `WaiverStale`;
+//! - (g) injected differing documents → an untolerated divergence naming its path;
 //! - (j) invalid input to `normalize::config` → `Normalization` (no raw fallback).
+//!
+//! Legs (h) and (i) — a matching waiver yields `pass-waived`, and a kept-but-unmatched
+//! waiver is stale — retired with the corpus waiver model they exercised. Their
+//! properties are asserted against the model that actually runs, in leg (o): a covered
+//! difference is `allowed-difference` naming its backing id, and an unconsumed tolerance
+//! is reported STALE.
 //!
 //! Hermetic: NO live oracle, NO real Docker, NO network — stub executables and env
 //! overrides only. The oracle/docker/timeout legs rely on nextest's process-per-
@@ -27,7 +31,7 @@
 //!
 //! Unix-only (whole file): the fault stubs are `#!/bin/sh` scripts made executable
 //! via POSIX mode bits (per the repo's Windows notes on stub-script tests). The
-//! pipeline legs (g–j) exercise pure `normalize`/`waiver` code that is additionally
+//! pipeline legs (g–j) exercise pure `normalize`/`compare` code that is additionally
 //! covered cross-platform by the harness crate's own unit tests.
 #![cfg(unix)]
 
@@ -37,12 +41,14 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use parity_harness::HarnessError;
+use parity_harness::compare::{Tolerances, verdict_differential};
+use parity_harness::evidence::{NormalizedChannelEvidence, Outcome as DeclOutcome};
 use parity_harness::exec::{Side, run_and_capture};
+use parity_harness::model::CHAN_STRUCTURED_OUTPUT;
 use parity_harness::normalize;
 use parity_harness::oracle::{ORACLE_OVERRIDE_ENV, Oracle};
 use parity_harness::prereq::{DOCKER_OVERRIDE_ENV, require_docker};
 use parity_harness::report::{CaseResult, Cause, Outcome, RawPaths};
-use parity_harness::waiver::{Scope, WaiverSet};
 
 /// This binary's name — used as the raw-artifact subdirectory for exec cases.
 const BINARY: &str = "parity_harness_faults";
@@ -57,14 +63,58 @@ fn write_stub(dir: &Path, name: &str, body: &str) -> PathBuf {
     p
 }
 
-/// Placeholder raw-artifact paths for pipeline-only `CaseResult`s (g/h): those
-/// legs assert classification, not artifact bytes (that is `raw_outputs.rs`).
+/// Placeholder raw-artifact paths for pipeline-only `CaseResult`s: those legs assert
+/// classification, not artifact bytes (that is `raw_outputs.rs`).
 fn sample_raw() -> RawPaths {
     RawPaths {
         deacon_stdout: "raw/parity_harness_faults/c/deacon.stdout".into(),
         deacon_stderr: "raw/parity_harness_faults/c/deacon.stderr".into(),
         oracle_stdout: "raw/parity_harness_faults/c/oracle.stdout".into(),
         oracle_stderr: "raw/parity_harness_faults/c/oracle.stderr".into(),
+    }
+}
+
+/// The observable paths on which two normalized documents differ, reached through the
+/// PRODUCTION comparison with no tolerances declared.
+///
+/// The difference-class legs below used to call a second, ranked differ that lived in
+/// `normalize` and classified each difference as `ref-only` / `deacon-only` / `value`.
+/// That differ is retired: the declarative comparison names the diverging PATH and leaves
+/// both sides' values in the preserved evidence. What these legs must still prove is that
+/// each SHAPE of difference is detected and named — most of all the deacon-only one, which
+/// a comparison treating the reference as the truth would silently drop (FR-020).
+fn diverging_paths(deacon: &serde_json::Value, reference: &serde_json::Value) -> Vec<String> {
+    let side = |value: &serde_json::Value| NormalizedChannelEvidence {
+        channel: CHAN_STRUCTURED_OUTPUT.to_string(),
+        operation: "op-read".to_string(),
+        present: true,
+        value: value.clone(),
+    };
+    let no_tolerances = Tolerances::new(&[], &[]);
+    let mut consumed = HashSet::new();
+    let verdict = verdict_differential(
+        CHAN_STRUCTURED_OUTPUT,
+        &side(deacon),
+        &side(reference),
+        &no_tolerances,
+        &mut consumed,
+    );
+    let prefix = format!("{CHAN_STRUCTURED_OUTPUT}.");
+    match verdict.outcome {
+        DeclOutcome::Agree => Vec::new(),
+        DeclOutcome::Diverge => verdict
+            .detail
+            .as_ref()
+            .and_then(|d| d.get("divergingPaths"))
+            .and_then(|p| p.as_array())
+            .expect("a differential divergence names its paths")
+            .iter()
+            .map(|p| {
+                let p = p.as_str().expect("a diverging path is a string");
+                p.strip_prefix(&prefix).unwrap_or(p).to_string()
+            })
+            .collect(),
+        other => panic!("no tolerance was declared, so {other:?} is unreachable"),
     }
 }
 
@@ -314,12 +364,12 @@ async fn f_hang_stub_times_out_with_partial_output() {
 }
 
 // ---------------------------------------------------------------------------
-// (g) Two fabricated documents differing in one key → an unwaived divergence that
-//     a corpus runner would FAIL (no waiver excuses it).
+// (g) Two fabricated documents differing in one key → an untolerated divergence that
+//     the runner FAILS, naming the path it differed on.
 // ---------------------------------------------------------------------------
 #[test]
-fn g_injected_difference_is_unwaived_divergence() {
-    // deacon drops a key the reference keeps — the highest-signal (ref-only) class.
+fn g_injected_difference_is_an_untolerated_divergence() {
+    // deacon drops a key the reference keeps.
     let deacon =
         normalize::config("g", r#"{ "name": "demo" }"#, Side::Deacon).expect("normalize deacon");
     let reference = normalize::config(
@@ -329,117 +379,24 @@ fn g_injected_difference_is_unwaived_divergence() {
     )
     .expect("normalize reference");
 
-    let divergences = normalize::diff(&deacon, &reference);
-    assert!(
-        !divergences.is_empty(),
-        "the injected difference must be detected by the single diff"
-    );
-    let summary = normalize::summarize(&divergences);
-    assert!(
-        summary.contains("ref-only") && summary.contains("customizations"),
-        "the ref-only divergence must be named: {summary}"
+    // With no tolerance declared, the difference is DETECTED and its path is NAMED —
+    // a divergence reported without a path is one nobody can act on, and it is also one
+    // no scoped tolerance could ever be written against.
+    assert_eq!(
+        diverging_paths(&deacon, &reference),
+        vec!["customizations".to_string()],
+        "the injected difference must be detected by the single comparison and named"
     );
 
-    // Mirror the corpus runner: no waiver covers this case → it is a failure.
-    let waivers = WaiverSet::default();
-    assert!(
-        waivers.corpus_case("tier1", "g").is_none(),
-        "no waiver may cover an injected difference"
+    // Which the driver turns into a failure carrying its cause.
+    let result = CaseResult::fail(
+        "g",
+        Cause::Divergence,
+        Some("chan-structured-output.customizations".to_string()),
+        sample_raw(),
     );
-    let result = CaseResult::fail("g", Cause::Divergence, Some(summary), sample_raw());
     assert_eq!(result.outcome, Outcome::Fail);
     assert_eq!(result.cause, Some(Cause::Divergence));
-    assert!(result.waivers_applied.is_empty());
-}
-
-// ---------------------------------------------------------------------------
-// (h) The same injected difference WITH a matching waiver fixture → pass-waived,
-//     the case result referencing the waiver record id.
-// ---------------------------------------------------------------------------
-#[test]
-fn h_matching_waiver_yields_pass_waived() {
-    let corpus = tempfile::tempdir().expect("corpus dir");
-    let waivers_dir = corpus.path().join("waivers");
-    std::fs::create_dir_all(&waivers_dir).unwrap();
-    std::fs::write(
-        waivers_dir.join("h.json"),
-        r#"{
-          "id": "wvr-injected-h",
-          "behaviors": ["bhv-injected-h"],
-          "scope": { "kind": "corpus_case", "corpus": "tier1", "case": "h" },
-          "expect": { "kind": "field-divergence", "ours": "demo", "reference": "demo-ref" },
-          "rationale": "acceptance fixture — characterized injected difference",
-          "added": "2026-07-19",
-          "expires": "2027-01-19"
-        }"#,
-    )
-    .unwrap();
-
-    let waivers = WaiverSet::load(corpus.path()).expect("load waivers");
-    let w = waivers
-        .corpus_case("tier1", "h")
-        .expect("a matching waiver must be found for the injected case");
-    assert_eq!(w.id, "wvr-injected-h");
-    assert!(w.expect.is_divergence());
-
-    // Mirror the corpus runner: divergence observed + waiver present → pass-waived.
-    let result = CaseResult::pass_waived("h", vec![w.id.clone()], sample_raw());
-    assert_eq!(result.outcome, Outcome::PassWaived);
-    assert_eq!(result.waivers_applied, vec!["wvr-injected-h".to_string()]);
-
-    // Consumed → not stale.
-    let mut consumed = HashSet::new();
-    consumed.insert(w.id.clone());
-    let stale = waivers.stale_among(
-        |w| matches!(&w.scope, Scope::CorpusCase { corpus, .. } if corpus == "tier1"),
-        &consumed,
-    );
-    assert!(stale.is_empty(), "a consumed waiver is not stale");
-}
-
-// ---------------------------------------------------------------------------
-// (i) The difference is gone but the waiver is kept → WaiverStale naming the id.
-// ---------------------------------------------------------------------------
-#[test]
-fn i_kept_waiver_without_difference_is_stale() {
-    let corpus = tempfile::tempdir().expect("corpus dir");
-    let waivers_dir = corpus.path().join("waivers");
-    std::fs::create_dir_all(&waivers_dir).unwrap();
-    std::fs::write(
-        waivers_dir.join("i.json"),
-        r#"{
-          "id": "wvr-injected-h",
-          "behaviors": ["bhv-injected-h"],
-          "scope": { "kind": "corpus_case", "corpus": "tier1", "case": "h" },
-          "expect": { "kind": "field-divergence", "ours": "demo", "reference": "demo-ref" },
-          "rationale": "acceptance fixture — characterized injected difference",
-          "added": "2026-07-19",
-          "expires": "2027-01-19"
-        }"#,
-    )
-    .unwrap();
-
-    let waivers = WaiverSet::load(corpus.path()).expect("load waivers");
-    // The injected difference was removed, so no case consumed the waiver.
-    let consumed: HashSet<String> = HashSet::new();
-    let stale = waivers.stale_among(
-        |w| matches!(&w.scope, Scope::CorpusCase { corpus, .. } if corpus == "tier1"),
-        &consumed,
-    );
-    assert_eq!(
-        stale,
-        vec!["wvr-injected-h".to_string()],
-        "a loaded-but-unconsumed waiver must be reported stale"
-    );
-
-    let err = HarnessError::WaiverStale {
-        id: stale[0].clone(),
-    };
-    let msg = err.to_string();
-    assert!(
-        msg.contains("wvr-injected-h") && msg.contains("stale") && msg.contains("Remedy"),
-        "Display must name the stale record and a remedy: {msg}"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -474,21 +431,25 @@ fn j_normalization_failure_has_no_raw_fallback() {
 }
 
 // ===========================================================================
-// T055 (US4, FR-018 / FR-056): one hermetic case per DIFFERENCE class.
+// T055 (US4, FR-018 / FR-056): one hermetic case per SHAPE of difference.
 //
 // The fault-injection binary already proves the process-level causes (a–f) and the
-// waiver/normalization pipeline (g–j). What it did not prove is that each
-// *difference* class is reported with its own classification — which is exactly
-// what research D3 says was being lost: `deacon-only` was ranked last as "usually
-// default noise" and `prune` deleted it outright when empty. Each leg below injects
-// one class synthetically and asserts it is classified AS that class and named.
+// normalization pipeline (g, j). What it did not prove is that each *shape* of
+// difference is detected and named — which is exactly what research D3 says was being
+// lost: `deacon-only` was ranked last as "usually default noise" and `prune` deleted it
+// outright when empty. Each leg below injects one shape synthetically and asserts it is
+// reported with the path it occurred on.
+//
+// These legs used to assert a `DiffKind` classification stamped on the verdict by a
+// second, ranked differ. That differ is retired; the class is now read off the preserved
+// evidence — the two sides' values are both there — while the verdict names the path.
+// The substance is unchanged: no shape may be silently absorbed.
 // ===========================================================================
 
-/// (k) `ref-only` — the reference emits a key deacon does not. Historically framed as
-/// the highest-signal class ("deacon drops data"), and it must stay reported as its own
-/// class rather than folded into a generic "differs".
+/// (k) The reference emits a key deacon does not. Historically framed as the
+/// highest-signal shape ("deacon drops data").
 #[test]
-fn k_reference_only_difference_is_classified_as_ref_only() {
+fn k_reference_only_difference_is_detected_and_named() {
     let deacon = normalize::config("k", r#"{ "name": "demo" }"#, Side::Deacon).expect("normalize");
     let reference = normalize::config(
         "k",
@@ -497,24 +458,21 @@ fn k_reference_only_difference_is_classified_as_ref_only() {
     )
     .expect("normalize");
 
-    let divergences = normalize::diff(&deacon, &reference);
-    assert_eq!(divergences.len(), 1, "{divergences:?}");
-    assert_eq!(divergences[0].kind, normalize::DiffKind::RefOnly);
-    assert_eq!(divergences[0].path, "remoteUser");
-    assert!(divergences[0].deacon.is_none() && divergences[0].reference.is_some());
-
-    let summary = normalize::summarize(&divergences);
-    assert!(
-        summary.contains("ref-only") && summary.contains("remoteUser"),
-        "the class and the path must both be named: {summary}"
+    assert_eq!(
+        diverging_paths(&deacon, &reference),
+        vec!["remoteUser".to_string()]
     );
+    // Both sides remain readable in the evidence, so the shape is diagnosable.
+    assert!(deacon.get("remoteUser").is_none());
+    assert_eq!(reference["remoteUser"], serde_json::json!("vscode"));
 }
 
-/// (l) `deacon-only` — deacon emits a key the reference does not. **This is the class
-/// FR-020 protects.** It must be reported with its own classification, and (023 T065) it
-/// must no longer sort below `value` on the grounds of being noise.
+/// (l) deacon emits a key the reference does not. **This is the shape FR-020 protects.**
+/// It must be reported at all — a comparison that took the reference as the truth, or a
+/// blanket empty-value prune, would drop it — and (023 T065) it must not be treated as
+/// less interesting than the others.
 #[test]
-fn l_deacon_only_difference_is_classified_and_not_deprioritized() {
+fn l_deacon_only_difference_is_detected_and_not_deprioritized() {
     // `someNewProperty` is deliberately NOT on the enumerated `ABSENT_OPTIONAL_KEYS`
     // list, so it is compared — the property retiring `prune` restored (023 T062).
     let deacon = normalize::config(
@@ -526,23 +484,15 @@ fn l_deacon_only_difference_is_classified_and_not_deprioritized() {
     let reference =
         normalize::config("l", r#"{ "name": "demo" }"#, Side::Deacon).expect("normalize");
 
-    let divergences = normalize::diff(&deacon, &reference);
     assert_eq!(
-        divergences.len(),
-        1,
-        "an unlisted empty deacon-only key must be REPORTED, not pruned away: \
-         {divergences:?}"
-    );
-    assert_eq!(divergences[0].kind, normalize::DiffKind::DeaconOnly);
-    assert_eq!(divergences[0].path, "someNewProperty");
-
-    let summary = normalize::summarize(&divergences);
-    assert!(
-        summary.contains("deacon-only") && summary.contains("the reference does not emit"),
-        "deacon-only must read as a finding, not a shrug: {summary}"
+        diverging_paths(&deacon, &reference),
+        vec!["someNewProperty".to_string()],
+        "an unlisted EMPTY deacon-only key must be REPORTED, not pruned away"
     );
 
-    // FR-020 / 023 T065: ordering must not place deacon-only last as "default noise".
+    // FR-020 / 023 T065: with all three shapes present at once, every one is reported.
+    // Ordering is by path — a deterministic display order, not a significance ranking, so
+    // no shape can sort below another on the grounds of being noise.
     let mixed_deacon = normalize::config(
         "l",
         r#"{ "name": "a", "someNewProperty": 1 }"#,
@@ -555,109 +505,107 @@ fn l_deacon_only_difference_is_classified_and_not_deprioritized() {
         Side::Deacon,
     )
     .expect("normalize");
-    let kinds: Vec<_> = normalize::diff(&mixed_deacon, &mixed_reference)
-        .iter()
-        .map(|d| d.kind)
-        .collect();
     assert_eq!(
-        kinds,
+        diverging_paths(&mixed_deacon, &mixed_reference),
         vec![
-            normalize::DiffKind::RefOnly,
-            normalize::DiffKind::DeaconOnly,
-            normalize::DiffKind::Value
+            "name".to_string(),            // differing value
+            "remoteUser".to_string(),      // reference-only
+            "someNewProperty".to_string(), // deacon-only
         ],
-        "deacon-only must not be ranked last as noise (FR-020)"
+        "no shape may be absorbed when several occur at once"
     );
 }
 
-/// (m) `value` — the same key, different values. Must not be collapsed into either
-/// one-sided class, and must report BOTH sides so the difference is diagnosable.
+/// (m) The same key with different values. Must not be collapsed into either one-sided
+/// shape, and both sides must survive in the evidence so the difference is diagnosable.
 #[test]
-fn m_value_difference_is_classified_with_both_sides() {
+fn m_value_difference_is_named_with_both_sides_readable() {
     let deacon =
         normalize::config("m", r#"{ "name": "demo-a" }"#, Side::Deacon).expect("normalize");
     let reference =
         normalize::config("m", r#"{ "name": "demo-b" }"#, Side::Deacon).expect("normalize");
 
-    let divergences = normalize::diff(&deacon, &reference);
-    assert_eq!(divergences.len(), 1);
-    assert_eq!(divergences[0].kind, normalize::DiffKind::Value);
     assert_eq!(
-        (
-            divergences[0].deacon.clone(),
-            divergences[0].reference.clone()
-        ),
-        (
-            Some(serde_json::json!("demo-a")),
-            Some(serde_json::json!("demo-b"))
-        ),
-        "a value difference must carry both sides to be diagnosable"
+        diverging_paths(&deacon, &reference),
+        vec!["name".to_string()]
     );
-
-    let summary = normalize::summarize(&divergences);
-    assert!(
-        summary.contains("value") && summary.contains("demo-a") && summary.contains("demo-b"),
-        "{summary}"
+    assert_eq!(
+        (deacon["name"].clone(), reference["name"].clone()),
+        (serde_json::json!("demo-a"), serde_json::json!("demo-b")),
+        "a value difference must leave both sides in the evidence to be diagnosable"
     );
 }
 
-/// (n) accept-vs-reject, WITH DIRECTION — the decision-class difference the error corpus
-/// turns on. `deacon-stricter` and `reference-stricter` are distinct outcomes and a
-/// waiver characterizing one must NOT waive the other; only the right direction applies.
+/// (n) accept-vs-reject — the decision-class difference the error-path cases turn on. It
+/// lands on `chan-exit-code`, and it must be ADDRESSABLE: the channel carries one scalar,
+/// so a bare channel id would be the diverging path, and a bare channel id is exactly
+/// what `AllowedDifference::is_global_ignore` rejects (FR-032). Naming the observable
+/// `chan-exit-code.exitCode` is what makes an exit-code difference expressible as a
+/// scoped tolerance at all; four committed tolerances spelling it were inert before.
+///
+/// Direction (deacon rejected vs the reference rejected) used to live in a waiver's
+/// `Expect` enum, which had to distinguish the two so one waiver could not excuse the
+/// other. In the declarative model a case IS one direction — it pins one fixture and one
+/// pair of expectations — so the direction is carried by the case, and what remains to
+/// prove here is that both directions are reported and neither is absorbed.
 #[test]
-fn n_accept_vs_reject_difference_preserves_direction() {
-    use parity_harness::waiver::{Expect, Waiver};
+fn n_accept_vs_reject_difference_is_reported_and_addressable() {
+    use parity_harness::model::{AllowedDifference, CHAN_EXIT_CODE};
 
-    fn waiver(id: &str, expect: Expect) -> Waiver {
-        Waiver {
-            id: id.to_string(),
-            behaviors: vec!["bhv-readconfig-malformed-jsonc-rejected".to_string()],
-            scope: Scope::CorpusCase {
-                corpus: "errors".to_string(),
-                case: "n".to_string(),
-            },
-            expect,
-            rationale: "fault-injection probe".to_string(),
-            added: "2026-07-25".to_string(),
-            expires: "2027-07-25".to_string(),
-            config: None,
+    fn exit_code(code: i64) -> NormalizedChannelEvidence {
+        NormalizedChannelEvidence {
+            channel: CHAN_EXIT_CODE.to_string(),
+            operation: "op-read".to_string(),
+            present: true,
+            value: serde_json::json!({ "exitCode": code }),
         }
     }
 
-    // The direction predicate every corpus runner applies, mirrored here so the
-    // classification is asserted rather than assumed.
-    fn applies(expect: &Expect, deacon_ok: bool, oracle_ok: bool) -> bool {
-        match expect {
-            Expect::ReferenceStricter { .. } => deacon_ok && !oracle_ok,
-            Expect::DeaconStricter { .. } => !deacon_ok && oracle_ok,
-            Expect::BothReject {} | Expect::BothAccept {} | Expect::FieldDivergence { .. } => false,
-        }
+    let no_tolerances = Tolerances::new(&[], &[]);
+    // deacon rejects, the reference accepts — and the inverse. Both are divergences.
+    for (deacon_code, reference_code) in [(1, 0), (0, 1)] {
+        let mut consumed = HashSet::new();
+        let verdict = verdict_differential(
+            CHAN_EXIT_CODE,
+            &exit_code(deacon_code),
+            &exit_code(reference_code),
+            &no_tolerances,
+            &mut consumed,
+        );
+        assert_eq!(
+            verdict.outcome,
+            DeclOutcome::Diverge,
+            "deacon={deacon_code} reference={reference_code} must diverge"
+        );
+        let paths = verdict.detail.expect("a divergence names its paths");
+        assert_eq!(
+            paths["divergingPaths"],
+            serde_json::json!(["chan-exit-code.exitCode"]),
+            "the one observable of a scalar channel must be NAMED, or no scoped tolerance \
+             can ever address it (FR-032)"
+        );
     }
 
-    let deacon_stricter = waiver("wvr-probe-deacon", Expect::DeaconStricter { signal: None });
-    let reference_stricter = waiver(
-        "wvr-probe-reference",
-        Expect::ReferenceStricter { signal: None },
+    // And a tolerance written against that named observable does cover it.
+    let tolerance = AllowedDifference {
+        behavior: "bhv-probe-decision".to_string(),
+        context: Vec::new(),
+        observable_path: "chan-exit-code.exitCode".to_string(),
+        rationale: "fault-injection probe".to_string(),
+        waiver_id: Some("wvr-probe-decision".to_string()),
+        divergence_id: None,
+    };
+    let behaviors = vec!["bhv-probe-decision".to_string()];
+    let tolerances = Tolerances::new(std::slice::from_ref(&tolerance), &behaviors);
+    let mut consumed = HashSet::new();
+    let verdict = verdict_differential(
+        CHAN_EXIT_CODE,
+        &exit_code(1),
+        &exit_code(0),
+        &tolerances,
+        &mut consumed,
     );
-
-    // deacon rejects, the reference accepts → only `deacon-stricter` characterizes it.
-    assert!(applies(&deacon_stricter.expect, false, true));
-    assert!(
-        !applies(&reference_stricter.expect, false, true),
-        "a reference-stricter waiver must NOT waive a deacon-stricter difference — the \
-         direction IS the finding"
-    );
-
-    // The inverse direction, symmetrically.
-    assert!(applies(&reference_stricter.expect, true, false));
-    assert!(!applies(&deacon_stricter.expect, true, false));
-
-    // An agreement expectation never characterizes a decision DIFFERENCE at all.
-    for agreement in [Expect::BothReject {}, Expect::BothAccept {}] {
-        let w = waiver("wvr-probe-agree", agreement);
-        assert!(!applies(&w.expect, false, true));
-        assert!(!applies(&w.expect, true, false));
-    }
+    assert_eq!(verdict.outcome, DeclOutcome::AllowedDifference);
 
     // An unwaived decision difference is a hard failure carrying its own cause.
     let result = CaseResult::fail(

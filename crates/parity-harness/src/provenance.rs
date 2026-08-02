@@ -34,8 +34,8 @@ use serde_json::Value;
 /// `portsAttributes`, where its key list was measured — it previously walked the whole
 /// document, eliding an enumerated key NAME at any depth (including inside
 /// `customizations`, arbitrary user data), which is the unbounded reach FR-029 forbids.
-/// 024 US5 (T123) set it to `"6"`, the de-suppression pass: `drop_noise_env` moved from
-/// CAPTURE to the legacy `diff_states` comparison (so `chan-container-state` now carries
+/// 024 US5 (T123) set it to `"6"`, the de-suppression pass: `drop_noise_env` moved out of
+/// CAPTURE into the since-retired state comparison (so `chan-container-state` now carries
 /// `PATH`, `HOME` and the rest, which FR-050 requires be compared); the irreconcilable
 /// `HOSTNAME` is rewritten by the new `container_hostname_token` instead of deleted;
 /// `drop_absent_optional` was narrowed to deacon's `configuration` block so an authored

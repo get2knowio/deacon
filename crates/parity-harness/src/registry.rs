@@ -1,106 +1,57 @@
-//! Parity registry checks (research D5; FR-022, FR-024).
+//! The nextest lane cross-check: which binaries may select live parity, and which
+//! must not.
 //!
-//! The registry *data model* (`ParityRegistry` and friends) and the *production*
-//! corpus discovery functions now live in `deacon-conformance::parity_corpus`, so the
-//! hermetic baseline enumerator can call exactly the same discovery the live runners
-//! execute without a dependency cycle (023-migrate-parity-to-conformance, research
-//! D1/D6). They are re-exported here unchanged, so every existing
-//! `parity_harness::registry::…` caller is unaffected.
+//! This is the smallest surviving piece of what was once a registry data model with
+//! its own JSON file, corpus enumerations and minimum-case gates. All of that
+//! described binaries that no longer exist. What earned its keep is the *check*: a
+//! bidirectional match between the `parity_*` sources on disk and the names declared
+//! here, plus an evaluation of every `[profile.*]` `default-filter` in
+//! `.config/nextest.toml`.
 //!
-//! What stays on this side of the seam is the *checking* concern that needs harness
-//! types: the bidirectional file↔registry match, the `.config/nextest.toml`
-//! `[profile.*]` cross-check, and the corpus minimum gate expressed as a
-//! [`HarnessError`]. These are free functions (an inherent `impl` may only live in
-//! the crate that defines the type).
+//! It has caught two real defects that nothing else would have: an edit that silently
+//! dropped the `default-filter` from four profiles (so `dev-fast` selected every
+//! Docker binary), and dangling `binary(=…)` references left behind when the five
+//! legacy carriers were retired.
+//!
+//! The invariant it defends is **truthfulness by non-selection**: live parity runs
+//! ONLY under `[profile.parity]`, so a green fast run never implies parity ran. That
+//! only holds if no other profile's filter selects a live binary — which is a claim
+//! about a filterset expression, and therefore has to be *evaluated*, not
+//! token-matched (see [`check_parity_profile_filter`]).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::HarnessError;
+/// The live (oracle-comparing) parity binaries: the declarative runners. Exactly
+/// these must be selected by `[profile.parity]` and by no other profile.
+///
+/// A plain const rather than a data file. There are two of them, they change roughly
+/// once a year, and a JSON document with its own schema, loader and validation tests
+/// was several hundred lines spent restating this line.
+pub const LIVE_BINARIES: &[&str] = &["parity_conformance_runner", "parity_conformance_docker"];
 
-pub use crate::parity_corpus::{
-    Corpus, DiscoveryBinary, DiscoveryRole, LiveBinary, LiveKind, ParityCorpusError,
-    ParityRegistry, REGISTRY_JSON,
-};
-
-/// Hermetic harness self-test binaries that intentionally carry the `parity_`
-/// name prefix but are NOT oracle-comparing live binaries: they must never appear
-/// in `live_binaries` nor be selected by `[profile.parity]`. Their source files
-/// are expected under `crates/deacon/tests/` and are recognized by
-/// [`check_test_files`] so the file↔registry match does not flag them as
-/// "unregistered live binaries" (research D5, D10; FR-013).
+/// Hermetic harness self-test binaries that intentionally carry the `parity_` name
+/// prefix but are NOT oracle-comparing: they must never be treated as live, and they
+/// MUST run in the ordinary lanes. Recognized by [`check_test_files`] so the
+/// file↔name match does not flag them as unregistered live binaries.
 pub const META_TEST_BINARIES: &[&str] = &["parity_harness_faults"];
 
-/// Map a discovery/registry failure onto the harness's cause-specific vocabulary, so
-/// a missing corpus still reads as `FixtureMissing` and a short corpus as
-/// `CorpusTooSmall` at every call site.
-fn map_corpus_error(e: ParityCorpusError) -> HarnessError {
-    match e {
-        ParityCorpusError::FixtureMissing { path } => HarnessError::FixtureMissing { path },
-        ParityCorpusError::CorpusTooSmall { corpus, found, min } => {
-            HarnessError::CorpusTooSmall { corpus, found, min }
-        }
-    }
-}
-
-/// Discover tier1 corpus case directories — the single production definition, shared
-/// with the baseline enumerator (see [`crate::parity_corpus::discover_tier1_cases`]).
-pub fn discover_tier1_cases(root: &Path) -> Result<Vec<PathBuf>, HarnessError> {
-    crate::parity_corpus::discover_tier1_cases(root).map_err(map_corpus_error)
-}
-
-/// Discover error corpus case directories — the single production definition, shared
-/// with the baseline enumerator (see [`crate::parity_corpus::discover_error_cases`]).
-pub fn discover_error_cases(errors_root: &Path) -> Result<Vec<PathBuf>, HarnessError> {
-    crate::parity_corpus::discover_error_cases(errors_root).map_err(map_corpus_error)
-}
-
-/// Enforce a corpus's minimum case count (FR-024), reported as a [`HarnessError`].
-pub fn check_corpus_min(
-    registry: &ParityRegistry,
-    corpus: &Corpus,
-    discovered: usize,
-) -> Result<(), HarnessError> {
-    registry
-        .check_corpus_min(corpus, discovered)
-        .map_err(map_corpus_error)
-}
-
-/// Bidirectional file↔registry match for `parity_*` sources under `tests_dir`
-/// plus existence of the internal-consistency `consistency_*` sources. Returns
-/// human-readable problems (empty = OK). Consumed by `parity_registry_check`.
-pub fn check_test_files(registry: &ParityRegistry, tests_dir: &Path) -> Vec<String> {
+/// Bidirectional file↔name match for `parity_*` sources under `tests_dir`. Returns
+/// human-readable problems (empty = OK).
+pub fn check_test_files(tests_dir: &Path) -> Vec<String> {
     let mut problems = Vec::new();
 
-    // Registry → file: every live binary has a source file.
-    for name in registry.live_names() {
+    // Name → file: every declared binary has a source file.
+    for name in LIVE_BINARIES.iter().chain(META_TEST_BINARIES) {
         if !tests_dir.join(format!("{name}.rs")).is_file() {
             problems.push(format!(
-                "registered live binary `{name}` has no source file {name}.rs"
-            ));
-        }
-    }
-    // Registry → file: every internal-consistency binary has a source file.
-    for name in &registry.internal_consistency_binaries {
-        if !tests_dir.join(format!("{name}.rs")).is_file() {
-            problems.push(format!(
-                "registered internal-consistency binary `{name}` has no source file {name}.rs"
-            ));
-        }
-    }
-    // The hermetic harness self-test binaries must also exist (they are the
-    // structural + fault-injection guard themselves).
-    for name in META_TEST_BINARIES {
-        if !tests_dir.join(format!("{name}.rs")).is_file() {
-            problems.push(format!(
-                "hermetic meta-test binary `{name}` has no source file {name}.rs"
+                "declared parity binary `{name}` has no source file {name}.rs"
             ));
         }
     }
 
-    // File → registry: every `parity_*.rs` source is a registered live binary
-    // (or a recognized hermetic meta-test binary — those carry the `parity_`
-    // prefix by design but are never live/oracle-comparing).
-    let live: std::collections::HashSet<&str> = registry.live_names().into_iter().collect();
+    // File → name: every `parity_*.rs` source is a declared live binary (or a
+    // recognized hermetic meta-test binary — those carry the `parity_` prefix by
+    // design but are never oracle-comparing).
     match std::fs::read_dir(tests_dir) {
         Ok(rd) => {
             for entry in rd.filter_map(Result::ok) {
@@ -108,12 +59,12 @@ pub fn check_test_files(registry: &ParityRegistry, tests_dir: &Path) -> Vec<Stri
                 let file = file.to_string_lossy();
                 if let Some(stem) = file.strip_suffix(".rs") {
                     if stem.starts_with("parity_")
-                        && !live.contains(stem)
+                        && !LIVE_BINARIES.contains(&stem)
                         && !META_TEST_BINARIES.contains(&stem)
                     {
                         problems.push(format!(
                             "source file {file} looks like a live parity binary but is not \
-                             registered in registry.json live_binaries"
+                             declared in registry::LIVE_BINARIES"
                         ));
                     }
                 }
@@ -124,20 +75,19 @@ pub fn check_test_files(registry: &ParityRegistry, tests_dir: &Path) -> Vec<Stri
     problems
 }
 
-/// Cross-check a nextest `[profile.parity]` default-filter expression: it must
-/// select EXACTLY the live binaries and NONE of the internal-consistency
-/// binaries (FR-013, FR-014). Returns problems (empty = OK).
+/// Cross-check a nextest `[profile.parity]` default-filter expression: it must select
+/// EXACTLY the live binaries and none of the hermetic meta-test binaries. Returns
+/// problems (empty = OK).
 ///
 /// Every verdict is reached by **evaluating** the expression with [`filter_selects`],
 /// not by token-matching it. The two differ the moment the filter names a binary in
-/// order to EXCLUDE it — which the parity filter now does for the discovery campaign
-/// binaries (025 T007), and which any future exclusion would do again. Token matching
-/// would read `… & not (binary(=discovery_campaign))` as "the parity profile selects
-/// `discovery_campaign`" and fail a correct file, so the check has to understand the
-/// operator it is reading. [`extract_binary_eq_tokens`] still supplies the *candidate*
-/// set — the names worth asking about — because there is no other way to discover a
-/// binary the filter mentions but the registry does not know.
-pub fn check_parity_profile_filter(registry: &ParityRegistry, filter_expr: &str) -> Vec<String> {
+/// order to EXCLUDE it — which any exclusion group does. Token matching would read
+/// `… & not (binary(=x))` as "the parity profile selects `x`" and fail a correct
+/// file, so the check has to understand the operator it is reading.
+/// [`extract_binary_eq_tokens`] still supplies the *candidate* set — the names worth
+/// asking about — because there is no other way to discover a binary the filter
+/// mentions but the declaration does not know.
+pub fn check_parity_profile_filter(filter_expr: &str) -> Vec<String> {
     let mut problems = Vec::new();
 
     let selects = |name: &str, problems: &mut Vec<String>| -> Option<bool> {
@@ -152,56 +102,54 @@ pub fn check_parity_profile_filter(registry: &ParityRegistry, filter_expr: &str)
         }
     };
 
-    for name in registry.live_names() {
+    for name in LIVE_BINARIES {
         if selects(name, &mut problems) == Some(false) {
             problems.push(format!(
                 "[profile.parity] filter does not select live binary `{name}`"
             ));
         }
     }
-    for name in &registry.internal_consistency_binaries {
+    for name in META_TEST_BINARIES {
         if selects(name, &mut problems) == Some(true) {
             problems.push(format!(
-                "[profile.parity] filter selects internal-consistency binary `{name}` (it must not)"
+                "[profile.parity] filter selects hermetic meta-test binary `{name}` (it must not)"
             ));
         }
     }
 
-    let live: std::collections::HashSet<&str> = registry.live_names().into_iter().collect();
     let mentioned: std::collections::BTreeSet<String> =
         extract_binary_eq_tokens(filter_expr).into_iter().collect();
     for name in &mentioned {
-        if !live.contains(name.as_str()) && selects(name, &mut problems) == Some(true) {
+        if !LIVE_BINARIES.contains(&name.as_str()) && selects(name, &mut problems) == Some(true) {
             problems.push(format!(
-                "[profile.parity] filter selects `{name}`, which is not a registered live binary"
+                "[profile.parity] filter selects `{name}`, which is not a declared live binary"
             ));
         }
     }
     problems
 }
 
-/// Full `.config/nextest.toml` cross-check (research D5; FR-013, FR-014):
+/// Full `.config/nextest.toml` cross-check:
 ///
-/// - `[profile.parity]` selects EXACTLY the live set and none of the
-///   internal-consistency binaries (delegates to [`check_parity_profile_filter`], which
-///   EVALUATES the expression — the parity filter is an allow-list with an explicit
-///   exclusion group appended, not a pure `binary(=…)` union, so a token-matching check
-///   would misread the exclusion as a selection);
+/// - `[profile.parity]` selects EXACTLY the live set (delegates to
+///   [`check_parity_profile_filter`]);
 /// - NO OTHER profile's `default-filter` selects any live parity binary — the
-///   truthful-by-non-selection invariant (FR-014). This is evaluated by
-///   [`filter_selects`] over each profile's filter expression, so an exclusion
-///   written as `not (…)` or `binary(#parity_*) & not (…)` is honored exactly,
-///   not merely token-matched.
+///   truthful-by-non-selection invariant. Evaluated by [`filter_selects`], so an
+///   exclusion written as `not (…)` or `binary(#parity_*) & not (…)` is honored
+///   exactly rather than merely token-matched.
+///
+/// A profile with NO `default-filter` selects everything, including the live
+/// binaries, and is therefore a problem in its own right. That is the specific defect
+/// this caught once already: an edit dropped the filter from four profiles, and
+/// `tomllib` still reported those profiles as *present* because their
+/// `[[…overrides]]` blocks survived. "The profile exists" is not the check.
 ///
 /// Returns human-readable problems (empty = OK).
-pub fn check_nextest_profiles(
-    registry: &ParityRegistry,
-    profiles: &NextestProfiles,
-) -> Vec<String> {
+pub fn check_nextest_profiles(profiles: &NextestProfiles) -> Vec<String> {
     let mut problems = Vec::new();
 
     match profiles.default_filters.get("parity") {
-        Some(Some(filter)) => problems.extend(check_parity_profile_filter(registry, filter)),
+        Some(Some(filter)) => problems.extend(check_parity_profile_filter(filter)),
         Some(None) => problems.push(
             "[profile.parity] has no default-filter; it must select exactly the live \
              parity binaries"
@@ -222,11 +170,11 @@ pub fn check_nextest_profiles(
             ));
             continue;
         };
-        for live in registry.live_names() {
+        for live in LIVE_BINARIES {
             match filter_selects(expr, live) {
                 Ok(true) => problems.push(format!(
                     "[profile.{name}] selects live parity binary `{live}` — only \
-                     [profile.parity] may select live parity binaries (FR-014)"
+                     [profile.parity] may select live parity binaries"
                 )),
                 Ok(false) => {}
                 Err(e) => problems.push(format!(
@@ -255,7 +203,7 @@ fn extract_binary_eq_tokens(expr: &str) -> Vec<String> {
     out
 }
 
-/// The parsed subset of `.config/nextest.toml` the registry check needs: each
+/// The parsed subset of `.config/nextest.toml` this check needs: each
 /// `[profile.<name>]`'s `default-filter` expression (absent = selects all).
 #[derive(Debug, Clone, Default)]
 pub struct NextestProfiles {
@@ -487,6 +435,15 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// A `[profile.parity]` filter that selects exactly the live set.
+    fn exact_live_filter() -> String {
+        LIVE_BINARIES
+            .iter()
+            .map(|n| format!("binary(={n})"))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+
     #[test]
     fn extract_binary_tokens_works() {
         let expr = "binary(=a) | binary(=b) | binary(#glob_*)";
@@ -494,109 +451,58 @@ mod tests {
     }
 
     #[test]
-    fn corpus_min_gate_maps_to_harness_error() {
-        // The corpora retired with the corpus binaries (023 US7), so this exercises the
-        // MAPPING from the shared gate onto the harness's cause-specific vocabulary,
-        // which is what this crate owns.
-        let reg = ParityRegistry::parse(
-            r#"{"live_binaries":[],"internal_consistency_binaries":[],
-                "corpora":[{"id":"probe","path":"fixtures/probe","min_cases":20}]}"#,
-        )
-        .expect("synthetic registry parses");
-        let probe = reg.corpus("probe").expect("declared");
-        assert!(check_corpus_min(&reg, probe, 20).is_ok());
-        let err = check_corpus_min(&reg, probe, 19).expect_err("below min fails");
-        assert!(matches!(err, HarnessError::CorpusTooSmall { .. }));
-    }
-
-    #[test]
-    fn discovery_is_the_shared_production_definition() {
-        // The re-exported wrappers must return exactly what the shared definition
-        // returns, and map its failures onto the harness's vocabulary.
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(dir.path().join("alpha").join(".devcontainer"))
-            .expect("create case");
-
-        let via_wrapper = discover_tier1_cases(dir.path()).expect("tier1 discovery");
-        let via_shared =
-            crate::parity_corpus::discover_tier1_cases(dir.path()).expect("shared tier1 discovery");
-        assert_eq!(via_wrapper, via_shared);
-
-        let missing = discover_tier1_cases(Path::new("/definitely/not/a/corpus"))
-            .expect_err("a missing corpus root fails loud");
-        assert!(matches!(missing, HarnessError::FixtureMissing { .. }));
-    }
-
-    #[test]
     fn profile_filter_cross_check() {
-        let reg = ParityRegistry::load().expect("embedded registry must parse");
-        let good = reg
-            .live_names()
-            .iter()
-            .map(|n| format!("binary(={n})"))
-            .collect::<Vec<_>>()
-            .join(" | ");
+        let good = exact_live_filter();
         assert!(
-            check_parity_profile_filter(&reg, &good).is_empty(),
+            check_parity_profile_filter(&good).is_empty(),
             "a filter selecting exactly the live set has no problems"
         );
 
         // Missing one live binary → flagged.
-        let missing = reg
-            .live_names()
+        let missing = LIVE_BINARIES
             .iter()
             .skip(1)
             .map(|n| format!("binary(={n})"))
             .collect::<Vec<_>>()
             .join(" | ");
-        assert!(!check_parity_profile_filter(&reg, &missing).is_empty());
+        assert!(!check_parity_profile_filter(&missing).is_empty());
 
-        // Selecting a consistency binary → flagged.
-        let with_consistency = format!("{good} | binary(=consistency_env_probe_flag)");
-        let problems = check_parity_profile_filter(&reg, &with_consistency);
+        // Selecting a hermetic meta-test binary → flagged. It is hermetic by design and
+        // must run in the ordinary lanes; pulling it into the parity lane would mean the
+        // proof that the comparison can fail only runs when the oracle is installed.
+        let with_meta = format!("{good} | binary(=parity_harness_faults)");
+        let problems = check_parity_profile_filter(&with_meta);
         assert!(
-            problems
-                .iter()
-                .any(|p| p.contains("consistency_env_probe_flag"))
+            problems.iter().any(|p| p.contains("parity_harness_faults")),
+            "got: {problems:?}"
         );
     }
 
     #[test]
     fn naming_a_binary_in_order_to_exclude_it_is_not_selecting_it() {
-        // 025 T007 puts the discovery campaign binaries in the parity filter's `not`
-        // group, so the parity lane's non-selection of them is structural rather than
-        // incidental. A token-matching check would read that as "the parity profile
-        // selects `discovery_campaign`" and fail a correct file — the check has to
-        // understand the operator it is reading.
-        let reg = ParityRegistry::load().expect("embedded registry must parse");
-        let good = reg
-            .live_names()
-            .iter()
-            .map(|n| format!("binary(={n})"))
-            .collect::<Vec<_>>()
-            .join(" | ");
+        // A token-matching check would read an exclusion group as a selection and fail a
+        // correct file — the check has to understand the operator it is reading.
+        let good = exact_live_filter();
 
-        let excluding = format!(
-            "({good}) & not (binary(=discovery_campaign) | binary(=discovery_metamorphic))"
-        );
+        let excluding = format!("({good}) & not (binary(=some_other_binary))");
         assert!(
-            check_parity_profile_filter(&reg, &excluding).is_empty(),
+            check_parity_profile_filter(&excluding).is_empty(),
             "an explicit exclusion must not read as a selection: {:?}",
-            check_parity_profile_filter(&reg, &excluding)
+            check_parity_profile_filter(&excluding)
         );
 
-        // Positively selecting an unregistered binary is still flagged — the exclusion
+        // Positively selecting an undeclared binary is still flagged — the exclusion
         // tolerance must not become a blanket amnesty for unknown names.
-        let selecting = format!("{good} | binary(=discovery_campaign)");
-        let problems = check_parity_profile_filter(&reg, &selecting);
+        let selecting = format!("{good} | binary(=some_other_binary)");
+        let problems = check_parity_profile_filter(&selecting);
         assert!(
-            problems.iter().any(|p| p.contains("discovery_campaign")),
+            problems.iter().any(|p| p.contains("some_other_binary")),
             "got: {problems:?}"
         );
 
         // An exclusion must not hide a MISSING live binary either.
-        let missing_live = format!("({good}) & not (binary(={}))", reg.live_names()[0]);
-        let problems = check_parity_profile_filter(&reg, &missing_live);
+        let missing_live = format!("({good}) & not (binary(={}))", LIVE_BINARIES[0]);
+        let problems = check_parity_profile_filter(&missing_live);
         assert!(
             problems
                 .iter()
@@ -607,19 +513,20 @@ mod tests {
 
     #[test]
     fn check_test_files_against_real_tree() {
-        let reg = ParityRegistry::load().expect("embedded registry must parse");
         let tests_dir = crate::workspace_root().join("crates/deacon/tests");
-        // The bidirectional match against the real tree must be clean: every
-        // registered live/consistency binary and every hermetic meta-test binary
-        // exists, and every `parity_*.rs` file is either registered or a recognized
-        // meta-test binary.
-        let problems = check_test_files(&reg, &tests_dir);
-        assert!(problems.is_empty(), "registry↔tests mismatch: {problems:?}");
+        // The bidirectional match against the real tree must be clean: every declared
+        // binary exists, and every `parity_*.rs` file is either declared live or a
+        // recognized meta-test binary.
+        let problems = check_test_files(&tests_dir);
+        assert!(
+            problems.is_empty(),
+            "declaration↔tests mismatch: {problems:?}"
+        );
     }
 
     #[test]
     fn glob_match_prefix_and_wildcards() {
-        assert!(glob_match("parity_*", "parity_exec"));
+        assert!(glob_match("parity_*", "parity_conformance_runner"));
         assert!(glob_match("parity_*", "parity_"));
         assert!(!glob_match("parity_*", "consistency_x"));
         assert!(glob_match("*", "anything"));
@@ -635,46 +542,60 @@ mod tests {
     #[test]
     fn filter_selects_grammar() {
         // Exact and glob.
-        assert!(filter_selects("binary(=parity_exec)", "parity_exec").unwrap());
-        assert!(!filter_selects("binary(=parity_exec)", "parity_build").unwrap());
-        assert!(filter_selects("binary(#parity_*)", "parity_exec").unwrap());
+        assert!(
+            filter_selects(
+                "binary(=parity_conformance_runner)",
+                "parity_conformance_runner"
+            )
+            .unwrap()
+        );
+        assert!(
+            !filter_selects(
+                "binary(=parity_conformance_runner)",
+                "parity_conformance_docker"
+            )
+            .unwrap()
+        );
+        assert!(filter_selects("binary(#parity_*)", "parity_conformance_runner").unwrap());
 
         // not / & / | precedence: `not a & b` == `(not a) & b`.
         assert!(
             !filter_selects(
-                "not binary(=parity_exec) & binary(#parity_*)",
-                "parity_exec"
+                "not binary(=parity_conformance_runner) & binary(#parity_*)",
+                "parity_conformance_runner"
             )
             .unwrap()
         );
         assert!(
             filter_selects(
-                "not binary(=parity_exec) & binary(#parity_*)",
-                "parity_build"
+                "not binary(=parity_conformance_runner) & binary(#parity_*)",
+                "parity_conformance_docker"
             )
             .unwrap()
         );
 
         // The real exclusion forms used in nextest.toml.
-        let excl = "not (binary(=parity_exec) | binary(=parity_build))";
-        assert!(!filter_selects(excl, "parity_exec").unwrap());
+        let excl = "not (binary(=parity_conformance_runner) | binary(=parity_conformance_docker))";
+        assert!(!filter_selects(excl, "parity_conformance_runner").unwrap());
         assert!(filter_selects(excl, "something_else").unwrap());
 
-        // docker/mvp form: parity glob minus the 9 named excludes a live binary.
-        let docker = "binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_exec))) | binary(#integration_*)";
-        assert!(!filter_selects(docker, "parity_exec").unwrap());
+        // docker/mvp form: the parity glob minus the named live binaries still selects
+        // the hermetic meta-test binary, which is the point of the carve-out.
+        let docker = "binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_conformance_runner) | binary(=parity_conformance_docker))) | binary(#integration_*)";
+        assert!(!filter_selects(docker, "parity_conformance_runner").unwrap());
         assert!(filter_selects(docker, "parity_harness_faults").unwrap());
 
         // test()/kind() predicates never select a specific binary here.
-        assert!(!filter_selects("test(/^env_probe::tests::/)", "parity_exec").unwrap());
+        assert!(
+            !filter_selects("test(/^env_probe::tests::/)", "parity_conformance_runner").unwrap()
+        );
 
         // Unsupported predicate fails loud.
-        assert!(filter_selects("mystery(=x)", "parity_exec").is_err());
+        assert!(filter_selects("mystery(=x)", "parity_conformance_runner").is_err());
     }
 
     #[test]
     fn parses_and_checks_the_real_nextest_toml() {
-        let reg = ParityRegistry::load().expect("embedded registry must parse");
         let toml_text =
             std::fs::read_to_string(crate::workspace_root().join(".config/nextest.toml"))
                 .expect("read nextest.toml");
@@ -683,7 +604,7 @@ mod tests {
             profiles.default_filters.contains_key("parity"),
             "the real nextest.toml must declare [profile.parity]"
         );
-        let problems = check_nextest_profiles(&reg, &profiles);
+        let problems = check_nextest_profiles(&profiles);
         assert!(
             problems.is_empty(),
             "nextest.toml profile cross-check problems: {problems:?}"
@@ -692,35 +613,45 @@ mod tests {
 
     #[test]
     fn check_nextest_profiles_flags_leaked_live_binary() {
-        let reg = ParityRegistry::load().expect("embedded registry must parse");
-        let parity_filter = reg
-            .live_names()
-            .iter()
-            .map(|n| format!("binary(={n})"))
-            .collect::<Vec<_>>()
-            .join(" | ");
         let mut profiles = NextestProfiles::default();
         profiles
             .default_filters
-            .insert("parity".to_string(), Some(parity_filter));
+            .insert("parity".to_string(), Some(exact_live_filter()));
         // A rogue profile that positively selects a live binary must be flagged. The
-        // binary is read from the registry rather than named literally, so retiring a
+        // binary is read from the declaration rather than named literally, so retiring a
         // carrier cannot leave this test asserting against a binary that no longer exists
         // — which is exactly how it broke when the five legacy carriers were deleted.
-        let leaked = reg
-            .live_names()
-            .first()
-            .expect("the registry declares at least one live binary")
-            .to_string();
+        let leaked = LIVE_BINARIES[0];
         profiles
             .default_filters
             .insert("rogue".to_string(), Some(format!("binary(={leaked})")));
-        let problems = check_nextest_profiles(&reg, &profiles);
+        let problems = check_nextest_profiles(&profiles);
         assert!(
             problems
                 .iter()
-                .any(|p| p.contains("rogue") && p.contains(&leaked as &str)),
+                .any(|p| p.contains("rogue") && p.contains(leaked)),
             "a leaked live binary in another profile must be flagged, got: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn a_profile_without_a_default_filter_is_a_problem() {
+        // The specific defect this caught once: an edit dropped `default-filter` from four
+        // profiles, so they selected every binary including live parity. A profile whose
+        // `[[…overrides]]` survive still parses as present, so presence is not the check.
+        let mut profiles = NextestProfiles::default();
+        profiles
+            .default_filters
+            .insert("parity".to_string(), Some(exact_live_filter()));
+        profiles
+            .default_filters
+            .insert("dev-fast".to_string(), None);
+        let problems = check_nextest_profiles(&profiles);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("dev-fast") && p.contains("no default-filter")),
+            "got: {problems:?}"
         );
     }
 }

@@ -1,34 +1,78 @@
-//! Cross-runner equivalence proof (018-harden-parity-harness, T040; SC-005, FR-019).
+//! Cross-caller equivalence proof (018-harden-parity-harness, T040; SC-005, FR-019).
 //!
-//! There is exactly ONE equivalence definition — `parity_harness::normalize` — and
-//! every runner (the `read-configuration` scenario binary, the tier1 corpus runner,
-//! the merged-config runner) reaches its verdict THROUGH it. These hermetic tests
-//! prove that single-sourcing observably: the SAME pair of raw CLI outputs, run
-//! through `normalize::config` + `diff` under DIFFERENT caller contexts (distinct
-//! `case` labels standing in for distinct runners), yields the IDENTICAL verdict —
-//! and that `merged_config` agrees with `config` on the shared configuration block.
-//! No live oracle, Docker, or network is involved.
+//! There is exactly ONE equivalence definition — `parity_harness::normalize` for
+//! normalization, `parity_harness::compare` for the comparison — and every caller
+//! reaches its verdict THROUGH them. These hermetic tests prove that single-sourcing
+//! observably: the SAME pair of raw CLI outputs, normalized and compared under DIFFERENT
+//! caller contexts (distinct `case` labels standing in for distinct callers), yields the
+//! IDENTICAL verdict — and that `merged_config` agrees with `config` on the shared
+//! configuration block. No live oracle, Docker, or network is involved.
+//!
+//! The verdict used to be a *ranked class* (`ref-only` / `deacon-only` / `value`) produced
+//! by a second differ living in `normalize`. That differ is gone; the declarative
+//! comparison names the diverging PATH and leaves both sides' values in the preserved
+//! evidence. The property these tests defend is unchanged — a difference is detected, and
+//! a ONE-SIDED difference is detected in both directions.
 
 use parity_harness::HarnessError;
+use parity_harness::compare::{Tolerances, verdict_differential};
+use parity_harness::evidence::{NormalizedChannelEvidence, Outcome};
 use parity_harness::exec::Side;
-use parity_harness::normalize::DocumentBlock;
-use parity_harness::normalize::{self, DiffKind};
+use parity_harness::model::CHAN_STRUCTURED_OUTPUT;
+use parity_harness::normalize::{self, DocumentBlock};
 use serde_json::{Value, json};
 
-/// The verdict a runner reaches for one (deacon, reference) output pair, reduced to
-/// exactly what drives pass/fail: equal-after-normalization, a *ranked* list of
-/// divergence classes, or a hard normalization failure (never a raw-compare
-/// fallback).
+/// The verdict a caller reaches for one (deacon, reference) output pair, reduced to
+/// exactly what drives pass/fail: equal-after-normalization, the diverging observable
+/// paths, or a hard normalization failure (never a raw-compare fallback).
 #[derive(Debug, PartialEq, Eq)]
 enum Verdict {
     Equal,
-    Divergent(Vec<DiffKind>),
+    Divergent(Vec<String>),
     NormalizationFailed,
 }
 
-/// Compare a (deacon, reference) config-output pair exactly as every runner does:
-/// normalize both sides through the single module, then rank-diff. `case` is the
-/// caller-context label — the only thing that varies between runners.
+/// The observable paths on which two normalized documents differ, reached through the
+/// production comparison. Channel-prefixed paths are trimmed to the document-relative
+/// path so the expectations read as the field names they are about.
+fn diverging_paths(deacon: &Value, reference: &Value) -> Vec<String> {
+    let side = |value: &Value| NormalizedChannelEvidence {
+        channel: CHAN_STRUCTURED_OUTPUT.to_string(),
+        operation: "op-read".to_string(),
+        present: true,
+        value: value.clone(),
+    };
+    let no_tolerances = Tolerances::new(&[], &[]);
+    let mut consumed = std::collections::HashSet::new();
+    let verdict = verdict_differential(
+        CHAN_STRUCTURED_OUTPUT,
+        &side(deacon),
+        &side(reference),
+        &no_tolerances,
+        &mut consumed,
+    );
+    let prefix = format!("{CHAN_STRUCTURED_OUTPUT}.");
+    match verdict.outcome {
+        Outcome::Agree => Vec::new(),
+        Outcome::Diverge => verdict
+            .detail
+            .as_ref()
+            .and_then(|d| d.get("divergingPaths"))
+            .and_then(Value::as_array)
+            .expect("a differential divergence names its paths")
+            .iter()
+            .map(|p| {
+                let p = p.as_str().expect("a diverging path is a string");
+                p.strip_prefix(&prefix).unwrap_or(p).to_string()
+            })
+            .collect(),
+        other => panic!("unexpected outcome with no tolerances declared: {other:?}"),
+    }
+}
+
+/// Compare a (deacon, reference) config-output pair exactly as every caller does:
+/// normalize both sides through the single module, then compare through the single
+/// comparison. `case` is the caller-context label — the only thing that varies.
 fn config_verdict(case: &str, deacon_raw: &str, reference_raw: &str) -> Verdict {
     let normalize_one = |raw: &str| -> Result<Value, ()> {
         match normalize::config(case, raw, Side::Deacon) {
@@ -40,12 +84,17 @@ fn config_verdict(case: &str, deacon_raw: &str, reference_raw: &str) -> Verdict 
     let (Ok(d), Ok(r)) = (normalize_one(deacon_raw), normalize_one(reference_raw)) else {
         return Verdict::NormalizationFailed;
     };
-    let divs = normalize::diff(&d, &r);
-    if divs.is_empty() {
+    let paths = diverging_paths(&d, &r);
+    if paths.is_empty() {
         Verdict::Equal
     } else {
-        Verdict::Divergent(divs.iter().map(|x| x.kind).collect())
+        Verdict::Divergent(paths)
     }
+}
+
+/// Sugar for a one-path divergence expectation.
+fn diverges_at(path: &str) -> Verdict {
+    Verdict::Divergent(vec![path.to_string()])
 }
 
 /// One row of the equivalence table: a (deacon, reference) output pair — the
@@ -78,7 +127,7 @@ fn table() -> Vec<Row> {
             name: "authored-empty-is-compared",
             deacon: r#"{ "name": "demo" }"#,
             reference: r#"{ "configuration": { "name": "demo", "customizations": {} } }"#,
-            expected: Verdict::Divergent(vec![DiffKind::RefOnly]),
+            expected: diverges_at("customizations"),
         },
         // An UNLISTED empty value is now compared rather than silently dropped — the
         // regression `prune` made invisible (023 T062).
@@ -86,7 +135,7 @@ fn table() -> Vec<Row> {
             name: "unlisted-empty-is-compared",
             deacon: r#"{ "name": "demo", "someNewProperty": {} }"#,
             reference: r#"{ "configuration": { "name": "demo" } }"#,
-            expected: Verdict::Divergent(vec![DiffKind::DeaconOnly]),
+            expected: diverges_at("someNewProperty"),
         },
         // `configFilePath` is no longer dropped: the reference emits it and deacon does
         // not, and that is now REPORTED (research D3).
@@ -95,14 +144,14 @@ fn table() -> Vec<Row> {
             deacon: r#"{ "name": "demo" }"#,
             reference: r#"{ "configuration": { "name": "demo",
                            "configFilePath": "/w/.devcontainer/devcontainer.json" } }"#,
-            expected: Verdict::Divergent(vec![DiffKind::RefOnly]),
+            expected: diverges_at("configFilePath"),
         },
         // The reference keeps a key deacon dropped: highest-signal ref-only.
         Row {
             name: "ref-only-key",
             deacon: r#"{ "name": "demo" }"#,
             reference: r#"{ "configuration": { "name": "demo", "remoteUser": "vscode" } }"#,
-            expected: Verdict::Divergent(vec![DiffKind::RefOnly]),
+            expected: diverges_at("remoteUser"),
         },
         // deacon emits a key the reference lacks: a deacon-only finding, reported with
         // the same significance as any other class (023 T065, FR-020).
@@ -110,14 +159,14 @@ fn table() -> Vec<Row> {
             name: "deacon-only-key",
             deacon: r#"{ "name": "demo", "extra": 1 }"#,
             reference: r#"{ "configuration": { "name": "demo" } }"#,
-            expected: Verdict::Divergent(vec![DiffKind::DeaconOnly]),
+            expected: diverges_at("extra"),
         },
         // Same key, differing value: a value mismatch.
         Row {
             name: "value-mismatch",
             deacon: r#"{ "name": "demo-a" }"#,
             reference: r#"{ "configuration": { "name": "demo-b" } }"#,
-            expected: Verdict::Divergent(vec![DiffKind::Value]),
+            expected: diverges_at("name"),
         },
         // The ONLY difference is a dynamic id inside an ENUMERATED id-bearing field
         // (`mounts`): deacon emits a 12-hex hash where the reference emits the
@@ -135,7 +184,7 @@ fn table() -> Vec<Row> {
             name: "hex-outside-id-fields-still-diverges",
             deacon: r#"{ "customizations": { "d": "0123456789ab" } }"#,
             reference: r#"{ "configuration": { "customizations": { "d": "ffffffffffff" } } }"#,
-            expected: Verdict::Divergent(vec![DiffKind::Value]),
+            expected: diverges_at("customizations.d"),
         },
         // Malformed JSON on one side: a hard normalization failure, never a
         // fall-through to raw comparison.
@@ -228,11 +277,12 @@ fn merged_config_agrees_with_config_on_the_shared_block() {
 }
 
 #[test]
-fn diff_ordering_is_stable_regardless_of_input_order() {
-    // A pair carrying all three divergence classes at once must order identically no
-    // matter which caller normalizes it. Order is deterministic (class, then path) and
-    // NOT a significance ranking — `deacon-only` no longer sorts last as "default
-    // noise" (023 T065, FR-020).
+fn every_difference_is_reported_in_a_stable_order() {
+    // A pair carrying a reference-only key, a deacon-only key and a differing value at
+    // once must report ALL THREE, in the same order no matter which caller normalized it.
+    // The deacon-only one is the load-bearing member: a comparison that treated the
+    // reference as the truth would drop it, and a key deacon emits and the reference does
+    // not is either a genuine extension or a genuine over-emission, never noise (FR-020).
     let deacon = r#"{ "name": "a", "extra": 1 }"#;
     let reference = r#"{ "configuration": { "name": "b", "dropped": 2 } }"#;
     let a = config_verdict("runner-a", deacon, reference);
@@ -241,11 +291,11 @@ fn diff_ordering_is_stable_regardless_of_input_order() {
     assert_eq!(
         a,
         Verdict::Divergent(vec![
-            DiffKind::RefOnly,
-            DiffKind::DeaconOnly,
-            DiffKind::Value
+            "dropped".to_string(), // reference-only
+            "extra".to_string(),   // deacon-only
+            "name".to_string(),    // differing value
         ]),
-        "divergence order must be single-sourced and stable"
+        "every difference must be reported, in a single-sourced stable order"
     );
 }
 
@@ -404,12 +454,14 @@ fn no_second_normalization_or_comparison_implementation_exists() {
     ];
     /// The ONE file allowed to define the normalization rules.
     const NORMALIZER: &str = "crates/parity-harness/src/normalize.rs";
+    /// The ONE file allowed to define the comparison.
+    const COMPARISON: &str = "crates/parity-harness/src/compare.rs";
 
     let root = parity_harness::workspace_root();
     let mut offenders: Vec<String> = Vec::new();
     let mut scanned = 0usize;
 
-    for dir in ["crates/parity-harness/src", "crates/conformance/src"] {
+    for dir in ["crates/parity-harness/src"] {
         let mut stack = vec![root.join(dir)];
         while let Some(current) = stack.pop() {
             let Ok(entries) = std::fs::read_dir(&current) else {
@@ -441,9 +493,14 @@ fn no_second_normalization_or_comparison_implementation_exists() {
                         ));
                     }
                 }
-                // `normalize::diff` is the single ranked config differ.
+                // `compare::verdict_differential` is the single comparison. A second
+                // config differ living in the normalizer is what this file used to call
+                // through, and it was retired precisely so there is one.
                 if rel != NORMALIZER && text.contains("pub fn diff(deacon:") {
                     offenders.push(format!("{rel}: defines a second config `diff`"));
+                }
+                if rel != COMPARISON && text.contains("pub fn verdict_differential(") {
+                    offenders.push(format!("{rel}: defines a second differential comparison"));
                 }
             }
         }
@@ -451,7 +508,7 @@ fn no_second_normalization_or_comparison_implementation_exists() {
 
     assert!(
         scanned > 10,
-        "expected to scan the harness + conformance sources, only saw {scanned} file(s)"
+        "expected to scan the harness sources, only saw {scanned} file(s)"
     );
     assert!(
         offenders.is_empty(),
@@ -523,10 +580,7 @@ fn null_empty_and_omitted_are_three_distinguishable_observations() {
     let verdict = |deacon_raw: &str, reference_raw: &str| {
         let d = observe(deacon_raw, Side::Deacon);
         let r = observe(reference_raw, Side::Oracle);
-        normalize::diff(&d, &r)
-            .iter()
-            .map(|x| format!("{:?}:{}", x.kind, x.path))
-            .collect::<Vec<_>>()
+        diverging_paths(&d, &r)
     };
     assert!(
         verdict(&deacon_doc(""), &omitted).is_empty(),
@@ -539,7 +593,7 @@ fn null_empty_and_omitted_are_three_distinguishable_observations() {
     );
     assert_eq!(
         verdict(&deacon_doc(""), &authored_null),
-        vec!["RefOnly:forwardPorts".to_string()],
+        vec!["forwardPorts".to_string()],
         "an authored null is the residual divergence: deacon omits the key, the reference \
          reports `null`"
     );

@@ -1,15 +1,16 @@
-# Live parity certification (018-harden-parity-harness, research D11).
+# The live differential parity lane.
 #
-# The SINGLE lane that provisions the pinned reference `@devcontainers/cli` and
-# runs the live comparison. Every OTHER lane excludes the live parity binaries by
-# nextest profile, so status stays truthful (FR-014). The check appears as
-# `parity / live-certification` — a record/replay mode, if ever added, MUST use
-# a distinct name and report `mode` (FR-017).
+# The SINGLE lane that provisions the pinned reference `@devcontainers/cli` and runs
+# the live comparison. Every OTHER lane excludes the live parity binaries by nextest
+# profile, so their status stays truthful by non-selection: a green fast run never
+# implies parity ran.
 #
-# Provisioning ONLY happens here; ALL pass/fail/gating logic lives in the harness
-# and the aggregator. There is deliberately NO `continue-on-error` anywhere: any
-# failing step fails the lane, and `target/parity/` is uploaded even on red runs
-# so the raw outputs + report fragments are always diagnosable.
+# This lane GATES NOTHING. It is not in the release path.
+#
+# Provisioning only happens here; ALL pass/fail logic lives in the harness, and the
+# nextest exit code is the verdict. There is deliberately NO `continue-on-error`
+# anywhere: any failing step fails the lane, and `target/parity/` is uploaded even on
+# red runs so the raw outputs and report fragments are always diagnosable.
 name: parity
 
 on:
@@ -147,15 +148,16 @@ jobs:
         run: ./scripts/parity/prepull-fixture-images.sh
 
       - name: Run live parity comparison
+        # The nextest exit code IS the verdict. A divergence with no covering tolerance,
+        # a tolerance whose difference no longer reproduces (stale), a missing oracle, an
+        # absent Docker daemon and a normalization failure all fail here with a
+        # cause-specific error. Nothing downstream re-decides it.
         run: cargo nextest run --profile parity
-
-      - name: Aggregate + enforce completeness gate
-        run: cargo run -p parity-harness --bin parity-report
 
       - name: Upload parity artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: parity-report
+          name: parity-evidence
           path: target/parity/
           if-no-files-found: warn

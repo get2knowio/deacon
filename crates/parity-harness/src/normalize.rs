@@ -322,9 +322,7 @@ pub fn path_env_segmented(path_value: &Value, tokens: &TokenMap) -> Value {
 /// Comparing the raw spelling reports a difference with no observable consequence, which
 /// RULES.md places out of scope entirely.
 ///
-/// The same equivalence the legacy [`diff_states`] has always applied ([`norm_user`]);
-/// this is the declarative channel's half of it, so one rule covers both comparison paths
-/// instead of one path quietly comparing something the other does not. It CANONICALIZES —
+/// It CANONICALIZES —
 /// nothing is removed, a genuinely non-root user still compares, and the rewrite is
 /// confined to the exact value `""` on two named fields.
 fn default_user_root(value: &Value) -> Value {
@@ -838,135 +836,6 @@ fn tokenize_hex12(input: &str) -> String {
 }
 
 // ===========================================================================
-// Configuration diff (ranked): ref-only / value / deacon-only
-// ===========================================================================
-
-/// Divergence class. **All three are reported with equal significance** (023 T065,
-/// FR-020).
-///
-/// This enum used to rank `deacon-only` LAST, documented as "usually default noise".
-/// That was the deacon-only-as-serialization-noise assumption research D3 identifies as
-/// the migration's central normalization defect: a field deacon emits and the reference
-/// does not is either a genuine extension or a genuine over-emission, and neither is
-/// noise. Combined with `prune` — which deleted such a field outright whenever it
-/// happened to be empty — it meant deacon-only data was hidden if empty and buried if
-/// populated.
-///
-/// Ordering is now a **display order only**, chosen for deterministic output, and no
-/// class sorts below another on the grounds of being less interesting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum DiffKind {
-    RefOnly,
-    DeaconOnly,
-    Value,
-}
-
-impl DiffKind {
-    /// The stable wire spelling, used for deterministic ordering and reporting.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            DiffKind::RefOnly => "ref-only",
-            DiffKind::DeaconOnly => "deacon-only",
-            DiffKind::Value => "value",
-        }
-    }
-}
-
-/// A single normalized-config divergence.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConfigDivergence {
-    pub kind: DiffKind,
-    pub path: String,
-    pub deacon: Option<Value>,
-    pub reference: Option<Value>,
-}
-
-/// Diff two normalized configs.
-///
-/// Output order is `(class, path)` — deterministic, and NOT a significance ranking: every
-/// class is reported, none is de-prioritized (023 T065, FR-020).
-pub fn diff(deacon: &Value, reference: &Value) -> Vec<ConfigDivergence> {
-    let mut out = Vec::new();
-    diff_rec(deacon, reference, "", &mut out);
-    out.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.path.cmp(&b.path)));
-    out
-}
-
-fn diff_rec(d: &Value, r: &Value, path: &str, out: &mut Vec<ConfigDivergence>) {
-    match (d, r) {
-        (Value::Object(dm), Value::Object(rm)) => {
-            let keys: BTreeSet<&String> = dm.keys().chain(rm.keys()).collect();
-            for k in keys {
-                let p = if path.is_empty() {
-                    k.clone()
-                } else {
-                    format!("{path}.{k}")
-                };
-                match (dm.get(k), rm.get(k)) {
-                    (Some(dv), None) => out.push(ConfigDivergence {
-                        kind: DiffKind::DeaconOnly,
-                        path: p,
-                        deacon: Some(dv.clone()),
-                        reference: None,
-                    }),
-                    (None, Some(rv)) => out.push(ConfigDivergence {
-                        kind: DiffKind::RefOnly,
-                        path: p,
-                        deacon: None,
-                        reference: Some(rv.clone()),
-                    }),
-                    (Some(dv), Some(rv)) => diff_rec(dv, rv, &p, out),
-                    (None, None) => unreachable!("key came from the union of both maps"),
-                }
-            }
-        }
-        _ => {
-            if d != r {
-                out.push(ConfigDivergence {
-                    kind: DiffKind::Value,
-                    path: path.to_string(),
-                    deacon: Some(d.clone()),
-                    reference: Some(r.clone()),
-                });
-            }
-        }
-    }
-}
-
-/// A compact, ranked, human-readable summary of config divergences (used for the
-/// report fragment's `diff_summary` and the test failure message).
-pub fn summarize(divs: &[ConfigDivergence]) -> String {
-    fn snip(v: &Value) -> String {
-        let s = v.to_string();
-        if s.len() > 200 {
-            format!("{}…", &s[..200])
-        } else {
-            s
-        }
-    }
-    let mut lines = Vec::new();
-    for d in divs {
-        let loc = if d.path.is_empty() { "<root>" } else { &d.path };
-        match d.kind {
-            DiffKind::RefOnly => lines.push(format!(
-                "ref-only    {loc} = {} (deacon drops this)",
-                d.reference.as_ref().map(snip).unwrap_or_default()
-            )),
-            DiffKind::Value => lines.push(format!(
-                "value       {loc}: deacon={} ref={}",
-                d.deacon.as_ref().map(snip).unwrap_or_default(),
-                d.reference.as_ref().map(snip).unwrap_or_default()
-            )),
-            DiffKind::DeaconOnly => lines.push(format!(
-                "deacon-only {loc} = {} (the reference does not emit this)",
-                d.deacon.as_ref().map(snip).unwrap_or_default()
-            )),
-        }
-    }
-    lines.join("\n")
-}
-
-// ===========================================================================
 // Container observable-state normalization (observable-state parity)
 //
 // Ported verbatim (semantics-preserving) from the sole prior implementation in
@@ -976,43 +845,15 @@ pub fn summarize(divs: &[ConfigDivergence]) -> String {
 // ported — divergence classification moves to the waiver system (US2).
 // ===========================================================================
 
-/// Env keys the LEGACY `diff_states` comparison subtracts before diffing env.
-///
-/// They are NOT removed at capture (024 US5, T123) — see [`is_noise_env_key`].
-pub const NOISE_ENV_KEYS: &[&str] = &["PATH", "HOME", "HOSTNAME", "TERM", "container"];
-
-/// **NAMED, SCOPED legacy rule `drop_noise_env` — the legacy [`diff_states`] COMPARISON
-/// only** (research D6, FR-029). Whether `key` is one of [`NOISE_ENV_KEYS`].
-///
-/// # NARROWED in 024 US5 (T123): comparison-time, not capture-time
-///
-/// This rule used to run inside [`container_state`], i.e. at CAPTURE. That made its
-/// registered scope (`channel:chan-container-state`) a false statement about its reach:
-/// the declarative `chan-container-state` observer DELEGATES to [`container_state`], so
-/// the five variables were removed from the declarative channel's evidence too — and one
-/// of them is `PATH`, which FR-050 requires be compared, including the segments a Feature
-/// contributes. A field a case cannot see is a field no case can compare, and the
-/// removal was invisible in the case record.
-///
-/// The subtraction now happens where its justification actually holds: inside
-/// [`diff_states`], the legacy observable-state comparison the two surviving live
-/// binaries drive. Their verdicts are unchanged. The declarative channel captures every
-/// variable, and the one variable that genuinely cannot agree across two containers —
-/// `HOSTNAME`, which Docker sets to the container's short id — is REWRITTEN by the named
-/// [`container_hostname_token`] rule rather than removed.
-pub fn is_noise_env_key(key: &str) -> bool {
-    NOISE_ENV_KEYS.contains(&key)
-}
-
 /// **Rule `container_hostname_token`** (024 US5, T123, action `rewrite`, scope
 /// `channel:chan-container-state`): rewrite a container-id-shaped `HOSTNAME` value to
 /// `<CONTAINER_HOSTNAME>`.
 ///
 /// Docker defaults a container's hostname to its own 12-character short id, so two
 /// containers created by two CLIs from the same configuration ALWAYS disagree here, for a
-/// reason that says nothing about either CLI. The retired capture-time `drop_noise_env`
-/// handled this by deleting the variable outright — along with `PATH` and `HOME`, which
-/// carry real information.
+/// reason that says nothing about either CLI. The retired `drop_noise_env` rule handled
+/// this by deleting the variable outright — along with `PATH` and `HOME`, which carry real
+/// information.
 ///
 /// Rewrite, never delete, and only when the value LOOKS like a container id: a hostname
 /// the configuration actually set (`runArgs: ["--hostname", "dev"]`) is not 12 hex
@@ -1105,8 +946,9 @@ pub struct StateSnapshot {
     /// `sleep infinity || tail -f /dev/null` as PID 1, which cannot service SIGTERM, so
     /// `docker stop` waited the full 10s grace period and then SIGKILLed the container:
     /// 10,258 ms versus the reference CLI's 215 ms, exit 137 versus exit 0. Measured the
-    /// first time a declarative case actually COMPARED this field (024) — the legacy
-    /// `diff_states` captured it and skipped it, on the strength of the same assumption.
+    /// first time a declarative case actually COMPARED this field (024) — the retired
+    /// state comparison captured it and skipped it, on the strength of the same
+    /// assumption.
     /// deacon now uses the same `trap` + background + `wait` shape, and both paths stop in
     /// ~200 ms.
     ///
@@ -1114,8 +956,8 @@ pub struct StateSnapshot {
     /// claim about behavior, and an uncompared field is exactly where such a claim never
     /// gets tested.
     ///
-    /// EMITTED on `chan-container-state` and therefore COMPARED (024 Phase 4). The legacy
-    /// `diff_states` documented it as "captured but NOT diffed" — an undeclared
+    /// EMITTED on `chan-container-state` and therefore COMPARED (024 Phase 4). The retired
+    /// state comparison documented it as "captured but NOT diffed" — an undeclared
     /// non-comparison, invisible to anyone reading the case. A declarative case declares
     /// the tolerance instead, so the elision is visible, backed and stale-checked.
     pub entrypoint: Vec<String>,
@@ -1126,14 +968,6 @@ pub struct StateSnapshot {
     /// project-naming difference characterized on the case
     /// (`bhv-compose-project-name-robust`) rather than silently not diffed.
     pub networks: BTreeSet<String>,
-}
-
-/// A single field-level observable-state divergence.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Divergence {
-    /// Stable field identifier, e.g. `mount:/feat-mnt`, `env:FOO`, `user`.
-    pub field: String,
-    pub detail: String,
 }
 
 /// Build a normalized snapshot from a single `docker inspect` object. Pure —
@@ -1186,8 +1020,8 @@ pub fn container_state(case: &str, raw: &Value) -> Result<StateSnapshot, Harness
     // Env VERBATIM (024 US5, T123). `drop_noise_env` used to subtract five variables
     // HERE, at capture, which also stripped them from the declarative
     // `chan-container-state` evidence (this function is what that observer delegates to)
-    // — including `PATH`, the field FR-050 exists to compare. The subtraction now happens
-    // in [`diff_states`], the legacy comparison whose justification it was written for.
+    // — including `PATH`, the field FR-050 exists to compare. The rule retired with the
+    // legacy comparison it was written for; capture now removes nothing.
     let env = str_array(&raw["Config"]["Env"]).into_iter().collect();
 
     // Labels VERBATIM (024 Phase 4): the `strip_intentional_labels` prefix-drop is
@@ -1272,165 +1106,6 @@ fn strip_project_prefix(name: &str, project: &str) -> String {
     name.to_string()
 }
 
-/// **Rule `user_default_root`** (registered in 024 US5, T123, action `canonicalize`,
-/// scope `field:/user`): an empty `Config.User` means "image default" (root for the Linux
-/// bases used here); treat "" and "root" as equivalent so a cosmetic difference is not
-/// flagged, while a real non-root `remoteUser`/`containerUser` still diverges.
-///
-/// This is the LEGACY [`diff_states`] half of the rule; [`default_user_root`] is the
-/// declarative channel's half, so one registered rule covers both comparison paths rather
-/// than one path quietly comparing something the other does not. Registered in 024 US5
-/// because it was an unregistered equivalence — a comparison-time collapse no reviewer
-/// could find from the rule list.
-fn norm_user(u: &str) -> &str {
-    if u.is_empty() { "root" } else { u }
-}
-
-/// The legacy `drop_noise_env` subtraction over a captured env set (024 US5, T123).
-fn without_noise_env(env: &BTreeSet<String>) -> BTreeSet<String> {
-    env.iter()
-        .filter(|e| {
-            let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e.as_str());
-            !is_noise_env_key(key)
-        })
-        .cloned()
-        .collect()
-}
-
-fn env_map(set: &BTreeSet<String>) -> BTreeMap<String, String> {
-    set.iter()
-        .map(|e| match e.split_once('=') {
-            Some((k, v)) => (k.to_string(), v.to_string()),
-            None => (e.clone(), String::new()),
-        })
-        .collect()
-}
-
-/// Field-by-field diff of two normalized snapshots (mounts by
-/// destination+type+read-only, env by key, labels by key, exposed/published
-/// ports as sets, scalar user/working_dir). Deliberately does NOT compare mount
-/// SOURCES, cmd/entrypoint, or networks — see the [`StateSnapshot`] field docs.
-pub fn diff_states(deacon: &StateSnapshot, upstream: &StateSnapshot) -> Vec<Divergence> {
-    let mut out = Vec::new();
-
-    let dests: BTreeSet<&String> = deacon.mounts.keys().chain(upstream.mounts.keys()).collect();
-    for dest in dests {
-        match (deacon.mounts.get(dest), upstream.mounts.get(dest)) {
-            (Some(d), Some(u)) => {
-                if d.mount_type != u.mount_type {
-                    out.push(Divergence {
-                        field: format!("mount:{dest}"),
-                        detail: format!(
-                            "type differs: deacon={} upstream={}",
-                            d.mount_type, u.mount_type
-                        ),
-                    });
-                }
-                if d.ro != u.ro {
-                    out.push(Divergence {
-                        field: format!("mount:{dest}"),
-                        detail: format!("read-only differs: deacon={} upstream={}", d.ro, u.ro),
-                    });
-                }
-            }
-            (Some(d), None) => out.push(Divergence {
-                field: format!("mount:{dest}"),
-                detail: format!("present on deacon ({}), absent upstream", d.mount_type),
-            }),
-            (None, Some(u)) => out.push(Divergence {
-                field: format!("mount:{dest}"),
-                detail: format!("present upstream ({}), absent deacon", u.mount_type),
-            }),
-            (None, None) => unreachable!("dest came from the union of both maps"),
-        }
-    }
-
-    // The legacy `drop_noise_env` subtraction, applied HERE (024 US5, T123) rather than
-    // at capture: the five runtime-injected variables are removed from this comparison
-    // only, so the declarative channel still sees every variable.
-    diff_kv(
-        "env",
-        &env_map(&without_noise_env(&deacon.env)),
-        &env_map(&without_noise_env(&upstream.env)),
-        &mut out,
-    );
-    diff_kv("label", &deacon.labels, &upstream.labels, &mut out);
-
-    for p in deacon.exposed_ports.difference(&upstream.exposed_ports) {
-        out.push(Divergence {
-            field: format!("port:{p}"),
-            detail: "exposed on deacon, not upstream".to_string(),
-        });
-    }
-    for p in upstream.exposed_ports.difference(&deacon.exposed_ports) {
-        out.push(Divergence {
-            field: format!("port:{p}"),
-            detail: "exposed upstream, not deacon".to_string(),
-        });
-    }
-
-    for p in deacon.published_ports.difference(&upstream.published_ports) {
-        out.push(Divergence {
-            field: format!("pubport:{p}"),
-            detail: "published on deacon, not upstream".to_string(),
-        });
-    }
-    for p in upstream.published_ports.difference(&deacon.published_ports) {
-        out.push(Divergence {
-            field: format!("pubport:{p}"),
-            detail: "published upstream, not deacon".to_string(),
-        });
-    }
-
-    if norm_user(&deacon.user) != norm_user(&upstream.user) {
-        out.push(Divergence {
-            field: "user".to_string(),
-            detail: format!("deacon={:?} upstream={:?}", deacon.user, upstream.user),
-        });
-    }
-    if deacon.working_dir != upstream.working_dir {
-        out.push(Divergence {
-            field: "workingdir".to_string(),
-            detail: format!(
-                "deacon={:?} upstream={:?}",
-                deacon.working_dir, upstream.working_dir
-            ),
-        });
-    }
-
-    out
-}
-
-fn diff_kv(
-    kind: &str,
-    deacon: &BTreeMap<String, String>,
-    upstream: &BTreeMap<String, String>,
-    out: &mut Vec<Divergence>,
-) {
-    let keys: BTreeSet<&String> = deacon.keys().chain(upstream.keys()).collect();
-    for k in keys {
-        match (deacon.get(k), upstream.get(k)) {
-            (Some(dv), Some(uv)) => {
-                if dv != uv {
-                    out.push(Divergence {
-                        field: format!("{kind}:{k}"),
-                        detail: format!("value differs: deacon={dv:?} upstream={uv:?}"),
-                    });
-                }
-            }
-            (Some(dv), None) => out.push(Divergence {
-                field: format!("{kind}:{k}"),
-                detail: format!("present on deacon ({dv:?}), absent upstream"),
-            }),
-            (None, Some(uv)) => out.push(Divergence {
-                field: format!("{kind}:{k}"),
-                detail: format!("present upstream ({uv:?}), absent deacon"),
-            }),
-            (None, None) => unreachable!("key came from the union of both maps"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1447,6 +1122,60 @@ mod tests {
             operation: "op-1".to_string(),
             present: true,
             value,
+        }
+    }
+
+    /// The observable paths on which two normalized configuration documents differ,
+    /// reached through the SAME comparison the runner uses
+    /// ([`crate::compare::verdict_differential`]) rather than a second differ written
+    /// for the tests.
+    ///
+    /// The ranked `diff`/`summarize` pair this replaced classified each difference as
+    /// `ref-only` / `deacon-only` / `value`. The declarative comparison names the
+    /// diverging PATH instead and leaves the two sides' values in the preserved
+    /// evidence, so the class is read off the evidence rather than stamped on the
+    /// verdict. What must not be lost is that a one-sided difference is reported in
+    /// BOTH directions — a comparison that treated the reference as the truth would
+    /// drop deacon-only keys, which is the failure FR-020 names.
+    fn diverging_paths(deacon: &Value, reference: &Value) -> Vec<String> {
+        use crate::compare::{Tolerances, verdict_differential};
+        use crate::evidence::{NormalizedChannelEvidence, Outcome};
+        use crate::model::CHAN_STRUCTURED_OUTPUT;
+
+        let side = |value: &Value| NormalizedChannelEvidence {
+            channel: CHAN_STRUCTURED_OUTPUT.to_string(),
+            operation: "op-read".to_string(),
+            present: true,
+            value: value.clone(),
+        };
+        let no_tolerances = Tolerances::new(&[], &[]);
+        let mut consumed = std::collections::HashSet::new();
+        let verdict = verdict_differential(
+            CHAN_STRUCTURED_OUTPUT,
+            &side(deacon),
+            &side(reference),
+            &no_tolerances,
+            &mut consumed,
+        );
+        let prefix = format!("{CHAN_STRUCTURED_OUTPUT}.");
+        match verdict.outcome {
+            Outcome::Agree => Vec::new(),
+            Outcome::Diverge => verdict
+                .detail
+                .as_ref()
+                .and_then(|d| d.get("divergingPaths"))
+                .and_then(Value::as_array)
+                .expect("a differential divergence names its paths")
+                .iter()
+                .map(|p| {
+                    p.as_str()
+                        .expect("a diverging path is a string")
+                        .strip_prefix(&prefix)
+                        .unwrap_or_else(|| p.as_str().expect("a diverging path is a string"))
+                        .to_string()
+                })
+                .collect(),
+            other => panic!("unexpected outcome with no tolerances declared: {other:?}"),
         }
     }
 
@@ -1678,11 +1407,6 @@ mod tests {
              what \"equal\" means, so every recorded snapshot must go stale and be \
              re-reviewed"
         );
-    }
-
-    #[test]
-    fn legacy_noise_rules_are_named_and_scoped() {
-        assert!(is_noise_env_key("PATH") && !is_noise_env_key("MY_VAR"));
     }
 
     #[test]
@@ -1920,7 +1644,11 @@ mod tests {
             Side::Deacon,
         )
         .unwrap();
-        assert_eq!(diff(&a, &b).len(), 1, "distinct digests must not collapse");
+        assert_eq!(
+            diverging_paths(&a, &b),
+            vec!["customizations.d".to_string()],
+            "distinct digests must not collapse"
+        );
     }
 
     #[test]
@@ -1944,24 +1672,32 @@ mod tests {
     }
 
     #[test]
-    fn diff_order_is_deterministic_and_deacon_only_is_not_last() {
+    fn every_one_sided_difference_is_reported_in_both_directions() {
+        // FR-020: a key only the reference emits and a key only deacon emits are BOTH
+        // findings. A comparison that treated the reference as the truth would report
+        // the first and drop the second, and a deacon-only key is either a genuine
+        // extension or a genuine over-emission — never noise.
         let deacon = json!({ "name": "x", "extra": 1 });
         let reference = json!({ "name": "y", "dropped": 2 });
-        let divs = diff(&deacon, &reference);
-        let kinds: Vec<_> = divs.iter().map(|d| d.kind).collect();
-        // 023 T065 / FR-020: `deacon-only` no longer sorts below `value` as "default
-        // noise" — the order is a deterministic display order, nothing more.
         assert_eq!(
-            kinds,
-            vec![DiffKind::RefOnly, DiffKind::DeaconOnly, DiffKind::Value]
+            diverging_paths(&deacon, &reference),
+            vec![
+                "dropped".to_string(), // reference-only
+                "extra".to_string(),   // deacon-only
+                "name".to_string(),    // same key, differing value
+            ],
+            "all three differences are reported, ordered deterministically by path"
         );
-        assert_eq!(divs[0].path, "dropped");
-        let summary = summarize(&divs);
-        assert!(summary.contains("ref-only"));
-        assert!(summary.contains("deacon drops this"));
-        assert!(
-            summary.contains("the reference does not emit this"),
-            "deacon-only must be reported as a finding, not shrugged off: {summary}"
+        // Deterministic regardless of which side is passed first.
+        let mut swapped = diverging_paths(&reference, &deacon);
+        swapped.sort();
+        assert_eq!(
+            swapped,
+            vec![
+                "dropped".to_string(),
+                "extra".to_string(),
+                "name".to_string()
+            ]
         );
     }
 
@@ -1982,7 +1718,7 @@ mod tests {
             Side::Deacon,
         )
         .unwrap();
-        assert!(diff(&a, &b).is_empty());
+        assert!(diverging_paths(&a, &b).is_empty());
     }
 
     #[test]
@@ -1992,9 +1728,7 @@ mod tests {
         // all. Eliding it is what made those two documents indistinguishable (FR-055).
         let a = config("a", r#"{ "name": "x", "image": null }"#, Side::Deacon).unwrap();
         let b = config("b", r#"{ "name": "x" }"#, Side::Deacon).unwrap();
-        let divs = diff(&a, &b);
-        assert_eq!(divs.len(), 1, "{divs:?}");
-        assert_eq!(divs[0].path, "image");
+        assert_eq!(diverging_paths(&a, &b), vec!["image".to_string()]);
     }
 
     #[test]
@@ -2008,10 +1742,11 @@ mod tests {
         )
         .unwrap();
         let b = config("b", r#"{ "name": "x" }"#, Side::Deacon).unwrap();
-        let divs = diff(&a, &b);
-        assert_eq!(divs.len(), 1, "{divs:?}");
-        assert_eq!(divs[0].kind, DiffKind::DeaconOnly);
-        assert_eq!(divs[0].path, "someNewProperty");
+        assert_eq!(
+            diverging_paths(&a, &b),
+            vec!["someNewProperty".to_string()],
+            "an unlisted key deacon emits and the reference does not is a finding"
+        );
     }
 
     #[test]
@@ -2019,9 +1754,7 @@ mod tests {
         // The value guard: the rule elides an ABSENT `appPort`, never a populated one.
         let a = config("a", r#"{ "appPort": [3000] }"#, Side::Deacon).unwrap();
         let b = config("b", r#"{ }"#, Side::Deacon).unwrap();
-        let divs = diff(&a, &b);
-        assert_eq!(divs.len(), 1);
-        assert_eq!(divs[0].path, "appPort");
+        assert_eq!(diverging_paths(&a, &b), vec!["appPort".to_string()]);
     }
 
     #[test]
@@ -2035,10 +1768,10 @@ mod tests {
             Side::Deacon,
         )
         .unwrap();
-        let divs = diff(&deacon, &reference);
-        assert_eq!(divs.len(), 1, "{divs:?}");
-        assert_eq!(divs[0].kind, DiffKind::RefOnly);
-        assert_eq!(divs[0].path, "configFilePath");
+        assert_eq!(
+            diverging_paths(&deacon, &reference),
+            vec!["configFilePath".to_string()]
+        );
     }
 
     #[test]
@@ -2068,8 +1801,7 @@ mod tests {
         // 024 US5 (T123): CAPTURE removes NOTHING. `drop_noise_env` used to subtract five
         // variables here, which also removed them from the declarative
         // `chan-container-state` evidence — `PATH` among them, the field FR-050 exists to
-        // compare. The subtraction now happens in `diff_states` (see
-        // `diff_states_subtracts_the_noise_env_keys`).
+        // compare.
         assert!(snap.env.contains("FOO=bar"));
         assert!(snap.env.contains("PATH=/bin"));
         assert!(snap.env.contains("HOME=/root"));
@@ -2083,47 +1815,6 @@ mod tests {
         assert!(snap.labels.contains_key("com.docker.compose.project"));
         // Bind mount source reported as leaf only.
         assert_eq!(snap.mounts["/workspace"].source_tail, "ws");
-    }
-
-    #[test]
-    fn diff_states_flags_env_and_normalizes_root_user() {
-        let mut deacon = StateSnapshot::default();
-        let mut upstream = StateSnapshot::default();
-        deacon.user = String::new(); // image default
-        upstream.user = "root".to_string();
-        deacon.env.insert("A=1".to_string());
-        upstream.env.insert("A=2".to_string());
-        let divs = diff_states(&deacon, &upstream);
-        // "" and "root" are equivalent → no user divergence.
-        assert!(!divs.iter().any(|d| d.field == "user"));
-        // Env value differs → flagged.
-        assert!(divs.iter().any(|d| d.field == "env:A"));
-    }
-
-    /// 024 US5 (T123): the `drop_noise_env` subtraction moved from CAPTURE to HERE, so the
-    /// legacy comparison's verdicts are unchanged while the declarative channel keeps
-    /// every variable.
-    #[test]
-    fn diff_states_subtracts_the_noise_env_keys() {
-        let mut deacon = StateSnapshot::default();
-        let mut upstream = StateSnapshot::default();
-        for key in NOISE_ENV_KEYS {
-            deacon.env.insert(format!("{key}=deacon"));
-            upstream.env.insert(format!("{key}=upstream"));
-        }
-        deacon.env.insert("REAL=one".to_string());
-        upstream.env.insert("REAL=two".to_string());
-
-        let divs = diff_states(&deacon, &upstream);
-        assert_eq!(
-            divs.iter()
-                .filter(|d| d.field.starts_with("env:"))
-                .map(|d| d.field.as_str())
-                .collect::<Vec<_>>(),
-            vec!["env:REAL"],
-            "every noise key differs on both sides and none is reported; only the real \
-             variable is"
-        );
     }
 
     /// The `container_hostname_token` rewrite (024 US5, T123): a container-id-shaped
@@ -2184,8 +1875,14 @@ mod tests {
         );
     }
 
+    /// Capture keeps the whole of both sides. The retired state comparison that once read
+    /// this snapshot deliberately did NOT compare bind mount SOURCES (a
+    /// per-workspace temp path differs by construction); the declarative
+    /// `chan-container-state` channel captures the source's leaf and lets a case declare
+    /// a tolerance for it, so the elision is visible and stale-checked rather than
+    /// hard-coded into the comparison.
     #[test]
-    fn diff_states_detects_missing_mount_and_env_but_ignores_bind_source() {
+    fn container_state_captures_mounts_env_and_the_bind_source_leaf() {
         let deacon = container_state(
             "d",
             &json!({
@@ -2205,16 +1902,20 @@ mod tests {
             }),
         )
         .unwrap();
-        let divs = diff_states(&deacon, &upstream);
-        // Missing mount and missing env are both flagged...
-        assert!(divs.iter().any(|d| d.field == "mount:/data"));
-        assert!(divs.iter().any(|d| d.field == "env:SECRET"));
-        // ...but a differing bind SOURCE (per-workspace temp path) is NOT.
-        assert!(!divs.iter().any(|d| d.field == "mount:/workspace"));
+        // The mount and the env var present on only one side are both captured, so a
+        // comparison can see them.
+        assert!(!deacon.mounts.contains_key("/data"));
+        assert!(upstream.mounts.contains_key("/data"));
+        assert!(!deacon.env.contains("SECRET=1"));
+        assert!(upstream.env.contains("SECRET=1"));
+        // The bind source is captured as its LEAF, so the two per-workspace temp paths
+        // are comparable without being identical.
+        assert_eq!(deacon.mounts["/workspace"].source_tail, "ws-a");
+        assert_eq!(upstream.mounts["/workspace"].source_tail, "ws-b");
     }
 
     #[test]
-    fn diff_states_captures_and_diffs_published_ports() {
+    fn container_state_captures_published_ports() {
         let with_port = container_state(
             "w",
             &json!({
@@ -2232,15 +1933,6 @@ mod tests {
         )
         .unwrap();
         assert!(with_port.published_ports.contains("3000/tcp"));
-        let divs = diff_states(&with_port, &without_port);
-        assert!(divs.iter().any(|d| d.field == "pubport:3000/tcp"));
-        // Identical published ports → no divergence.
-        assert!(diff_states(&with_port, &with_port).is_empty());
-    }
-
-    #[test]
-    fn diff_states_default_snapshot_has_no_self_divergence() {
-        let s = StateSnapshot::default();
-        assert!(diff_states(&s, &s).is_empty());
+        assert!(without_port.published_ports.is_empty());
     }
 }
