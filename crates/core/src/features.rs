@@ -234,20 +234,20 @@ impl std::fmt::Display for OptionValue {
 pub enum FeatureOption {
     #[serde(rename = "boolean")]
     Boolean {
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         default: Option<bool>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         description: Option<String>,
     },
     #[serde(rename = "string")]
     String {
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         default: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         description: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         r#enum: Option<Vec<String>>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         proposals: Option<Vec<String>>,
     },
 }
@@ -315,12 +315,19 @@ pub struct FeatureMetadata {
     #[serde(default)]
     pub description: Option<String>,
 
-    /// Documentation URL
-    #[serde(default)]
+    /// Documentation URL.
+    ///
+    /// Spelled `documentationURL` (not the struct-wide camelCase `documentationUrl`)
+    /// because that is the key `devcontainer-feature.json` and the OCI
+    /// `dev.containers.metadata` annotation actually use — see
+    /// devcontainer-features.md. Without the explicit rename the field never
+    /// deserialized and the value was silently dropped.
+    #[serde(default, rename = "documentationURL")]
     pub documentation_url: Option<String>,
 
-    /// License URL
-    #[serde(default)]
+    /// License URL. Spelled `licenseURL` for the same reason as
+    /// [`Self::documentation_url`].
+    #[serde(default, rename = "licenseURL")]
     pub license_url: Option<String>,
 
     /// Feature options

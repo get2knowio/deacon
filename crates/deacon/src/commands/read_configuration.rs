@@ -93,26 +93,86 @@ pub struct FeatureSet {
     pub computed_digest: Option<String>,
 }
 
-/// Individual feature in output
+/// One resolved feature, matching the reference CLI's `featureSets[].features[]`
+/// element: the feature's own `devcontainer-feature.json` metadata, plus the four
+/// fields the resolver computes (`value`, `included`, `cachePath`, `consecutiveId`).
+///
+/// Every field is `Option` + `skip_serializing_if` because the reference emits only
+/// what the feature actually declares — a feature with no `capAdd` has no `capAdd`
+/// key, not an empty array. deacon's [`deacon_core::features::FeatureMetadata`] stores
+/// the collection-valued properties as bare `Vec`/`HashMap`, so it cannot distinguish
+/// an authored-empty (`"capAdd": []`) from an absent one; those are emitted only when
+/// non-empty. No observed feature authors an empty collection, and the alternative —
+/// emitting every key unconditionally — diverges on every feature.
+///
+/// `options` carries the feature's option SCHEMA and `value` the user's supplied
+/// option values. deacon previously put the user's values in `options` and had no
+/// `value`, which read as the same field name meaning two different things.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Feature {
+    /// The feature's own id from its `devcontainer-feature.json` (`go`,
+    /// `needs-node`) — NOT the per-command canonical id, which for a local
+    /// feature is `local:<absolute path>`.
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub options: Option<HashMap<String, serde_json::Value>>,
-    /// Source reference preserving registry/namespace/tag (e.g., "oci://ghcr.io/devcontainers/features/node:1.2.3")
+    pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
+    pub name: Option<String>,
+    #[serde(rename = "documentationURL", skip_serializing_if = "Option::is_none")]
+    pub documentation_url: Option<String>,
+    #[serde(rename = "licenseURL", skip_serializing_if = "Option::is_none")]
+    pub license_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The feature's declared option schema (`{ name: { type, default, … } }`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_env: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customizations: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mounts: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub init: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub privileged: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mounts: Option<Vec<serde_json::Value>>,
+    pub cap_add: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub container_env: Option<HashMap<String, String>>,
+    pub security_opt: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entrypoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installs_after: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depends_on: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_create_command: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_content_command: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_create_command: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_start_command: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_attach_command: Option<serde_json::Value>,
+    /// The option values the configuration supplied for this feature, as written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
+    /// Whether the feature participates in the build. Every feature deacon
+    /// reports comes from the resolved installation plan, so this is always
+    /// `true`; deacon has no notion of a resolved-but-excluded feature.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub included: Option<bool>,
+    /// Host directory this feature's content is staged into
+    /// (`<dstFolder>/<consecutiveId>`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_path: Option<String>,
+    /// `<feature id>_<position in install order>` — the staged directory's name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consecutive_id: Option<String>,
 }
 
 /// Parsed OCI feature reference, mirroring the reference CLI's `featureRef`.
@@ -322,13 +382,19 @@ fn resolve_workspace_configuration(
     })
 }
 
-/// Resolve features configuration from the DevContainer config
+/// Resolve features configuration from the DevContainer config.
+///
+/// `dst_folder` is the host directory a build WOULD stage this workspace's feature
+/// content into (see
+/// [`crate::commands::shared::feature_resolver::feature_staging_dst_folder`]). It is
+/// reported, never created: `read-configuration` builds nothing.
 async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     config: &deacon_core::config::DevContainerConfig,
     additional_features: Option<&str>,
     skip_feature_auto_mapping: bool,
     fetcher: &deacon_core::oci::FeatureFetcher<C>,
     config_dir: &Path,
+    dst_folder: &Path,
 ) -> Result<FeaturesConfiguration> {
     use anyhow::Context;
 
@@ -366,7 +432,10 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     // Extract features from config
     let features_map_opt = config.features().as_object();
     if features_map_opt.is_none() || features_map_opt.unwrap().is_empty() {
-        // No features, return empty configuration
+        // No features. `dst_folder` stays absent because the whole
+        // `featuresConfiguration` block is dropped when no feature set survives
+        // (matching the reference, which emits no such key at all) — reporting a
+        // staging folder for a build that would stage nothing would be noise.
         return Ok(FeaturesConfiguration {
             feature_sets: vec![],
             dst_folder: None,
@@ -379,6 +448,14 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     // path and are read directly from disk — parity with the up flow
     // (`features_build.rs`). Per #106.
     let mut resolved_features = Vec::with_capacity(features_map.len());
+
+    // The option values the configuration wrote for each feature, keyed by the
+    // canonical id, kept VERBATIM for the reported `value`. `ResolvedFeature`
+    // stores options as a typed map, and reconstructing the authored document
+    // from it would lose the shorthand string form (`"features": {"x": "1.2"}`,
+    // which resolution expands to `{"version": "1.2"}`).
+    let mut authored_values: HashMap<String, serde_json::Value> =
+        HashMap::with_capacity(features_map.len());
 
     for (feature_id, feature_value) in features_map {
         let is_local = feature_id.starts_with("./")
@@ -460,6 +537,7 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             _ => HashMap::new(),
         };
 
+        authored_values.insert(canonical_id.clone(), feature_value.clone());
         resolved_features.push(ResolvedFeature {
             id: canonical_id,
             source: source_string,
@@ -488,6 +566,7 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             )
             .await?;
             if !resolved_features.iter().any(|f| f.id == dep.id) {
+                authored_values.insert(dep.id.clone(), dep_value.clone());
                 resolved_features.push(dep);
             }
         }
@@ -505,46 +584,58 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     let installation_plan = resolver.resolve(&resolved_features)?;
 
     let mut feature_sets: Vec<FeatureSet> = Vec::with_capacity(installation_plan.features.len());
-    for resolved in &installation_plan.features {
-        let options = if resolved.options.is_empty() {
-            None
-        } else {
-            Some(
-                resolved
-                    .options
-                    .iter()
-                    .map(|(k, v)| {
-                        let json_val = match v {
-                            OptionValue::Boolean(b) => serde_json::Value::Bool(*b),
-                            OptionValue::String(s) => serde_json::Value::String(s.clone()),
-                            OptionValue::Number(n) => serde_json::Value::Number(n.clone()),
-                            OptionValue::Array(a) => serde_json::Value::Array(a.clone()),
-                            OptionValue::Object(o) => serde_json::Value::Object(o.clone()),
-                            OptionValue::Null => serde_json::Value::Null,
-                        };
-                        (k.clone(), json_val)
-                    })
-                    .collect(),
-            )
-        };
+    for (install_index, resolved) in installation_plan.features.iter().enumerate() {
+        let metadata = &resolved.metadata;
+
+        // `<id>_<install index>` — the SAME name `up` stages this feature into
+        // (`DockerfileGenerator::feature_staging_dir_name`), so the reported
+        // `cachePath` names a directory a build would really use.
+        let consecutive_id =
+            deacon_core::dockerfile_generator::DockerfileGenerator::feature_staging_dir_name(
+                resolved,
+                install_index,
+            );
+        let cache_path = dst_folder.join(&consecutive_id);
 
         let feature = Feature {
-            id: resolved.id.clone(),
-            options,
-            source: Some(resolved.source.clone()),
-            customizations: resolved.metadata.customizations.clone(),
-            init: resolved.metadata.init,
-            privileged: resolved.metadata.privileged,
-            mounts: if resolved.metadata.mounts.is_empty() {
-                None
+            // The feature's OWN id. `resolved.id` is the per-command canonical
+            // form and is `local:<absolute path>` for a local feature, which is
+            // a host path rather than an identity.
+            id: if metadata.id.is_empty() {
+                resolved.id.clone()
             } else {
-                Some(resolved.metadata.mounts.clone())
+                metadata.id.clone()
             },
-            container_env: if resolved.metadata.container_env.is_empty() {
-                None
-            } else {
-                Some(resolved.metadata.container_env.clone())
-            },
+            version: metadata.version.clone(),
+            name: metadata.name.clone(),
+            documentation_url: metadata.documentation_url.clone(),
+            license_url: metadata.license_url.clone(),
+            description: metadata.description.clone(),
+            options: option_schema(metadata)?,
+            container_env: non_empty_map(&metadata.container_env),
+            customizations: metadata.customizations.clone(),
+            mounts: non_empty_vec(&metadata.mounts),
+            init: metadata.init,
+            privileged: metadata.privileged,
+            cap_add: non_empty_vec(&metadata.cap_add),
+            security_opt: non_empty_vec(&metadata.security_opt),
+            entrypoint: metadata.entrypoint.clone(),
+            installs_after: non_empty_vec(&metadata.installs_after),
+            depends_on: non_empty_json_map(&metadata.depends_on),
+            on_create_command: metadata.on_create_command.clone(),
+            update_content_command: metadata.update_content_command.clone(),
+            post_create_command: metadata.post_create_command.clone(),
+            post_start_command: metadata.post_start_command.clone(),
+            post_attach_command: metadata.post_attach_command.clone(),
+            value: Some(
+                authored_values
+                    .get(&resolved.id)
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())),
+            ),
+            included: Some(true),
+            cache_path: Some(cache_path.display().to_string()),
+            consecutive_id: Some(consecutive_id),
         };
 
         // Build sourceInformation matching the reference CLI's per-origin shape.
@@ -600,19 +691,78 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             }
         };
 
+        // `computedDigest` is the manifest digest, and the reference emits it only
+        // for a registry-sourced set — a `file-path` set has no manifest to digest.
+        let computed_digest = match &source_information {
+            SourceInformation::Oci {
+                manifest_digest, ..
+            } => Some(manifest_digest.clone()),
+            SourceInformation::FilePath { .. } => None,
+        };
+
         // One featureSet per feature, in install order (reference parity).
         feature_sets.push(FeatureSet {
             features: vec![feature],
             source_information,
-            internal_version: None,
-            computed_digest: None,
+            internal_version: Some(FEATURE_SET_INTERNAL_VERSION.to_string()),
+            computed_digest,
         });
     }
 
     Ok(FeaturesConfiguration {
         feature_sets,
-        dst_folder: None,
+        dst_folder: Some(dst_folder.display().to_string()),
     })
+}
+
+/// The `featureSets[].internalVersion` the reference CLI 0.87.0 reports.
+///
+/// A constant on the reference side too: it names the Feature *resolution*
+/// generation ("v2 features"), not the version of any feature or of the CLI, and
+/// was `"2"` on every featureSet measured against the pin — OCI and local alike.
+const FEATURE_SET_INTERNAL_VERSION: &str = "2";
+
+/// The feature's declared option SCHEMA as plain JSON, or `None` when it declares
+/// none.
+///
+/// Round-tripping through `serde_json` rather than hand-building the object keeps
+/// the shape owned by [`deacon_core::features::FeatureOption`]; a hand-built copy
+/// would silently drift the day a new option keyword is modeled.
+fn option_schema(
+    metadata: &deacon_core::features::FeatureMetadata,
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>> {
+    if metadata.options.is_empty() {
+        return Ok(None);
+    }
+    let mut out = serde_json::Map::with_capacity(metadata.options.len());
+    for (name, option) in &metadata.options {
+        let value = serde_json::to_value(option).with_context(|| {
+            format!(
+                "Failed to serialize option schema '{}' of feature '{}'",
+                name, metadata.id
+            )
+        })?;
+        out.insert(name.clone(), value);
+    }
+    Ok(Some(out))
+}
+
+/// `Some(clone)` when the slice has entries, `None` when empty — the reference
+/// omits a collection-valued property a feature did not declare.
+fn non_empty_vec<T: Clone>(items: &[T]) -> Option<Vec<T>> {
+    (!items.is_empty()).then(|| items.to_vec())
+}
+
+/// [`non_empty_vec`] for `containerEnv`.
+fn non_empty_map(map: &HashMap<String, String>) -> Option<HashMap<String, String>> {
+    (!map.is_empty()).then(|| map.clone())
+}
+
+/// [`non_empty_vec`] for `dependsOn`, whose values are arbitrary JSON.
+fn non_empty_json_map(
+    map: &HashMap<String, serde_json::Value>,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    (!map.is_empty()).then(|| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
 }
 
 /// Properties that the upstream `mergeConfiguration` strips from the base config and emits as
@@ -1085,57 +1235,62 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
 
         for feature_set in &features_config.feature_sets {
             for feature in &feature_set.features {
-                // Re-fetch metadata per resolved feature. FeaturesConfiguration intentionally
-                // does not carry the full FeatureMetadata blob (output schema only keeps the
-                // user-visible subset), so we look it up again via the same OCI fetcher used
-                // upstream — cached connections keep the cost low.
+                // Re-fetch metadata per resolved feature. The reported `Feature` is a
+                // serialization DTO shaped for the reference's output, not a
+                // `FeatureMetadata`, so the merge reads the metadata itself via the same
+                // OCI fetcher used upstream — cached connections keep the cost low.
                 //
-                // Local features (canonical id `local:/abs/path/...`) skip
-                // the OCI path entirely: their metadata lives on disk at
-                // <abs-path>/devcontainer-feature.json. Per #106.
-                let downloaded_owned;
-                let metadata: &deacon_core::features::FeatureMetadata = if let Some(local_path) =
-                    feature.id.strip_prefix("local:")
+                // The ORIGIN comes from the set's `sourceInformation`, which is the field
+                // that records it. It used to be sniffed from a `local:` prefix on the
+                // reported feature id; that id is now the feature's own id (reference
+                // parity), and a prefix sniff would have silently sent every local
+                // feature down the OCI path.
+                let metadata: deacon_core::features::FeatureMetadata = match &feature_set
+                    .source_information
                 {
-                    let metadata_path =
-                        std::path::Path::new(local_path).join("devcontainer-feature.json");
-                    let parsed =
+                    SourceInformation::FilePath {
+                        resolved_file_path, ..
+                    } => {
+                        let metadata_path = std::path::Path::new(resolved_file_path)
+                            .join("devcontainer-feature.json");
                         deacon_core::features::parse_feature_metadata(&metadata_path).map_err(
-                            |e| {
-                                anyhow::anyhow!(
+                                |e| {
+                                    anyhow::anyhow!(
                                     "Failed to parse local feature metadata at '{}' for merged config: {}",
                                     metadata_path.display(),
                                     e
                                 )
-                            },
-                        )?;
-                    downloaded_owned = parsed;
-                    &downloaded_owned
-                } else {
-                    // Parse the feature reference - prefer the preserved source field if available
-                    let reference_to_parse = feature.source.as_ref().unwrap_or(&feature.id);
-                    let (registry_url, namespace, name, tag) =
-                        parse_registry_reference(reference_to_parse)?;
+                                },
+                            )?
+                    }
+                    SourceInformation::Oci {
+                        user_feature_id, ..
+                    } => {
+                        let (registry_url, namespace, name, tag) =
+                            parse_registry_reference(user_feature_id)?;
 
-                    // Use the provided fetcher with configured timeout and retries
-                    let feature_ref = deacon_core::oci::FeatureRef::new(
-                        registry_url.clone(),
-                        namespace.clone(),
-                        name.clone(),
-                        tag.clone(),
-                    );
+                        // Use the provided fetcher with configured timeout and retries
+                        let feature_ref = deacon_core::oci::FeatureRef::new(
+                            registry_url.clone(),
+                            namespace.clone(),
+                            name.clone(),
+                            tag.clone(),
+                        );
 
-                    let downloaded = fetcher.fetch_feature(&feature_ref).await.map_err(|e| {
-                        anyhow::anyhow!(
-                            "Failed to fetch feature '{}' for merged config: {}",
-                            feature.id,
-                            e
-                        )
-                    })?;
-
-                    downloaded_owned = downloaded.metadata;
-                    &downloaded_owned
+                        fetcher
+                            .fetch_feature(&feature_ref)
+                            .await
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "Failed to fetch feature '{}' for merged config: {}",
+                                    feature.id,
+                                    e
+                                )
+                            })?
+                            .metadata
+                    }
                 };
+                let metadata = &metadata;
 
                 // Collect this feature's entrypoint + lifecycle hooks (none of which live
                 // on DevContainerConfig) for the plural output arrays.
@@ -1731,6 +1886,15 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             .and_then(|p| p.parent())
             .unwrap_or(workspace_folder)
             .to_path_buf();
+        // Where a build WOULD stage this workspace's feature content. Derived from
+        // the same workspace hash `up` derives its staging root from, so the two
+        // agree; derived only — `read-configuration` must not leave a directory
+        // behind for a build it never runs.
+        let features_dst_folder =
+            crate::commands::shared::feature_resolver::feature_staging_dst_folder(
+                &deacon_core::container::ContainerIdentity::new(workspace_folder, &config)
+                    .workspace_hash,
+            );
         Some(
             resolve_features_configuration(
                 &config,
@@ -1738,6 +1902,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                 args.skip_feature_auto_mapping,
                 &fetcher,
                 &features_config_dir,
+                &features_dst_folder,
             )
             .await?,
         )

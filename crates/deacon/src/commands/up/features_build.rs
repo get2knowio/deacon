@@ -845,17 +845,24 @@ async fn resolve_and_stage_features(
         }
     }
 
-    // Create temporary directory for features and Dockerfile
+    // Create temporary directory for features and Dockerfile. The path is derived
+    // by the same helper `read-configuration` reports as `dstFolder`, so the two
+    // commands can never name different directories.
     let temp_dir =
-        std::env::temp_dir().join(format!("deacon-features-{}", identity.workspace_hash));
+        crate::commands::shared::feature_resolver::feature_staging_root(&identity.workspace_hash);
     tokio::fs::create_dir_all(&temp_dir).await?;
 
     // Create features directory structure for BuildKit context
-    let features_dir = temp_dir.join("features");
+    let features_dir = crate::commands::shared::feature_resolver::feature_staging_dst_folder(
+        &identity.workspace_hash,
+    );
     tokio::fs::create_dir_all(&features_dir).await?;
 
-    // Copy features to the BuildKit context directory
-    for (level_idx, level) in installation_plan.levels.iter().enumerate() {
+    // Copy features to the BuildKit context directory. The destination name must
+    // be the one `DockerfileGenerator` writes as the bind-mount `source=`, so it
+    // is derived by that generator's own helper rather than re-spelled here.
+    let mut install_index = 0usize;
+    for level in installation_plan.levels.iter() {
         for feature_id in level {
             let feature = installation_plan.get_feature(feature_id).ok_or_else(|| {
                 DeaconError::Runtime(format!("Feature {} not found in plan", feature_id))
@@ -865,19 +872,12 @@ async fn resolve_and_stage_features(
                 DeaconError::Runtime(format!("Downloaded feature {} not found", feature_id))
             })?;
 
-            let sanitized_id = feature
-                .id
-                .chars()
-                .map(|c| {
-                    if c.is_alphanumeric() || c == '-' || c == '_' {
-                        c
-                    } else {
-                        '_'
-                    }
-                })
-                .collect::<String>();
-
-            let feature_dir_name = format!("{}_{}", sanitized_id, level_idx);
+            let feature_dir_name =
+                deacon_core::dockerfile_generator::DockerfileGenerator::feature_staging_dir_name(
+                    feature,
+                    install_index,
+                );
+            install_index += 1;
             let feature_dest = features_dir.join(&feature_dir_name);
             let src = downloaded.path.clone();
             // copy_dir_all is sync std::fs; offload to the blocking pool so we

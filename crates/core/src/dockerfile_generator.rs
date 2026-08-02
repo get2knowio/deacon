@@ -174,6 +174,7 @@ impl DockerfileGenerator {
         }
 
         // Install features level by level
+        let mut install_index = 0usize;
         for (level_idx, level) in plan.levels.iter().enumerate() {
             dockerfile.push_str(&format!("# Level {}: Installing features\n", level_idx));
 
@@ -184,7 +185,12 @@ impl DockerfileGenerator {
                             path: format!("Feature {} in installation plan", feature_id),
                         })?;
 
-                dockerfile.push_str(&self.generate_feature_install_command(feature, level_idx)?);
+                dockerfile.push_str(&self.generate_feature_install_command(
+                    feature,
+                    level_idx,
+                    install_index,
+                )?);
+                install_index += 1;
             }
 
             dockerfile.push('\n');
@@ -235,6 +241,7 @@ impl DockerfileGenerator {
             dockerfile.push_str(&host_ca_run_step());
         }
 
+        let mut install_index = 0usize;
         for (level_idx, level) in plan.levels.iter().enumerate() {
             dockerfile.push_str(&format!("# Level {}: Installing features\n", level_idx));
 
@@ -245,7 +252,12 @@ impl DockerfileGenerator {
                             path: format!("Feature {} in installation plan", feature_id),
                         })?;
 
-                dockerfile.push_str(&self.generate_feature_install_command(feature, level_idx)?);
+                dockerfile.push_str(&self.generate_feature_install_command(
+                    feature,
+                    level_idx,
+                    install_index,
+                )?);
+                install_index += 1;
             }
 
             dockerfile.push('\n');
@@ -267,9 +279,9 @@ impl DockerfileGenerator {
         &self,
         feature: &ResolvedFeature,
         level_idx: usize,
+        install_index: usize,
     ) -> Result<String> {
-        let sanitized_id = Self::sanitize_feature_id(&feature.id);
-        let feature_dir_name = format!("{}_{}", sanitized_id, level_idx);
+        let feature_dir_name = Self::feature_staging_dir_name(feature, install_index);
         let mount_target = format!("/tmp/build-features-{}/{}", level_idx, feature_dir_name);
 
         let mut command = String::new();
@@ -350,10 +362,38 @@ impl DockerfileGenerator {
         Ok(command)
     }
 
+    /// The directory name a feature's content is staged into, both on the host
+    /// build context and as the BuildKit bind-mount `source=`.
+    ///
+    /// `<sanitized feature id>_<index>`, where `index` is the feature's position
+    /// in the resolved INSTALL ORDER (`InstallationPlan::features`, which is the
+    /// flattened `levels`). The index used to be the parallel LEVEL, which meant
+    /// two features installed in the same round shared a suffix and the name
+    /// carried no position information; a running index is unique by
+    /// construction and is also what the reference CLI names its staged
+    /// directories (`consecutiveId`), so `read-configuration` can report the
+    /// path `up` will actually stage into.
+    ///
+    /// The id is the FEATURE'S OWN id from its `devcontainer-feature.json`
+    /// (`go`, `common-utils`, `needs-node`) rather than `ResolvedFeature::id`,
+    /// which is a per-command canonical form — the registry path in `up`/`build`
+    /// and the short metadata id in `read-configuration`. Keying on the metadata
+    /// id is what lets those two commands agree on one name. A feature whose
+    /// metadata carries no id falls back to the canonical id rather than
+    /// producing a bare `_<index>`.
+    pub fn feature_staging_dir_name(feature: &ResolvedFeature, index: usize) -> String {
+        let id = if feature.metadata.id.is_empty() {
+            feature.id.as_str()
+        } else {
+            feature.metadata.id.as_str()
+        };
+        format!("{}_{}", Self::sanitize_feature_id(id), index)
+    }
+
     /// Sanitize feature ID for use in file paths.
     ///
     /// Public so consumers that need to reverse-map a build-log mount marker
-    /// (`source=<sanitized_id>_<level>`) back to a feature — e.g. the build
+    /// (`source=<sanitized_id>_<index>`) back to a feature — e.g. the build
     /// progress parser in the `deacon` crate — can compute the same sanitized
     /// form instead of re-implementing (and drifting from) this scheme.
     pub fn sanitize_feature_id(id: &str) -> String {
@@ -603,9 +643,11 @@ mod tests {
         assert!(dockerfile.contains("ENV NVM_DIR=\"/usr/local/share/nvm\""));
 
         // Ordering: node's install RUN < node's ENV < ai-clis's install RUN.
+        // The mount `source=` suffix is the INSTALL-ORDER index, so two features in
+        // the same parallel level get `_0` and `_1` rather than colliding on `_0`.
         let node_run = dockerfile.find("source=node_0").unwrap();
         let env_pos = dockerfile.find(env_line).unwrap();
-        let ai_run = dockerfile.find("source=ai-clis_0").unwrap();
+        let ai_run = dockerfile.find("source=ai-clis_1").unwrap();
         assert!(
             node_run < env_pos && env_pos < ai_run,
             "containerEnv ENV must sit after node's RUN and before ai-clis's RUN"
@@ -614,6 +656,43 @@ mod tests {
         // A feature with an empty containerEnv emits no stray ENV line for it.
         // (Only the two node ENV lines exist in the whole file.)
         assert_eq!(dockerfile.matches("\nENV ").count(), 2);
+    }
+
+    /// The staged directory name is keyed on the feature's OWN id and its position in
+    /// the install order — the two properties `read-configuration` needs to report a
+    /// `cachePath` that names the directory a build would really create.
+    #[test]
+    fn feature_staging_dir_name_uses_the_metadata_id_and_install_index() {
+        // The canonical id differs per command (registry path in `up`, short id in
+        // `read-configuration`); the metadata id is what both agree on.
+        let mut feature = create_test_feature("go", HashMap::new());
+        feature.id = "ghcr.io/devcontainers/features/go".to_string();
+        assert_eq!(
+            DockerfileGenerator::feature_staging_dir_name(&feature, 0),
+            "go_0"
+        );
+        assert_eq!(
+            DockerfileGenerator::feature_staging_dir_name(&feature, 3),
+            "go_3"
+        );
+
+        // A local feature's canonical id is `local:<absolute path>`; the staged name
+        // must not carry a host path.
+        let mut local = create_test_feature("needs-node", HashMap::new());
+        local.id = "local:/ws/.devcontainer/needs-node".to_string();
+        assert_eq!(
+            DockerfileGenerator::feature_staging_dir_name(&local, 1),
+            "needs-node_1"
+        );
+
+        // No metadata id: fall back to the canonical id rather than emit a bare `_2`.
+        let mut anonymous = create_test_feature("x", HashMap::new());
+        anonymous.metadata.id = String::new();
+        anonymous.id = "ghcr.io/o/n/x".to_string();
+        assert_eq!(
+            DockerfileGenerator::feature_staging_dir_name(&anonymous, 2),
+            "ghcr_io_o_n_x_2"
+        );
     }
 
     #[test]
