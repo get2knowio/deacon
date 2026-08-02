@@ -549,15 +549,28 @@ fn the_real_registry_blocks_only_on_declared_coverage_gaps() {
          registry — an uncovered behavior, a constraint/clause join violation, or an \
          undispositioned obligation would mean something broke behind the gaps: {unexpected:#?}"
     );
+    // Every declared gap is either the per-operation pairwise family (024) or named
+    // here with its justification. The allow-list is by exact id, not by prefix, so a
+    // newly added gap still trips this assertion and has to argue for itself.
+    //
+    // `gap-features-duplicate-in-one-document` — deacon rejects a `features` map whose
+    // keys resolve to one canonical Feature id, which `feature-dependencies.md` defines
+    // as two distinct Features with an oldest-tag-first install order. An `implementation`
+    // gap rather than a `coverage` one: the behavior IS covered by a case, and what is
+    // missing is the capability, because Feature identity is version-independent through
+    // staging (deleting the parse-time rejection alone silently drops the second Feature).
+    // Tracked at https://github.com/get2knowio/deacon/issues/430; deleted when that lands.
+    const JUSTIFIED_NON_PAIRWISE_GAPS: &[&str] = &["gap-features-duplicate-in-one-document"];
     for entry in blocking
         .iter()
         .filter(|b| b["kind"].as_str() == Some("gap"))
     {
         let id = entry["id"].as_str().unwrap_or_default();
         assert!(
-            id.starts_with("gap-pairwise-"),
-            "the only declared gaps are the per-operation pairwise ones; {id} is new and \
-             needs its own justification"
+            id.starts_with("gap-pairwise-") || JUSTIFIED_NON_PAIRWISE_GAPS.contains(&id),
+            "declared gaps are the per-operation pairwise ones plus the individually \
+             justified ones in JUSTIFIED_NON_PAIRWISE_GAPS; {id} is new and needs its own \
+             justification"
         );
     }
 }

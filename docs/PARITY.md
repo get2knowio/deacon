@@ -13,8 +13,8 @@ follows the spec where the CLI does not — those are the CLI's deviation, not w
 are deacon-only, with nothing to compare against.
 
 **14 more have never been compared against the CLI at all** — 7 assumed
-to match, 5 assumed to differ on purpose, 2 assumed to be the
-CLI deviating from the spec, 0 assumed to be deacon's fault. These are claims, not
+to match, 4 assumed to differ on purpose, 2 assumed to be the
+CLI deviating from the spec, 1 assumed to be deacon's fault. These are claims, not
 measurements: nothing has run the reference for them, so each could turn out to be any of the
 four. They are listed separately rather than folded into the totals above, because a claim nobody
 has checked is not evidence of parity — and a page that counted it as such would improve every
@@ -200,7 +200,7 @@ So every `·` is a real gap: a scenario this behavior COULD be checked in and ha
 </thead>
 <tbody>
 <tr><td>🔵</td><td>When a link of an `extends` chain declares a Feature its base already declared at a…</td><td>?</td><td></td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#411</td></tr>
-<tr><td>⚠️</td><td>A single configuration document whose `features` map contains two keys resolving to…</td><td>?</td><td>✘</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td><code>wvr-features-duplicate-in-one-document</code> <strong>(unchecked)</strong> #411</td></tr>
+<tr><td>❌</td><td>A single configuration document whose `features` map contains two keys resolving to…</td><td>✘</td><td>✘</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#430</td></tr>
 <tr><td>⚠️</td><td>deacon's resolved-configuration output omits a property the author wrote as `null`,…</td><td>?</td><td>✘</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td><code>wvr-readconfig-authored-empty-omitted</code> #398</td></tr>
 <tr><td>·</td><td>An explicit --config pointing at a file that does not exist is rejected (no silent…</td><td>✔</td><td>✔</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
 <tr><td>✅</td><td>Reading a well-formed devcontainer.json exits 0 and emits the resolved configuration…</td><td>✔</td><td>✔</td><td>✅</td><td>◐</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td></td></tr>
