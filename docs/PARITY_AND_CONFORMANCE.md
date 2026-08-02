@@ -138,9 +138,11 @@ those lanes are truthful by non-selection — a green fast run never *implies* p
 missing oracle, absent Docker, or a normalization failure FAILS with a cause-specific error
 rather than skipping to green.
 
-**The nightly's queue is 3 cases in two root causes**: 2 on
-`chan-image.labels.devcontainer.metadata` (#436) and 1 on
-`chan-container-state.labels.devcontainer.metadata` (#437).
+**The nightly's queue is EMPTY** (pending its next scheduled run for confirmation). The
+14-case queue measured 2026-08-02 is fully burned down — the 11 `case-merged-decl-*` by
+#439, the 2 build-image differentials by #436, `case-state-compose-feature-mounts` by #437
+— every one closed by making deacon correct, none by a new tolerance. From here the lane's
+red-means-a-real-problem contract holds for real.
 
 The 11 `case-merged-decl-*` cases that used to head this queue are **closed** (#439). They
 are worth remembering for how the issue was scoped rather than for the fix: it named three
@@ -189,7 +191,11 @@ isolated temp workspaces behind an RAII cleanup guard; a run cancelled partway l
 orphaned containers and Compose networks that trip the next run's resource guard (`all
 predefined address pools have been fully subnetted`). Reclaim them by removing containers
 whose `devcontainer.local_folder` label names a directory that no longer exists, and
-networks whose names carry a `deacon-conf-` workspace basename.
+networks whose names carry a `deacon-conf-` workspace basename. A label-only sweep is NOT
+enough: Compose **sidecar** containers (`deacon-conf-*-db-1`) carry no
+`devcontainer.local_folder` label, keep their network referenced so `docker network prune`
+skips it, and the leaked network then trips the reclamation guard — sweep containers by
+the `deacon-conf-` name prefix too.
 
 ## Further reading
 

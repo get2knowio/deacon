@@ -470,13 +470,12 @@ profile carries a filter.
 pinned oracle, prepulls fixture images, and runs the profile. It is **not** in the release
 path. `release.yml` runs fmt/clippy/tests only.
 
-**The nightly's remaining queue is 3 cases in two root causes** (the config-only group is
-fully green as of #439; measured `--no-fail-fast`):
-
-| Cases | Diverging path | Verdict |
-|---|---|---|
-| 2 × `case-build-image-{args,labels}-differential` | `chan-image.labels.devcontainer.metadata` | #436 |
-| 1 × `case-state-compose-feature-mounts` | `chan-container-state.labels.devcontainer.metadata` | #437 |
+**The nightly's queue is EMPTY** (pending its next scheduled run for confirmation). The
+14-case queue measured 2026-08-02 is fully burned down: the 11 `case-merged-decl-*` by
+#439, the 2 `case-build-image-{args,labels}-differential` by #436, and
+`case-state-compose-feature-mounts` by #437 — every one closed by making deacon correct,
+none by a new tolerance. From here the lane's contract holds for real: a red nightly means
+a new, uncharacterized difference.
 
 **#439 (the 11 `case-merged-decl-*`) is closed, and how it was scoped is the durable
 lesson.** The issue named three omitted fields (`dstFolder`, `internalVersion`,
@@ -527,7 +526,10 @@ cleanly (`npm install -g @devcontainers/cli@0.87.0`) — verify parity changes f
 rather than reasoning about them. Docker-backed cases run in isolated temp workspaces with
 an RAII cleanup guard; if a run is cancelled partway, orphaned containers accumulate and
 will trip the resource-reclamation guard on the next run. Reclaim them by removing
-containers whose `devcontainer.local_folder` label names a directory that no longer exists.
+containers whose `devcontainer.local_folder` label names a directory that no longer exists
+— AND containers named with the `deacon-conf-` prefix: Compose sidecars
+(`deacon-conf-*-db-1`) carry no label, keep their network referenced so `docker network
+prune` skips it, and the leaked network trips the guard even after a label-only sweep.
 
 **Recording what we learn.** `parity/SPEC_STATUS.md` is the hand-maintained answer to "does
 deacon behave like the CLI?" — five plain statuses, each row stating its evidence. When a
