@@ -470,12 +470,32 @@ profile carries a filter.
 pinned oracle, prepulls fixture images, and runs the profile. It is **not** in the release
 path. `release.yml` runs fmt/clippy/tests only.
 
-**The nightly is currently RED and that is known** — see #376. Roughly 127 of the
-divergences concentrate in four path-valued fields (`configFilePath`, `rootFolderPath`,
-`configFolderPath`, `dstFolder`) and are very likely ONE `path_token` normalization defect
-rather than many bugs. Before assuming a change made things worse, diff your run's
-diverging case ids against a recent `main` nightly (`gh run list --workflow=parity.yml
---branch=main`); identical sets mean your change is neutral.
+**The nightly is RED, and the queue is 14 cases in three root causes** (measured
+2026-08-02, full lane, `--no-fail-fast`):
+
+| Cases | Diverging path | Verdict |
+|---|---|---|
+| 11 × `case-merged-decl-*` | `featuresConfiguration.{dstFolder,featureSets}` | **deacon's fidelity gap** — #439. deacon models `dstFolder`/`internalVersion`/`computedDigest` with reference-matching serde names and hardcodes them to `None` (`read_configuration.rs:598-616`); the digest is already in hand (`sourceInformation.manifestDigest` is byte-identical), `internalVersion` is the constant `"2"`, and deacon has a deterministic staging-dir analog (`features_build.rs:849`). The reference's timestamped `dstFolder` path is a *normalization* concern (tokenize like `${IMAGE_TAG}`), NOT grounds for a tolerance — an earlier read proposed allowlisting this and was wrong. |
+| 2 × `case-build-image-{args,labels}-differential` | `chan-image.labels.devcontainer.metadata` | #436 |
+| 1 × `case-state-compose-feature-mounts` | `chan-container-state.labels.devcontainer.metadata` | #437 |
+
+**#376's headline is stale — do not go looking for the `path_token` defect it
+hypothesizes.** Its table (127 occurrences over `configFilePath`, `rootFolderPath`,
+`configFolderPath`, `workspaceFolder`, `mergedConfiguration.*Commands`,
+`otherPortsAttributes.*`) was measured on run 30193096270, when the suite was ONE
+monolithic test that ran to completion. Those paths are now at **zero** occurrences in a
+full run — genuinely fixed, not hidden.
+
+They *looked* hidden for a while, and that is the lesson worth keeping: once the runner was
+split into per-group tests, the nightly's default fail-fast began cancelling after the
+first group failed (run 30737990462: 26 selected, 19 never ran), so it reported two
+observable paths and left the Docker groups unexamined. **The lane therefore runs with
+`--no-fail-fast`** — its job is to enumerate a work queue, and a run that stops at the
+first item cannot tell one broken thing from forty. Keep the flag.
+
+Before assuming a change made things worse, diff your run's diverging case ids against a
+recent `main` nightly (`gh run list --workflow=parity.yml --branch=main`); identical sets
+mean your change is neutral.
 
 **Verifying locally.** Docker works in this dev container and the pinned oracle installs
 cleanly (`npm install -g @devcontainers/cli@0.87.0`) — verify parity changes for real

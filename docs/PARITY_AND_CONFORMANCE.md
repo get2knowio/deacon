@@ -138,9 +138,23 @@ those lanes are truthful by non-selection — a green fast run never *implies* p
 missing oracle, absent Docker, or a normalization failure FAILS with a cause-specific error
 rather than skipping to green.
 
-**The nightly is currently RED and that is known** — see #376. Roughly 127 of the
-divergences concentrate in four path-valued fields and are very likely ONE `path_token`
-normalization defect rather than many bugs. Before assuming a change made things worse,
+**The nightly is RED, and the queue is 14 cases in three root causes** (measured
+2026-08-02): 11 `case-merged-decl-*` on `featuresConfiguration.{dstFolder,featureSets}` —
+deacon's own fidelity gap (#439): it models `dstFolder`, `internalVersion` and
+`computedDigest` and hardcodes all three to `None`, while the digest it would need is
+already computed. The reference's per-run timestamped `dstFolder` value is a normalization
+concern (tokenize it, like `${IMAGE_TAG}`), not grounds for a tolerance. Then 2 on
+`chan-image.labels.devcontainer.metadata` (#436) and 1 on
+`chan-container-state.labels.devcontainer.metadata` (#437).
+
+**#376's headline is stale.** Its 127-occurrence table over `configFilePath`,
+`rootFolderPath`, `configFolderPath` and friends was measured when the suite was one
+monolithic test; those paths are now at zero in a full run. The `path_token` defect it
+hypothesizes does not exist — don't go looking for it.
+
+The lane runs with `--no-fail-fast` deliberately: its job is to enumerate a work queue, and
+the default cancel-on-first-failure once truncated a nightly to 7 of 26 tests, hiding every
+Docker group behind one config-only failure. Before assuming a change made things worse,
 diff your run's diverging case ids against a recent `main` nightly.
 
 ## What to do when you find a difference

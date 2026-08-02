@@ -150,7 +150,17 @@ jobs:
         # a tolerance whose difference no longer reproduces (stale), a missing oracle, an
         # absent Docker daemon and a normalization failure all fail here with a
         # cause-specific error. Nothing downstream re-decides it.
-        run: cargo nextest run --profile parity
+        #
+        # `--no-fail-fast` is REQUIRED, not a preference. This lane's job is to enumerate
+        # the diverging set as a work queue; the default cancel-on-first-failure truncates
+        # it to whichever group happened to fail first. Measured on run 30737990462:
+        # 26 tests selected, `differential_group_none` failed at 53s, and 19 of 26 never
+        # ran — so the nightly reported two observable paths while the Docker groups went
+        # unexamined. A run that stops at the first item cannot distinguish one broken
+        # thing from forty, which is precisely the red-by-default state this suite exists
+        # to end. Each group already bounds itself (five minutes per case, FR-077b), so
+        # running them all costs wall clock, never a hang.
+        run: cargo nextest run --profile parity --no-fail-fast
 
       - name: Upload parity artifacts
         if: always()

@@ -303,7 +303,7 @@ test-parity: install-nextest ## Run live parity certification (needs the pinned 
 	# the report describes THIS run only. \
 	rm -rf target/parity/report; \
 	./scripts/parity/prepull-fixture-images.sh; \
-	cargo nextest run --profile parity
+	cargo nextest run --profile parity --no-fail-fast
 
 .PHONY: test-parity-all
 test-parity-all: ## Alias for test-parity (live parity certification)
