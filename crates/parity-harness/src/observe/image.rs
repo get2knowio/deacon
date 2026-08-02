@@ -5,7 +5,7 @@
 //! normalizer applies `label_semantic` (labels → canonical key/value) and
 //! `null_preserving` (`normalize::normalize_image`). Nothing is blanket-removed (FR-029).
 
-use deacon_conformance::model::{CHAN_IMAGE, Operation};
+use crate::model::{CHAN_IMAGE, Operation};
 use serde_json::json;
 
 use crate::HarnessError;

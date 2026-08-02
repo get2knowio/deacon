@@ -7,7 +7,7 @@
 //! `path_token` elsewhere (`normalize::normalize_process_graph`); nothing is removed
 //! (FR-029).
 
-use deacon_conformance::model::{CHAN_PROCESS_GRAPH, Operation};
+use crate::model::{CHAN_PROCESS_GRAPH, Operation};
 use serde_json::{Value, json};
 
 use crate::HarnessError;

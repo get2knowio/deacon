@@ -10,7 +10,7 @@
 //! exec-semantic and are surfaced through the CLI-process channels (exit-code) — the
 //! configured process context (env/user/cwd/PATH/TTY) is what this channel captures.
 
-use deacon_conformance::model::{CHAN_INJECTED_PROCESS, Operation};
+use crate::model::{CHAN_INJECTED_PROCESS, Operation};
 use serde_json::{Value, json};
 
 use crate::HarnessError;

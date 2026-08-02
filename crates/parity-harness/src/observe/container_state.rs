@@ -29,7 +29,7 @@
 
 use std::path::Path;
 
-use deacon_conformance::model::{CHAN_CONTAINER_STATE, Operation};
+use crate::model::{CHAN_CONTAINER_STATE, Operation};
 use serde_json::Value;
 
 use crate::HarnessError;

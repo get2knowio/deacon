@@ -7,10 +7,10 @@
 //! (`parity_conformance_runner`). The record/replay-equivalence + 13-field-provenance
 //! assertions land in User Story 2 (T030).
 
-use deacon_conformance::model::{
+use parity_harness::evidence::{CaseVerdict, ChannelVerdict, Outcome};
+use parity_harness::model::{
     CHAN_EXIT_CODE, CHAN_STRUCTURED_OUTPUT, ExpectedObservable, Operation, OracleType, TestCase,
 };
-use parity_harness::evidence::{CaseVerdict, ChannelVerdict, Outcome};
 use parity_harness::report::VerdictReport;
 
 /// A declarative spec-expectation case: read-configuration on `fx-x`, asserting exit 0
@@ -295,8 +295,8 @@ mod spec_expectation {
 
 #[cfg(unix)]
 mod snapshot_replay {
-    use deacon_conformance::model::{CHAN_EXIT_CODE, ExpectedObservable, OracleType};
-    use deacon_conformance::snapshot;
+    use parity_harness::model::{CHAN_EXIT_CODE, ExpectedObservable, OracleType};
+    use parity_harness::snapshot;
 
     use parity_harness::evidence::write_snapshot;
     use parity_harness::exec::Side;

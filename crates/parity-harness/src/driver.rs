@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use deacon_conformance::model::{CaseKind, ResourceGroup, TestCase};
+use crate::model::{CaseKind, ResourceGroup, TestCase};
 
 use crate::HarnessError;
 use crate::evidence::{CaseVerdict, Outcome};
@@ -621,7 +621,7 @@ pub const fn case_bound() -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deacon_conformance::model::{Operation, OracleType};
+    use crate::model::{Operation, OracleType};
 
     fn declarative(id: &str, group: Option<ResourceGroup>) -> TestCase {
         TestCase {
@@ -712,7 +712,7 @@ mod tests {
         let mut legacy = declarative("case-legacy", Some(ResourceGroup::DockerShared));
         legacy.operations.clear();
         legacy.oracle_type = None;
-        legacy.executable = Some(deacon_conformance::model::Executable {
+        legacy.executable = Some(crate::model::Executable {
             binary: "parity_build".to_string(),
             test: None,
             corpus: None,

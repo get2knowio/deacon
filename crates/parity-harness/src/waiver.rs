@@ -4,8 +4,8 @@
 //! There is exactly ONE waiver record schema and ONE loader for every
 //! characterized divergence in the parity surface, and both now live in
 //! `deacon-conformance`: the record types ([`Scope`], [`Expect`], [`Waiver`]) are
-//! re-exported from `deacon_conformance::model`, and the on-disk records are read
-//! through `deacon_conformance::load::load_waiver_files`. This module is a thin
+//! re-exported from `crate::model`, and the on-disk records are read
+//! through `crate::load::load_waiver_files`. This module is a thin
 //! query wrapper — [`WaiverSet`] with the stable API the nine live parity binaries
 //! and `parity_corpus_errors` already consume (`load`, `records`, `get`,
 //! `corpus_case`, `corpus_cases`, `state_field_waivers`, `stale_among`).
@@ -33,7 +33,7 @@ use crate::HarnessError;
 // parity harness consumes those exact types so there is no second schema to drift
 // (research Decision 3). Callers that `use parity_harness::waiver::{Scope, Expect,
 // Waiver}` keep working unchanged through these re-exports.
-pub use deacon_conformance::model::{Expect, Scope, Waiver};
+pub use crate::model::{Expect, Scope, Waiver};
 
 /// Match an observable-state `field` against a waiver `pattern`. Matchers are
 /// EXACT by default; a trailing `*` makes it a prefix match. Exact-by-default
@@ -65,7 +65,7 @@ impl WaiverSet {
     /// passes a temp directory whose `waivers/` subdirectory holds its fixtures.
     pub fn load(registry_root: &Path) -> Result<WaiverSet, HarnessError> {
         let waivers_dir = registry_root.join("waivers");
-        let pairs = deacon_conformance::load::load_waiver_files(&waivers_dir).map_err(|e| {
+        let pairs = crate::load::load_waiver_files(&waivers_dir).map_err(|e| {
             HarnessError::WaiverInvalid {
                 path: waivers_dir,
                 cause: e.to_string(),

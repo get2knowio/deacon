@@ -1,7 +1,0 @@
-{
-  "schemaVersion": 1,
-  "records": [
-    { "id": "chan-exit-code", "description": "Process exit status of the invoked command." },
-    { "id": "chan-stdout", "description": "Bytes written to standard output (the result document)." }
-  ]
-}

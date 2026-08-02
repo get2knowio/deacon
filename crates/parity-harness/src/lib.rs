@@ -21,23 +21,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 pub mod aggregate;
+pub mod case_hash;
 pub mod compare;
-pub mod discovery;
-pub mod drift;
 pub mod driver;
-pub mod equivalence;
 pub mod evidence;
 pub mod exec;
-pub mod inject;
-pub mod manifest_emit;
+pub mod load;
+pub mod model;
 pub mod normalize;
 pub mod observe;
 pub mod oracle;
 pub mod oracle_type;
+pub mod parity_corpus;
 pub mod prereq;
 pub mod registry;
 pub mod report;
 pub mod runner;
+pub mod snapshot;
 pub mod waiver;
 pub mod workspace;
 
@@ -401,12 +401,20 @@ pub fn workspace_root() -> PathBuf {
         .unwrap_or(manifest)
 }
 
-/// The conformance registry root: `<workspace_root>/conformance/registry`. Waiver
-/// records live under its `waivers/` subdirectory and are consumed through
-/// `deacon-conformance` (019-conformance-registry, research D3). Delegates to the
-/// conformance crate so there is a single definition of the registry location.
+/// The case/waiver data root: `<workspace_root>/conformance/registry`. Scenario records
+/// live under `cases/`, tolerances under `waivers/`. Single definition — every caller
+/// resolves the root through here rather than joining its own path.
+/// The vendored upstream spec revision these scenarios are pinned to. Bumped only on a
+/// conscious re-vendoring.
+pub const CURRENT_SPEC_PIN: &str = "113500f4";
+
+pub fn default_registry_dir() -> PathBuf {
+    workspace_root().join("conformance").join("registry")
+}
+
+/// Alias kept for the call sites that spell it this way.
 pub fn conformance_registry_root() -> PathBuf {
-    deacon_conformance::default_registry_dir()
+    default_registry_dir()
 }
 
 /// The report/artifact root: `DEACON_PARITY_REPORT_DIR` when set, else

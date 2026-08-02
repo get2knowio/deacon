@@ -17,7 +17,7 @@
 //! is surfaced via the fixture's marker files on the filesystem channel; this channel
 //! captures the container-STATE transitions.
 
-use deacon_conformance::model::{CHAN_TEMPORAL, Operation};
+use crate::model::{CHAN_TEMPORAL, Operation};
 use serde_json::json;
 
 use crate::HarnessError;
