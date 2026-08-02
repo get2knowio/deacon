@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub mod buildkit;
-pub mod metadata;
 
 /// How `docker build` output is presented to the user.
 ///

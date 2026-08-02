@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceBuildOutputMetadata",
+	"build": { "dockerfile": "Dockerfile" },
+	"remoteUser": "root",
+	"containerEnv": { "PARITY_OUTPUT_METADATA": "authored-in-config" }
+}

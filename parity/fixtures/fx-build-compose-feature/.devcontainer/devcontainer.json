@@ -1,0 +1,9 @@
+{
+	"name": "ConformanceBuildComposeFeature",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"remoteUser": "root",
+	"containerEnv": { "PARITY_COMPOSE_METADATA": "authored-in-config" },
+	"features": { "./features/marker": {} }
+}
