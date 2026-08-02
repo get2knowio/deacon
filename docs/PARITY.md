@@ -7,7 +7,7 @@ Compared against **`@devcontainers/cli` 0.87.0** and the [containers.dev spec]\
 (https://github.com/devcontainers/spec) at commit `113500f4`.
 
 **Of 57 behaviors that both tools implement, 29 are verified to match.**
-10 are verified to differ deliberately, and 4 differ because deacon
+6 are verified to differ deliberately, and 8 differ because deacon
 follows the spec where the CLI does not — those are the CLI's deviation, not work we owe.
 0 are differences where deacon is the nonconformant side. A further 16
 are deacon-only, with nothing to compare against.
@@ -221,11 +221,11 @@ So every `·` is a real gap: a scenario this behavior COULD be checked in and ha
 <tr><td>◐</td><td>Variable substitution reaches the object-shaped fields that carry user templates —…</td><td>✔</td><td>✔</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#312</td></tr>
 <tr><td>✅</td><td>Reading real-world devcontainer.json configurations from the tier1 corpus produces…</td><td>✔</td><td>✘</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>·</td><td>✅</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>#383 #387</td></tr>
 <tr><td>✅</td><td>Unknown / forward-compatible top-level fields are accepted and preserved verbatim in…</td><td>✔</td><td>✔</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
-<tr><td>⚠️</td><td>A modelled field whose value is outside the schema's closed enum (for example…</td><td>✔</td><td>✘</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td><code>wvr-unsupported-enum-values</code></td></tr>
+<tr><td>✅</td><td>A modelled field whose value is outside the schema's closed enum (for example…</td><td>✔</td><td>✘</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td><code>wvr-unsupported-enum-values</code></td></tr>
 <tr><td>✅</td><td>The reported `workspace.workspaceFolder` is the automatic source-code mount location…</td><td>✔</td><td>✔</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#273 #383</td></tr>
 <tr><td>✅</td><td>The `workspace` section carries exactly `workspaceFolder` and the optional…</td><td>?</td><td>✔</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>#376</td></tr>
-<tr><td>⚠️</td><td>A `features` value that is a bare string instead of an object is rejected…</td><td>✔</td><td>✘</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td><code>wvr-wrong-type-features</code></td></tr>
-<tr><td>⚠️</td><td>A `forwardPorts` value that is a bare string instead of an array is rejected (typed…</td><td>✔</td><td>✘</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td><code>wvr-wrong-type-forwardports</code></td></tr>
+<tr><td>✅</td><td>A `features` value that is a bare string instead of an object is rejected…</td><td>✔</td><td>✘</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td><code>wvr-wrong-type-features</code></td></tr>
+<tr><td>✅</td><td>A `forwardPorts` value that is a bare string instead of an array is rejected (typed…</td><td>✔</td><td>✘</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td><code>wvr-wrong-type-forwardports</code></td></tr>
 </tbody>
 </table>
 
@@ -297,7 +297,7 @@ So every `·` is a real gap: a scenario this behavior COULD be checked in and ha
 </thead>
 <tbody>
 <tr><td>🔵</td><td>`upgrade` regenerates the lockfile from the configuration AFTER the command-line…</td><td>?</td><td></td><td>·</td><td>◐</td><td>·</td><td>◐</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>#409</td></tr>
-<tr><td>⚠️</td><td>`upgrade` on a configuration that declares no Features regenerates an EMPTY lockfile…</td><td>✔</td><td>✘</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td><code>wvr-upgrade-empty-feature-set</code></td></tr>
+<tr><td>✅</td><td>`upgrade` on a configuration that declares no Features regenerates an EMPTY lockfile…</td><td>✔</td><td>✘</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td>·</td><td>◐</td><td>·</td><td>·</td><td><code>wvr-upgrade-empty-feature-set</code></td></tr>
 <tr><td>✅</td><td>`upgrade` regenerates the devcontainer lockfile from the effective configuration's…</td><td>✔</td><td>✔</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>✅</td><td>·</td><td>·</td><td>·</td><td>·</td><td></td></tr>
 </tbody>
 </table>

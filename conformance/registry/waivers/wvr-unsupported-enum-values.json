@@ -11,7 +11,7 @@
   "expect": {
     "kind": "deacon-stricter"
   },
-  "rationale": "deacon validates modelled fields against the pinned schema's closed enums during configuration resolution; the reference's read-configuration is a lenient parse-and-echo that accepts and prints the value back. Same family, and the same deliberate choice, as the wrong-type rejections: constitution IV requires failing fast on a developer's mistake in a modelled field.",
+  "rationale": "deacon validates modelled fields against the pinned schema's closed enums during configuration resolution; the reference's read-configuration is a lenient parse-and-echo that accepts and prints the value back. This tolerance absorbs the REFERENCE's departure from the schema — bhv-readconfig-unsupported-enum-rejected is `follow-spec`, so nothing here waives a deacon deviation. It exists because the live-differential case would otherwise fail on a difference we expect to keep seeing, and it self-invalidates the day the reference starts validating.",
   "added": "2026-07-26",
   "expires": "2027-07-26"
 }

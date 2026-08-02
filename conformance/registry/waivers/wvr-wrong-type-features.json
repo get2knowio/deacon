@@ -3,7 +3,7 @@
   "behaviors": ["bhv-readconfig-wrong-type-features-rejected"],
   "scope": { "kind": "corpus_case", "corpus": "errors", "case": "wrong-type-features" },
   "expect": { "kind": "deacon-stricter" },
-  "rationale": "features is a bare string instead of a map. deacon now rejects this (type-strict, matching forwardPorts) instead of passing it through untyped. This is the deliberate consistency fix: modeled fields enforce their spec shape and fail fast on a clear mistake. The reference keeps the raw JSON and accepts.",
+  "rationale": "features is a bare string instead of the object the schema declares. deacon rejects it (type-strict, matching forwardPorts); the reference keeps the raw JSON and accepts. This tolerance absorbs the REFERENCE's departure from the schema — bhv-readconfig-wrong-type-features-rejected is `follow-spec`, so nothing here waives a deacon deviation. It exists because the live-differential case would otherwise fail on a difference we expect to keep seeing, and it self-invalidates the day the reference starts enforcing the shape.",
   "added": "2026-07-19",
   "expires": "2027-01-19"
 }

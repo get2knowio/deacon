@@ -227,8 +227,8 @@
       "applicability": [],
       "spec": "conformant",
       "reference": "divergent",
-      "decision": "intentional-divergence",
-      "notes": "Same family as the wrong-type rejections: the reference's read-configuration is a lenient parse-and-echo that accepts and prints the value back, while deacon validates modelled fields eagerly (constitution IV). Characterized, not repaired — backed by wvr-unsupported-enum-values and a direction-pinning spec-expectation twin."
+      "decision": "follow-spec",
+      "notes": "The pinned schema declares the enum closed, so a value outside it is not a valid configuration and deacon rejects it (constitution IV). The reference's read-configuration is a lenient parse-and-echo that accepts the value and prints it back — the divergence is the reference departing from the schema, not deacon choosing to differ from the reference. wvr-unsupported-enum-values remains, because it is what keeps the live-differential case from failing on a difference we expect to keep seeing; it records the reference's leniency, not a deacon deviation. A direction-pinning spec-expectation twin fixes which side is which."
     },
     {
       "id": "bhv-readconfig-workspace-folder-subpath",
@@ -257,8 +257,8 @@
       "applicability": [],
       "spec": "conformant",
       "reference": "divergent",
-      "decision": "intentional-divergence",
-      "notes": "Deliberate consistency fix: modeled object-shaped fields enforce their spec shape and fail fast on a clear mistake, matching the typed strictness forwardPorts already had. Backed by case-errors-wrong-type-features and wvr-wrong-type-features."
+      "decision": "follow-spec",
+      "notes": "The schema declares `features` an object; a bare string is not a valid configuration, and deacon enforces the declared shape (constitution IV) as it already did for the typed `forwardPorts`. The reference keeps the raw JSON and accepts, so the divergence is the reference not enforcing its own schema — not deacon choosing to differ. Backed by case-errors-wrong-type-features; wvr-wrong-type-features remains as the tolerance that keeps the live-differential case from failing on the reference's leniency."
     },
     {
       "id": "bhv-readconfig-wrong-type-forwardports-rejected",
@@ -267,8 +267,8 @@
       "applicability": [],
       "spec": "conformant",
       "reference": "divergent",
-      "decision": "intentional-divergence",
-      "notes": "Typed (deacon) vs untyped (reference) read-configuration. Backed by case-errors-wrong-type-forwardports and wvr-wrong-type-forwardports."
+      "decision": "follow-spec",
+      "notes": "The schema declares `forwardPorts` an array; a bare string is not a valid configuration, and deacon's typed deserialization rejects it. The reference keeps the raw JSON and accepts, so the divergence is the reference not enforcing its own schema — not deacon choosing to differ. Backed by case-errors-wrong-type-forwardports; wvr-wrong-type-forwardports remains as the tolerance that keeps the live-differential case from failing on the reference's leniency."
     }
   ]
 }
