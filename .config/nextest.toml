@@ -52,7 +52,10 @@ parity-cli = { max-threads = 8 }
 # so the live-parity exclusions never capture them.
 #
 # The three parity lanes split by what a case NEEDS, not by what it is about:
-#   `parity_hermetic`    — no Docker, no oracle → runs in EVERY profile, dev-fast included
+#   `parity_hermetic`    — no Docker, no oracle → runs in EVERY profile, dev-fast included.
+#                          Gated to Linux in the source (`#![cfg(target_os = "linux")]`):
+#                          its case data pins Linux-measured output, so off-Linux the lane
+#                          is truthfully not selected rather than skipped (#441).
 #   `parity_docker`      — Docker, no oracle    → runs wherever a daemon is available
 #   `parity_differential`— needs the pinned oracle → `[profile.parity]` ONLY
 # The LIVE binary is `parity_differential`. It must be selected by `[profile.parity]` and

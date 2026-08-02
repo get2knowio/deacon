@@ -428,7 +428,7 @@ what lets the majority of the suite gate every pull request:
 
 | Binary | Needs | Runs where | Cases |
 |---|---|---|---|
-| `parity_hermetic` | nothing | every profile, `dev-fast` included | 72 — `spec-expectation`, config-only |
+| `parity_hermetic` | a Linux host | every profile, `dev-fast` included; Linux only (#441) | 72 — `spec-expectation`, config-only |
 | `parity_docker` | Docker | wherever a daemon exists; the release gate | 46 — `spec-expectation` / `invariant-metamorphic`, Docker-backed |
 | `parity_differential` | Docker + the pinned oracle | `parity` ONLY (nightly) | 116 — every `live-differential` |
 | `parity_harness_faults` | nothing | `default`, `dev-fast` | hermetic guard: oracle mismatch, timeout, normalization failure, and the injected-difference proof that the comparison can fail |
