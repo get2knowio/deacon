@@ -182,30 +182,37 @@ threads-required = 1
 - Compares deacon's behavior against the pinned upstream `@devcontainers/cli`
   oracle (version in `fixtures/parity-corpus/oracle.json`)
 - Requires a controlled environment for deterministic comparison (the oracle on
-  `PATH`, plus Docker for the container-scenario binaries)
+  `PATH`, plus Docker for the container-backed groups)
 - Mildly throttled (`parity` = `max-threads 2`, `parity-cli` = `max-threads 8`)
 
-**Selection is by a dedicated profile, not an env-var opt-in.** As of
-018-harden-parity-harness the legacy `DEACON_PARITY=1` triple-gate and the
-`cargo test` side-channel are **retired**. The live parity binaries run **only**
-under the dedicated `[profile.parity]` nextest profile, whose `default-filter`
-selects **exactly** the nine live binaries by an explicit `binary(=name)`
-allow-list:
+**Selection is by a dedicated profile, not an env-var opt-in.** The live parity
+binaries run **only** under `[profile.parity]`, whose `default-filter` names them
+explicitly:
 
 ```toml
 [profile.parity]
-default-filter = 'binary(=parity_read_configuration) | binary(=parity_exec) | binary(=parity_build) | binary(=parity_up_exec) | binary(=parity_observable_state) | binary(=parity_state_diff) | binary(=parity_corpus_tier1) | binary(=parity_corpus_merged) | binary(=parity_corpus_errors)'
+default-filter = '(binary(=parity_conformance_runner) | binary(=parity_conformance_docker))'
 ```
 
-The allow-list is deliberate: a `binary(#parity_*)` glob would also match the two
-**hermetic guard** binaries (`parity_harness_faults`, `parity_registry_check`),
-which must run in the fast/default lanes and must NOT run under
-`[profile.parity]`. Correspondingly, every other profile
-(`default`/`full`/`ci`/`dev-fast`/`mvp-integration`) **excludes** those nine live
-binaries from its `default-filter`, so those lanes are truthful by
-non-selection — a green fast/CI run never implies live parity ran. The
-`parity`/`parity-cli` **test-groups** still exist to throttle the live binaries
-*within* the parity profile.
+Two binaries, because the scenarios are DATA and the split is by resource need,
+not by subject: `parity_conformance_runner` drives the config-only resource
+groups and `parity_conformance_docker` the Docker-backed ones. Adding a scenario
+is a JSON edit; neither binary changes.
+
+The explicit list is deliberate. A `binary(#parity_*)` glob would also match
+`parity_harness_faults`, the **hermetic guard** that proves the comparison can
+fail (oracle mismatch, timeout, normalization failure, injected difference) — it
+must run in the fast/default lanes and must NOT run here. Correspondingly, every
+other profile (`default`/`full`/`ci`/`dev-fast`/`docker`/`mvp-integration`)
+excludes the two live binaries from its `default-filter`, so those lanes are
+truthful by non-selection: a green fast or CI run never implies live parity ran.
+
+> **Gotcha, learned the hard way.** Editing these profiles once silently dropped
+> the `default-filter` from four of them, so `dev-fast` selected every Docker
+> binary. `tomllib` still reports a profile as *present* when only its
+> `[[…overrides]]` blocks survive, so "the profile exists" is NOT the check.
+> After any edit, assert that **every** profile carries a filter —
+> `parity-harness`'s `registry::tests` does exactly this and is what caught it.
 
 **When to use:** live comparison against the reference CLI. There is no silent
 skip — a missing/mismatched oracle, missing Docker, or a normalization failure
@@ -213,15 +220,14 @@ fails the run with a cause-specific message.
 
 **Entry point:**
 ```bash
-# provision the pinned oracle once, then run the whole certified surface:
+# provision the pinned oracle once, then run the whole surface:
 npm install -g @devcontainers/cli@"$(jq -r .version fixtures/parity-corpus/oracle.json)"
-make test-parity        # = cargo nextest run --profile parity  +  parity-report aggregator
+make test-parity
 ```
 
-CI runs this as the `parity / live-certification` lane
-(`.github/workflows/parity.yml`), never as part of the normal PR test lanes. See
-`crates/parity-harness/` and `specs/018-harden-parity-harness/quickstart.md` for
-the full model.
+CI runs this as a nightly lane (`.github/workflows/parity.yml`) that **gates
+nothing** — it is not in the release path. See `docs/PARITY_AND_CONFORMANCE.md`
+and `CLAUDE.md` § Differential Parity Suite for the full model.
 
 ### 7. `long-running`
 
@@ -252,9 +258,9 @@ The project defines three nextest profiles in `.config/nextest.toml`:
 **Purpose:** Maximum speed for local development feedback loops
 
 **Characteristics:**
-- Excludes slow smoke tests and Docker suites; runs the hermetic parity guards
-  (`parity_harness_faults`, `parity_registry_check`) but NOT the live parity
-  binaries (those run only under `--profile parity`)
+- Excludes slow smoke tests and Docker suites; runs the hermetic parity guard
+  (`parity_harness_faults`) but NOT the live parity binaries (those run only
+  under `--profile parity`)
 - High parallelism for unit tests
 - Limited concurrency for Docker tests
 - Ideal for rapid iteration during development
@@ -372,9 +378,8 @@ fn fs_heavy_large_tarball_extraction() { ... }
 #[test]
 fn smoke_basic_up_exec_down() { ... }
 
-// Parity tests
-#[test]
-fn parity_read_configuration_output() { ... }
+// Parity: a scenario is DATA, not a test function — add a record to
+// conformance/registry/cases/<area>.json rather than a #[test] here.
 
 // Unit tests (default - no special prefix needed)
 #[test]
