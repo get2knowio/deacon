@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceExecContainerIdMetadata",
+	"image": "alpine:3.19",
+	"containerEnv": { "FROM_CONTAINER_ENV": "baked-into-the-container" },
+	"remoteEnv": { "REMOTE_ONLY": "from-devcontainer-json" }
+}

@@ -126,11 +126,25 @@ impl<'a> Tolerances<'a> {
     /// The allowed difference covering `observable_path` — matched by a LINKED behavior
     /// and an `observablePath` that equals `observable_path` or is a segment-prefix of it
     /// (so `chan-image.labels` covers `chan-image.labels.foo`). `None` if uncovered.
+    ///
+    /// When several tolerances cover the same path, the MOST SPECIFIC one (longest
+    /// `observablePath`) is the one consumed. That matters because a diverging path is
+    /// built by joining object keys with `.`, and Docker label keys contain dots
+    /// themselves: `labels.com.docker.compose.project` and
+    /// `labels.com.docker.compose.project.config_files` are two SEPARATE flat keys that
+    /// the prefix rule cannot tell from a parent and its child. First-match order let the
+    /// shorter one swallow the longer one's difference, leaving the specific tolerance
+    /// unconsumed and therefore reported STALE — a tolerance failing for the exact
+    /// difference it was written to excuse. Longest-match attributes each difference to
+    /// the tolerance that names it.
     fn covering(&self, observable_path: &str) -> Option<&'a crate::model::AllowedDifference> {
-        self.allowed.iter().find(|ad| {
-            self.behaviors.contains(&ad.behavior)
-                && path_covers(&ad.observable_path, observable_path)
-        })
+        self.allowed
+            .iter()
+            .filter(|ad| {
+                self.behaviors.contains(&ad.behavior)
+                    && path_covers(&ad.observable_path, observable_path)
+            })
+            .max_by_key(|ad| ad.observable_path.len())
     }
 
     /// The tolerance keys that were NOT consumed by any covered divergence this run — the

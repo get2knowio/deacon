@@ -1,0 +1,4 @@
+{
+	"name": "ConformanceBuildFlags",
+	"build": { "dockerfile": "Dockerfile" }
+}

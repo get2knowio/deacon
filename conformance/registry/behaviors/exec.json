@@ -9,7 +9,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Backed by case-exec-parity (parity_exec)."
+      "notes": "Backed by the declarative exec cases (case-exec-decl-tty, case-exec-decl-user, case-exec-decl-working-directory, case-exec-remote-env-propagation), which replaced the hand-written `parity_exec` carrier."
     },
     {
       "id": "bhv-exec-container-id-metadata",
@@ -19,7 +19,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "#322: up writes the merged devcontainer.metadata label (single-container, Dockerfile, and compose paths); exec/read-configuration/set-up read it back via the shared container_metadata::config_from_metadata_label helper. Evidence: case-up-exec-parity (parity_up_exec) — which reports ONE outcome covering this behavior AND bhv-up-exec-parity (research D2's inverse defect, characterized in 023 T054). An independently-reported case needs a runtime-resolved container-id token in an operation's argv; deferred as tasks.md#T110."
+      "notes": "#322: up writes the merged devcontainer.metadata label (single-container, Dockerfile, and compose paths); exec/read-configuration/set-up read it back via the shared container_metadata::config_from_metadata_label helper. Evidence: case-exec-container-id-metadata — an INDEPENDENTLY reported case, which the earlier note recorded as deferred (T110) for want of a runtime-resolved container-id token in an operation's argv. `${CONTAINER_ID}` is that token: the runner substitutes the id observed after the case's `up`, and fails loud when an operation uses it before any container exists, so such a case cannot silently degrade into a workspace-addressed exec. It replaces `case-up-exec-parity` (parity_up_exec), which reported ONE outcome covering this behavior and bhv-up-exec-parity together."
     },
     {
       "id": "bhv-exec-image-path-preserved",
@@ -29,7 +29,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Fixed under #370. Measured at oracle 0.87.0 against fx-exec-dockerfile-overlay: the image's `Config.Env` PATH is `/opt/conformance/bin:/usr/local/sbin:\u2026`, and deacon's `exec` now reports exactly that, byte-identical to the reference; `conf-tool` resolves on both sides. The defect was a three-step composition \u2014 the probe runs a LOGIN shell whose `/etc/profile` ASSIGNS PATH (alpine:3.19 does), `build_effective_env` rebuilt the environment from that probe alone, and `build_exec_args` then re-asserted the degraded value as an explicit `-e PATH=`. `resolve_env_and_user` now restores the container's own PATH entries into the probe result before any of that, via `ContainerEnvironmentProber::merge_container_path`. ROOT CAUSE CORRECTION: the issue originally described this as an env-PRECEDENCE problem needing a per-variable policy for PATH. It is not. The reference does not resolve it by precedence at all \u2014 it REWRITES the container's `/etc/profile` to `export PATH=${PATH:-\u2026}` so a login shell stops clobbering, and applies an in-process merge only when it may not change system config. deacon does not modify container system files, so it always takes the merge path. The residual that leaves \u2014 the relative order of a restored image entry against a Feature's `/etc/profile.d` entry \u2014 is recorded separately as `bhv-exec-restored-path-ordering`. `wvr-exec-image-path-dropped` was deleted with the fix."
+      "notes": "Fixed under #370. Measured at oracle 0.87.0 against fx-exec-dockerfile-overlay: the image's `Config.Env` PATH is `/opt/conformance/bin:/usr/local/sbin:…`, and deacon's `exec` now reports exactly that, byte-identical to the reference; `conf-tool` resolves on both sides. The defect was a three-step composition — the probe runs a LOGIN shell whose `/etc/profile` ASSIGNS PATH (alpine:3.19 does), `build_effective_env` rebuilt the environment from that probe alone, and `build_exec_args` then re-asserted the degraded value as an explicit `-e PATH=`. `resolve_env_and_user` now restores the container's own PATH entries into the probe result before any of that, via `ContainerEnvironmentProber::merge_container_path`. ROOT CAUSE CORRECTION: the issue originally described this as an env-PRECEDENCE problem needing a per-variable policy for PATH. It is not. The reference does not resolve it by precedence at all — it REWRITES the container's `/etc/profile` to `export PATH=${PATH:-…}` so a login shell stops clobbering, and applies an in-process merge only when it may not change system config. deacon does not modify container system files, so it always takes the merge path. The residual that leaves — the relative order of a restored image entry against a Feature's `/etc/profile.d` entry — is recorded separately as `bhv-exec-restored-path-ordering`. `wvr-exec-image-path-dropped` was deleted with the fix."
     },
     {
       "id": "bhv-exec-restored-path-ordering",

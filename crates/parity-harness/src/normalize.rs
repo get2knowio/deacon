@@ -381,12 +381,28 @@ pub fn normalize_channel(
 /// (`workspace_basename_token`), because its evidence carries container-side paths
 /// derived from the per-side temp workspace name. Every other channel gets the plain
 /// full-path map, so this change cannot alter what any existing channel compares.
-pub fn tokens_for_channel(channel: &str, workspace: &Path) -> TokenMap {
-    if channel == crate::model::CHAN_CONTAINER_STATE {
+///
+/// **Rule `image_tag_token`.** When the case built into a runner-assigned tag
+/// (`--image-name ${IMAGE_TAG}`), that tag rewrites to `<IMAGE_TAG>`. The tag is unique per
+/// case run AND per side — it has to be, or the second side's build would overwrite the
+/// first — so without this every build's reported `imageName` would differ by construction
+/// and no case could assert the tag it asked for. Rewritten, never dropped: an operation
+/// that reported NO image name still differs from one that reported the tag.
+pub fn tokens_for_channel(channel: &str, workspace: &Path, image_tag: Option<&str>) -> TokenMap {
+    let mut m = if channel == crate::model::CHAN_CONTAINER_STATE {
         TokenMap::workspace_with_basename(workspace)
     } else {
         TokenMap::workspace(workspace)
+    };
+    if let Some(tag) = image_tag {
+        m.insert(tag, "<IMAGE_TAG>");
+        // The reported name is sometimes the bare repository, without the `:latest` the
+        // runner appends — tokenize that too so both forms land on the same token.
+        if let Some(repo) = tag.strip_suffix(":latest") {
+            m.insert(repo, "<IMAGE_TAG>");
+        }
     }
+    m
 }
 
 /// Apply the named rules the contract lists for `channel` (observer-channel.md). An
@@ -1512,6 +1528,67 @@ mod tests {
         assert!(i.value.get("env").is_some() && i.value.get("command").is_some());
     }
 
+    #[test]
+    fn image_tag_token_makes_two_sides_build_output_comparable() {
+        // The two sides build into DIFFERENT tags by construction (a shared tag would have
+        // the second build overwrite the first), so their reported image names can only be
+        // compared through the token.
+        let deacon = tokens_for_channel(
+            CHAN_STRUCTURED_OUTPUT,
+            Path::new("/tmp/deacon-conf-aaa"),
+            Some("dcr-1-0-img:latest"),
+        );
+        let reference = tokens_for_channel(
+            CHAN_STRUCTURED_OUTPUT,
+            Path::new("/tmp/deacon-conf-bbb"),
+            Some("dcr-1-1-img:latest"),
+        );
+        let out = |t: &TokenMap, tag: &str| {
+            normalize_channel(
+                CHAN_STRUCTURED_OUTPUT,
+                &raw(CHAN_STRUCTURED_OUTPUT, json!({ "imageName": [tag] })),
+                t,
+                Side::Deacon,
+            )
+            .value
+        };
+        assert_eq!(
+            out(&deacon, "dcr-1-0-img:latest"),
+            out(&reference, "dcr-1-1-img:latest"),
+            "per-side build tags compare equal once tokenized"
+        );
+        assert_eq!(
+            out(&deacon, "dcr-1-0-img:latest")["imageName"][0],
+            "<IMAGE_TAG>"
+        );
+        // The bare repository (no `:latest`) lands on the same token, so a CLI that reports
+        // one form and a CLI that reports the other still compare equal.
+        assert_eq!(out(&deacon, "dcr-1-0-img")["imageName"][0], "<IMAGE_TAG>");
+        // Rewritten, never dropped: an operation that reported NO name still differs.
+        assert_ne!(
+            out(&deacon, "dcr-1-0-img:latest"),
+            normalize_channel(
+                CHAN_STRUCTURED_OUTPUT,
+                &raw(CHAN_STRUCTURED_OUTPUT, json!({ "imageName": [] })),
+                &deacon,
+                Side::Deacon,
+            )
+            .value
+        );
+    }
+
+    #[test]
+    fn image_tag_token_is_absent_when_the_case_built_no_image() {
+        // No tag → the map is exactly the workspace map, so no existing channel's
+        // normalization changes meaning.
+        let with_none = tokens_for_channel(CHAN_STDOUT, Path::new("/tmp/ws"), None);
+        let plain = TokenMap::workspace(Path::new("/tmp/ws"));
+        assert_eq!(
+            with_none.apply("dcr-1-0-img:latest /tmp/ws"),
+            plain.apply("dcr-1-0-img:latest /tmp/ws")
+        );
+    }
+
     // -- T040: label_semantic / mount_source_canonical / path_env_segmented ------------
 
     #[test]
@@ -1664,13 +1741,21 @@ mod tests {
         let a = apply_channel_rules(
             CHAN_CONTAINER_STATE,
             &state("deacon-conf-aaa"),
-            &tokens_for_channel(CHAN_CONTAINER_STATE, Path::new("/tmp/deacon-conf-aaa")),
+            &tokens_for_channel(
+                CHAN_CONTAINER_STATE,
+                Path::new("/tmp/deacon-conf-aaa"),
+                None,
+            ),
             Side::Deacon,
         );
         let b = apply_channel_rules(
             CHAN_CONTAINER_STATE,
             &state("deacon-conf-bbb"),
-            &tokens_for_channel(CHAN_CONTAINER_STATE, Path::new("/tmp/deacon-conf-bbb")),
+            &tokens_for_channel(
+                CHAN_CONTAINER_STATE,
+                Path::new("/tmp/deacon-conf-bbb"),
+                None,
+            ),
             Side::Deacon,
         );
         assert_eq!(a, b, "two temp workspaces must normalize equal");
@@ -1681,7 +1766,7 @@ mod tests {
         );
 
         // Only this channel gets the basename token — no other channel's meaning changes.
-        let plain = tokens_for_channel(CHAN_STDOUT, Path::new("/tmp/deacon-conf-aaa"));
+        let plain = tokens_for_channel(CHAN_STDOUT, Path::new("/tmp/deacon-conf-aaa"), None);
         assert_eq!(
             path_token(&json!("/workspaces/deacon-conf-aaa"), &plain),
             json!("/workspaces/deacon-conf-aaa"),

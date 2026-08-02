@@ -47,6 +47,84 @@
       "notes": "FR-040 boundary class for `build`: an image-reference configuration whose collection fields are all present and empty. An empty `features` map is the specific edge — it must produce the base image unchanged rather than an empty Feature layer or a failure."
     },
     {
+      "id": "case-build-cache-to-flag",
+      "behaviors": [
+        "bhv-build-buildkit-flag-accepted"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "json"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--cache-to",
+            "type=local,dest=${WORKSPACE}/bkcache",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "parity.build.token": "conformance-build-flags"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Replaces the `--cache-to` half of `parity_build::buildkit-only-features` (res-build-tolerant-outcome). What this establishes is bounded and worth stating: deacon accepts the flag, passes it through, and still produces the image. What it does NOT establish is that anything was cached — measured on Docker 29.6.2 with the default `docker` driver, `type=local,dest=…` creates no directory at the destination, so an assertion that the cache exists would fail for reasons that have nothing to do with deacon. Pinning the reachable claim and naming the unreachable one is the honest shape; the legacy unit instead tolerated failure and, in its failure arm, accepted any of three substrings one of which (`outcome`) appears in normal JSON success output, so it could not fail either way."
+    },
+    {
       "id": "case-build-compose-service-shape",
       "behaviors": [
         "bhv-build-image-parity"
@@ -261,24 +339,423 @@
       "notes": "FR-034 build-time failure: the Dockerfile's `RUN` exits non-zero, so no image is produced. Both CLIs must fail, and the declared phase records WHERE — a build failure and a container-creation failure are the same exit code and different facts, which is the whole reason the phase is part of the record."
     },
     {
-      "id": "case-build-parity",
+      "id": "case-build-image-args-differential",
       "behaviors": [
-        "bhv-build-image-parity"
+        "bhv-build-image-produced-carries-authored-config",
+        "bhv-build-image-bookkeeping-label",
+        "bhv-build-image-metadata-label"
       ],
       "context": [],
-      "executable": {
-        "binary": "parity_build"
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
       },
-      "outcomes": [
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}"
+          ],
+          "fixtures": [
+            "fx-build-image-args"
+          ]
+        }
+      ],
+      "expected": [
         {
           "channel": "chan-exit-code",
-          "expectation": "exits 0 on a successful build"
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
         },
         {
-          "channel": "chan-stdout",
-          "expectation": "reports a build outcome matching the reference after normalization"
+          "channel": "chan-image",
+          "operation": "op-build"
         }
-      ]
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-build-image-bookkeeping-label",
+          "context": [],
+          "observablePath": "chan-image.labels.org.deacon.configHash",
+          "rationale": "deacon stamps `org.deacon.configHash` on the image it builds; the reference sets no such label (measured against the pinned oracle 0.87.0 on this fixture). One named key in deacon's own namespace, never the `org.deacon.*` namespace as a whole. `devcontainer.metadata` is deliberately NOT tolerated alongside it — that difference is a deacon defect (#436), and this case reporting it is the point.",
+          "divergenceId": "ext-build-image-bookkeeping-label"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Ports `parity_build::with-build-args` (res-build-image-discovery). The fixture routes one `build.args` value into BOTH an image label and an environment variable, and the Dockerfile's `ARG` default is `default-not-passed` — so a build that silently dropped `build.args` produces an image that still exists and still carries the label, and is caught here by the VALUE (`default-not-passed` instead of `passed-from-config`) on two independent observables. That is the failure the legacy unit's substring check over `docker inspect` output was reaching for; this compares the whole image configuration between the CLIs instead. Everything agrees except the two label keys: `org.deacon.configHash` is tolerated (a deacon extension), and `devcontainer.metadata` is NOT (a deacon defect, #436) — note that this fixture declares no Features and deacon writes the label anyway, where the reference writes it only when there is metadata to carry, so the defect is visible here as a one-sided key and in the sibling labels case the same way. Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-build-image-labels-differential",
+      "behaviors": [
+        "bhv-build-image-produced-carries-authored-config",
+        "bhv-build-image-bookkeeping-label",
+        "bhv-build-image-metadata-label"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}"
+          ],
+          "fixtures": [
+            "fx-build-image-labels"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-build-image-bookkeeping-label",
+          "context": [],
+          "observablePath": "chan-image.labels.org.deacon.configHash",
+          "rationale": "deacon stamps `org.deacon.configHash` on the image it builds; the reference sets no such label (measured against the pinned oracle 0.87.0 on this fixture). One named key in deacon's own namespace, never the `org.deacon.*` namespace as a whole. `devcontainer.metadata` is deliberately NOT tolerated alongside it — that difference is a deacon defect (#436), and this case reporting it is the point.",
+          "divergenceId": "ext-build-image-bookkeeping-label"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Ports `parity_build::creates-discoverable-image` (res-build-image-discovery) and strengthens it. The legacy unit asked only whether an image carrying a unique label EXISTED after each side's build — a question answerable by a build that produced the wrong image entirely, as long as the label came along. This compares the produced image's whole configuration between the two CLIs: labels, environment, command, entrypoint, working directory. Made observable by the built-image capability: a `build` leaves an image and no container, so the container probe sees nothing and the case passes `--image-name ${IMAGE_TAG}` for a runner-assigned, per-side tag the observer inspects and the workspace reclaims. The image's own IDENTITY is not compared — the two sides build separately into different tags, so id/digests/tags differ by construction and say nothing about behavior. The label is a fixed literal rather than the legacy unit's PID-uniquified token: discovery is now by the assigned tag, so global uniqueness across concurrent runs is no longer the case's problem. TWO label keys differ and are treated differently on purpose — `org.deacon.configHash` is a deacon extension and is tolerated by one named key; `devcontainer.metadata` is a deacon defect (#436) and is NOT tolerated, so this case reports it until the fix lands. Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-build-image-reference-custom-tag",
+      "behaviors": [
+        "bhv-build-image-produced-carries-authored-config"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "image",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "json"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--label",
+            "parity.build.token=conformance-image-reference",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "parity.build.token": "conformance-image-reference"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Ports `parity_build::image-reference` (res-build-image-discovery), which is DEACON-ONLY — it never invoked the oracle — so a spec-expectation is its honest shape; a live-differential would claim cross-CLI agreement the unit never checked. Building from a plain image reference with a user tag and a `--label`, it pins the two halves the legacy unit checked and one it could not. (1) The reported `imageName` contains the tag the user asked for, asserted through the `<IMAGE_TAG>` token — the runner assigns a per-run, per-side tag, so the literal is unassertable and the token is what makes the claim expressible at all. (2) The produced IMAGE carries the `--label` value: the legacy unit inferred this from `docker images --filter label=…` returning a non-empty list, which proves only that SOME image matched; this reads the label off the image the build was told to write. `source: image` is pinned deliberately — without it the assertion would also pass on evidence captured from a container, and the whole point of this case is that a `build` leaves no container to capture."
+    },
+    {
+      "id": "case-build-output-export-tar",
+      "behaviors": [
+        "bhv-build-output-export"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "json"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--output",
+            "type=docker,dest=${WORKSPACE}/export.tar",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "exportPath": "type=docker,dest=<WORKSPACE>/export.tar"
+            }
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-build",
+          "assertion": {
+            "exists": "export.tar"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "export.tar"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Replaces `parity_build::output-json-format` (res-build-tolerant-outcome) by PINNING the outcome instead of porting the tolerance. The legacy unit branched on success/failure and, in its failure arm, accepted stdout or stderr containing any of \"BuildKit is required\", \"outcome\" or \"Docker\" — and a `--output-format json` build prints `outcome` in its normal success output, so the failure arm could pass on almost anything. An assertion that cannot fail is worse than no assertion. `--output type=docker,dest=…` is deterministic wherever a build can run at all: it exports to a path the case owns, so there is a single correct outcome to pin. The claim is deliberately the ARTIFACT, not the echo — `exportPath` alone repeats the flag back and would pass on a build that wrote nothing, so `chan-filesystem` asserts the tar exists. `<WORKSPACE>` is the path token; the case writes inside its own isolated workspace, which the runner reclaims. Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-build-platform-flag",
+      "behaviors": [
+        "bhv-build-platform-flag"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "json"
+      },
+      "inputClass": "valid",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--platform",
+            "linux/amd64",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "parity.build.token": "conformance-build-flags"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Replaces the `--platform` half of `parity_build::buildkit-only-features` (res-build-tolerant-outcome). The legacy unit tolerated either outcome on the theory that BuildKit might be absent; it then asserted, only in the failure arm, that some error string appeared — so on any machine WITH BuildKit (every machine this suite runs on, and the default since Docker 23) it asserted nothing at all. `--platform` on the host's own architecture is deterministic, so this pins success and, through `chan-image`, that the flag produced a real image carrying the Dockerfile's label rather than merely being accepted. A genuinely BuildKit-less environment now fails this case loudly, which is the correct report — the suite's prerequisites are checked, not guessed at. Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-build-push-unreachable-registry",
+      "behaviors": [
+        "bhv-build-push-failure-reported",
+        "bhv-build-push-target-selection"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "build",
+        "sdim-config-source": "dockerfile",
+        "sdim-container-state": "none",
+        "sdim-features": "none",
+        "sdim-layering": "cli-overlay",
+        "sdim-output-mode": "json"
+      },
+      "inputClass": "unsupported",
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--push",
+            "--image-name",
+            "registry.invalid/conformance-push:latest",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-build",
+          "assertion": {
+            "contains": "failed to push"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Replaces `parity_build::push-json-output` (res-build-tolerant-outcome). The legacy unit pushed to `localhost:5000` and branched on whether that happened to be reachable, so its assertion depended on the machine. `registry.invalid` is RFC 2606 reserved and resolves nowhere, so the push ALWAYS fails and there is one outcome to pin: exit 1, and a diagnostic that names the push as the failing step. `contains` is used rather than a full match because the message body is BuildKit's, not deacon's, and pinning it would assert the daemon's wording. NOTE the message is currently about the WRONG registry: deacon also pushes its internal `deacon-build:<hash>` tag, which has no registry component and so resolves to Docker Hub, and that push fails first (#438). Both the current and the fixed behavior contain `failed to push`, so this assertion holds across the fix; #438 is what makes the named registry right. Image pinned to alpine:3.19 (V18)."
     },
     {
       "id": "case-build-reference-lenient-wrong-type",
@@ -294,7 +771,7 @@
         "sdim-layering": "single",
         "sdim-output-mode": "human"
       },
-      "inputClass": "reference-lenient",
+      "inputClass": "malformed",
       "oracleType": "live-differential",
       "resourceGroup": "docker-shared",
       "operations": [
@@ -316,15 +793,7 @@
           "operation": "op-build"
         }
       ],
-      "allowedDifferences": [
-        {
-          "behavior": "bhv-readconfig-wrong-type-features-rejected",
-          "context": [],
-          "observablePath": "chan-exit-code.exitCode",
-          "rationale": "deacon refuses a `features` value that is a bare string rather than an object; the reference accepts it and builds.",
-          "waiverId": "wvr-wrong-type-features"
-        }
-      ],
+      "allowedDifferences": [],
       "cleanup": {
         "containers": true,
         "images": false,
@@ -332,7 +801,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-040 reference-lenient class for `build`: `features` written as a bare string is refused by deacon and accepted by the reference, which goes on to build. The direction is pinned by the spec-expectation twin `case-errors-decl-wrong-type-features`."
+      "notes": "A `features` value written as a bare string rather than an object, on `build`. This case carried a tolerance excusing an exit-code difference on the premise that \"the reference accepts it and builds\"; that premise is FALSE at oracle 0.87.0 and the tolerance was reported STALE the moment stale tolerances began failing. Re-measured: both CLIs exit 1. They reject for different reasons — deacon fails at config parse (`expected an object (map), found a string`), while the reference indexes the string as a legacy character-keyed feature map and fails with `Legacy feature '0' not supported` — but the observable exit code agrees, so there is nothing left to excuse and the class is `malformed`, not `reference-lenient`. The reference's LENIENCY toward this input is real on `read-configuration`, where it echoes the config instead of rejecting it; that is where `bhv-readconfig-wrong-type-features-rejected` and `wvr-wrong-type-features` still apply, and `case-errors-decl-wrong-type-features` pins the direction. Image pinned to alpine:3.18 (V18)."
     },
     {
       "id": "case-build-unsupported-image-reference",

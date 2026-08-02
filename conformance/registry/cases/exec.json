@@ -60,7 +60,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-040 boundary class for `exec`: a command that succeeds and writes NOTHING. Empty output is the edge of the stdout domain and is a different observation from output that was not captured \u2014 the distinction `present: false` exists to keep, and the one a comparison that treats empty as absent would silently lose."
+      "notes": "FR-040 boundary class for `exec`: a command that succeeds and writes NOTHING. Empty output is the edge of the stdout domain and is a different observation from output that was not captured — the distinction `present: false` exists to keep, and the one a comparison that treats empty as absent would silently lose."
     },
     {
       "id": "case-exec-compose-service",
@@ -122,6 +122,73 @@
         "tempdir": true
       },
       "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. `exec` against a Compose project has to reach the SERVICE container the configuration names, not the first container of the project. With a single service the two coincide, so the assertion is the round trip; the discrimination lives in the down cases, where a mis-identified project is observable."
+    },
+    {
+      "id": "case-exec-container-id-metadata",
+      "behaviors": [
+        "bhv-exec-container-id-metadata"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-container-id-metadata"
+          ]
+        },
+        {
+          "id": "op-exec-by-container",
+          "subcommand": "exec",
+          "argv": [
+            "--container-id",
+            "${CONTAINER_ID}",
+            "--",
+            "sh",
+            "-lc",
+            "printf 'remote=[%s] env=[%s]\\n' \"$REMOTE_ONLY\" \"$FROM_CONTAINER_ENV\""
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec-by-container",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec-by-container",
+          "assertion": {
+            "contains": "remote=[from-devcontainer-json] env=[baked-into-the-container]"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Ports the `container-id` half of `parity_up_exec` and gives `bhv-exec-container-id-metadata` an INDEPENDENTLY REPORTED case — the thing its behavior record said was deferred (T110) because the declarative model had no way to name a container created mid-case. `${CONTAINER_ID}` is that way: the runner substitutes the id observed after `op-up`, and fails loud if an operation uses the token before any container exists, so the case cannot silently degrade into a workspace-addressed exec. The claim is #322: `exec --container-id` with NO `--workspace-folder` and NO `--config` has only the container to work from, so `remoteEnv` — which lives solely in devcontainer.json and is never baked into the image — is recoverable only if `up` stamped it into the `devcontainer.metadata` label and `exec` read it back. `FROM_CONTAINER_ENV` is asserted alongside it as the control: it reaches the process through the container's own environment either way, so a run where the metadata path is broken prints `remote=[] env=[baked-into-the-container]` rather than failing outright, and asserting only the exit code would call that a pass. Image pinned to alpine:3.19 (V18)."
     },
     {
       "id": "case-exec-decl-tty",
@@ -364,7 +431,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-exec-dockerfile-running-cli-overlay`. Three sources of environment meet in one invocation \u2014 the image's own `ENV`, the configuration's `containerEnv`, and a `--remote-env` overlay \u2014 and all three must survive together. The `command -v conf-tool` PATH probe that used to share this argv now lives in case-exec-image-path-overlay. Splitting them was forced by the tolerance model, not by preference: the probe DOES diverge (deacon loses the image's `ENV PATH`), the divergence lands in arbitrary stdout TEXT, and a tolerance over the whole of `chan-stdout` is a wildcard by any reading \u2014 which is exactly why `chan-stdout` is excluded from SCALAR_OBSERVABLE. Keeping both subjects in one case would have meant either weakening that rule or letting a real divergence sit uncharacterized. Each case now has one subject, and the exit-code tolerance in the sibling is scoped to a case whose only exit code IS the PATH probe."
+      "notes": "Covers the high-risk triple `hrt-exec-dockerfile-running-cli-overlay`. Three sources of environment meet in one invocation — the image's own `ENV`, the configuration's `containerEnv`, and a `--remote-env` overlay — and all three must survive together. The `command -v conf-tool` PATH probe that used to share this argv now lives in case-exec-image-path-overlay. Splitting them was forced by the tolerance model, not by preference: the probe DOES diverge (deacon loses the image's `ENV PATH`), the divergence lands in arbitrary stdout TEXT, and a tolerance over the whole of `chan-stdout` is a wildcard by any reading — which is exactly why `chan-stdout` is excluded from SCALAR_OBSERVABLE. Keeping both subjects in one case would have meant either weakening that rule or letting a real divergence sit uncharacterized. Each case now has one subject, and the exit-code tolerance in the sibling is scoped to a case whose only exit code IS the PATH probe."
     },
     {
       "id": "case-exec-feature-path-ordering",
@@ -431,7 +498,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Pins what deacon's PATH restoration (#370) produces when BOTH an image `ENV PATH=` entry and a Feature's `/etc/profile.d` entry are in play \u2014 the case the fix's design question turned on. Deliberately spec-expectation, not live-differential: the reference produces `/opt/feature/bin:/opt/image/bin:\u2026` for this input, so a differential would fail on `chan-stdout`, and `chan-stdout` is un-waivable by design (its diverging path is the bare channel id, and a whole-channel tolerance is a wildcard). Asserting deacon's own output states what deacon does without claiming a cross-CLI agreement that does not hold. Both tools are then RUN, not just listed: an ordering assertion alone would still pass if a directory were on PATH but unreachable, and `image-tool`/`feature-tool` exiting 0 is what proves each contributor actually resolves. The measured reference ordering lives in `bhv-exec-restored-path-ordering`; image pinned to alpine:3.19 (V18)."
+      "notes": "Pins what deacon's PATH restoration (#370) produces when BOTH an image `ENV PATH=` entry and a Feature's `/etc/profile.d` entry are in play — the case the fix's design question turned on. Deliberately spec-expectation, not live-differential: the reference produces `/opt/feature/bin:/opt/image/bin:…` for this input, so a differential would fail on `chan-stdout`, and `chan-stdout` is un-waivable by design (its diverging path is the bare channel id, and a whole-channel tolerance is a wildcard). Asserting deacon's own output states what deacon does without claiming a cross-CLI agreement that does not hold. Both tools are then RUN, not just listed: an ordering assertion alone would still pass if a directory were on PATH but unreachable, and `image-tool`/`feature-tool` exiting 0 is what proves each contributor actually resolves. The measured reference ordering lives in `bhv-exec-restored-path-ordering`; image pinned to alpine:3.19 (V18)."
     },
     {
       "id": "case-exec-image-path-overlay",
@@ -480,7 +547,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "The PATH half of the exec/dockerfile/cli-overlay pair, split out of case-exec-dockerfile-overlay so the divergence it carries is addressable by a scoped tolerance. The argv resolves the tool THROUGH A SHELL (`sh -c conf-tool`) rather than naming it as the exec argv, because those are two different lookups and only one of them is broken: `docker exec` resolves a bare argv against the container's own configuration and finds the tool on both sides, so `-- conf-tool` would pass vacuously. A shell inside the session reads `$PATH` as deacon handed it over, which is where the image's entry has gone missing \u2014 deacon exits 127, the reference runs the tool and exits 0. `sh -c` rather than `sh -lc` for the same reason: a login shell re-sources `/etc/profile`, which would put a third PATH in play and blur what the case is measuring. The earlier `command -v conf-tool` form was worse still \u2014 `command` is a shell BUILTIN, so as an exec argv it is not an executable at all and both CLIs failed identically with 127, agreeing about nothing. Characterized by bhv-exec-image-path-preserved / wvr-exec-image-path-dropped, tracked for fix at https://github.com/get2knowio/deacon/issues/370. No `scenarioContext`: the triple this exercises is already carried by its sibling, and declaring it twice would inflate the pairwise denominator with a combination nothing new is being learned about. When the fix lands, the tolerance stops being consumed and is reported stale, which is what forces it to be deleted alongside."
+      "notes": "The PATH half of the exec/dockerfile/cli-overlay pair, split out of case-exec-dockerfile-overlay so the divergence it carries is addressable by a scoped tolerance. The argv resolves the tool THROUGH A SHELL (`sh -c conf-tool`) rather than naming it as the exec argv, because those are two different lookups and only one of them is broken: `docker exec` resolves a bare argv against the container's own configuration and finds the tool on both sides, so `-- conf-tool` would pass vacuously. A shell inside the session reads `$PATH` as deacon handed it over, which is where the image's entry has gone missing — deacon exits 127, the reference runs the tool and exits 0. `sh -c` rather than `sh -lc` for the same reason: a login shell re-sources `/etc/profile`, which would put a third PATH in play and blur what the case is measuring. The earlier `command -v conf-tool` form was worse still — `command` is a shell BUILTIN, so as an exec argv it is not an executable at all and both CLIs failed identically with 127, agreeing about nothing. Characterized by bhv-exec-image-path-preserved / wvr-exec-image-path-dropped, tracked for fix at https://github.com/get2knowio/deacon/issues/370. No `scenarioContext`: the triple this exercises is already carried by its sibling, and declaring it twice would inflate the pairwise denominator with a combination nothing new is being learned about. When the fix lands, the tolerance stops being consumed and is reported stale, which is what forces it to be deleted alongside."
     },
     {
       "id": "case-exec-malformed-config-rejected",
@@ -531,27 +598,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-040 malformed class for `exec`: the target container is identified from the configuration, so a document that cannot be parsed stops the run before any container is looked up. The container-state is `none` deliberately \u2014 the case never gets far enough for one to exist."
-    },
-    {
-      "id": "case-exec-parity",
-      "behaviors": [
-        "bhv-exec-command-parity"
-      ],
-      "context": [],
-      "executable": {
-        "binary": "parity_exec"
-      },
-      "outcomes": [
-        {
-          "channel": "chan-stdout",
-          "expectation": "the executed command's stdout matches the reference"
-        },
-        {
-          "channel": "chan-exit-code",
-          "expectation": "the executed command's exit code is propagated, matching the reference"
-        }
-      ]
+      "notes": "FR-040 malformed class for `exec`: the target container is identified from the configuration, so a document that cannot be parsed stops the run before any container is looked up. The container-state is `none` deliberately — the case never gets far enough for one to exist."
     },
     {
       "id": "case-exec-reference-lenient-wrong-type",
@@ -617,63 +664,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-040 reference-lenient class for `exec`: the reference accepts a wrongly-typed `forwardPorts`, creates the container and then execs into it successfully; deacon refuses the document and never reaches the container. Same fixture, same waiver, one stage further along than the `up` case \u2014 which is the evidence that the leniency is not a read-time quirk."
-    },
-    {
-      "id": "case-exec-unsupported-missing-command",
-      "behaviors": [
-        "bhv-exec-command-parity"
-      ],
-      "context": [],
-      "scenarioContext": {
-        "sdim-operation": "exec",
-        "sdim-config-source": "image",
-        "sdim-container-state": "running",
-        "sdim-features": "none",
-        "sdim-layering": "single",
-        "sdim-output-mode": "human"
-      },
-      "inputClass": "unsupported",
-      "oracleType": "live-differential",
-      "resourceGroup": "docker-shared",
-      "operations": [
-        {
-          "id": "op-up",
-          "subcommand": "up",
-          "argv": [
-            "--workspace-folder",
-            "${WORKSPACE}"
-          ],
-          "fixtures": [
-            "fx-exec-tty"
-          ]
-        },
-        {
-          "id": "op-exec",
-          "subcommand": "exec",
-          "argv": [
-            "--workspace-folder",
-            "${WORKSPACE}",
-            "--",
-            "definitely-not-an-installed-binary"
-          ],
-          "expectFailurePhase": "exec"
-        }
-      ],
-      "expected": [
-        {
-          "channel": "chan-exit-code",
-          "operation": "op-exec"
-        }
-      ],
-      "cleanup": {
-        "containers": true,
-        "images": false,
-        "networks": true,
-        "volumes": true,
-        "tempdir": true
-      },
-      "notes": "FR-040 unsupported class for `exec`: the invocation is well-formed and the container is running, but the named executable does not exist inside it. Both CLIs must surface the container's own failure rather than substitute one of their own, and the exit code is where that shows."
+      "notes": "FR-040 reference-lenient class for `exec`: the reference accepts a wrongly-typed `forwardPorts`, creates the container and then execs into it successfully; deacon refuses the document and never reaches the container. Same fixture, same waiver, one stage further along than the `up` case — which is the evidence that the leniency is not a read-time quirk."
     },
     {
       "id": "case-exec-remote-env-propagation",
@@ -736,7 +727,63 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Ports `parity_exec::env-propagation` (res-exec-per-side-argv). A variable supplied with `--remote-env` must reach the command's environment on both sides. The residual recorded a need for PER-SIDE argument vectors, which was disproven: deacon declares `--remote-env` as the primary flag with `--env` as a legacy alias, so ONE shared argv exercises both CLIs. Measured before this case was written \u2014 both print `BAR`. Asserting stdout (not just the exit code) is the point: an exec that dropped the variable would still exit 0 and print an empty line."
+      "notes": "Ports `parity_exec::env-propagation` (res-exec-per-side-argv). A variable supplied with `--remote-env` must reach the command's environment on both sides. The residual recorded a need for PER-SIDE argument vectors, which was disproven: deacon declares `--remote-env` as the primary flag with `--env` as a legacy alias, so ONE shared argv exercises both CLIs. Measured before this case was written — both print `BAR`. Asserting stdout (not just the exit code) is the point: an exec that dropped the variable would still exit 0 and print an empty line."
+    },
+    {
+      "id": "case-exec-unsupported-missing-command",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "unsupported",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-tty"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "definitely-not-an-installed-binary"
+          ],
+          "expectFailurePhase": "exec"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class for `exec`: the invocation is well-formed and the container is running, but the named executable does not exist inside it. Both CLIs must surface the container's own failure rather than substitute one of their own, and the exit code is where that shows."
     }
   ]
 }

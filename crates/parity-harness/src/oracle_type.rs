@@ -88,8 +88,13 @@ async fn spec_expectation(
 
 /// live-differential: run deacon AND the verified pinned oracle over the same
 /// operations, capture + normalize each declared channel on both sides, and compare
-/// them. A missing oracle is fail-loud (never a silent skip); an `assertion`, when
-/// present, is ignored (the reference supplies the expectation, data-model §5).
+/// them. A missing oracle is fail-loud (never a silent skip).
+///
+/// An `assertion`, when the case declares one, is evaluated against DEACON's side in
+/// addition to the comparison — see the call site. The reference supplies the expectation
+/// for most cases, which is why an assertion is optional here and required for
+/// spec-expectation; but a differential alone cannot fail when both sides are equally
+/// wrong, and a case that knows what the output should BE can say so.
 async fn live_differential(
     case: &TestCase,
     cfg: &RunConfig<'_>,
@@ -159,6 +164,24 @@ async fn live_differential(
             &tolerances,
             &mut consumed,
         );
+        // An ABSOLUTE claim, when the case declares one, on top of the relative one.
+        //
+        // A differential alone passes when both sides are equally wrong — two CLIs that
+        // each fail to recover a value both print the empty string and agree perfectly.
+        // For most cases that is the right and only available answer; but where the case
+        // knows what the output should BE, saying so turns "they match" into "they match
+        // AND it is correct". Until this ran, an `assertion` on a live-differential
+        // expectation was silently dead data: authored, loaded, and never evaluated.
+        //
+        // Checked against deacon's side. The reference is the thing being compared to, not
+        // a thing under test; a reference that disagreed with the declared expectation is
+        // already reported by the differential above.
+        if let Some(assertion) = &exp.assertion {
+            let declared = verdict_spec_expectation(&exp.channel, deacon_norm, assertion)?;
+            if declared.outcome != Outcome::Agree {
+                verdict = declared;
+            }
+        }
         runner::attach_failure_phase(&mut verdict, case, exp, &deacon_ctx, Some(&oracle_ctx));
         channels.push(verdict);
     }

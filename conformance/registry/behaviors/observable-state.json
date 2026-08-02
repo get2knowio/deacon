@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "bhv-compose-metadata-label-mount-source-template",
+      "area": "observable-state",
+      "statement": "On the Compose path, `devcontainer.metadata` records mount sources as the author wrote them, with `${localWorkspaceFolder}` left unsubstituted.",
+      "applicability": [],
+      "spec": "nonconformant",
+      "reference": "divergent",
+      "decision": "unresolved-gap",
+      "notes": "OPEN — filed as #437. Measured against oracle 0.87.0 on fx-state-compose-feature-mounts: for `source=${localWorkspaceFolder}/sib` the reference records `${localWorkspaceFolder}/sib` and deacon records `/sib` — the token substituted to the EMPTY string, not to the host path, so the recorded value resolves nowhere. Both the configuration-authored mount and the Feature-contributed one are affected. A regression of #373 confined to the compose path: the same class of mount through the single-container path records the template correctly (case-state-mount-variety agrees), which is why bhv-container-metadata-label-content still reads `conformant` — its six verifying fixtures included no Compose one. The actual mounts are correct on both CLIs; what is wrong is the record that travels with the image. Deliberately NOT waived: case-state-compose-feature-mounts carries no tolerance for the key."
+    },
+    {
       "id": "bhv-compose-project-file-set",
       "area": "observable-state",
       "statement": "The set of Compose files a CLI composes with, and the Compose labels derived from that set (`com.docker.compose.project.config_files`, `com.docker.compose.config-hash`).",
@@ -29,7 +39,17 @@
           "compose"
         ]
       },
-      "notes": "Robustness differentiator (issue #265; docs/DIFFERENTIATORS.md). The reference derives <folder>_devcontainer verbatim, so a folder like `-myproj` yields an invalid --project-name docker compose rejects. deacon's derived name is always valid and isolated. Backed by case-compose-project-name (parity_observable_state, which observes com.docker.compose.project)."
+      "notes": "Robustness differentiator (issue #265; docs/DIFFERENTIATORS.md). The reference derives <folder>_devcontainer verbatim, so a folder like `-myproj` yields an invalid --project-name docker compose rejects. deacon's derived name is always valid and isolated. Backed by case-up-compose-project-resources-differential, case-state-compose-feature-mounts and case-state-compose-sidecar-volume, each of which observes com.docker.compose.project and declares the name difference as a scoped tolerance rather than normalizing it away."
+    },
+    {
+      "id": "bhv-compose-service-image-independently-built",
+      "area": "observable-state",
+      "statement": "When a Compose service's image is extended with Features, each CLI builds that image itself, so Compose's `com.docker.compose.image` label records a different content digest on each side.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "divergent",
+      "decision": "intentional-divergence",
+      "notes": "Measured against oracle 0.87.0 on fx-state-compose-feature-mounts: deacon `sha256:2badca10…`, reference `sha256:35612053…`. The label carries a DIGEST of an image each side built separately from its own generated Dockerfile, so it differs by construction and can never agree — the same reason a built image's identity is not captured on `chan-image` at all. Comparing it would report a divergence on every run while saying nothing about behavior; what the two sides must agree on is what the image CONTAINS, which `env`, `user`, `workingDir` and the mount graph on this same channel do compare. Visible only when Features force a rebuild: the sibling case fx-state-compose-sidecar-volume runs the service image unmodified and this label agrees there, which is what keeps the tolerance from being a blanket excuse for the key."
     },
     {
       "id": "bhv-container-identity-labels",
@@ -59,17 +79,17 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Surfaced by 024 US5, fixed under #373. Two differences were measured at oracle 0.87.0 and both are now closed: (1) the reference records a `{\"id\": \"<feature>\"}` entry for every installed Feature, keyed by the id AS WRITTEN in devcontainer.json, and deacon recorded none \u2014 so deacon's metadata did not say which Features an image carried, which is what the label exists to carry forward; (2) for a mount declared `source=${localWorkspaceFolder}/ro,\u2026` the reference records the UNSUBSTITUTED template and deacon recorded the substituted absolute host path, baking the building machine's filesystem layout into a label that travels with the image. deacon now emits `[\u2026image entries, \u2026one entry per Feature, pick(config.raw)]`, matching upstream's `getDevcontainerMetadata`; the Feature pick list deliberately excludes `containerEnv` (already baked into the feature-extended image's ENV) and the config pick list gained `forwardPorts` and lost `entrypoint`, which is a Feature property only. Verified by running BOTH CLIs over all six covering fixtures and comparing the label: structurally identical on every one. `wvr-container-metadata-label-content` was deleted with the fix \u2014 an unconsumed tolerance is reported stale by design, so it could not have been left behind."
+      "notes": "Surfaced by 024 US5, fixed under #373. Two differences were measured at oracle 0.87.0 and both are now closed: (1) the reference records a `{\"id\": \"<feature>\"}` entry for every installed Feature, keyed by the id AS WRITTEN in devcontainer.json, and deacon recorded none — so deacon's metadata did not say which Features an image carried, which is what the label exists to carry forward; (2) for a mount declared `source=${localWorkspaceFolder}/ro,…` the reference records the UNSUBSTITUTED template and deacon recorded the substituted absolute host path, baking the building machine's filesystem layout into a label that travels with the image. deacon now emits `[…image entries, …one entry per Feature, pick(config.raw)]`, matching upstream's `getDevcontainerMetadata`; the Feature pick list deliberately excludes `containerEnv` (already baked into the feature-extended image's ENV) and the config pick list gained `forwardPorts` and lost `entrypoint`, which is a Feature property only. Verified by running BOTH CLIs over all six covering fixtures and comparing the label: structurally identical on every one. `wvr-container-metadata-label-content` was deleted with the fix — an unconsumed tolerance is reported stale by design, so it could not have been left behind."
     },
     {
       "id": "bhv-container-metadata-label-serialization",
       "area": "observable-state",
-      "statement": "The BYTE FORM of the `devcontainer.metadata` label value \u2014 JSON whitespace and object key order \u2014 as distinct from the entries it records.",
+      "statement": "The BYTE FORM of the `devcontainer.metadata` label value — JSON whitespace and object key order — as distinct from the entries it records.",
       "applicability": [],
       "spec": "unspecified",
       "reference": "divergent",
       "decision": "intentional-divergence",
-      "notes": "Split out of `bhv-container-metadata-label-content` when #373 closed the CONTENT difference and left the byte form as the only thing still differing. Two causes, both measured at oracle 0.87.0. (1) The reference emits `[ {\u2026}, {\u2026} ]` \u2014 spaces after `[`, after each `,`, before `]` \u2014 whenever the value reaches the container through an IMAGE BUILD (a Dockerfile config, or any config with Features, where it is written into a generated `LABEL` line and inherited), and compact `[{\u2026}]` when it writes the container label directly. deacon always writes the container label directly, so it is always compact. Reproducing the difference would mean varying deacon's label formatting by whether an image build happened \u2014 mimicking an artifact of the reference's own build routing, which no consumer can observe: both values parse to the same JSON. (2) deacon's `containerEnv`/`remoteEnv` keys are emitted in `HashMap` iteration order, so a multi-key value is not byte-stable run-to-run and does not match the reference's authored order. That one IS a deacon defect \u2014 filed as `parity-drift` #394; the fix is `IndexMap` on `DevContainerConfig`, which touches ~366 references across 52 files and belongs in its own change. The spec says nothing about either, which is why `spec` is `unspecified`. Characterized by `wvr-container-metadata-label-serialization`, scoped to the label key on the two cases where an image build makes it visible; the four cases that reach the label WITHOUT a build compare it byte-for-byte and must agree."
+      "notes": "Split out of `bhv-container-metadata-label-content` when #373 closed the CONTENT difference and left the byte form as the only thing still differing. Two causes, both measured at oracle 0.87.0. (1) The reference emits `[ {…}, {…} ]` — spaces after `[`, after each `,`, before `]` — whenever the value reaches the container through an IMAGE BUILD (a Dockerfile config, or any config with Features, where it is written into a generated `LABEL` line and inherited), and compact `[{…}]` when it writes the container label directly. deacon always writes the container label directly, so it is always compact. Reproducing the difference would mean varying deacon's label formatting by whether an image build happened — mimicking an artifact of the reference's own build routing, which no consumer can observe: both values parse to the same JSON. (2) deacon's `containerEnv`/`remoteEnv` keys are emitted in `HashMap` iteration order, so a multi-key value is not byte-stable run-to-run and does not match the reference's authored order. That one IS a deacon defect — filed as `parity-drift` #394; the fix is `IndexMap` on `DevContainerConfig`, which touches ~366 references across 52 files and belongs in its own change. The spec says nothing about either, which is why `spec` is `unspecified`. Characterized by `wvr-container-metadata-label-serialization`, scoped to the label key on the two cases where an image build makes it visible; the four cases that reach the label WITHOUT a build compare it byte-for-byte and must agree."
     },
     {
       "id": "bhv-state-container-parity",
@@ -79,7 +99,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Backed by case-observable-state (parity_observable_state)."
+      "notes": "Backed by the declarative chan-container-state cases — case-state-single-container, case-state-appport, case-state-mount-variety, case-state-dockerfile-nonroot and case-up-container-identity-labels — which replaced the hand-written `parity_observable_state` carrier."
     },
     {
       "id": "bhv-state-diff-parity",
@@ -89,7 +109,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Backed by case-state-diff (parity_state_diff)."
+      "notes": "Backed by the declarative chan-container-state cases, which compare the whole normalized container state between the two CLIs: case-state-single-container, case-state-appport, case-state-mount-variety, case-state-dockerfile-nonroot, case-state-default-workspace-mount, case-state-compose-feature-mounts and case-state-compose-sidecar-volume. These replaced the hand-written `parity_state_diff` carrier; its intra-deacon single-vs-compose unit was consciously dropped rather than ported (it compares deacon to itself, not to the reference) and that omission is recorded in parity/SPEC_STATUS.md."
     }
   ]
 }

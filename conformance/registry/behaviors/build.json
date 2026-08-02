@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "records": [
     {
+      "id": "bhv-build-buildkit-flag-accepted",
+      "area": "build",
+      "statement": "A BuildKit-only build flag (`--cache-to`) is accepted and passed through, and the build still produces the configured image.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "deacon-only surface. Scoped deliberately to acceptance and pass-through: on Docker 29.6.2 with the default `docker` driver a local cache export writes nothing observable, so whether the cache was WRITTEN is not a claim this can make and is not made."
+    },
+    {
       "id": "bhv-build-failure-reported",
       "area": "build",
       "statement": "A Dockerfile instruction that exits non-zero fails the build, and the failure is reported at the build stage rather than as a later container-creation failure.",
@@ -22,6 +32,26 @@
       "notes": "This project shipped the inverse once: the post-build Feature pass layered correctly and the user's tag still pointed at the base, which every outcome-only assertion reported as success. The case pins the reported image AND the tag in one ordered match."
     },
     {
+      "id": "bhv-build-image-bookkeeping-label",
+      "area": "build",
+      "statement": "`build` stamps `org.deacon.configHash` on the image it produces; the reference CLI sets no such label.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "Measured against oracle 0.87.0 on fx-build-image-labels and fx-build-image-args, not inferred. A deacon-only bookkeeping label in deacon's own `org.deacon.*` namespace — the reference has no concept of it, so there is nothing to diverge from. Recorded by ext-build-image-bookkeeping-label and tolerated per-key on the two differential cases; the tolerance names the ONE key, never a namespace. Distinct from bhv-container-identity-labels, which describes five labels on a created CONTAINER in the `devcontainer.*` namespace."
+    },
+    {
+      "id": "bhv-build-image-metadata-label",
+      "area": "build",
+      "statement": "The `devcontainer.metadata` label on a BUILT image records one entry per installed Feature plus the configuration pick, so a later consumer of the image can read what it carries.",
+      "applicability": [],
+      "spec": "nonconformant",
+      "reference": "divergent",
+      "decision": "unresolved-gap",
+      "notes": "OPEN — filed as #436. Measured against oracle 0.87.0 on fx-build-dockerfile-feature: the reference writes `[ {\"id\":\"./features/marker\"} ]` and deacon writes `[{\"configHash\":\"dd386475bebe4dcf\"}]`. deacon's `build` path hardcodes the value at crates/deacon/src/commands/build/mod.rs:2056 under a comment naming it a simplification, so every Feature entry is dropped and `configHash` — not a devcontainer.json property — stands in their place. NOT a computation defect: the SAME fixture through `deacon up` writes the correct `[{\"id\":\"./features/marker\"}]` on the container, and crates/core/src/build/metadata.rs already builds the right value; the build command simply does not use it. Deliberately NOT waived: the two differential cases carry no tolerance for this key, so they report the divergence until the fix lands and go green when it does. Distinct from bhv-container-metadata-label-serialization (#394), which is about the value's BYTE FORM, not its entries."
+    },
+    {
       "id": "bhv-build-image-parity",
       "area": "build",
       "statement": "build produces a container image and reports the build outcome, matching the reference.",
@@ -29,7 +59,57 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Backed by case-build-parity (parity_build)."
+      "notes": "Backed by case-build-image-labels-differential and case-build-image-args-differential, which compare the produced IMAGE's whole configuration between the two CLIs. Until the built-image observation capability existed the only evidence was `parity_build`, a hand-written carrier that could ask whether an image existed but not what was in it."
+    },
+    {
+      "id": "bhv-build-image-produced-carries-authored-config",
+      "area": "build",
+      "statement": "The image a `build` produces carries what the configuration and Dockerfile authored into it — labels, environment, command and working directory — and `build.args` reach the build so an arg-derived value is the configured one rather than the Dockerfile default.",
+      "applicability": [],
+      "spec": "conformant",
+      "reference": "aligned",
+      "decision": "follow-spec",
+      "notes": "Measured against oracle 0.87.0 on fx-build-image-labels and fx-build-image-args: `Env`, `Cmd`, `Entrypoint`, `WorkingDir` and every authored label agree exactly on both fixtures, including `parity.build.arg=passed-from-config` (a build that dropped `build.args` would leave the Dockerfile default `default-not-passed` and is the failure this distinguishes). The two labels that do NOT agree are recorded separately: `org.deacon.configHash` (bhv-build-image-bookkeeping-label, a deacon extension) and `devcontainer.metadata` (bhv-build-image-metadata-label, a deacon defect, #436). Observing the produced IMAGE rather than a container is what makes this checkable at all — a `build` leaves no container, so every earlier assertion on this behavior could only read the CLI's own stdout."
+    },
+    {
+      "id": "bhv-build-output-export",
+      "area": "build",
+      "statement": "`build --output type=docker,dest=<path>` exports the built image to that path and reports the export destination.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "deacon-only surface: the reference CLI has no `--output` flag on `build`, so there is nothing to compare against and the case is a spec-expectation. The claim pinned is the ARTIFACT (the tar exists), not the echoed `exportPath` — a build that accepted the flag and wrote nothing satisfies the echo."
+    },
+    {
+      "id": "bhv-build-platform-flag",
+      "area": "build",
+      "statement": "`build --platform <os/arch>` builds for the named platform and produces a real image carrying the configuration's authored labels.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "not-applicable",
+      "decision": "deacon-extension",
+      "notes": "deacon-only surface (`--platform` is not a reference `build` flag). Previously covered by an assertion that tolerated either outcome and therefore asserted nothing on any machine with BuildKit; now pinned to success plus the produced image's labels."
+    },
+    {
+      "id": "bhv-build-push-failure-reported",
+      "area": "build",
+      "statement": "`build --push` to a registry that cannot be reached fails with a non-zero exit and a diagnostic naming the push as the failing step, rather than reporting success.",
+      "applicability": [],
+      "spec": "unspecified",
+      "reference": "aligned",
+      "decision": "align-with-reference",
+      "notes": "Both CLIs fail non-zero and name the push. deacon's message currently names the WRONG registry — it pushes its internal `deacon-build:<hash>` tag, which resolves to Docker Hub, and that push fails before the user's registry is contacted (#438, measured against oracle 0.87.0, which tags only the user's `--image-name`). The case asserts the part that is right and stays true across the fix."
+    },
+    {
+      "id": "bhv-build-push-target-selection",
+      "area": "build",
+      "statement": "`build --push` pushes the image names the user supplied and nothing else.",
+      "applicability": [],
+      "spec": "nonconformant",
+      "reference": "divergent",
+      "decision": "unresolved-gap",
+      "notes": "OPEN — filed as #438. Measured against oracle 0.87.0 on fx-build-flags with `--push --image-name registry.invalid/conformance-push:latest`: deacon also tags the image with its internal deterministic `deacon-build:<hash>`, which has no registry component and so resolves to `docker.io/library/`, and BuildKit pushes it — the failure reported is a Docker Hub authorization error for a command that named a private registry, and the named registry is never contacted. The reference passes only `-t registry.invalid/conformance-push:latest` and fails against that host. On a machine holding Docker Hub credentials for a matching repository this would upload an image the user never asked to publish. `case-build-push-unreachable-registry` asserts the part that is already right (non-zero exit, a diagnostic naming the push) and stays true across the fix."
     }
   ]
 }

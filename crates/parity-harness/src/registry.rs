@@ -703,16 +703,23 @@ mod tests {
         profiles
             .default_filters
             .insert("parity".to_string(), Some(parity_filter));
-        // A rogue profile that positively selects a live binary must be flagged.
-        profiles.default_filters.insert(
-            "rogue".to_string(),
-            Some("binary(=parity_exec)".to_string()),
-        );
+        // A rogue profile that positively selects a live binary must be flagged. The
+        // binary is read from the registry rather than named literally, so retiring a
+        // carrier cannot leave this test asserting against a binary that no longer exists
+        // — which is exactly how it broke when the five legacy carriers were deleted.
+        let leaked = reg
+            .live_names()
+            .first()
+            .expect("the registry declares at least one live binary")
+            .to_string();
+        profiles
+            .default_filters
+            .insert("rogue".to_string(), Some(format!("binary(={leaked})")));
         let problems = check_nextest_profiles(&reg, &profiles);
         assert!(
             problems
                 .iter()
-                .any(|p| p.contains("rogue") && p.contains("parity_exec")),
+                .any(|p| p.contains("rogue") && p.contains(&leaked as &str)),
             "a leaked live binary in another profile must be flagged, got: {problems:?}"
         );
     }

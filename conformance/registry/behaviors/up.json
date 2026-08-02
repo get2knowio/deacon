@@ -9,7 +9,7 @@
       "spec": "unspecified",
       "reference": "divergent",
       "decision": "intentional-divergence",
-      "notes": "Measured directly at oracle 0.87.0 against fx-up-stale-config: two `up` runs whose documents differ only in `name` and `containerEnv` return the IDENTICAL containerId from the reference and two different containerIds from deacon. deacon's direction is deliberate and is the safer branch \u2014 reattaching keeps a container whose Feature layer was built from the OLD configuration while every reported value comes from the NEW one, which is the failure the recreate avoids. It follows from deacon's `devcontainer.configHash` identity label (ext-container-identity-labels), which the reference does not set. The spec defines no re-entry policy for a changed configuration, hence `spec: unspecified`. Characterized by wvr-up-changed-config-recreates. What is NOT intended, and is a separate defect tracked at https://github.com/get2knowio/deacon/issues/371, is that the superseded container is left RUNNING \u2014 the recreate policy is the decision, the leak is a bug."
+      "notes": "Measured directly at oracle 0.87.0 against fx-up-stale-config: two `up` runs whose documents differ only in `name` and `containerEnv` return the IDENTICAL containerId from the reference and two different containerIds from deacon. deacon's direction is deliberate and is the safer branch — reattaching keeps a container whose Feature layer was built from the OLD configuration while every reported value comes from the NEW one, which is the failure the recreate avoids. It follows from deacon's `devcontainer.configHash` identity label (ext-container-identity-labels), which the reference does not set. The spec defines no re-entry policy for a changed configuration, hence `spec: unspecified`. Characterized by wvr-up-changed-config-recreates. What is NOT intended, and is a separate defect tracked at https://github.com/get2knowio/deacon/issues/371, is that the superseded container is left RUNNING — the recreate policy is the decision, the leak is a bug."
     },
     {
       "id": "bhv-up-container-env-merge-precedence",
@@ -19,7 +19,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Authored in 024 US5 after the de-suppression found deacon on the wrong side: `commands/up/container.rs` merged the Feature-built image's containerEnv over the configuration's with `extend`, so the FEATURE won a conflicting key. Measured against oracle 0.87.0 (reference: `CONF_LAYER=config-wins`; deacon: `CONF_LAYER=feature-loses`) and fixed in the same change, so this records the state AFTER the fix. The fixture deliberately carries a config-only and a feature-only variable alongside the conflicting one \u2014 without them a case cannot tell 'the configuration wins the conflict' from 'the Feature layer was dropped'. The statement is over \"the created container\", so it spans BOTH container shapes, and the two failed it in different ways. The single-container path merged the Feature layer OVER the configuration's (fixed in 024 US5). The compose path was worse and was never checked: `commands/up/compose.rs` built the service's environment from `config.container_env` plus CLI `--remote-env` and never read `feature_build.combined_env`, so a Feature's `containerEnv` was baked into the extended image and then dropped from the service's `environment:` block \u2014 the configuration appeared to win only because the other layer was gone. Fixed in 8772e7c by folding `combined_env` into `project.additional_env` with `or_insert`, under the same must-run-after-`feature_build` constraint as the feature `mounts` merge. Covered by case-up-env-merge-precedence (single container) and case-up-compose-env-merge-precedence (compose); both assert a feature-ONLY variable alongside the conflicting one, because a regression that drops the Feature layer entirely passes a conflict-only assertion (#374)."
+      "notes": "Authored in 024 US5 after the de-suppression found deacon on the wrong side: `commands/up/container.rs` merged the Feature-built image's containerEnv over the configuration's with `extend`, so the FEATURE won a conflicting key. Measured against oracle 0.87.0 (reference: `CONF_LAYER=config-wins`; deacon: `CONF_LAYER=feature-loses`) and fixed in the same change, so this records the state AFTER the fix. The fixture deliberately carries a config-only and a feature-only variable alongside the conflicting one — without them a case cannot tell 'the configuration wins the conflict' from 'the Feature layer was dropped'. The statement is over \"the created container\", so it spans BOTH container shapes, and the two failed it in different ways. The single-container path merged the Feature layer OVER the configuration's (fixed in 024 US5). The compose path was worse and was never checked: `commands/up/compose.rs` built the service's environment from `config.container_env` plus CLI `--remote-env` and never read `feature_build.combined_env`, so a Feature's `containerEnv` was baked into the extended image and then dropped from the service's `environment:` block — the configuration appeared to win only because the other layer was gone. Fixed in 8772e7c by folding `combined_env` into `project.additional_env` with `or_insert`, under the same must-run-after-`feature_build` constraint as the feature `mounts` merge. Covered by case-up-env-merge-precedence (single container) and case-up-compose-env-merge-precedence (compose); both assert a feature-ONLY variable alongside the conflicting one, because a regression that drops the Feature layer entirely passes a conflict-only assertion (#374)."
     },
     {
       "id": "bhv-up-effective-user-uid-gid",
@@ -39,7 +39,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Backed by case-up-exec-parity (parity_up_exec, a single reported outcome shared with bhv-exec-container-id-metadata) and, independently, by the declarative case-up-exec-decl-traditional (023 T040)."
+      "notes": "Backed by the declarative case-up-exec-decl-traditional. It previously shared a single reported outcome with bhv-exec-container-id-metadata on the hand-written `parity_up_exec` carrier; both now have their own case, so a failure names which claim broke."
     },
     {
       "id": "bhv-up-feature-entrypoint-chain",
@@ -49,17 +49,17 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "The two CLIs build the chain differently \u2014 deacon mounts a generated `/devcontainer/entrypoint-wrapper.sh`, the reference inlines the scripts into the container command \u2014 so the raw `Config.Entrypoint`/`Cmd` cannot be compared. What IS comparable is the effect: each Feature's entrypoint appends its own id to a file in the bind-mounted workspace, so the FILE is the chain and its order. `overrideFeatureInstallOrder` pins the order the two Features would otherwise leave ambiguous (US5 acceptance scenario 5)."
+      "notes": "The two CLIs build the chain differently — deacon mounts a generated `/devcontainer/entrypoint-wrapper.sh`, the reference inlines the scripts into the container command — so the raw `Config.Entrypoint`/`Cmd` cannot be compared. What IS comparable is the effect: each Feature's entrypoint appends its own id to a file in the bind-mounted workspace, so the FILE is the chain and its order. `overrideFeatureInstallOrder` pins the order the two Features would otherwise leave ambiguous (US5 acceptance scenario 5)."
     },
     {
       "id": "bhv-up-feature-install-failure",
       "area": "up",
-      "statement": "A Feature that cannot be installed \u2014 its install script exiting non-zero, or a dependency graph with no resolvable order \u2014 fails `up` rather than producing a container without the Feature.",
+      "statement": "A Feature that cannot be installed — its install script exiting non-zero, or a dependency graph with no resolvable order — fails `up` rather than producing a container without the Feature.",
       "applicability": [],
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Authored by the 024 US4 error-path tier. Deliberately separate from `bhv-up-feature-install-order`: that claim is about WHICH Features run and in what order on the success path, and an implementation that gets the order right while swallowing a failing install script satisfies it and not this one \u2014 the container it hands back looks complete and is missing the Feature. Both halves of the statement are exercised (a failing `install.sh`, and a two-Feature `dependsOn` cycle) because the two fail at different points: one inside the install, one before any install runs. Verified against oracle 0.87.0 \u2014 both sides fail on both inputs."
+      "notes": "Authored by the 024 US4 error-path tier. Deliberately separate from `bhv-up-feature-install-order`: that claim is about WHICH Features run and in what order on the success path, and an implementation that gets the order right while swallowing a failing install script satisfies it and not this one — the container it hands back looks complete and is missing the Feature. Both halves of the statement are exercised (a failing `install.sh`, and a two-Feature `dependsOn` cycle) because the two fail at different points: one inside the install, one before any install runs. Verified against oracle 0.87.0 — both sides fail on both inputs."
     },
     {
       "id": "bhv-up-feature-install-order",
@@ -69,7 +69,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Evidenced by a live differential on the outcome plus a spec-expectation case that reads the marker each Feature's install.sh writes INSIDE the container \u2014 the lesson from the --image-name defect, where an outcome-only assertion reported success for an image with no Feature in it."
+      "notes": "Evidenced by a live differential on the outcome plus a spec-expectation case that reads the marker each Feature's install.sh writes INSIDE the container — the lesson from the --image-name defect, where an outcome-only assertion reported success for an image with no Feature in it."
     },
     {
       "id": "bhv-up-lifecycle-command-cwd",
@@ -89,17 +89,17 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Each form writes its own marker file into the bind-mounted workspace, so the observation is the file rather than the exit code \u2014 a hook that silently did not run leaves an exit code of 0 behind it. The object form's two commands write SEPARATE files: the spec does not order named commands, so asserting one file's contents would pin an order neither CLI promises."
+      "notes": "Each form writes its own marker file into the bind-mounted workspace, so the observation is the file rather than the exit code — a hook that silently did not run leaves an exit code of 0 behind it. The object form's two commands write SEPARATE files: the spec does not order named commands, so asserting one file's contents would pin an order neither CLI promises."
     },
     {
       "id": "bhv-up-mount-source-and-shape",
       "area": "up",
-      "statement": "Each declared mount is applied with both its declared source and its declared shape \u2014 the mount type and the read-only flag \u2014 and two mounts differing only in source are distinguishable.",
+      "statement": "Each declared mount is applied with both its declared source and its declared shape — the mount type and the read-only flag — and two mounts differing only in source are distinguishable.",
       "applicability": [],
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "FR-053's two axes are separated by construction in the fixture: `/mnt/ro` and `/mnt/rw` have the SAME shape and different sources, `/mnt/rw` and `/mnt/vol` have the same read-only flag and different types. Before 024 US5 the source axis was unobservable \u2014 the snapshot recorded only `sourceTail`, the bind's leaf component, so two mounts from different host directories that happened to share a leaf name compared equal."
+      "notes": "FR-053's two axes are separated by construction in the fixture: `/mnt/ro` and `/mnt/rw` have the SAME shape and different sources, `/mnt/rw` and `/mnt/vol` have the same read-only flag and different types. Before 024 US5 the source axis was unobservable — the snapshot recorded only `sourceTail`, the bind's leaf component, so two mounts from different host directories that happened to share a leaf name compared equal."
     },
     {
       "id": "bhv-up-path-construction",
@@ -109,7 +109,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "PATH was captured but NOT compared until 024 US5: `drop_noise_env` removed it at capture, so the declarative container-state channel never saw it. It is compared segment-wise (the derived `pathSegments`) rather than as one string \u2014 a whole-string equality breaks on any base-image difference, and a substring test would match `/opt/a/bin` inside `/opt/a/bin-extra`."
+      "notes": "PATH was captured but NOT compared until 024 US5: `drop_noise_env` removed it at capture, so the declarative container-state channel never saw it. It is compared segment-wise (the derived `pathSegments`) rather than as one string — a whole-string equality breaks on any base-image difference, and a substring test would match `/opt/a/bin` inside `/opt/a/bin-extra`."
     },
     {
       "id": "bhv-up-restart-reuses-container",
@@ -119,7 +119,7 @@
       "spec": "conformant",
       "reference": "aligned",
       "decision": "follow-spec",
-      "notes": "Asserted as a metamorphic relationship (`first-create-vs-restart`) rather than against a fixed output, because what is being pinned is the relation between the two runs and not either run's document. The container-graph observation captures EVERY container matching the workspace label so a duplicate is visible; an exit code cannot show one. SCOPED TO AN UNCHANGED CONFIGURATION (024 follow-up): the statement previously read \"including when the configuration has changed since it was created\", which is not what deacon does \u2014 deacon's container identity includes a configHash, so a changed document is a different identity and produces a NEW container. That is recorded separately as bhv-up-changed-config-recreates-container; leaving the clause here made the record claim a behavior no case had ever verified."
+      "notes": "Asserted as a metamorphic relationship (`first-create-vs-restart`) rather than against a fixed output, because what is being pinned is the relation between the two runs and not either run's document. The container-graph observation captures EVERY container matching the workspace label so a duplicate is visible; an exit code cannot show one. SCOPED TO AN UNCHANGED CONFIGURATION (024 follow-up): the statement previously read \"including when the configuration has changed since it was created\", which is not what deacon does — deacon's container identity includes a configHash, so a changed document is a different identity and produces a NEW container. That is recorded separately as bhv-up-changed-config-recreates-container; leaving the clause here made the record claim a behavior no case had ever verified."
     }
   ]
 }

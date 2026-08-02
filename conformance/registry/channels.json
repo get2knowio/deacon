@@ -19,7 +19,7 @@
     },
     {
       "id": "chan-image",
-      "description": "Built-image configuration and metadata (labels parsed semantically, environment, entrypoint)."
+      "description": "Image configuration and metadata (labels parsed semantically, environment, entrypoint, cmd, working directory, user) — of either the image a container was created FROM or the image a `build` produced, distinguished by the evidence's `source` field. A built image's own identity (id, digests, tags) is deliberately not captured: the two CLIs build separately into per-side tags, so it differs by construction."
     },
     {
       "id": "chan-injected-process",

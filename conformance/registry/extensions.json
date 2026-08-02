@@ -10,6 +10,14 @@
       "docs": "specs/015-auto-forward-ports/spec.md"
     },
     {
+      "id": "ext-build-image-bookkeeping-label",
+      "behaviors": [
+        "bhv-build-image-bookkeeping-label"
+      ],
+      "description": "deacon stamps one extra bookkeeping label, `org.deacon.configHash`, on the image a `build` produces; the reference CLI has no such label. Backs the scoped allowed-difference on the build image-discovery cases: the tolerance names that ONE key, never the `org.deacon.*` namespace.",
+      "docs": "conformance/registry/behaviors/build.json"
+    },
+    {
       "id": "ext-cli-config-overlay",
       "behaviors": [
         "bhv-upgrade-cli-config-overlay-honored"

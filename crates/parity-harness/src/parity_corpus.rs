@@ -370,16 +370,17 @@ mod tests {
 
     #[test]
     fn embedded_registry_parses_and_matches_the_surviving_set() {
-        // The three corpus binaries and `parity_read_configuration` were retired in
-        // 023 US7 once the equivalence ledger cleared them, and their corpora went with
-        // them — the registry now enumerates only the surviving live binaries.
+        // The corpus binaries went first (023 US7, once the equivalence ledger cleared
+        // them); the five hand-written Docker carriers followed once their residual
+        // coverage became declarative data. What is left is the two declarative runners —
+        // a config-only driver and the Docker-backed one (024 T015/T020 split them).
         let reg = ParityRegistry::load().expect("embedded registry must parse");
         assert_eq!(
-            reg.live_binaries.len(),
-            7,
-            "5 Docker scenario binaries + the two declarative runners (024 T015/T020 split \
-             `parity_conformance_runner` into a config-only driver and the Docker-backed \
-             `parity_conformance_docker`)"
+            reg.live_binaries
+                .iter()
+                .map(|b| b.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["parity_conformance_runner", "parity_conformance_docker"],
         );
         assert!(
             reg.live_binaries

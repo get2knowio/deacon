@@ -391,10 +391,27 @@ idempotence, first-create-vs-restart — rather than a fixed output).
 `mount_source_canonical`, `path_env_segmented`, `null_preserving`) — nothing is blanket
 removed.
 
-**An assertion that cannot fail is worse than no assertion.** Two real instances, both
-committed, both found only by injecting a difference: a `jsonSubset: {}` matches ANY value,
-and a `contains` assertion cannot see APPENDED output. `model.rs::is_vacuous_assertion` and
-the loader test exist for this; keep them.
+**An assertion that cannot fail is worse than no assertion.** Four real instances, every
+one committed, every one found only by injecting a difference: a `jsonSubset: {}` matches
+ANY value; a `contains` assertion cannot see APPENDED output; an `assertion` on a
+`live-differential` expectation was loaded and never evaluated; and a **stale tolerance**
+— one whose difference no longer reproduces — was computed and then discarded by the
+driver, so it kept excusing a path where the difference had already been fixed. The last
+two are now failures. `model.rs::is_vacuous_assertion` and the loader test exist for the
+first two; keep them. **After writing any assertion, break it once and watch it fail** —
+that is how all four were found, and it is cheaper than any amount of reading.
+
+Two rules that follow, both learned by tripping over them:
+
+- **A tolerance is consumed by the MOST SPECIFIC covering path, not the first match.**
+  Diverging paths are built by joining object keys with `.`, and Docker label keys contain
+  dots, so `labels.com.docker.compose.project` and
+  `labels.com.docker.compose.project.config_files` are two separate flat keys the prefix
+  rule cannot distinguish from a parent and its child. First-match let the shorter swallow
+  the longer, and the longer then reported stale.
+- **`case.cleanup` is declared on every case and consumed by nothing.** Reclamation is the
+  `DockerWorkspace` RAII guard, unconditionally. Do not reach for a fixed global resource
+  name (a named volume, a fixed host port) on the assumption the field will clean it up.
 
 **Selection is profile-based; there is no env-var opt-in and no silent skip.** Live parity
 runs ONLY under `cargo nextest run --profile parity`. Every other profile excludes it, so
@@ -406,8 +423,25 @@ missing oracle, missing Docker, or a normalization failure FAILS with a cause-sp
 |---|---|---|
 | `parity_conformance_runner` | `parity` | declarative cases, config-only groups |
 | `parity_conformance_docker` | `parity` | declarative cases, Docker-backed groups |
-| `parity_build` / `parity_exec` / `parity_up_exec` / `parity_observable_state` / `parity_state_diff` | `parity` | legacy hand-written carriers, pending retirement |
 | `parity_harness_faults` | `default`, `dev-fast` | hermetic guard: oracle mismatch, timeout, normalization failure, and the injected-difference proof that the comparison can fail |
+
+The five hand-written carriers (`parity_build`, `parity_exec`, `parity_up_exec`,
+`parity_observable_state`, `parity_state_diff`) are **gone**. Their residual coverage is
+declarative data now, which needed three runner capabilities the model lacked:
+
+- **`${IMAGE_TAG}`** — a per-run, per-side image name the runner assigns, tracks for
+  reclamation, and rewrites to `<IMAGE_TAG>` in evidence. A `build` leaves an image and no
+  container, so the container probe sees nothing; the case says `--image-name ${IMAGE_TAG}`
+  and `chan-image` inspects what was produced. The image's own identity (id, digests, tags)
+  is deliberately **not** captured — the two sides build separately, so it differs by
+  construction.
+- **`${CONTAINER_ID}`** — the id of a container an earlier operation in the same case
+  created, which is what makes `exec --container-id` (no workspace, no config) expressible.
+  Using it before any container exists fails loud rather than expanding to nothing.
+- **An `assertion` on a `live-differential` expectation is now evaluated** against deacon's
+  side, on top of the comparison. It used to be loaded and ignored. A differential alone
+  cannot fail when both sides are equally wrong; a case that knows what the output should
+  *be* can now say so.
 
 **`.config/nextest.toml` gotcha, learned the hard way.** Editing the profiles once silently
 dropped the `default-filter` from four of them, so `dev-fast` selected every Docker binary.

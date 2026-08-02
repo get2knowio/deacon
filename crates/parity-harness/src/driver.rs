@@ -32,7 +32,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::model::{CaseKind, ResourceGroup, TestCase};
 
 use crate::HarnessError;
-use crate::evidence::{CaseVerdict, Outcome};
+use crate::evidence::{CaseVerdict, ChannelVerdict, Outcome};
 use crate::oracle::VerifiedOracle;
 use crate::report::{
     CaseResult, Cause, OracleInfo, RawPaths, ReportFragment, VerdictReport, now_rfc3339,
@@ -320,6 +320,23 @@ pub async fn drive_group(
                     )),
                     _ => failures.push(format!("{}: {}", verdict.case_id, summarize(&verdict))),
                 }
+                // A tolerance whose difference no longer reproduces FAILS, on the same
+                // footing as an un-allowlisted divergence.
+                //
+                // This is what makes the allowlist self-invalidating rather than a place
+                // differences go to be forgotten. The runner has always COMPUTED the stale
+                // set (`CaseVerdict::stale_allowed_differences`), but nothing acted on it
+                // here, so a tolerance outlived its difference silently — and a stale
+                // tolerance is strictly worse than none: it keeps a real, newly-appearing
+                // difference at that path excused forever.
+                if !verdict.stale_allowed_differences.is_empty() {
+                    failures.push(format!(
+                        "{}: stale tolerance(s) — the difference no longer reproduces, so \
+                         remove or re-characterize: {}",
+                        verdict.case_id,
+                        verdict.stale_allowed_differences.join(", ")
+                    ));
+                }
                 verdicts.push(verdict);
             }
             // FR-077b: attributed to the case, reported as that case's failure, group
@@ -579,6 +596,20 @@ fn raw_paths(case_id: &str, first_op: &str) -> RawPaths {
 /// Map a case verdict to a report-fragment case result (agree/allowed-difference pass;
 /// anything else fails with a cause).
 fn case_result(verdict: &CaseVerdict, raw: RawPaths) -> CaseResult {
+    // A stale tolerance fails the case in the FRAGMENT too, not only in the group's
+    // failure list — otherwise the recorded artifact says `pass` for a case the run
+    // failed on, and the report and the exit status disagree about what happened.
+    if !verdict.stale_allowed_differences.is_empty() {
+        return CaseResult::fail(
+            verdict.case_id.clone(),
+            Cause::Divergence,
+            Some(format!(
+                "stale tolerance(s): {}",
+                verdict.stale_allowed_differences.join(", ")
+            )),
+            raw,
+        );
+    }
     match verdict.overall {
         // `no-reference-for-platform` is a NON-BLOCKING coverage gap (no snapshot recorded
         // for THIS platform yet), never a divergence — consistent with the runner's
@@ -601,15 +632,53 @@ fn case_result(verdict: &CaseVerdict, raw: RawPaths) -> CaseResult {
     }
 }
 
-/// A compact, path-free summary of a case's diverging channels for the fragment.
+/// A compact summary of a case's diverging channels, NAMING the observable paths that
+/// diverged.
+///
+/// The paths are the whole point. `chan-image: Diverge` says a case failed; it does not say
+/// whether one label key differs or the entire image configuration does, so triage begins by
+/// re-running the case by hand to find out. Since the nightly ships red (#376, ~127
+/// occurrences concentrated in four path-valued fields), a summary that omits the path turns
+/// a work queue into noise — which is the state this suite exists to leave behind.
+///
+/// [`crate::compare`] already records them in the verdict's `detail`; this only stops
+/// discarding them. Paths are truncated to [`MAX_SUMMARIZED_PATHS`] with an explicit
+/// `+N more` rather than silently, so a summary never reads as complete when it is not.
 fn summarize(verdict: &CaseVerdict) -> String {
     verdict
         .channels
         .iter()
         .filter(|c| c.outcome != Outcome::Agree && c.outcome != Outcome::AllowedDifference)
-        .map(|c| format!("{}: {:?}", c.channel, c.outcome))
+        .map(|c| match diverging_paths(c) {
+            paths if paths.is_empty() => format!("{}: {:?}", c.channel, c.outcome),
+            paths => format!("{}: {:?} at {}", c.channel, c.outcome, paths.join(", ")),
+        })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+/// How many diverging paths a channel's summary names before it says `+N more`.
+const MAX_SUMMARIZED_PATHS: usize = 8;
+
+/// The observable paths a channel verdict diverged at, as `compare` recorded them.
+fn diverging_paths(channel: &ChannelVerdict) -> Vec<String> {
+    let Some(paths) = channel
+        .detail
+        .as_ref()
+        .and_then(|d| d.get("divergingPaths"))
+        .and_then(|p| p.as_array())
+    else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = paths
+        .iter()
+        .take(MAX_SUMMARIZED_PATHS)
+        .map(|p| p.as_str().unwrap_or_default().to_string())
+        .collect();
+    if paths.len() > MAX_SUMMARIZED_PATHS {
+        out.push(format!("+{} more", paths.len() - MAX_SUMMARIZED_PATHS));
+    }
+    out
 }
 
 /// The per-case bound the drivers run under, re-exported so a driver's diagnostics can
