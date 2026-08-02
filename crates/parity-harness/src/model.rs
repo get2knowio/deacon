@@ -820,8 +820,6 @@ pub const OBSERVED_CHANNELS: &[&str] = &[
 pub enum OracleType {
     /// Compare normalized observables to the declared `expected`; no reference run.
     SpecExpectation,
-    /// Compare to a committed, provenance-checked snapshot.
-    Snapshot,
     /// Run deacon + the pinned reference and compare normalized observables.
     LiveDifferential,
     /// Evaluate a declared relationship across ≥2 operations (idempotence,

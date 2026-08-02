@@ -244,7 +244,6 @@ async fn an_error_path_differential_without_an_oracle_fails_loud() {
             oracle: None,
             fixtures_root: &root.join("conformance").join("fixtures"),
             report_root: report_root.path(),
-            snapshots_root: &root.join("conformance").join("snapshots"),
         };
         match run_case(case, &cfg).await {
             Err(HarnessError::OracleMissing { .. }) => {}

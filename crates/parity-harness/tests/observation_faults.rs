@@ -267,7 +267,6 @@ mod runner_faults {
             oracle: Some(&oracle),
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
 
         let err = run_case(&unobservable_case(), &cfg)
@@ -297,7 +296,6 @@ mod runner_faults {
             oracle: None,
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
         let mut case = unobservable_case();
         case.id = "case-unobservable-spec".to_string();
@@ -337,7 +335,6 @@ mod runner_faults {
             oracle: Some(&oracle),
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
         let mut case = unobservable_case();
         case.id = "case-partly-observable".to_string();
@@ -381,7 +378,6 @@ mod runner_faults {
             oracle: Some(&oracle),
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
         // A Docker-backed case (isolated workspace + RAII guard), whose op is config-only
         // so the case needs no daemon: the sequencing under test is the guard's, not

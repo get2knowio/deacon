@@ -91,10 +91,6 @@ pub struct RunConfig<'a> {
     pub fixtures_root: &'a Path,
     /// Root the raw stdout/stderr artifacts are written under (atomic temp+rename).
     pub report_root: &'a Path,
-    /// Committed-snapshots root (`conformance/snapshots`) — the `snapshot` oracle type
-    /// resolves `<snapshots_root>/<os-arch>/<case-id>/` here. Unused by
-    /// spec-expectation / live-differential.
-    pub snapshots_root: &'a Path,
 }
 
 /// Run one declarative case end to end and produce its [`CaseVerdict`], bounded by
@@ -694,7 +690,7 @@ pub async fn collect_evidence_on(
 /// Build the 13-field [`Provenance`] for a snapshot recording (T035, data-model §7):
 /// recompute the case/fixture hashes, take the oracle version from the verified oracle,
 /// probe Node/Docker/Compose versions (via the shared
-/// [`crate::snapshot::probe_environment`]), and stamp the source revision +
+/// [`crate::provenance::probe_environment`]), and stamp the source revision +
 /// normalizer version. `imageDigests` records the digest of each image a Docker case's
 /// fixtures pin ([`image_digests_for_case`]) so the snapshot goes stale if a pinned image's
 /// content changes; it is empty for config-only cases (they pull no images).
@@ -707,13 +703,13 @@ pub fn capture_provenance(
     case: &TestCase,
     cfg: &RunConfig<'_>,
     oracle_version: &str,
-) -> Result<crate::snapshot::Provenance, HarnessError> {
-    use crate::snapshot;
+) -> Result<crate::provenance::Provenance, HarnessError> {
+    use crate::provenance;
 
     let (case_hash, fixture_hash) = snapshot_hashes(case, cfg)?;
-    let env = snapshot::probe_environment();
+    let env = provenance::probe_environment();
 
-    Ok(crate::snapshot::Provenance {
+    Ok(crate::provenance::Provenance {
         oracle_version: oracle_version.to_string(),
         source_revision: crate::CURRENT_SPEC_PIN.to_string(),
         case_hash,

@@ -61,13 +61,13 @@ use crate::exec::Side;
 /// staleness (FR-030). It is bumped whenever ANY named normalization rule changes so a
 /// snapshot recorded under an older normalizer replays as stale (data-model §7).
 ///
-/// SINGLE SOURCE OF TRUTH: re-exported from [`crate::snapshot`] so the
+/// SINGLE SOURCE OF TRUTH: re-exported from [`crate::provenance`] so the
 /// snapshot provenance (conformance, the lower crate) and this normalizer never drift.
 /// `"1"` was the T011 pass-through; `"2"` is the US3 named-rule normalizer. The runner
 /// stamps it into the verdict report (`VerdictReport::new`) and the refresh bin records
 /// it into `Provenance.normalizerVersion`; staleness compares the recorded value
 /// against it (T032).
-pub use crate::snapshot::NORMALIZER_VERSION;
+pub use crate::provenance::NORMALIZER_VERSION;
 
 /// The FINITE, ENUMERATED key names [`drop_absent_optional`] may remove when their value
 /// carries no information (023 T062).

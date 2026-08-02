@@ -824,7 +824,7 @@ fn p_no_reference_for_platform_is_its_own_outcome() {
 /// `Agree`.
 #[test]
 fn q_stale_snapshot_is_reported_naming_the_drifted_field() {
-    use parity_harness::snapshot::{Provenance, Staleness, compare_staleness};
+    use parity_harness::provenance::{Provenance, Staleness, compare_staleness};
 
     // Built by deserialization so this test needs no `indexmap` dependency of its own —
     // the shape is the committed `provenance.json` shape.
@@ -837,7 +837,7 @@ fn q_stale_snapshot_is_reported_naming_the_drifted_field() {
         "dockerVersion": "29.0.0",
         "composeVersion": "2.0.0",
         "imageDigests": {},
-        "normalizerVersion": parity_harness::snapshot::NORMALIZER_VERSION,
+        "normalizerVersion": parity_harness::provenance::NORMALIZER_VERSION,
         "argv": ["read-configuration"],
         "platform": "linux",
         "arch": "x86_64",

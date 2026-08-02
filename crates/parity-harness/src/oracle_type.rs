@@ -12,12 +12,11 @@
 //! invariant/metamorphic evaluation in US6 (T068/T069). Until then those two types are
 //! fail-loud (`HarnessError`), never a silent skip.
 
-use crate::model::{ExpectedObservable, OracleType, TestCase};
-use crate::snapshot;
+use crate::model::{OracleType, TestCase};
 
 use crate::HarnessError;
 use crate::compare::{Tolerances, verdict_differential, verdict_spec_expectation};
-use crate::evidence::{ChannelVerdict, NormalizedChannelEvidence, Outcome};
+use crate::evidence::{ChannelVerdict, Outcome};
 use crate::exec::Side;
 use crate::runner::{self, RunConfig};
 
@@ -33,7 +32,6 @@ pub async fn evaluate(case: &TestCase, cfg: &RunConfig<'_>) -> Result<Evaluation
     match case.oracle_type {
         Some(OracleType::SpecExpectation) => spec_expectation(case, cfg).await,
         Some(OracleType::LiveDifferential) => live_differential(case, cfg).await,
-        Some(OracleType::Snapshot) => snapshot_oracle(case, cfg).await,
         Some(OracleType::InvariantMetamorphic) => invariant_metamorphic(case, cfg).await,
         None => Err(HarnessError::NormalizationFailed {
             channel: format!("case:{}", case.id),
@@ -274,111 +272,6 @@ fn require_some_observation<'a>(
     Ok(())
 }
 
-/// snapshot: resolve the committed snapshot for the current `os-arch`, gate on
-/// provenance staleness, then compare deacon's freshly-normalized evidence to the
-/// snapshot's committed normalized evidence (T036, D5). Emits `no-reference-for-platform`
-/// when no snapshot exists for the platform, `stale` (all channels) when a provenance
-/// field drifted, else per-channel `agree`/`diverge` against the recorded evidence.
-async fn snapshot_oracle(case: &TestCase, cfg: &RunConfig<'_>) -> Result<Evaluation, HarnessError> {
-    let os_arch = snapshot::current_os_arch();
-    let resolution = snapshot::resolve(cfg.snapshots_root, &os_arch, &case.id).map_err(|e| {
-        HarnessError::NormalizationFailed {
-            channel: format!("case:{}", case.id),
-            cause: format!("could not load committed snapshot: {e}"),
-        }
-    })?;
-    let snap = match resolution {
-        snapshot::Resolution::NoReferenceForPlatform { os_arch } => {
-            return Ok((
-                all_channels(case, Outcome::NoReferenceForPlatform, || {
-                    Some(serde_json::json!({ "osArch": os_arch }))
-                }),
-                Vec::new(),
-            ));
-        }
-        snapshot::Resolution::Found(s) => *s,
-    };
-
-    // Staleness gate: recompute the evidence-determining inputs and compare to committed
-    // provenance. Host tool versions (node/docker/compose) are informational, NOT staleness
-    // signals (see `snapshot::compare_staleness`), so they are neither re-probed nor
-    // compared — a snapshot recorded under a different Node/Docker/Compose must replay
-    // fresh across machines (SC-003).
-    let (case_hash, fixture_hash) = runner::snapshot_hashes(case, cfg)?;
-    let mut current = snap.provenance.clone();
-    current.case_hash = case_hash;
-    current.fixture_hash = fixture_hash;
-    current.source_revision = crate::CURRENT_SPEC_PIN.to_string();
-    current.normalizer_version = snapshot::NORMALIZER_VERSION.to_string();
-    if let Some(v) = snapshot::current_oracle_version_pin() {
-        current.oracle_version = v;
-    }
-    // Recompute imageDigests for a Docker case (finding #5) so a changed pinned image is
-    // caught; offloaded so the docker probe never blocks the async executor (finding #4).
-    // `None` (docker unreachable) carries the recorded digests rather than fabricating.
-    let case_for_digests = case.clone();
-    let fixtures_root = cfg.fixtures_root.to_path_buf();
-    let recomputed_digests = tokio::task::spawn_blocking(move || {
-        runner::image_digests_for_case(&case_for_digests, &fixtures_root)
-    })
-    .await
-    .map_err(runner::blocking_join_err)?;
-    if let Some(digests) = recomputed_digests {
-        current.image_digests = digests.into_iter().collect();
-    }
-    if let snapshot::Staleness::Stale { field, .. } =
-        snapshot::compare_staleness(&snap.provenance, &current)
-    {
-        return Ok((
-            all_channels(case, Outcome::Stale, || {
-                Some(serde_json::json!({ "staleField": field }))
-            }),
-            Vec::new(),
-        ));
-    }
-
-    // Fresh: run deacon and compare its normalized evidence to the recorded evidence.
-    let recorded: Vec<NormalizedChannelEvidence> = serde_json::from_value(snap.normalized.clone())
-        .map_err(|e| HarnessError::NormalizationFailed {
-            channel: format!("case:{}", case.id),
-            cause: format!("committed normalized.json is not channel evidence: {e}"),
-        })?;
-    let (ctx, ws) = runner::execute_ops(Side::Deacon, cfg.deacon_path, case, cfg).await?;
-    let tolerances = Tolerances::new(&case.allowed_differences, &case.behaviors);
-    let mut consumed = std::collections::HashSet::new();
-    let mut channels = Vec::with_capacity(case.expected.len());
-    let mut captured = Vec::with_capacity(case.expected.len());
-    for exp in &case.expected {
-        captured.push(runner::capture_normalized(case, exp, &ctx)?);
-    }
-    // Observation complete — reclaim before the in-memory comparison (see the note on
-    // `release_workspace`).
-    runner::release_workspace(ws).await?;
-    for (exp, deacon_norm) in case.expected.iter().zip(&captured) {
-        let op = runner::resolve_expected_op(case, exp)?;
-        match recorded
-            .iter()
-            .find(|e| e.channel == exp.channel && e.operation == op.id)
-        {
-            Some(rec) => channels.push(verdict_differential(
-                &exp.channel,
-                deacon_norm,
-                rec,
-                &tolerances,
-                &mut consumed,
-            )),
-            None => channels.push(ChannelVerdict {
-                channel: exp.channel.clone(),
-                outcome: Outcome::Diverge,
-                detail: Some(
-                    serde_json::json!({ "reason": "channel absent from committed snapshot" }),
-                ),
-            }),
-        }
-    }
-    Ok((channels, tolerances.stale(&consumed)))
-}
-
 /// invariant-metamorphic: run the case's operations and verdict on the DECLARED
 /// RELATIONSHIP between operations (idempotence / first-create-vs-restart / resume),
 /// NOT against a fixed expected output (FR-008, T069). Each operation that declares a
@@ -490,47 +383,17 @@ fn evaluate_relationship(
     }
 }
 
-/// Build one [`ChannelVerdict`] per declared channel with a fixed `outcome` and a
-/// per-channel `detail` (used for the case-level `no-reference-for-platform` / `stale`
-/// outcomes, which apply to every channel).
-fn all_channels(
-    case: &TestCase,
-    outcome: Outcome,
-    detail: impl Fn() -> Option<serde_json::Value>,
-) -> Vec<ChannelVerdict> {
-    if case.expected.is_empty() {
-        // No declared channel: still surface the case-level outcome on a synthetic row.
-        return vec![ChannelVerdict {
-            channel: "case".to_string(),
-            outcome,
-            detail: detail(),
-        }];
-    }
-    case.expected
-        .iter()
-        .map(|exp: &ExpectedObservable| ChannelVerdict {
-            channel: exp.channel.clone(),
-            outcome,
-            detail: detail(),
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::OracleType;
 
-    fn cfg<'a>(
-        fixtures_root: &'a std::path::Path,
-        snapshots_root: &'a std::path::Path,
-    ) -> RunConfig<'a> {
+    fn cfg<'a>(fixtures_root: &'a std::path::Path) -> RunConfig<'a> {
         RunConfig {
             deacon_path: std::path::Path::new("/bin/true"),
             oracle: None,
             fixtures_root,
             report_root: std::path::Path::new("/tmp"),
-            snapshots_root,
         }
     }
 
@@ -549,7 +412,7 @@ mod tests {
             ..TestCase::default()
         };
         let tmp = std::path::Path::new("/tmp");
-        assert!(evaluate(&case, &cfg(tmp, tmp)).await.is_err());
+        assert!(evaluate(&case, &cfg(tmp)).await.is_err());
     }
 
     #[test]
@@ -642,36 +505,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_missing_for_platform_yields_no_reference() {
-        // No committed snapshot under the empty snapshots root → no-reference-for-platform.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let case = TestCase {
-            id: "case-missing-snap".to_string(),
-            oracle_type: Some(OracleType::Snapshot),
-            operations: vec![crate::model::Operation {
-                id: "op".to_string(),
-                subcommand: "read-configuration".to_string(),
-                ..Default::default()
-            }],
-            expected: vec![crate::model::ExpectedObservable {
-                channel: crate::model::CHAN_EXIT_CODE.to_string(),
-                operation: Some("op".to_string()),
-                assertion: None,
-            }],
-            ..TestCase::default()
-        };
-        let (channels, _stale) = evaluate(&case, &cfg(dir.path(), dir.path()))
-            .await
-            .expect("no-reference is a verdict, not an error");
-        assert!(
-            channels
-                .iter()
-                .all(|c| c.outcome == Outcome::NoReferenceForPlatform),
-            "a missing snapshot for this os-arch is no-reference-for-platform, got {channels:?}"
-        );
-    }
-
-    #[tokio::test]
     async fn live_differential_without_oracle_fails_loud() {
         let case = TestCase {
             id: "case-x".to_string(),
@@ -690,7 +523,7 @@ mod tests {
         };
         let tmp = std::path::Path::new("/tmp");
         assert!(matches!(
-            evaluate(&case, &cfg(tmp, tmp)).await,
+            evaluate(&case, &cfg(tmp)).await,
             Err(HarnessError::OracleMissing { .. })
         ));
     }

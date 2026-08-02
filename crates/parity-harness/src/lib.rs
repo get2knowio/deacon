@@ -34,10 +34,10 @@ pub mod oracle;
 pub mod oracle_type;
 pub mod parity_corpus;
 pub mod prereq;
+pub mod provenance;
 pub mod registry;
 pub mod report;
 pub mod runner;
-pub mod snapshot;
 pub mod waiver;
 pub mod workspace;
 

@@ -1,16 +1,17 @@
-//! Committed, provenance-tracked snapshots + staleness comparison (data-model §7,
-//! contract snapshot-provenance.md, 022-conformance-runner, US2).
+//! Run provenance: the identity and environment elements a recorded run is stamped with,
+//! and the pure comparison that says whether a recording still describes the current world.
 //!
-//! Snapshots live under `conformance/snapshots/<os>-<arch>/<case-id>/` as three files —
-//! `provenance.json` (the FR-017 identity/environment elements), `raw.json` (verbatim
-//! per-channel evidence), and `normalized.json` (rule-normalized evidence, kept separate
-//! per FR-016). The **pure** staleness comparison ([`compare_staleness`]) is hermetic and
-//! lives here; the live re-record path is `parity-harness`'s `conformance-snapshot` bin
-//! (research D5). `platform`/`arch` are SELECTORS (they pick a snapshot), never staleness
-//! signals; a missing snapshot for the current `os-arch` is a distinct
-//! `no-reference-for-platform` outcome (FR-016a).
-
-use std::path::{Path, PathBuf};
+//! This was `snapshot.rs`, and it carried both this and the `snapshot` ORACLE — a fourth
+//! oracle type whose entire population was ONE case asserting one exit code, backed by
+//! three committed files and a staleness model over eight elements. The case is now a
+//! `spec-expectation` that states the claim directly, and the oracle, its `conformance/
+//! snapshots/` tree and its `conformance-snapshot` refresh binary are gone.
+//!
+//! What survives is used by record/replay and by the report: [`Provenance`] (what a run
+//! was produced by), [`compare_staleness`] (whether a recording is still current),
+//! [`probe_environment`], [`current_os_arch`] and [`NORMALIZER_VERSION`] — the version
+//! `normalize.rs` re-exports and stamps on every recorded verdict. `platform`/`arch` are
+//! SELECTORS, never staleness signals.
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -164,55 +165,10 @@ pub fn compare_staleness(recorded: &Provenance, current: &Provenance) -> Stalene
     Staleness::Fresh
 }
 
-/// A committed snapshot: provenance + the raw and normalized evidence (kept SEPARATE,
-/// FR-016). `raw`/`normalized` are opaque JSON arrays here (the conformance crate does
-/// not interpret channel-evidence semantics — that is `parity-harness`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Snapshot {
-    /// The 13-field provenance.
-    pub provenance: Provenance,
-    /// The verbatim per-channel evidence (`raw.json`).
-    pub raw: Value,
-    /// The rule-normalized per-channel evidence (`normalized.json`).
-    pub normalized: Value,
-}
-
-/// An error loading a committed snapshot (fail-loud, constitution IV).
-#[derive(Debug, thiserror::Error)]
-pub enum SnapshotError {
-    /// A snapshot file was unreadable.
-    #[error("could not read snapshot file {path:?}: {cause}")]
-    Read { path: PathBuf, cause: String },
-    /// A snapshot file was malformed JSON / schema-invalid.
-    #[error("malformed snapshot file {path:?}: {cause}")]
-    Malformed { path: PathBuf, cause: String },
-}
-
-/// The outcome of resolving a snapshot for a case + platform (FR-016a).
-#[derive(Debug, Clone, PartialEq)]
-pub enum Resolution {
-    /// A snapshot exists for this `os-arch` and loaded. Boxed — the [`Snapshot`] payload
-    /// is far larger than the sibling variant.
-    Found(Box<Snapshot>),
-    /// No snapshot directory exists for the current `os-arch` — a coverage gap, distinct
-    /// from stale and from a silent skip.
-    NoReferenceForPlatform {
-        /// The `os-arch` selector that had no committed snapshot.
-        os_arch: String,
-    },
-}
-
 /// The current platform selector, `"<os>-<arch>"` (e.g. `linux-x86_64`), from the build
 /// target. Both the record key and the recorded `platform`/`arch` derive from this.
 pub fn current_os_arch() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
-}
-
-/// The default committed-snapshots root: `<workspace>/conformance/snapshots`.
-pub fn default_snapshots_dir() -> PathBuf {
-    crate::workspace_root()
-        .join("conformance")
-        .join("snapshots")
 }
 
 /// The probed host environment versions used to build a `current` provenance for
@@ -270,122 +226,6 @@ pub fn current_oracle_version_pin() -> Option<String> {
     let raw = std::fs::read_to_string(path).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
     doc.get("version")?.as_str().map(str::to_string)
-}
-
-/// The directory a case's snapshot for `os_arch` lives in:
-/// `<snapshots>/<os-arch>/<case-id>/`.
-pub fn snapshot_case_dir(snapshots_root: &Path, os_arch: &str, case_id: &str) -> PathBuf {
-    snapshots_root.join(os_arch).join(case_id)
-}
-
-/// Resolve the snapshot for `case_id` at `os_arch` under `snapshots_root`. A missing
-/// `os-arch`/`case` directory is [`Resolution::NoReferenceForPlatform`] (not an error);
-/// a present-but-malformed snapshot is a fail-loud [`SnapshotError`].
-pub fn resolve(
-    snapshots_root: &Path,
-    os_arch: &str,
-    case_id: &str,
-) -> Result<Resolution, SnapshotError> {
-    let dir = snapshot_case_dir(snapshots_root, os_arch, case_id);
-    if !dir.is_dir() {
-        return Ok(Resolution::NoReferenceForPlatform {
-            os_arch: os_arch.to_string(),
-        });
-    }
-    Ok(Resolution::Found(Box::new(load_snapshot(&dir)?)))
-}
-
-/// Load the three snapshot files from a case's snapshot directory.
-pub fn load_snapshot(dir: &Path) -> Result<Snapshot, SnapshotError> {
-    let provenance: Provenance = load_json(&dir.join("provenance.json"))?;
-    let raw: Value = load_json(&dir.join("raw.json"))?;
-    let normalized: Value = load_json(&dir.join("normalized.json"))?;
-    Ok(Snapshot {
-        provenance,
-        raw,
-        normalized,
-    })
-}
-
-/// Load just the provenance (the staleness gate needs nothing else).
-pub fn load_provenance(dir: &Path) -> Result<Provenance, SnapshotError> {
-    load_json(&dir.join("provenance.json"))
-}
-
-fn load_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, SnapshotError> {
-    let raw = std::fs::read_to_string(path).map_err(|e| SnapshotError::Read {
-        path: path.to_path_buf(),
-        cause: e.to_string(),
-    })?;
-    serde_json::from_str(&raw).map_err(|e| SnapshotError::Malformed {
-        path: path.to_path_buf(),
-        cause: e.to_string(),
-    })
-}
-
-/// A single field-level difference between two snapshot trees (`snapshot diff`).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SnapshotDiffEntry {
-    /// Which artifact differs: `provenance` / `raw` / `normalized`.
-    pub artifact: String,
-    /// A dotted path within that artifact (empty = the whole artifact).
-    pub path: String,
-    /// The old (left) value.
-    pub old: Value,
-    /// The new (right) value.
-    pub new: Value,
-}
-
-/// Deterministic drift between two loaded snapshots (`snapshot diff`), artifact then
-/// path ordered. Compares provenance field-by-field and raw/normalized structurally.
-pub fn diff(old: &Snapshot, new: &Snapshot) -> Vec<SnapshotDiffEntry> {
-    let mut out = Vec::new();
-    let old_prov = serde_json::to_value(&old.provenance).unwrap_or(Value::Null);
-    let new_prov = serde_json::to_value(&new.provenance).unwrap_or(Value::Null);
-    diff_value("provenance", "", &old_prov, &new_prov, &mut out);
-    diff_value("raw", "", &old.raw, &new.raw, &mut out);
-    diff_value("normalized", "", &old.normalized, &new.normalized, &mut out);
-    out.sort_by(|a, b| a.artifact.cmp(&b.artifact).then(a.path.cmp(&b.path)));
-    out
-}
-
-/// Recursively record differences between two values under `artifact`/`path`.
-fn diff_value(
-    artifact: &str,
-    path: &str,
-    old: &Value,
-    new: &Value,
-    out: &mut Vec<SnapshotDiffEntry>,
-) {
-    match (old, new) {
-        (Value::Object(o), Value::Object(n)) => {
-            let mut keys: Vec<&String> = o.keys().chain(n.keys()).collect();
-            keys.sort();
-            keys.dedup();
-            for k in keys {
-                let child = if path.is_empty() {
-                    k.clone()
-                } else {
-                    format!("{path}.{k}")
-                };
-                diff_value(
-                    artifact,
-                    &child,
-                    o.get(k).unwrap_or(&Value::Null),
-                    n.get(k).unwrap_or(&Value::Null),
-                    out,
-                );
-            }
-        }
-        _ if old != new => out.push(SnapshotDiffEntry {
-            artifact: artifact.to_string(),
-            path: path.to_string(),
-            old: old.clone(),
-            new: new.clone(),
-        }),
-        _ => {}
-    }
 }
 
 #[cfg(test)]
@@ -504,25 +344,5 @@ mod tests {
             .image_digests
             .insert("a".to_string(), "1".to_string());
         assert_eq!(compare_staleness(&recorded, &current), Staleness::Fresh);
-    }
-
-    #[test]
-    fn diff_reports_provenance_and_evidence_changes() {
-        let a = Snapshot {
-            provenance: provenance(),
-            raw: serde_json::json!([{ "channel": "chan-exit-code", "value": 0 }]),
-            normalized: serde_json::json!([{ "channel": "chan-exit-code", "value": 0 }]),
-        };
-        let mut b = a.clone();
-        b.provenance.case_hash = "zzzz".to_string();
-        b.raw = serde_json::json!([{ "channel": "chan-exit-code", "value": 1 }]);
-        let d = diff(&a, &b);
-        assert!(
-            d.iter()
-                .any(|e| e.artifact == "provenance" && e.path == "caseHash")
-        );
-        assert!(d.iter().any(|e| e.artifact == "raw"));
-        // Identical snapshots diff empty.
-        assert!(diff(&a, &a).is_empty());
     }
 }

@@ -138,8 +138,6 @@ pub struct DriverConfig {
     pub fixtures_root: PathBuf,
     /// Root the raw stdout/stderr artifacts and report fragments are written under.
     pub report_root: PathBuf,
-    /// Committed-snapshots root.
-    pub snapshots_root: PathBuf,
 }
 
 impl DriverConfig {
@@ -155,7 +153,6 @@ impl DriverConfig {
             oracle: self.oracle.as_ref(),
             fixtures_root: &self.fixtures_root,
             report_root: &self.report_root,
-            snapshots_root: &self.snapshots_root,
         }
     }
 }

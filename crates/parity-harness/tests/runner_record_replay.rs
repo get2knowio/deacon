@@ -153,7 +153,6 @@ mod spec_expectation {
             oracle: None,
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
         let evidence = collect_spec_evidence(&spec_case(), &cfg)
             .await
@@ -194,7 +193,6 @@ mod spec_expectation {
             oracle: None,
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
         let verdict = run_case(&spec_case(), &cfg).await.expect("run");
         assert_eq!(
@@ -215,7 +213,6 @@ mod spec_expectation {
             oracle: None,
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
         let verdict = run_case(&spec_case(), &cfg).await.expect("run");
         assert_eq!(
@@ -253,7 +250,6 @@ mod spec_expectation {
             oracle: None,
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
         let verdict = run_case(&failure_case(), &cfg).await.expect("run");
 
@@ -284,108 +280,6 @@ mod spec_expectation {
             .find(|c| c.channel == CHAN_STRUCTURED_OUTPUT)
             .expect("structured channel");
         assert_eq!(structured.outcome, Outcome::Diverge);
-    }
-}
-
-// ------------------------------------------------------------------------------------
-// T030: record/replay equivalence for a snapshot-oracle case (stub reference + stub
-// deacon, Unix only). Records a snapshot to a temp tree, then replays via the snapshot
-// dispatch and asserts the SAME verdict (agree) + 13-field provenance.
-// ------------------------------------------------------------------------------------
-
-#[cfg(unix)]
-mod snapshot_replay {
-    use parity_harness::model::{CHAN_EXIT_CODE, ExpectedObservable, OracleType};
-    use parity_harness::snapshot;
-
-    use parity_harness::evidence::write_snapshot;
-    use parity_harness::exec::Side;
-    use parity_harness::runner::{RunConfig, capture_provenance, collect_evidence_on, run_case};
-
-    use super::*;
-    use std::path::{Path, PathBuf};
-
-    fn write_exit0_stub(dir: &Path, name: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        let p = dir.join(name);
-        std::fs::write(&p, "#!/bin/sh\nexit 0\n").expect("write stub");
-        let mut perms = std::fs::metadata(&p).expect("stat").permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&p, perms).expect("chmod");
-        p
-    }
-
-    fn snapshot_case() -> TestCase {
-        TestCase {
-            id: "case-replay".to_string(),
-            behaviors: vec!["bhv-x".to_string()],
-            oracle_type: Some(OracleType::Snapshot),
-            operations: vec![Operation {
-                id: "op-read".to_string(),
-                subcommand: "read-configuration".to_string(),
-                argv: vec!["--workspace-folder".to_string(), "${WORKSPACE}".to_string()],
-                fixtures: vec!["fx-x".to_string()],
-                ..Operation::default()
-            }],
-            expected: vec![ExpectedObservable {
-                channel: CHAN_EXIT_CODE.to_string(),
-                operation: Some("op-read".to_string()),
-                assertion: None,
-            }],
-            ..TestCase::default()
-        }
-    }
-
-    #[tokio::test]
-    async fn recorded_case_replays_to_the_same_verdict_with_full_provenance() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(dir.path().join("fixtures").join("fx-x")).expect("fixture");
-        let fixtures = dir.path().join("fixtures");
-        let snapshots = dir.path().join("snapshots");
-        let reports = dir.path().join("report");
-        let case = snapshot_case();
-
-        // A stub that exits 0 stands in for BOTH the reference (record) and deacon
-        // (replay) — the recorded exit-code (0) must equal deacon's on replay.
-        let stub = write_exit0_stub(dir.path(), "exit0");
-        let cfg = RunConfig {
-            deacon_path: &stub,
-            oracle: None,
-            fixtures_root: &fixtures,
-            report_root: &reports,
-            snapshots_root: &snapshots,
-        };
-
-        // RECORD: capture the reference evidence + provenance and write the snapshot for
-        // the CURRENT os-arch (so the replay dispatch resolves it).
-        let evidence = collect_evidence_on(Side::Oracle, &stub, &case, &cfg)
-            .await
-            .expect("record evidence");
-        let provenance = capture_provenance(&case, &cfg, "0.87.0").expect("provenance");
-        let os_arch = snapshot::current_os_arch();
-        let case_dir = snapshot::snapshot_case_dir(&snapshots, &os_arch, &case.id);
-        write_snapshot(&case_dir, &provenance, &evidence)
-            .await
-            .expect("write snapshot");
-
-        // Provenance carries all 13 fields (SC-002) — reload and check the non-derived ones.
-        let reloaded = snapshot::load_provenance(&case_dir).expect("provenance loads");
-        assert_eq!(reloaded.oracle_version, "0.87.0");
-        assert_eq!(reloaded.normalizer_version, snapshot::NORMALIZER_VERSION);
-        assert_eq!(reloaded.source_revision, "113500f4");
-        assert_eq!(reloaded.case_hash.len(), 64);
-        assert_eq!(reloaded.fixture_hash.len(), 64);
-        assert!(!reloaded.captured_at.is_empty());
-
-        // REPLAY: the snapshot dispatch resolves the committed snapshot, gates on
-        // provenance freshness (same machine → fresh), runs deacon (exit 0), and compares
-        // to the recorded exit-code (0) → agree. Record/replay equivalence (SC-011).
-        let verdict = run_case(&case, &cfg).await.expect("replay");
-        assert_eq!(
-            verdict.overall,
-            Outcome::Agree,
-            "a recorded case replays to the same (agree) verdict: {verdict:?}"
-        );
     }
 }
 
@@ -439,10 +333,9 @@ mod oracle_types {
     fn re_pointing_changes_only_oracle_type() {
         let a = base_case(OracleType::SpecExpectation);
         let b = base_case(OracleType::LiveDifferential);
-        let c = base_case(OracleType::Snapshot);
-        let d = base_case(OracleType::InvariantMetamorphic);
+        let c = base_case(OracleType::InvariantMetamorphic);
         // Every variant is identical EXCEPT `oracleType` — re-pointing is a one-field edit.
-        for other in [&b, &c, &d] {
+        for other in [&b, &c] {
             assert_eq!(
                 a.operations, other.operations,
                 "operations must be identical"
@@ -454,18 +347,15 @@ mod oracle_types {
     }
 
     #[tokio::test]
-    async fn four_oracle_types_apply_distinct_semantics() {
+    async fn three_oracle_types_apply_distinct_semantics() {
         let dir = tempfile::tempdir().expect("tempdir");
         let stub = exit0_stub(dir.path());
-        let empty_snapshots = dir.path().join("snapshots"); // no committed snapshots
-
         // spec-expectation: runs deacon, evaluates the assertion → a real Agree verdict.
         let spec_cfg = RunConfig {
             deacon_path: &stub,
             oracle: None,
             fixtures_root: dir.path(),
             report_root: &dir.path().join("report"),
-            snapshots_root: &empty_snapshots,
         };
         let spec = run_case(&base_case(OracleType::SpecExpectation), &spec_cfg)
             .await
@@ -484,18 +374,6 @@ mod oracle_types {
                 Err(parity_harness::HarnessError::OracleMissing { .. })
             ),
             "live-differential requires the reference oracle: {live:?}"
-        );
-
-        // snapshot with no committed snapshot for this platform → no-reference-for-platform
-        // (a distinct coverage-gap outcome, not a verdict against a fixed value).
-        let (snap_channels, _stale) = evaluate(&base_case(OracleType::Snapshot), &spec_cfg)
-            .await
-            .expect("snapshot resolves to a verdict, not an error");
-        assert!(
-            snap_channels
-                .iter()
-                .all(|c| c.outcome == Outcome::NoReferenceForPlatform),
-            "snapshot with no committed reference is no-reference-for-platform: {snap_channels:?}"
         );
 
         // invariant-metamorphic with NO declared relationship → fail-loud (the relationship

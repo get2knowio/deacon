@@ -174,8 +174,8 @@ build.
    `conformance/fixtures/fx-upgrade-overlay-lockfile/.devcontainer/devcontainer-lock.json`
    was never committed — the only `*-lockfile*` fixture missing one, though `.gitignore:65`
    explicitly un-ignores that filename. `fixture_hash_dir` walks the working tree, so a
-   snapshot recorded against this fixture reads fresh locally and stale in CI. No live
-   impact today (`case-readconfig-snapshot` is the only committed snapshot and does not use
+   recording made against this fixture reads fresh locally and stale in CI. No live
+   impact today (the `snapshot` oracle and its one committed case were removed; nothing uses
    it). Left in place rather than deleted — deciding it needs the second finding resolved.
 
 2. **`case-readconfig-lockfile-present` advertises evidence it cannot produce.** Its note

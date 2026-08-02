@@ -76,7 +76,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Decision half of the migrated `parity_corpus_errors::bad-config-path` unit (023 T036/T072). The unit's `both-reject` waiver asserts TWO things \u2014 that deacon rejects an explicit --config that does not exist, AND that the reference agrees \u2014 and one oracleType cannot express both. The sibling live-differential case `case-errors-decl-bad-config-path` keeps the cross-CLI agreement; this case PINS deacon's own rejection and its diagnostic, so the rejection cannot quietly evaporate if both CLIs ever start accepting the input. The two are variants of one behavior, distinguished by oracle type.",
+      "notes": "Decision half of the migrated `parity_corpus_errors::bad-config-path` unit (023 T036/T072). The unit's `both-reject` waiver asserts TWO things — that deacon rejects an explicit --config that does not exist, AND that the reference agrees — and one oracleType cannot express both. The sibling live-differential case `case-errors-decl-bad-config-path` keeps the cross-CLI agreement; this case PINS deacon's own rejection and its diagnostic, so the rejection cannot quietly evaporate if both CLIs ever start accepting the input. The two are variants of one behavior, distinguished by oracle type.",
       "inputClass": "malformed"
     },
     {
@@ -120,7 +120,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Both CLIs accept duplicate top-level JSON keys with last-wins semantics and must resolve to the same document (a both-accept agreement; the migrated waiver wvr-duplicate-keys was retired 2026-08-01 as tolerating no difference). The structured-output channel is compared under the declarative normalizer, which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values (research D3); differences it surfaces are characterized in US4/T064, never re-hidden.",
+      "notes": "Both CLIs accept duplicate top-level JSON keys with last-wins semantics and must resolve to the same document (a both-accept agreement; the migrated waiver wvr-duplicate-keys was retired 2026-08-01 as tolerating no difference). The structured-output channel is compared under the declarative normalizer, which — unlike the legacy `prune` path — does NOT drop null/empty values (research D3); differences it surfaces are characterized in US4/T064, never re-hidden.",
       "inputClass": "boundary"
     },
     {
@@ -170,7 +170,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "deacon rejects a cyclic extends chain where the reference leniently accepts it \u2014 an ahead-of-spec capability characterized by ext-extends-resolution (the duplicate waiver wvr-extends-cycle was retired 2026-08-01). Expressed as a spec-expectation on deacon's own decision: the exit-code channel is scalar, so a live-differential divergence there would need a bare-channel tolerance, which is rejected as a global ignore (FR-032).",
+      "notes": "deacon rejects a cyclic extends chain where the reference leniently accepts it — an ahead-of-spec capability characterized by ext-extends-resolution (the duplicate waiver wvr-extends-cycle was retired 2026-08-01). Expressed as a spec-expectation on deacon's own decision: the exit-code channel is scalar, so a live-differential divergence there would need a bare-channel tolerance, which is rejected as a global ignore (FR-032).",
       "inputClass": "malformed"
     },
     {
@@ -220,7 +220,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "deacon rejects an extends target that does not exist where the reference leniently accepts it \u2014 characterized by ext-extends-resolution (the duplicate waiver wvr-extends-missing was retired 2026-08-01). See case-errors-decl-extends-cycle for why this is a spec-expectation.",
+      "notes": "deacon rejects an extends target that does not exist where the reference leniently accepts it — characterized by ext-extends-resolution (the duplicate waiver wvr-extends-missing was retired 2026-08-01). See case-errors-decl-extends-cycle for why this is a spec-expectation.",
       "inputClass": "malformed"
     },
     {
@@ -270,7 +270,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "deacon rejects a hard JSONC syntax error where the reference leniently recovers \u2014 waiver wvr-malformed-json (deacon-stricter). See case-errors-decl-extends-cycle for why this is a spec-expectation. The stderr assertion is ANCHORED at end-of-text rather than a bare `contains`: the parse diagnostic must be the LAST thing deacon writes, so trailing bytes after it \u2014 a stray print, a partially written second error, an un-flushed buffer landing late \u2014 are a difference this case notices. A `contains` cannot see appended output at all, which made chan-stderr inert by construction (024 US6, reg-stderr-diagnostic-truncated).",
+      "notes": "deacon rejects a hard JSONC syntax error where the reference leniently recovers — waiver wvr-malformed-json (deacon-stricter). See case-errors-decl-extends-cycle for why this is a spec-expectation. The stderr assertion is ANCHORED at end-of-text rather than a bare `contains`: the parse diagnostic must be the LAST thing deacon writes, so trailing bytes after it — a stray print, a partially written second error, an un-flushed buffer landing late — are a difference this case notices. A `contains` cannot see appended output at all, which made chan-stderr inert by construction (024 US6, reg-stderr-diagnostic-truncated).",
       "inputClass": "malformed"
     },
     {
@@ -344,7 +344,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Decision half of the migrated `parity_corpus_errors::missing-config` unit (023 T036/T072). The unit's `both-reject` waiver asserts TWO things \u2014 that deacon rejects a workspace with no devcontainer configuration, AND that the reference agrees \u2014 and one oracleType cannot express both. The sibling live-differential case `case-errors-decl-missing-config` keeps the cross-CLI agreement; this case PINS deacon's own rejection and its diagnostic, so the rejection cannot quietly evaporate if both CLIs ever start accepting the input. The two are variants of one behavior, distinguished by oracle type.",
+      "notes": "Decision half of the migrated `parity_corpus_errors::missing-config` unit (023 T036/T072). The unit's `both-reject` waiver asserts TWO things — that deacon rejects a workspace with no devcontainer configuration, AND that the reference agrees — and one oracleType cannot express both. The sibling live-differential case `case-errors-decl-missing-config` keeps the cross-CLI agreement; this case PINS deacon's own rejection and its diagnostic, so the rejection cannot quietly evaporate if both CLIs ever start accepting the input. The two are variants of one behavior, distinguished by oracle type.",
       "inputClass": "malformed"
     },
     {
@@ -437,7 +437,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "deacon rejects a `features` value that is a bare string where the reference accepts it \u2014 waiver wvr-wrong-type-features (deacon-stricter).",
+      "notes": "deacon rejects a `features` value that is a bare string where the reference accepts it — waiver wvr-wrong-type-features (deacon-stricter).",
       "inputClass": "malformed"
     },
     {
@@ -487,7 +487,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "deacon rejects a `forwardPorts` value that is a bare string where the reference accepts it \u2014 waiver wvr-wrong-type-forwardports (deacon-stricter).",
+      "notes": "deacon rejects a `forwardPorts` value that is a bare string where the reference accepts it — waiver wvr-wrong-type-forwardports (deacon-stricter).",
       "inputClass": "malformed"
     },
     {
@@ -532,7 +532,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `bare-base-node-feature`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `bare-base-node-feature`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-build-args-subst",
@@ -576,7 +576,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `build-args-subst`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `build-args-subst`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-compose-array",
@@ -620,7 +620,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `compose-array`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `compose-array`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-compose-postgres",
@@ -664,7 +664,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `compose-postgres`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `compose-postgres`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-containerenv-subst",
@@ -708,7 +708,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `containerenv-subst`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `containerenv-subst`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-dependson-autoinstall",
@@ -752,7 +752,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `dependson-autoinstall`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `dependson-autoinstall`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-dockerfile-build",
@@ -796,7 +796,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `dockerfile-build`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `dockerfile-build`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-dotnet-mounts",
@@ -840,7 +840,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `dotnet-mounts`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `dotnet-mounts`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-extends-child",
@@ -894,7 +894,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `extends-child`, and the one unit whose recorded expectation is a REFERENCE rejection: deacon resolves the full `extends` chain eagerly under --include-merged-configuration where the reference errors \u2014 the ahead-of-spec capability recorded as ext-extends-resolution and characterized by that record alone (the duplicate waiver wvr-extends-child-merged was retired 2026-08-01). Expressed as a spec-expectation, NOT a live-differential: a differential asserts the two sides are EQUAL, which both inverts this expectation into a guaranteed failure and pins nothing about deacon's own side. It pins deacon succeeding and resolving the base image from the extends chain \u2014 the recorded `image` signal \u2014 so the ahead-of-spec resolution cannot silently regress (023 T072). The reference-side rejection stays characterized by ext-extends-resolution."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `extends-child`, and the one unit whose recorded expectation is a REFERENCE rejection: deacon resolves the full `extends` chain eagerly under --include-merged-configuration where the reference errors — the ahead-of-spec capability recorded as ext-extends-resolution and characterized by that record alone (the duplicate waiver wvr-extends-child-merged was retired 2026-08-01). Expressed as a spec-expectation, NOT a live-differential: a differential asserts the two sides are EQUAL, which both inverts this expectation into a guaranteed failure and pins nothing about deacon's own side. It pins deacon succeeding and resolving the base image from the extends chain — the recorded `image` signal — so the ahead-of-spec resolution cannot silently regress (023 T072). The reference-side rejection stays characterized by ext-extends-resolution."
     },
     {
       "id": "case-merged-decl-feature-order",
@@ -938,7 +938,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `feature-order`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `feature-order`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-go-minimal",
@@ -985,7 +985,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `go-minimal`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `go-minimal`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-init-privileged",
@@ -1029,7 +1029,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `init-privileged`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `init-privileged`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-lifecycle-arrays",
@@ -1074,7 +1074,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `lifecycle-arrays`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `lifecycle-arrays`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-lifecycle-mixed",
@@ -1119,7 +1119,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `lifecycle-mixed`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `lifecycle-mixed`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-mounts-bind-localenv",
@@ -1163,7 +1163,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `mounts-bind-localenv`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `mounts-bind-localenv`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-name-subst",
@@ -1207,7 +1207,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `name-subst`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `name-subst`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-node-ts",
@@ -1251,7 +1251,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `node-ts`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `node-ts`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-object-form-metadata",
@@ -1295,7 +1295,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `object-form-metadata`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `object-form-metadata`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-ports-mixed",
@@ -1340,7 +1340,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `ports-mixed`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `ports-mixed`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-python-features",
@@ -1384,7 +1384,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `python-features`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `python-features`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-ruby-node-feature",
@@ -1428,7 +1428,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `ruby-node-feature`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `ruby-node-feature`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-universal-jsonc",
@@ -1472,7 +1472,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `universal-jsonc`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `universal-jsonc`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-user-mapping",
@@ -1516,7 +1516,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `user-mapping`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `user-mapping`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-merged-decl-workspacefolder-custom",
@@ -1560,7 +1560,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `workspacefolder-custom`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `workspacefolder-custom`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-readconfig-boundary-empty-collections",
@@ -1604,7 +1604,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-040 boundary class: every collection-valued field is present and EMPTY \u2014 `features`, `forwardPorts`, `containerEnv`, `remoteEnv`, `mounts`, `runArgs`, `customizations`. An empty collection is the edge of the accepted domain and is distinct from an omitted field, which is exactly the distinction the `null_preserving` rule exists to keep visible. STRENGTHENED BY #398, which is what made the strengthening possible: until deacon wrapped the eleven bare-collection properties in `Option`, it emitted these keys whether or not the author wrote them, `drop_absent_optional` elided them from deacon's side, and observing `chan-structured-output` here would have compared a document with the fields removed \u2014 the case would have been green while proving nothing about the very boundary it names. deacon now emits exactly the authored eight and the rule no longer touches this block, so the channel is added and the boundary is actually compared. Measured at oracle 0.87.0: both CLIs emit the same ten keys, with no tolerance."
+      "notes": "FR-040 boundary class: every collection-valued field is present and EMPTY — `features`, `forwardPorts`, `containerEnv`, `remoteEnv`, `mounts`, `runArgs`, `customizations`. An empty collection is the edge of the accepted domain and is distinct from an omitted field, which is exactly the distinction the `null_preserving` rule exists to keep visible. STRENGTHENED BY #398, which is what made the strengthening possible: until deacon wrapped the eleven bare-collection properties in `Option`, it emitted these keys whether or not the author wrote them, `drop_absent_optional` elided them from deacon's side, and observing `chan-structured-output` here would have compared a document with the fields removed — the case would have been green while proving nothing about the very boundary it names. deacon now emits exactly the authored eight and the rule no longer touches this block, so the channel is added and the boundary is actually compared. Measured at oracle 0.87.0: both CLIs emit the same ten keys, with no tolerance."
     },
     {
       "id": "case-readconfig-compose-depends-overlay",
@@ -1672,7 +1672,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Closes `config-source=compose` x `features=multiple-dependency-order`. The Compose counterpart of `case-readconfig-overlay-dockerfile-depends`: the configuration declares only `needs-base-tool`, and `base-tool` \u2014 which it `installsAfter` \u2014 arrives ONLY through `--additional-features`, so dependency order has to be decided across the configuration and the overlay together. Positional for the same reason as its Dockerfile sibling. Its existence is the pairwise question stated plainly: the Dockerfile case proves nothing about whether a Compose-shaped configuration resolves the same way, which is why the pair was counted as a hole rather than assumed covered."
+      "notes": "Closes `config-source=compose` x `features=multiple-dependency-order`. The Compose counterpart of `case-readconfig-overlay-dockerfile-depends`: the configuration declares only `needs-base-tool`, and `base-tool` — which it `installsAfter` — arrives ONLY through `--additional-features`, so dependency order has to be decided across the configuration and the overlay together. Positional for the same reason as its Dockerfile sibling. Its existence is the pairwise question stated plainly: the Dockerfile case proves nothing about whether a Compose-shaped configuration resolves the same way, which is why the pair was counted as a hole rather than assumed covered."
     },
     {
       "id": "case-readconfig-compose-lockfile-merged",
@@ -1796,7 +1796,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Closes three pairs at once \u2014 `config-source=compose` x `features=lockfile`, `config-source=compose` x `layering=cli-overlay`, and `features=lockfile` x `layering=cli-overlay`. A Compose project whose Feature is pinned by a committed `devcontainer-lock.json`, read through a merge-fragment overlay. The assertion keeps the pinned Feature id alongside the overlaid `name`: an overlay that silently dropped the Feature set while applying its own keys would pass an assertion naming only the overlaid value, and dropping Features is exactly the failure a Compose-plus-lockfile read invites. Reading reports the DECLARED Feature set \u2014 consuming the lockfile belongs to `upgrade` and `up` \u2014 so the case makes the combination reachable without claiming the read resolves the pin. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
+      "notes": "Closes three pairs at once — `config-source=compose` x `features=lockfile`, `config-source=compose` x `layering=cli-overlay`, and `features=lockfile` x `layering=cli-overlay`. A Compose project whose Feature is pinned by a committed `devcontainer-lock.json`, read through a merge-fragment overlay. The assertion keeps the pinned Feature id alongside the overlaid `name`: an overlay that silently dropped the Feature set while applying its own keys would pass an assertion naming only the overlaid value, and dropping Features is exactly the failure a Compose-plus-lockfile read invites. Reading reports the DECLARED Feature set — consuming the lockfile belongs to `upgrade` and `up` — so the case makes the combination reachable without claiming the read resolves the pin. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
     },
     {
       "id": "case-readconfig-compose-single-overlay",
@@ -1863,7 +1863,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Closes `features=single` x `layering=cli-overlay`. One Feature, one merge fragment: the fragment renames the configuration and the single declared Feature survives untouched. The pairing matters because a merge fragment and a Feature set are the two things an overlay can most easily get wrong together \u2014 replacing the base wholesale would drop the Feature, and deep-merging the `features` map wrongly would duplicate it \u2014 so the assertion names both the overlaid `name` and the surviving Feature id rather than either alone."
+      "notes": "Closes `features=single` x `layering=cli-overlay`. One Feature, one merge fragment: the fragment renames the configuration and the single declared Feature survives untouched. The pairing matters because a merge fragment and a Feature set are the two things an overlay can most easily get wrong together — replacing the base wholesale would drop the Feature, and deep-merging the `features` map wrongly would duplicate it — so the assertion names both the overlaid `name` and the surviving Feature id rather than either alone."
     },
     {
       "id": "case-readconfig-decl-basic",
@@ -2009,7 +2009,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-027 discovery, direction half: the spec lists `.devcontainer/<folder>/devcontainer.json` (one level deep) as a discovery location, and deacon finds it with no `--config`. Pinning deacon's own side matters because the sibling differential only shows that the two CLIs DISAGREE \u2014 not which of them searched the location the spec names (the 023 T072 lesson)."
+      "notes": "FR-027 discovery, direction half: the spec lists `.devcontainer/<folder>/devcontainer.json` (one level deep) as a discovery location, and deacon finds it with no `--config`. Pinning deacon's own side matters because the sibling differential only shows that the two CLIs DISAGREE — not which of them searched the location the spec names (the 023 T072 lesson)."
     },
     {
       "id": "case-readconfig-discovery-named-subfolder-differential",
@@ -2222,7 +2222,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Closes `config-source=dockerfile` x `features=multiple-declared-order` and `features=multiple-declared-order` x `layering=cli-overlay`. Two local Features with no dependency between them, so the order is DECLARED rather than derived: `overrideFeatureInstallOrder` names `beta-tool` first while the `features` map lists `alpha-tool` first, and the resolved order must follow the override. The array assertion is positional for the reason `case-readconfig-overlay-dockerfile-depends` records \u2014 a `jsonSubset` over an array matches without regard to order, so a non-positional assertion would pass for an implementation that ignored the override entirely. The overlay is a merge fragment rather than `--additional-features` so the declared order stays two Features long and the case measures ordering, not arrival."
+      "notes": "Closes `config-source=dockerfile` x `features=multiple-declared-order` and `features=multiple-declared-order` x `layering=cli-overlay`. Two local Features with no dependency between them, so the order is DECLARED rather than derived: `overrideFeatureInstallOrder` names `beta-tool` first while the `features` map lists `alpha-tool` first, and the resolved order must follow the override. The array assertion is positional for the reason `case-readconfig-overlay-dockerfile-depends` records — a `jsonSubset` over an array matches without regard to order, so a non-positional assertion would pass for an implementation that ignored the override entirely. The overlay is a merge fragment rather than `--additional-features` so the declared order stays two Features long and the case measures ordering, not arrival."
     },
     {
       "id": "case-readconfig-dockerfile-lockfile-extends",
@@ -2284,7 +2284,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Closes `config-source=dockerfile` x `features=lockfile` and `features=lockfile` x `layering=extends-chain`. The child document carries nothing but `extends` and a `name`; the Dockerfile build, the version-pinned Feature and `remoteUser` all reach the merged result through the base. Asserting all four together is the point \u2014 a chain that resolved the child's own keys but dropped the base's `features` would satisfy an assertion naming only `name`, and that is the failure mode an extends chain carrying a pinned Feature actually has. `--include-merged-configuration` is required because a plain read ECHOES `extends` rather than resolving it, which is deacon's characterized behavior, not an accident of this fixture. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
+      "notes": "Closes `config-source=dockerfile` x `features=lockfile` and `features=lockfile` x `layering=extends-chain`. The child document carries nothing but `extends` and a `name`; the Dockerfile build, the version-pinned Feature and `remoteUser` all reach the merged result through the base. Asserting all four together is the point — a chain that resolved the child's own keys but dropped the base's `features` would satisfy an assertion naming only `name`, and that is the failure mode an extends chain carrying a pinned Feature actually has. `--include-merged-configuration` is required because a plain read ECHOES `extends` rather than resolving it, which is deacon's characterized behavior, not an accident of this fixture. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
     },
     {
       "id": "case-readconfig-duplicate-feature-one-document-rejected",
@@ -2334,7 +2334,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Characterizes what deacon does TODAY, which the spec says is wrong. `feature-dependencies.md` defines the two entries as distinct Features (\u00a7Definition: Feature Equality), supplies an oldest-tag-first tie-break for exactly this collision (\u00a7Definition: Round Stable Sort), and states that a single Feature may be installed more than once (\u00a7Feature authorship); oracle 0.87.0 accepts the document and resolves both digests. So this case is no longer evidence of a deliberate strictness choice \u2014 it is the regression guard on a known nonconformance, backed by gap-features-duplicate-in-one-document and tracked at https://github.com/get2knowio/deacon/issues/430. It is EXPECTED to fail when the fix lands; that failure is how the fix announces itself, at which point the assertions become the spec's (both entries accepted, installed oldest tag first) and the gap record is deleted in the same change. Both the exit code and the diagnostic stay asserted meanwhile: while deacon does reject, a rejection that does not say WHICH two keys collided leaves the author hunting through a Feature map. The retired wvr-features-duplicate-in-one-document is deliberately not replaced \u2014 it waived a divergence deacon is on the wrong side of."
+      "notes": "Characterizes what deacon does TODAY, which the spec says is wrong. `feature-dependencies.md` defines the two entries as distinct Features (§Definition: Feature Equality), supplies an oldest-tag-first tie-break for exactly this collision (§Definition: Round Stable Sort), and states that a single Feature may be installed more than once (§Feature authorship); oracle 0.87.0 accepts the document and resolves both digests. So this case is no longer evidence of a deliberate strictness choice — it is the regression guard on a known nonconformance, backed by gap-features-duplicate-in-one-document and tracked at https://github.com/get2knowio/deacon/issues/430. It is EXPECTED to fail when the fix lands; that failure is how the fix announces itself, at which point the assertions become the spec's (both entries accepted, installed oldest tag first) and the gap record is deleted in the same change. Both the exit code and the diagnostic stay asserted meanwhile: while deacon does reject, a rejection that does not say WHICH two keys collided leaves the author hunting through a Feature map. The retired wvr-features-duplicate-in-one-document is deliberately not replaced — it waived a divergence deacon is on the wrong side of."
     },
     {
       "id": "case-readconfig-extends-compose-features",
@@ -2403,7 +2403,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-readconfig-extends-chain-compose-declared-order`: a chain whose BASE link declares the Compose project and whose CHILD adds a declared-order Feature set. The assertion pins all three interacting facts at once \u2014 the Compose fields survive the merge from the base, the Feature map and its explicit install order survive from the child, and the child's `containerEnv` wins key-wise without discarding the base's keys."
+      "notes": "Covers the high-risk triple `hrt-readconfig-extends-chain-compose-declared-order`: a chain whose BASE link declares the Compose project and whose CHILD adds a declared-order Feature set. The assertion pins all three interacting facts at once — the Compose fields survive the merge from the base, the Feature map and its explicit install order survive from the child, and the child's `containerEnv` wins key-wise without discarding the base's keys."
     },
     {
       "id": "case-readconfig-extends-dockerfile-depends",
@@ -2471,7 +2471,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-readconfig-extends-chain-dockerfile-dependency-order`. The parent link declares the Dockerfile build AND one Feature; the child declares a second Feature that `installsAfter` the parent's. The assertion pins that the merged Feature map is assembled across the WHOLE chain before any ordering question is asked \u2014 an implementation that sorted the child's map alone would produce a set missing the parent's contribution and still look ordered."
+      "notes": "Covers the high-risk triple `hrt-readconfig-extends-chain-dockerfile-dependency-order`. The parent link declares the Dockerfile build AND one Feature; the child declares a second Feature that `installsAfter` the parent's. The assertion pins that the merged Feature map is assembled across the WHOLE chain before any ordering question is asked — an implementation that sorted the child's map alone would produce a set missing the parent's contribution and still look ordered."
     },
     {
       "id": "case-readconfig-extends-feature-version-override",
@@ -2531,7 +2531,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Regression evidence for #411, and it pins three things one assertion at a time. The child's `git:1.3.8` is present, so the version bump took effect. The base's `ppa: true` is still on it, so a bare version bump does not discard the options the base configured. The base's unrelated `node:1.6.1` survives, so overriding is not confused with replacing the whole map. What CANNOT be asserted by a subset is the absence of the base's `git:1.3.2` \u2014 a jsonSubset match ignores extra keys \u2014 which is exactly the failure this case exists to catch, so the unit tests in `config.rs` assert the key SET and the ordering; this case pins the end-to-end shape those tests cannot reach."
+      "notes": "Regression evidence for #411, and it pins three things one assertion at a time. The child's `git:1.3.8` is present, so the version bump took effect. The base's `ppa: true` is still on it, so a bare version bump does not discard the options the base configured. The base's unrelated `node:1.6.1` survives, so overriding is not confused with replacing the whole map. What CANNOT be asserted by a subset is the absence of the base's `git:1.3.2` — a jsonSubset match ignores extra keys — which is exactly the failure this case exists to catch, so the unit tests in `config.rs` assert the key SET and the ordering; this case pins the end-to-end shape those tests cannot reach."
     },
     {
       "id": "case-readconfig-extends-merge-precedence",
@@ -2655,7 +2655,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "A workspace whose Features are already pinned by a committed `devcontainer-lock.json`. Reading the configuration reports the DECLARED Feature set \u2014 resolution against the lockfile belongs to `upgrade` and `up`, not to a configuration read \u2014 so this case is what makes the `lockfile` value reachable under `read-configuration` without claiming the read consumes it. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
+      "notes": "A workspace whose Features are already pinned by a committed `devcontainer-lock.json`. Reading the configuration reports the DECLARED Feature set — resolution against the lockfile belongs to `upgrade` and `up`, not to a configuration read — so this case is what makes the `lockfile` value reachable under `read-configuration` without claiming the read consumes it. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
     },
     {
       "id": "case-readconfig-malformed-json-differential",
@@ -2762,7 +2762,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-055, deacon's side pinned outright. Four states in one document: an authored `null`, two authored empty collections, a populated property, and `mounts`, which the configuration does NOT author \u2014 named in the fixture's `.conformance-observed-properties` sidecar, because nothing inside a document can name a property that is not in it. UPDATED BY #398: the three collection states now match the reference \u2014 `forwardPorts` and `containerEnv` are emitted because the author wrote them, and the unauthored `mounts` reports `omitted` where it previously reported `empty`, which WAS the defect. `name: \"omitted\"` is what remains: the author wrote `null` and deacon cannot tell that from an omission. Pinning deacon's side means the differential below cannot lose the direction if the difference ever stops reproducing."
+      "notes": "FR-055, deacon's side pinned outright. Four states in one document: an authored `null`, two authored empty collections, a populated property, and `mounts`, which the configuration does NOT author — named in the fixture's `.conformance-observed-properties` sidecar, because nothing inside a document can name a property that is not in it. UPDATED BY #398: the three collection states now match the reference — `forwardPorts` and `containerEnv` are emitted because the author wrote them, and the unauthored `mounts` reports `omitted` where it previously reported `empty`, which WAS the defect. `name: \"omitted\"` is what remains: the author wrote `null` and deacon cannot tell that from an omission. Pinning deacon's side means the differential below cannot lose the direction if the difference ever stops reproducing."
     },
     {
       "id": "case-readconfig-null-empty-omitted-differential",
@@ -2808,7 +2808,7 @@
           "behavior": "bhv-readconfig-authored-null-omitted-collapsed",
           "context": [],
           "observablePath": "chan-structured-output.configuration.name",
-          "rationale": "The author wrote `\"name\": null`. The reference echoes it; deacon now omits it, because #398 made unset optionals skip serialization and deacon holds an authored null and an omission in the same `None`. This is the null-vs-omitted half of the defect, which that fix deliberately left open \u2014 the boundary moved rather than closed: before the fix both CLIs emitted `null` here and agreed.",
+          "rationale": "The author wrote `\"name\": null`. The reference echoes it; deacon now omits it, because #398 made unset optionals skip serialization and deacon holds an authored null and an omission in the same `None`. This is the null-vs-omitted half of the defect, which that fix deliberately left open — the boundary moved rather than closed: before the fix both CLIs emitted `null` here and agreed.",
           "waiverId": "wvr-readconfig-authored-empty-omitted"
         },
         {
@@ -2822,7 +2822,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "The cross-CLI half of FR-055, and the case the 024 US5 normalizer narrowing exists to make possible: while `drop_absent_optional` ran on both sides, all three states normalized to 'absent on both sides' and this comparison was green while proving nothing. UPDATED BY #398, which retired that rule on the `configuration` block entirely \u2014 nothing is compensated here now, so every tolerance below names a difference the two CLIs really produce. THREE TOLERANCES WERE DELETED, not narrowed: `configuration.forwardPorts`, `configuration.containerEnv` and `nullEmptyOmitted.mounts` stopped reproducing once deacon began emitting only what the author wrote, and a tolerance whose difference no longer reproduces is reported STALE by design. The two that remain both concern the authored `\"name\": null`, stated on the raw key and on the derived FR-055 classification, because a tolerance on the raw key alone would leave the classification uncompared."
+      "notes": "The cross-CLI half of FR-055, and the case the 024 US5 normalizer narrowing exists to make possible: while `drop_absent_optional` ran on both sides, all three states normalized to 'absent on both sides' and this comparison was green while proving nothing. UPDATED BY #398, which retired that rule on the `configuration` block entirely — nothing is compensated here now, so every tolerance below names a difference the two CLIs really produce. THREE TOLERANCES WERE DELETED, not narrowed: `configuration.forwardPorts`, `configuration.containerEnv` and `nullEmptyOmitted.mounts` stopped reproducing once deacon began emitting only what the author wrote, and a tolerance whose difference no longer reproduces is reported STALE by design. The two that remain both concern the authored `\"name\": null`, stated on the raw key and on the derived FR-055 classification, because a tolerance on the raw key alone would leave the classification uncompared."
     },
     {
       "id": "case-readconfig-overlay-dockerfile-depends",
@@ -2890,7 +2890,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-readconfig-cli-overlay-dockerfile-dependency-order`. The configuration declares only `needs-base-tool`; `base-tool`, which it `installsAfter`, arrives ONLY through `--additional-features`. The stdout assertion pins the resolved order positionally \u2014 a `jsonSubset` over an array matches without regard to order, so it alone would pass for an implementation that appended the overlay after the declared set instead of resolving both together."
+      "notes": "Covers the high-risk triple `hrt-readconfig-cli-overlay-dockerfile-dependency-order`. The configuration declares only `needs-base-tool`; `base-tool`, which it `installsAfter`, arrives ONLY through `--additional-features`. The stdout assertion pins the resolved order positionally — a `jsonSubset` over an array matches without regard to order, so it alone would pass for an implementation that appended the overlay after the declared set instead of resolving both together."
     },
     {
       "id": "case-readconfig-overlay-dockerfile-depends-order",
@@ -3004,7 +3004,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Closes the `config-source=image` x `layering=cli-overlay` and `features=none` x `layering=cli-overlay` pairs. Every command-line overlay the registry carried until now arrived as `--additional-features`, which cannot express either pair: adding a Feature moves the scenario out of `features=none` by construction. `--merge-config` is the overlay that layers a fragment WITHOUT touching the Feature set, so it is the only way these two combinations are reachable at all. The assertion pins all three merge outcomes in one match \u2014 `name` overridden by the fragment, `containerEnv` contributed by it, `remoteUser` surviving from the base \u2014 because an assertion on the overridden key alone would also pass for an implementation that REPLACED the base rather than merging onto it, which is what `--override-config` does and what this flag must not."
+      "notes": "Closes the `config-source=image` x `layering=cli-overlay` and `features=none` x `layering=cli-overlay` pairs. Every command-line overlay the registry carried until now arrived as `--additional-features`, which cannot express either pair: adding a Feature moves the scenario out of `features=none` by construction. `--merge-config` is the overlay that layers a fragment WITHOUT touching the Feature set, so it is the only way these two combinations are reachable at all. The assertion pins all three merge outcomes in one match — `name` overridden by the fragment, `containerEnv` contributed by it, `remoteUser` surviving from the base — because an assertion on the overridden key alone would also pass for an implementation that REPLACED the base rather than merging onto it, which is what `--override-config` does and what this flag must not."
     },
     {
       "id": "case-readconfig-parity-exit",
@@ -3044,37 +3044,6 @@
         "tempdir": true
       },
       "notes": "Declarative live-differential case (022-conformance-runner MVP): deacon and the pinned reference both exit 0 for a well-formed configuration. Runs in the parity lane only; the exit-code channel is compared without US3 normalization."
-    },
-    {
-      "id": "case-readconfig-snapshot",
-      "behaviors": [
-        "bhv-readconfig-basic-parse"
-      ],
-      "context": [],
-      "oracleType": "snapshot",
-      "operations": [
-        {
-          "id": "op-read",
-          "subcommand": "read-configuration",
-          "argv": [
-            "--workspace-folder",
-            "${WORKSPACE}"
-          ],
-          "fixtures": [
-            "fx-config-with-unknown-field"
-          ]
-        }
-      ],
-      "expected": [
-        {
-          "channel": "chan-exit-code",
-          "operation": "op-read"
-        }
-      ],
-      "cleanup": {
-        "tempdir": true
-      },
-      "notes": "Declarative snapshot-oracle case (022-conformance-runner US2): deacon's exit-code is compared against the committed, provenance-checked reference snapshot recorded via `conformance-snapshot refresh`. Replay fails as stale on caseHash/fixtureHash/oracleVersion/sourceRevision/node|docker|compose|imageDigests/normalizerVersion drift; a missing snapshot for the current os-arch is no-reference-for-platform."
     },
     {
       "id": "case-readconfig-substitution-object-fields",
@@ -3143,7 +3112,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-029: substitution has to reach the OBJECT-shaped fields, not only the scalar ones. `build.args`, `containerEnv`, `mounts` and `customizations.vscode.settings` each carry `${localWorkspaceFolder}`, and `customizations` is the one that was actually missed once (#312). `${localEnv:...}` naming an unset variable resolves to the empty string rather than being left as a literal \u2014 the distinction `null_preserving` keeps observable."
+      "notes": "FR-029: substitution has to reach the OBJECT-shaped fields, not only the scalar ones. `build.args`, `containerEnv`, `mounts` and `customizations.vscode.settings` each carry `${localWorkspaceFolder}`, and `customizations` is the one that was actually missed once (#312). `${localEnv:...}` naming an unset variable resolves to the empty string rather than being left as a literal — the distinction `null_preserving` keeps observable."
     },
     {
       "id": "case-readconfig-unknown-field-echo",
@@ -3196,7 +3165,54 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Declarative spec-expectation case (022-conformance-runner MVP): unknown top-level keys round-trip through read-configuration (Constitution IV faithful-on-unmodeled). No new Rust function \u2014 the shared runner verdicts it from this data."
+      "notes": "Declarative spec-expectation case (022-conformance-runner MVP): unknown top-level keys round-trip through read-configuration (Constitution IV faithful-on-unmodeled). No new Rust function — the shared runner verdicts it from this data."
+    },
+    {
+      "id": "case-readconfig-unknown-field-preserved-basic",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-config-with-unknown-field"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "name": "conformance-unknown-field-echo",
+                "customUnknownKey": "preserved"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Was the ONE case using the `snapshot` oracle, and it asserted a single exit code against a committed, provenance-checked artifact — three files and a whole staleness model (caseHash/fixtureHash/oracleVersion/sourceRevision/node|docker|compose|imageDigests/normalizerVersion) to say `0`. Re-pointed to `spec-expectation`, which states the same claim directly, and strengthened while re-pointing: the fixture exists to carry an unknown top-level key, so the case now asserts that `customUnknownKey` SURVIVES into the emitted configuration. Silently dropping it would be a fidelity loss against the reference (bhv-readconfig-unknown-field-preserved) and an exit-code assertion could not see it.",
+      "inputClass": "valid"
     },
     {
       "id": "case-readconfig-unsupported-enum-differential",
@@ -3245,7 +3261,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "The reference's `read-configuration` is a lenient parse-and-echo: it accepts `userEnvProbe: telepathy` and prints it back unchanged, where deacon rejects it against the schema's closed value set. Characterized, not repaired \u2014 constitution IV is explicit that deacon validates modelled fields eagerly. The direction is pinned by the spec-expectation twin."
+      "notes": "The reference's `read-configuration` is a lenient parse-and-echo: it accepts `userEnvProbe: telepathy` and prints it back unchanged, where deacon rejects it against the schema's closed value set. Characterized, not repaired — constitution IV is explicit that deacon validates modelled fields eagerly. The direction is pinned by the spec-expectation twin."
     },
     {
       "id": "case-readconfig-unsupported-enum-rejected",
@@ -3296,7 +3312,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "FR-040 unsupported class: `userEnvProbe` is a CLOSED enum in the pinned schema and `telepathy` is not one of its four values. The document is well-formed JSON and every field name is real \u2014 it names a value the format does not define \u2014 so this is not the malformed class, and deacon rejects it at configuration resolution with a diagnostic that names the offending variant and the permitted ones."
+      "notes": "FR-040 unsupported class: `userEnvProbe` is a CLOSED enum in the pinned schema and `telepathy` is not one of its four values. The document is well-formed JSON and every field name is real — it names a value the format does not define — so this is not the malformed class, and deacon rejects it at configuration resolution with a diagnostic that names the offending variant and the permitted ones."
     },
     {
       "id": "case-readconfig-workspace-file-present",
@@ -3348,7 +3364,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Declarative spec-expectation case (022-conformance-runner US3): exercises the allowlist-scoped filesystem observer \u2014 the workspace's .devcontainer/devcontainer.json is present after read-configuration. path_token normalization applies; no full-tree diff (clarify Q1)."
+      "notes": "Declarative spec-expectation case (022-conformance-runner US3): exercises the allowlist-scoped filesystem observer — the workspace's .devcontainer/devcontainer.json is present after read-configuration. path_token normalization applies; no full-tree diff (clarify Q1)."
     },
     {
       "id": "case-tier1-decl-bare-base-node-feature",
@@ -3391,7 +3407,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `bare-base-node-feature`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `bare-base-node-feature`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-build-args-subst",
@@ -3434,7 +3450,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `build-args-subst`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `build-args-subst`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-compose-array",
@@ -3478,7 +3494,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `compose-array`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `compose-array`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-compose-postgres",
@@ -3521,7 +3537,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `compose-postgres`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `compose-postgres`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-containerenv-subst",
@@ -3564,7 +3580,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `containerenv-subst`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `containerenv-subst`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-dependson-autoinstall",
@@ -3607,7 +3623,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `dependson-autoinstall`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `dependson-autoinstall`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-dockerfile-build",
@@ -3650,7 +3666,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `dockerfile-build`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `dockerfile-build`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-dotnet-mounts",
@@ -3693,7 +3709,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `dotnet-mounts`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `dotnet-mounts`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-extends-child",
@@ -3736,7 +3752,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `extends-child`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `extends-child`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-feature-order",
@@ -3779,7 +3795,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `feature-order`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `feature-order`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-go-minimal",
@@ -3825,7 +3841,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `go-minimal`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `go-minimal`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-init-privileged",
@@ -3868,7 +3884,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `init-privileged`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `init-privileged`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-lifecycle-arrays",
@@ -3911,7 +3927,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `lifecycle-arrays`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `lifecycle-arrays`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-lifecycle-mixed",
@@ -3954,7 +3970,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `lifecycle-mixed`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `lifecycle-mixed`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-mounts-bind-localenv",
@@ -3997,7 +4013,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `mounts-bind-localenv`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `mounts-bind-localenv`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-name-subst",
@@ -4040,7 +4056,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `name-subst`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `name-subst`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-node-ts",
@@ -4083,7 +4099,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `node-ts`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `node-ts`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-object-form-metadata",
@@ -4126,7 +4142,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `object-form-metadata`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `object-form-metadata`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-ports-mixed",
@@ -4171,7 +4187,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `ports-mixed`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `ports-mixed`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-python-features",
@@ -4214,7 +4230,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `python-features`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `python-features`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-ruby-node-feature",
@@ -4257,7 +4273,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `ruby-node-feature`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `ruby-node-feature`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-universal-jsonc",
@@ -4301,7 +4317,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `universal-jsonc`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `universal-jsonc`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-user-mapping",
@@ -4344,7 +4360,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `user-mapping`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `user-mapping`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     },
     {
       "id": "case-tier1-decl-workspacefolder-custom",
@@ -4387,7 +4403,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Tier-1 corpus case `workspacefolder-custom`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which \u2014 unlike the legacy `prune` path \u2014 does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+      "notes": "Tier-1 corpus case `workspacefolder-custom`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
     }
   ]
 }

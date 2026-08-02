@@ -83,7 +83,6 @@ async fn drive(group: ResourceGroup) {
         oracle: Some(oracle),
         fixtures_root: root.join("conformance").join("fixtures"),
         report_root: report_root(),
-        snapshots_root: root.join("conformance").join("snapshots"),
     });
 
     let run = ff(driver::drive_group(Arc::clone(&cfg), cases, group).await);
@@ -178,7 +177,6 @@ async fn tier_config(report_root: &std::path::Path) -> Arc<DriverConfig> {
         oracle: Some(oracle),
         fixtures_root: root.join("conformance").join("fixtures"),
         report_root: report_root.to_path_buf(),
-        snapshots_root: root.join("conformance").join("snapshots"),
     })
 }
 

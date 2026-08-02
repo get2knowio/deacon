@@ -3,7 +3,7 @@
 # The SINGLE lane that provisions the pinned reference `@devcontainers/cli` and
 # runs the live comparison. Every OTHER lane excludes the live parity binaries by
 # nextest profile, so status stays truthful (FR-014). The check appears as
-# `parity / live-certification` — a snapshot/replay mode, if ever added, MUST use
+# `parity / live-certification` — a record/replay mode, if ever added, MUST use
 # a distinct name and report `mode` (FR-017).
 #
 # Provisioning ONLY happens here; ALL pass/fail/gating logic lives in the harness
@@ -32,7 +32,6 @@ on:
       - 'crates/deacon/tests/consistency_*'
       - 'conformance/registry/**'
       - 'conformance/fixtures/**'
-      - 'conformance/snapshots/**'
       - 'fixtures/parity-corpus/**'
       - 'scripts/parity/**'
       - '.config/nextest.toml'
