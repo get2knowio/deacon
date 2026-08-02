@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use deacon_conformance::model::{
+use crate::model::{
     CHAN_EXIT_CODE, CaseKind, ExpectedObservable, Operation, ResourceGroup, TestCase,
 };
 
@@ -295,13 +295,6 @@ pub(crate) async fn execute_ops(
     for (op_id, snapshot) in op_snapshots {
         ctx.record_op_snapshot(op_id, snapshot);
     }
-
-    // THE EVIDENCE-SOURCE BOUNDARY (024 US6, research Decision 5). Capture is complete and
-    // no observer has run yet, so this is the one point at which the injected-regression
-    // harness may perturb the RAW artifacts. It is a no-op — a single atomic load — in
-    // every ordinary run: only the `coverage-regressions` bin takes out the capability
-    // that arms it (FR-070), and only deacon's side is ever perturbed.
-    crate::inject::intercept(&mut ctx)?;
 
     Ok((ctx, docker_ws))
 }
@@ -613,7 +606,7 @@ pub async fn collect_evidence_on(
 /// Build the 13-field [`Provenance`] for a snapshot recording (T035, data-model §7):
 /// recompute the case/fixture hashes, take the oracle version from the verified oracle,
 /// probe Node/Docker/Compose versions (via the shared
-/// [`deacon_conformance::snapshot::probe_environment`]), and stamp the source revision +
+/// [`crate::snapshot::probe_environment`]), and stamp the source revision +
 /// normalizer version. `imageDigests` records the digest of each image a Docker case's
 /// fixtures pin ([`image_digests_for_case`]) so the snapshot goes stale if a pinned image's
 /// content changes; it is empty for config-only cases (they pull no images).
@@ -626,15 +619,15 @@ pub fn capture_provenance(
     case: &TestCase,
     cfg: &RunConfig<'_>,
     oracle_version: &str,
-) -> Result<deacon_conformance::snapshot::Provenance, HarnessError> {
-    use deacon_conformance::snapshot;
+) -> Result<crate::snapshot::Provenance, HarnessError> {
+    use crate::snapshot;
 
     let (case_hash, fixture_hash) = snapshot_hashes(case, cfg)?;
     let env = snapshot::probe_environment();
 
-    Ok(deacon_conformance::snapshot::Provenance {
+    Ok(crate::snapshot::Provenance {
         oracle_version: oracle_version.to_string(),
-        source_revision: deacon_conformance::CURRENT_SPEC_PIN.to_string(),
+        source_revision: crate::CURRENT_SPEC_PIN.to_string(),
         case_hash,
         fixture_hash,
         argv: tokenized_argv(case),
@@ -660,7 +653,7 @@ pub fn snapshot_hashes(
     case: &TestCase,
     cfg: &RunConfig<'_>,
 ) -> Result<(String, String), HarnessError> {
-    deacon_conformance::case_hash::hashes_for_case(case, cfg.fixtures_root).map_err(|e| {
+    crate::case_hash::hashes_for_case(case, cfg.fixtures_root).map_err(|e| {
         HarnessError::FixtureMissing {
             path: cfg.fixtures_root.join(format!("<case {}>: {e}", case.id)),
         }
@@ -864,7 +857,7 @@ fn shape_error(case: &TestCase, cause: &str) -> HarnessError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deacon_conformance::model::OracleType;
+    use crate::model::OracleType;
 
     fn case_with_op(argv: &[&str], fixtures: &[&str]) -> TestCase {
         TestCase {

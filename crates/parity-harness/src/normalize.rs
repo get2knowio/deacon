@@ -61,13 +61,13 @@ use crate::exec::Side;
 /// staleness (FR-030). It is bumped whenever ANY named normalization rule changes so a
 /// snapshot recorded under an older normalizer replays as stale (data-model §7).
 ///
-/// SINGLE SOURCE OF TRUTH: re-exported from [`deacon_conformance::snapshot`] so the
+/// SINGLE SOURCE OF TRUTH: re-exported from [`crate::snapshot`] so the
 /// snapshot provenance (conformance, the lower crate) and this normalizer never drift.
 /// `"1"` was the T011 pass-through; `"2"` is the US3 named-rule normalizer. The runner
 /// stamps it into the verdict report (`VerdictReport::new`) and the refresh bin records
 /// it into `Provenance.normalizerVersion`; staleness compares the recorded value
 /// against it (T032).
-pub use deacon_conformance::snapshot::NORMALIZER_VERSION;
+pub use crate::snapshot::NORMALIZER_VERSION;
 
 /// The FINITE, ENUMERATED key names [`drop_absent_optional`] may remove when their value
 /// carries no information (023 T062).
@@ -382,7 +382,7 @@ pub fn normalize_channel(
 /// derived from the per-side temp workspace name. Every other channel gets the plain
 /// full-path map, so this change cannot alter what any existing channel compares.
 pub fn tokens_for_channel(channel: &str, workspace: &Path) -> TokenMap {
-    if channel == deacon_conformance::model::CHAN_CONTAINER_STATE {
+    if channel == crate::model::CHAN_CONTAINER_STATE {
         TokenMap::workspace_with_basename(workspace)
     } else {
         TokenMap::workspace(workspace)
@@ -392,7 +392,7 @@ pub fn tokens_for_channel(channel: &str, workspace: &Path) -> TokenMap {
 /// Apply the named rules the contract lists for `channel` (observer-channel.md). An
 /// unknown channel is identity (never blanket-removed).
 fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap, side: Side) -> Value {
-    use deacon_conformance::model::{
+    use crate::model::{
         CHAN_CONTAINER_STATE, CHAN_EXIT_CODE, CHAN_FILE_CONTENT, CHAN_FILESYSTEM, CHAN_IMAGE,
         CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_STDERR, CHAN_STDOUT,
         CHAN_STRUCTURED_OUTPUT, CHAN_TEMPORAL,
@@ -1420,7 +1420,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    use deacon_conformance::model::{
+    use crate::model::{
         CHAN_EXIT_CODE, CHAN_IMAGE, CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_STDOUT,
         CHAN_STRUCTURED_OUTPUT,
     };
@@ -1654,7 +1654,7 @@ mod tests {
         // path derived from the basename differs. `TokenMap::workspace` alone cannot
         // reach it (the container path never contains the host path), so the two sides
         // would diverge on a mount KEY that is an artifact of the runner's isolation.
-        use deacon_conformance::model::CHAN_CONTAINER_STATE;
+        use crate::model::CHAN_CONTAINER_STATE;
         let state = |name: &str| {
             json!({
                 "mounts": { format!("/workspaces/{name}"): { "mountType": "bind", "ro": false, "sourceTail": name } },

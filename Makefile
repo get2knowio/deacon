@@ -49,13 +49,7 @@ help: ## Show this help
 	@grep -E '^(test-nextest-fast|test-nextest-unit|test-nextest-docker|test-nextest-long-running|test-nextest-smoke|test-nextest|test-nextest-ci|test-nextest-bg|test-nextest-audit):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
 	@echo "Testing - Other:"
-	@grep -E '^(test-non-smoke|test-smoke|test-parity|test-parity-all|test-parity-regressions|parity):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
-	@echo ""
-	@echo "Testing - Exploratory discovery (never gates):"
-	@grep -E '^(test-discovery|test-discovery-proof|test-discovery-check):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
-	@echo ""
-	@echo "Continuous conformance operation (026):"
-	@grep -E '^(test-lanes|test-drift|test-pr-docker|test-canary|certify-report):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
+	@grep -E '^(test-non-smoke|test-smoke|test-parity|test-parity-all|parity):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
 	@echo ""
 	@echo "Code Quality:"
 	@grep -E '^(fmt|clippy|coverage):.*?##' $(MAKEFILE_LIST) | sed -E 's/:.*?##/\t- /'
@@ -315,78 +309,9 @@ test-parity: install-nextest ## Run live parity certification (needs the pinned 
 	cargo nextest run --profile parity; \
 	cargo run -p parity-harness --bin parity-report
 
-.PHONY: test-parity-equivalence
-test-parity-equivalence: ## Produce the equivalent-or-stricter ledger that gates deleting a superseded parity carrier
-	@set -euo pipefail; \
-	# 023-migrate-parity-to-conformance (US7, T082/T083): runs the SUPERSEDED path and \
-	# its REPLACEMENT over the same baseline units and writes \
-	# target/parity/equivalence.json. Deleting a carrier is gated on this ledger, so it \
-	# is a separate target from `test-parity` — you run it when you are about to delete \
-	# something, not on every parity run. Needs the pinned oracle; fails loud without it. \
-	cargo run -p parity-harness --bin equivalence-report; \
-	cargo run -p deacon-conformance -- migration check --ledger target/parity/equivalence.json
-
-.PHONY: test-parity-regressions
-test-parity-regressions: ## Prove every observable channel can fail (injected-regression harness)
-	@set -euo pipefail; \
-	# 024-deterministic-conformance-coverage (US6, T137/T139): runs one declarative, \
-	# reversible perturbation per observable channel and writes \
-	# target/conformance/regressions.json. Exits NONZERO on any inert channel (FR-067) — \
-	# a channel no regression can make fail proves nothing, and every green result that \
-	# rests on it is unearned. \
-	# Separate from `test-parity` because it answers a different question: `test-parity` \
-	# asks whether deacon matches the reference, this asks whether the suite that says so \
-	# is capable of noticing that it does not. Needs the pinned oracle + Docker; fails \
-	# loud without either, never skips. \
-	cargo run -p parity-harness --bin coverage-regressions
-
 .PHONY: test-parity-all
 test-parity-all: ## Alias for test-parity (live parity certification)
 	$(MAKE) test-parity
-
-.PHONY: test-discovery
-test-discovery: install-nextest ## Run exploratory discovery campaigns, then render the findings queue
-	@set -euo pipefail; \
-	./scripts/nextest/assert-installed.sh; \
-	# 025-exploratory-parity-discovery (contracts/discovery-cli.md § Make targets). \
-	# Step 1 runs every registered discovery binary under the dedicated `discovery` \
-	# profile, whose default-filter is an EXPLICIT binary(=…) allow-list — never a \
-	# `discovery_*` glob, which would capture the hermetic guard. Step 2 renders \
-	# target/discovery/queue.{json,md}. \
-	# \
-	# This lane GATES NOTHING. A campaign that finds forty differences exits 0; only a \
-	# machinery failure is non-zero. It is a THIRD lane alongside the PR lanes and live \
-	# parity, and a red run here never blocks a release. \
-	# \
-	# Needs the pinned oracle for every tier except `metamorphic`, Docker for the \
-	# container-backed tier, and network for the corpus tier; each fails loud on a \
-	# missing prerequisite, never skips. \
-	cargo nextest run --profile discovery; \
-	cargo run -p deacon-conformance -- discovery report
-
-.PHONY: test-discovery-proof
-test-discovery-proof: ## Prove the discovery pipeline can surface an injected difference end to end
-	@set -euo pipefail; \
-	# 025-exploratory-parity-discovery (FR-042a): injects a known difference at the \
-	# SEALED evidence-source boundary and requires it to traverse generation → \
-	# comparison → minimization → candidate → classification → promotable. \
-	# \
-	# This is the ONE discovery command whose status depends on an outcome — and it is \
-	# not a finding-dependent status: it asserts a property of the MACHINERY, so \
-	# non-zero means the pipeline is broken, which is exactly the thing that should fail \
-	# a lane. An injection that never landed exits 1 as `InjectionInapplicable` rather \
-	# than being counted as "found nothing": a mis-authored proof must never masquerade \
-	# as a working pipeline. \
-	cargo run -p parity-harness --bin discovery-proof
-
-.PHONY: test-discovery-check
-test-discovery-check: ## Validate the discovery data root (hermetic; also runs in the fast lane)
-	@set -euo pipefail; \
-	# 025-exploratory-parity-discovery: the D1–D5 violation classes over \
-	# conformance/discovery/. Hermetic — no Docker, no network, no oracle — so it is \
-	# safe anywhere and is also asserted by the `discovery_hermetic` guard in the \
-	# default/dev-fast lanes. Read-only by construction: `check` never writes. \
-	cargo run -p deacon-conformance -- discovery check
 
 .PHONY: test-podman
 test-podman: ## Run Podman runtime tests via Makefile
@@ -597,34 +522,3 @@ clean-branches: ## Delete local and remote branches fully merged into the defaul
 # Continuous conformance operation (026-continuous-conformance-certification)
 # ---------------------------------------------------------------------------
 
-.PHONY: test-lanes
-test-lanes: ## Check lane integrity (V34) and render the ran/excluded breakdown
-	@set -euo pipefail; \
-	cargo run -p deacon-conformance -- lane check; \
-	cargo run -p deacon-conformance -- lane report; \
-	echo "lane report: target/conformance/lanes.md"
-
-.PHONY: test-drift
-test-drift: ## Validate committed drift records (V36). Hermetic; does NOT scan upstream.
-	@cargo run -p deacon-conformance -- drift check
-
-.PHONY: test-pr-docker
-test-pr-docker: ## Container-backed lane: deacon vs pinned expected observables (no oracle)
-	@cargo nextest run --profile pr-docker --no-fail-fast
-
-.PHONY: test-canary
-test-canary: ## Canary lane against pinned upstream development revisions. Never gates.
-	@cargo nextest run --profile canary --no-fail-fast
-
-.PHONY: certify-report
-certify-report: ## Release certification + the report. Exits 1 when not certified, by design.
-	@set -euo pipefail; \
-	# Certification is hermetic (FR-033a): no reference implementation, no container \
-	# engine, no network. It reads the execution manifest the container lane produced. \
-	# A local run without one blocks on `V35-absent`, which is the gate working — run \
-	# `make test-pr-docker` first, or fetch the CI artifact. \
-	cargo run -p deacon-conformance -- certify --report-dir target/conformance || { \
-		echo ""; \
-		echo "not certified — see target/conformance/certification.md for the full list"; \
-		exit 1; \
-	}

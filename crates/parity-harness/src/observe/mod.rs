@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use deacon_conformance::model::{
+use crate::model::{
     CHAN_EXIT_CODE, CHAN_FILE_CONTENT, CHAN_FILESYSTEM, CHAN_STDERR, CHAN_STDOUT,
     CHAN_STRUCTURED_OUTPUT, FailurePhase, Operation,
 };
@@ -213,7 +213,7 @@ pub trait ChannelObserver {
 /// US1 wires the four CLI-process channels; US3 the filesystem channels; US5 the four
 /// Docker channels.
 pub fn observer_for(channel: &str) -> Option<Box<dyn ChannelObserver>> {
-    use deacon_conformance::model::{
+    use crate::model::{
         CHAN_CONTAINER_STATE, CHAN_IMAGE, CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_TEMPORAL,
     };
     match channel {

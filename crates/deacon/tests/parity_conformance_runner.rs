@@ -22,9 +22,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use deacon_conformance::default_registry_dir;
-use deacon_conformance::load::Registry;
-use deacon_conformance::model::ResourceGroup;
+use parity_harness::default_registry_dir;
+use parity_harness::load::Registry;
+use parity_harness::model::ResourceGroup;
 
 use parity_harness::driver::{self, DriverConfig};
 use parity_harness::oracle::Oracle;

@@ -12,7 +12,7 @@
 use parity_harness::exec::Side;
 use std::process::Command;
 
-use deacon_conformance::model::{
+use parity_harness::model::{
     CHAN_IMAGE, CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_TEMPORAL, Operation,
 };
 use parity_harness::normalize::{TokenMap, normalize_channel};

@@ -16,11 +16,11 @@
 //! Hermetic: pure functions, synthetic cases, and (Unix) POSIX-shell stub binaries. No
 //! Docker, no network, no oracle.
 
-use deacon_conformance::model::{
+use parity_harness::HarnessError;
+use parity_harness::model::{
     CHAN_CONTAINER_STATE, CHAN_IMAGE, CHAN_TEMPORAL, ExpectedObservable, OBSERVED_CHANNELS,
     Operation, OracleType, ResourceGroup, TestCase,
 };
-use parity_harness::HarnessError;
 use parity_harness::observe::observer_for;
 
 // ---------------------------------------------------------------------------------
@@ -64,10 +64,18 @@ fn a_channel_with_no_observer_is_not_declared_observable() {
 /// therefore forces an explicit observable/not-observable decision here.
 #[test]
 fn observed_channels_is_exactly_the_set_with_an_observer() {
-    let registry =
-        deacon_conformance::load::Registry::load(&deacon_conformance::default_registry_dir())
-            .expect("the committed conformance registry loads");
-    let declared: Vec<&str> = registry.channels.iter().map(|c| c.id.as_str()).collect();
+    // Read `channels.json` directly: the slim loader carries scenarios only, and this
+    // assertion is precisely about the channel universe the scenarios are written against.
+    let path = parity_harness::default_registry_dir().join("channels.json");
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("channels.json must be readable at {}: {e}", path.display()));
+    let doc: serde_json::Value = serde_json::from_str(&raw).expect("channels.json is valid JSON");
+    let declared: Vec<&str> = doc["records"]
+        .as_array()
+        .expect("channels.json has a `records` array")
+        .iter()
+        .map(|c| c["id"].as_str().expect("each channel record has an `id`"))
+        .collect();
     for id in &declared {
         assert_eq!(
             observer_for(id).is_some(),
@@ -334,12 +342,12 @@ mod runner_faults {
         let mut case = unobservable_case();
         case.id = "case-partly-observable".to_string();
         case.expected.push(ExpectedObservable {
-            channel: deacon_conformance::model::CHAN_EXIT_CODE.to_string(),
+            channel: parity_harness::model::CHAN_EXIT_CODE.to_string(),
             operation: Some("op-read".to_string()),
             assertion: None,
         });
         case.expected.push(ExpectedObservable {
-            channel: deacon_conformance::model::CHAN_FILESYSTEM.to_string(),
+            channel: parity_harness::model::CHAN_FILESYSTEM.to_string(),
             operation: Some("op-read".to_string()),
             assertion: None,
         });
@@ -389,7 +397,7 @@ mod runner_faults {
                 ..Operation::default()
             }],
             expected: vec![ExpectedObservable {
-                channel: deacon_conformance::model::CHAN_EXIT_CODE.to_string(),
+                channel: parity_harness::model::CHAN_EXIT_CODE.to_string(),
                 operation: Some("op-read".to_string()),
                 assertion: None,
             }],

@@ -18,8 +18,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use deacon_conformance::model::OracleType;
-use deacon_conformance::snapshot::Provenance;
+use crate::model::OracleType;
+use crate::snapshot::Provenance;
 
 use crate::HarnessError;
 
@@ -326,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_snapshot_is_atomic_and_leaves_no_trailing_bytes() {
-        use deacon_conformance::snapshot::Provenance;
+        use crate::snapshot::Provenance;
         let dir = tempfile::tempdir().expect("tempdir");
         let mut prov = Provenance {
             oracle_version: "0.87.0".to_string(),

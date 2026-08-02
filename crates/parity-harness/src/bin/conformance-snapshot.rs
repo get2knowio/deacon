@@ -15,9 +15,9 @@
 
 use std::process::ExitCode;
 
-use deacon_conformance::load::Registry;
-use deacon_conformance::model::{CaseKind, OracleType, TestCase};
-use deacon_conformance::{default_registry_dir, snapshot, workspace_root};
+use parity_harness::load::Registry;
+use parity_harness::model::{CaseKind, OracleType, TestCase};
+use parity_harness::{default_registry_dir, snapshot, workspace_root};
 
 use parity_harness::exec::Side;
 use parity_harness::oracle::Oracle;

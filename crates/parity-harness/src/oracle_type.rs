@@ -12,8 +12,8 @@
 //! invariant/metamorphic evaluation in US6 (T068/T069). Until then those two types are
 //! fail-loud (`HarnessError`), never a silent skip.
 
-use deacon_conformance::model::{ExpectedObservable, OracleType, TestCase};
-use deacon_conformance::snapshot;
+use crate::model::{ExpectedObservable, OracleType, TestCase};
+use crate::snapshot;
 
 use crate::HarnessError;
 use crate::compare::{Tolerances, verdict_differential, verdict_spec_expectation};
@@ -175,13 +175,13 @@ async fn live_differential(
 /// inspected. Requiring "at least one channel overall" is satisfied by `chan-exit-code`
 /// alone, which is why it must be required PER GROUP instead.
 const RUNTIME_DERIVED_CHANNELS: &[&str] = &[
-    deacon_conformance::model::CHAN_CONTAINER_STATE,
-    deacon_conformance::model::CHAN_IMAGE,
-    deacon_conformance::model::CHAN_PROCESS_GRAPH,
-    deacon_conformance::model::CHAN_INJECTED_PROCESS,
-    deacon_conformance::model::CHAN_TEMPORAL,
-    deacon_conformance::model::CHAN_FILESYSTEM,
-    deacon_conformance::model::CHAN_FILE_CONTENT,
+    crate::model::CHAN_CONTAINER_STATE,
+    crate::model::CHAN_IMAGE,
+    crate::model::CHAN_PROCESS_GRAPH,
+    crate::model::CHAN_INJECTED_PROCESS,
+    crate::model::CHAN_TEMPORAL,
+    crate::model::CHAN_FILESYSTEM,
+    crate::model::CHAN_FILE_CONTENT,
 ];
 
 /// Fail loud when a case's declared channels were not actually observed (024 Phase 3,
@@ -285,7 +285,7 @@ async fn snapshot_oracle(case: &TestCase, cfg: &RunConfig<'_>) -> Result<Evaluat
     let mut current = snap.provenance.clone();
     current.case_hash = case_hash;
     current.fixture_hash = fixture_hash;
-    current.source_revision = deacon_conformance::CURRENT_SPEC_PIN.to_string();
+    current.source_revision = crate::CURRENT_SPEC_PIN.to_string();
     current.normalizer_version = snapshot::NORMALIZER_VERSION.to_string();
     if let Some(v) = snapshot::current_oracle_version_pin() {
         current.oracle_version = v;
@@ -394,10 +394,10 @@ async fn invariant_metamorphic(
 /// state needed to evaluate it is missing.
 fn evaluate_relationship(
     op_id: &str,
-    relationship: &deacon_conformance::model::Relationship,
+    relationship: &crate::model::Relationship,
     ctx: &crate::observe::RunContext,
 ) -> ChannelVerdict {
-    use deacon_conformance::model::{CHAN_TEMPORAL, RelationshipKind};
+    use crate::model::{CHAN_TEMPORAL, RelationshipKind};
 
     let temporal = CHAN_TEMPORAL.to_string();
     let this = ctx.op_snapshot(op_id);
@@ -496,7 +496,7 @@ fn all_channels(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deacon_conformance::model::OracleType;
+    use crate::model::OracleType;
 
     fn cfg<'a>(
         fixtures_root: &'a std::path::Path,
@@ -518,7 +518,7 @@ mod tests {
         let case = TestCase {
             id: "case-x".to_string(),
             oracle_type: Some(OracleType::InvariantMetamorphic),
-            operations: vec![deacon_conformance::model::Operation {
+            operations: vec![crate::model::Operation {
                 id: "op".to_string(),
                 subcommand: "read-configuration".to_string(),
                 ..Default::default()
@@ -531,8 +531,8 @@ mod tests {
 
     #[test]
     fn evaluate_relationship_verdicts_on_the_declared_relationship() {
+        use crate::model::{Relationship, RelationshipKind};
         use crate::observe::{OpSnapshot, RunContext};
-        use deacon_conformance::model::{Relationship, RelationshipKind};
 
         let running =
             serde_json::json!({ "status": "running", "running": true, "restartCount": 0 });
@@ -561,7 +561,7 @@ mod tests {
         // The relationship HOLDS: same single running container → agree (NOT a fixed value).
         let held = evaluate_relationship("op-up-2", &rel, &ctx);
         assert_eq!(held.outcome, Outcome::Agree, "idempotence holds: {held:?}");
-        assert_eq!(held.channel, deacon_conformance::model::CHAN_TEMPORAL);
+        assert_eq!(held.channel, crate::model::CHAN_TEMPORAL);
 
         // If op-up-2 had RECREATED the container (different id), idempotence is VIOLATED.
         let mut ctx2 = RunContext::new(std::path::PathBuf::from("/tmp"));
@@ -625,13 +625,13 @@ mod tests {
         let case = TestCase {
             id: "case-missing-snap".to_string(),
             oracle_type: Some(OracleType::Snapshot),
-            operations: vec![deacon_conformance::model::Operation {
+            operations: vec![crate::model::Operation {
                 id: "op".to_string(),
                 subcommand: "read-configuration".to_string(),
                 ..Default::default()
             }],
-            expected: vec![deacon_conformance::model::ExpectedObservable {
-                channel: deacon_conformance::model::CHAN_EXIT_CODE.to_string(),
+            expected: vec![crate::model::ExpectedObservable {
+                channel: crate::model::CHAN_EXIT_CODE.to_string(),
                 operation: Some("op".to_string()),
                 assertion: None,
             }],
@@ -653,13 +653,13 @@ mod tests {
         let case = TestCase {
             id: "case-x".to_string(),
             oracle_type: Some(OracleType::LiveDifferential),
-            operations: vec![deacon_conformance::model::Operation {
+            operations: vec![crate::model::Operation {
                 id: "op".to_string(),
                 subcommand: "read-configuration".to_string(),
                 ..Default::default()
             }],
-            expected: vec![deacon_conformance::model::ExpectedObservable {
-                channel: deacon_conformance::model::CHAN_EXIT_CODE.to_string(),
+            expected: vec![crate::model::ExpectedObservable {
+                channel: crate::model::CHAN_EXIT_CODE.to_string(),
                 operation: None,
                 assertion: None,
             }],

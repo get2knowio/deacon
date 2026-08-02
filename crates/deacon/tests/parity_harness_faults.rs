@@ -688,9 +688,9 @@ fn n_accept_vs_reject_difference_preserves_direction() {
 /// the verdict at `Diverge`.
 #[test]
 fn o_allowed_difference_is_distinct_from_agree_and_names_its_backing_id() {
-    use deacon_conformance::model::AllowedDifference;
     use parity_harness::compare::{Tolerances, verdict_differential};
     use parity_harness::evidence::{NormalizedChannelEvidence, Outcome as DeclOutcome};
+    use parity_harness::model::AllowedDifference;
 
     fn evidence(value: serde_json::Value) -> NormalizedChannelEvidence {
         NormalizedChannelEvidence {
@@ -824,7 +824,7 @@ fn p_no_reference_for_platform_is_its_own_outcome() {
 /// `Agree`.
 #[test]
 fn q_stale_snapshot_is_reported_naming_the_drifted_field() {
-    use deacon_conformance::snapshot::{Provenance, Staleness, compare_staleness};
+    use parity_harness::snapshot::{Provenance, Staleness, compare_staleness};
 
     // Built by deserialization so this test needs no `indexmap` dependency of its own —
     // the shape is the committed `provenance.json` shape.
@@ -837,7 +837,7 @@ fn q_stale_snapshot_is_reported_naming_the_drifted_field() {
         "dockerVersion": "29.0.0",
         "composeVersion": "2.0.0",
         "imageDigests": {},
-        "normalizerVersion": deacon_conformance::snapshot::NORMALIZER_VERSION,
+        "normalizerVersion": parity_harness::snapshot::NORMALIZER_VERSION,
         "argv": ["read-configuration"],
         "platform": "linux",
         "arch": "x86_64",

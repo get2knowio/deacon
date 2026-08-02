@@ -7,7 +7,7 @@
 //! [`ProcessOutcome`] on the [`RunContext`]; this observer reads that outcome and maps
 //! it to per-channel [`RawChannelEvidence`]. It never re-runs the command.
 
-use deacon_conformance::model::{
+use crate::model::{
     CHAN_EXIT_CODE, CHAN_STDERR, CHAN_STDOUT, CHAN_STRUCTURED_OUTPUT, FailurePhase, Operation,
 };
 

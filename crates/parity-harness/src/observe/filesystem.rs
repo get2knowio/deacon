@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use deacon_conformance::model::{CHAN_FILE_CONTENT, CHAN_FILESYSTEM, Operation};
+use crate::model::{CHAN_FILE_CONTENT, CHAN_FILESYSTEM, Operation};
 use serde_json::{Map, Value};
 
 use crate::HarnessError;

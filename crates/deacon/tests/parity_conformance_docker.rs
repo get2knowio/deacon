@@ -29,9 +29,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use deacon_conformance::default_registry_dir;
-use deacon_conformance::load::Registry;
-use deacon_conformance::model::ResourceGroup;
+use parity_harness::default_registry_dir;
+use parity_harness::load::Registry;
+use parity_harness::model::ResourceGroup;
 
 use parity_harness::driver::{self, DriverConfig, TIER_BUDGET};
 use parity_harness::oracle::Oracle;
@@ -149,7 +149,7 @@ async fn conformance_group_docker_exclusive() {
 // ---------------------------------------------------------------------------------
 
 /// The registry's error-path cases, id-sorted.
-fn error_path_cases() -> Vec<deacon_conformance::model::TestCase> {
+fn error_path_cases() -> Vec<parity_harness::model::TestCase> {
     let registry = Registry::load(&default_registry_dir())
         .unwrap_or_else(|e| panic!("conformance registry must load: {e}"));
     let mut cases: Vec<_> = registry
@@ -198,8 +198,8 @@ async fn tier_config(report_root: &std::path::Path) -> Arc<DriverConfig> {
 ///   statement about two observed behaviours rather than about one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_error_path_case_records_the_failing_stage_and_each_sides_outcome() {
-    use deacon_conformance::model::{CHAN_EXIT_CODE, OracleType};
     use parity_harness::evidence::Outcome;
+    use parity_harness::model::{CHAN_EXIT_CODE, OracleType};
 
     let reports = tempfile::tempdir().expect("tempdir");
     let cfg = tier_config(reports.path()).await;

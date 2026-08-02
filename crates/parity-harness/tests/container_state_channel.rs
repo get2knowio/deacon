@@ -18,9 +18,9 @@ use parity_harness::exec::Side;
 use std::collections::HashSet;
 use std::path::Path;
 
-use deacon_conformance::model::{CHAN_CONTAINER_STATE, OBSERVED_CHANNELS, Operation};
 use parity_harness::compare::{Tolerances, verdict_differential};
 use parity_harness::evidence::Outcome;
+use parity_harness::model::{CHAN_CONTAINER_STATE, OBSERVED_CHANNELS, Operation};
 use parity_harness::normalize::{TokenMap, normalize_channel, tokens_for_channel};
 use parity_harness::observe::container_state::ContainerStateObserver;
 use parity_harness::observe::{ChannelObserver, RunContext, observer_for};
@@ -390,7 +390,7 @@ fn a_per_cli_identity_label_difference_is_visible_and_must_be_characterized() {
     // project name reaches the derived `composeProjectResources`. Each is named
     // explicitly: a tolerance that covered them implicitly would be the blanket ignore
     // this mechanism replaces.
-    let path = |p: &str| deacon_conformance::model::AllowedDifference {
+    let path = |p: &str| parity_harness::model::AllowedDifference {
         behavior: "bhv-x".to_string(),
         context: vec![],
         observable_path: p.to_string(),

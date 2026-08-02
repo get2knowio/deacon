@@ -25,9 +25,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use deacon_conformance::load::Registry;
-use deacon_conformance::model::{CaseKind, ResourceGroup, TestCase};
-use deacon_conformance::{default_registry_dir, workspace_root};
+use parity_harness::load::Registry;
+use parity_harness::model::{CaseKind, ResourceGroup, TestCase};
+use parity_harness::{default_registry_dir, workspace_root};
 
 use parity_harness::HarnessError;
 use parity_harness::evidence::Outcome;
@@ -222,7 +222,7 @@ fn the_verdict_vocabulary_cannot_express_a_skip() {
 /// error-path cases so it cannot pass against a synthetic case shape that no longer ships.
 #[tokio::test]
 async fn an_error_path_differential_without_an_oracle_fails_loud() {
-    use deacon_conformance::model::OracleType;
+    use parity_harness::model::OracleType;
 
     let registry = real_registry();
     let differentials: Vec<&TestCase> = error_path_cases(&registry)

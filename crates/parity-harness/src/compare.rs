@@ -15,7 +15,7 @@
 
 use serde_json::{Value, json};
 
-use deacon_conformance::model::{
+use crate::model::{
     CHAN_CONTAINER_STATE, CHAN_EXIT_CODE, CHAN_FILE_CONTENT, CHAN_FILESYSTEM, CHAN_IMAGE,
     CHAN_INJECTED_PROCESS, CHAN_PROCESS_GRAPH, CHAN_STDERR, CHAN_STDOUT, CHAN_STRUCTURED_OUTPUT,
     CHAN_TEMPORAL,
@@ -105,14 +105,14 @@ pub fn verdict_differential(
 /// The scoped tolerances applicable to a case: its allowed differences plus the
 /// behaviors it links (a tolerance applies only under a linked behavior, FR-033).
 pub struct Tolerances<'a> {
-    allowed: &'a [deacon_conformance::model::AllowedDifference],
+    allowed: &'a [crate::model::AllowedDifference],
     behaviors: &'a [String],
 }
 
 impl<'a> Tolerances<'a> {
     /// Build the tolerance set for a case.
     pub fn new(
-        allowed: &'a [deacon_conformance::model::AllowedDifference],
+        allowed: &'a [crate::model::AllowedDifference],
         behaviors: &'a [String],
     ) -> Tolerances<'a> {
         Tolerances { allowed, behaviors }
@@ -126,10 +126,7 @@ impl<'a> Tolerances<'a> {
     /// The allowed difference covering `observable_path` — matched by a LINKED behavior
     /// and an `observablePath` that equals `observable_path` or is a segment-prefix of it
     /// (so `chan-image.labels` covers `chan-image.labels.foo`). `None` if uncovered.
-    fn covering(
-        &self,
-        observable_path: &str,
-    ) -> Option<&'a deacon_conformance::model::AllowedDifference> {
+    fn covering(&self, observable_path: &str) -> Option<&'a crate::model::AllowedDifference> {
         self.allowed.iter().find(|ad| {
             self.behaviors.contains(&ad.behavior)
                 && path_covers(&ad.observable_path, observable_path)
@@ -157,7 +154,7 @@ impl<'a> Tolerances<'a> {
 }
 
 /// The stable consumption key for a tolerance: `(behavior, observablePath)` (FR-033).
-fn tolerance_key(ad: &deacon_conformance::model::AllowedDifference) -> String {
+fn tolerance_key(ad: &crate::model::AllowedDifference) -> String {
     format!("{}\u{0}{}", ad.behavior, ad.observable_path)
 }
 
@@ -205,8 +202,7 @@ fn name_the_scalar_observable(channel: &str, paths: &mut [String]) {
 ///
 /// Closed and tiny on purpose: adding a channel here declares "this channel is one value",
 /// which is what makes a whole-channel tolerance specific rather than blanket.
-const SCALAR_OBSERVABLE: &[(&str, &str)] =
-    &[(deacon_conformance::model::CHAN_EXIT_CODE, "exitCode")];
+const SCALAR_OBSERVABLE: &[(&str, &str)] = &[(crate::model::CHAN_EXIT_CODE, "exitCode")];
 
 /// Collect the channel-prefixed dotted paths where `a` and `b` differ. Objects recurse
 /// key-wise; arrays/scalars that differ emit their path. `prefix` starts as the channel id.
@@ -679,7 +675,7 @@ mod tests {
         assert!(verdict_spec_expectation(CHAN_EXIT_CODE, &ev, &json!("not-an-object")).is_err());
     }
 
-    use deacon_conformance::model::AllowedDifference;
+    use crate::model::AllowedDifference;
     use std::collections::HashSet;
 
     fn no_tolerances() -> Tolerances<'static> {
@@ -753,11 +749,11 @@ mod tests {
     /// bare channel id, which no loadable `observablePath` can cover.
     #[test]
     fn a_stdout_divergence_is_not_made_addressable() {
-        let deacon = norm(deacon_conformance::model::CHAN_STDOUT, json!("a"));
-        let reference = norm(deacon_conformance::model::CHAN_STDOUT, json!("b"));
+        let deacon = norm(crate::model::CHAN_STDOUT, json!("a"));
+        let reference = norm(crate::model::CHAN_STDOUT, json!("b"));
         let mut consumed = HashSet::new();
         let verdict = verdict_differential(
-            deacon_conformance::model::CHAN_STDOUT,
+            crate::model::CHAN_STDOUT,
             &deacon,
             &reference,
             &no_tolerances(),

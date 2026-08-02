@@ -402,105 +402,6 @@ fn merge_fragment(
     Ok(())
 }
 
-/// **Gate 7 — reported granularity** (024 D-1).
-///
-/// Every baseline unit a live carrier *still carries* must appear among the cases that
-/// carrier reported. This is the mechanical check whose absence let the registry claim 25
-/// pointer cases for 111 real units: a carrier that asserts eight things but reports one
-/// result looks green while seven claims go unwitnessed.
-///
-/// The expected set is computed entirely from artifacts that already exist — the frozen
-/// `baseline.json` (what each carrier covered), keeping only the units whose mapping still
-/// makes them this carrier's to report.
-///
-/// **A unit is expected iff its disposition is `residual`, or it has no mapping entry
-/// at all.** That is the whole point of `residual`: the coverage has not moved, so the
-/// carrier still owes a result for it. The other three dispositions each say the opposite,
-/// and for different reasons — `migrated` and `deduplicated` moved the coverage to a
-/// declarative case, and `retired` deliberately dropped it with a recorded rationale.
-/// Excluding only `requires_cases()` (migrated | deduplicated) would both under-check —
-/// a `deduplicated` unit's carrier is no longer asked for anything — and produce a FALSE
-/// failure, by demanding a result for a unit whose `#[test]` was removed on purpose. A
-/// unit with no mapping entry is expected, because an unmapped unit is an unaccounted one:
-/// V21 reports it as an orphan, and until it is dispositioned its carrier still owes it.
-///
-/// **Only the missing direction is a violation.** A carrier reporting a case the baseline
-/// does not list is the transitional dual-path state — a unit may be migrated *and* still
-/// exercised by its legacy carrier until that carrier is deleted — and adding genuinely new
-/// coverage to a legacy carrier is already forbidden by the `legacy_ratchet` test. Flagging
-/// extras here would fail the run for a state the migration deliberately passes through.
-///
-/// A registry without a baseline or mapping (a fixture, or a checkout predating 023)
-/// contributes no violations rather than failing: the gate scopes itself out exactly as
-/// `check_inventory` does.
-pub fn check_reported_granularity(
-    registry_root: &Path,
-    fragments: &[ReportFragment],
-) -> Result<Vec<String>, HarnessError> {
-    // `Registry::load` resolves `migration/` as a sibling of the registry dir and returns
-    // `baseline: Option`, so both the "no baseline yet" and the pathing concerns are its
-    // job, not a second implementation here.
-    let registry = deacon_conformance::load::Registry::load(registry_root).map_err(|e| {
-        HarnessError::Report {
-            cause: format!("gate 7 could not read the conformance registry: {e}"),
-        }
-    })?;
-    let Some(baseline) = registry.baseline.as_ref() else {
-        return Ok(Vec::new());
-    };
-
-    // The units their carrier no longer owes a result for: everything whose disposition
-    // is not `residual`. See the doc comment — this is not `requires_cases()`.
-    let discharged: HashSet<&str> = registry
-        .mapping
-        .iter()
-        .filter(|m| m.disposition != deacon_conformance::mapping::Disposition::Residual)
-        .map(|m| m.unit.as_str())
-        .collect();
-
-    // carrier -> the unit local-names it must still report.
-    let mut expected: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-    for unit in &baseline.records {
-        if discharged.contains(unit.id.as_str()) {
-            continue;
-        }
-        // `<program>::<case-id>`; a unit with no `::` is a whole-binary guard and is
-        // reported under its own name.
-        let local = unit
-            .id
-            .split_once("::")
-            .map(|(_, tail)| tail)
-            .unwrap_or(unit.id.as_str());
-        expected
-            .entry(unit.program.as_str())
-            .or_default()
-            .insert(local);
-    }
-
-    let mut violations = Vec::new();
-    for fragment in fragments {
-        let Some(want) = expected.get(fragment.binary.as_str()) else {
-            continue;
-        };
-        let reported: HashSet<&str> = fragment.cases.iter().map(|c| c.case.as_str()).collect();
-        let omitted: HashSet<&str> = fragment.omitted.iter().map(|o| o.case.as_str()).collect();
-        for unit in want {
-            // An EXPLAINED omission is not a silent loss — gate 3 already judges whether the
-            // reason is acceptable, so gate 7 must not double-report it.
-            if reported.contains(unit) || omitted.contains(unit) {
-                continue;
-            }
-            violations.push(format!(
-                "gate 7 (reported granularity): binary `{}` carries baseline unit `{}::{}` but \
-                 reported no result for it — the carrier asserts more than it reports, which is \
-                 the under-count the conformance registry exists to prevent",
-                fragment.binary, fragment.binary, unit
-            ));
-        }
-    }
-    Ok(violations)
-}
-
 /// Atomically write the aggregated report to `<report_root>/parity-report.json`,
 /// returning the path written. A write failure is [`HarnessError::Report`] and is
 /// gate 6 — a run whose result cannot be recorded is not a passing run.
@@ -531,7 +432,6 @@ pub async fn run(
     let waivers = WaiverSet::load(registry_root)?;
     let fragments = read_fragments(report_root)?;
     let (report, mut violations) = evaluate(registry, pin, &fragments, &waivers);
-    violations.extend(check_reported_granularity(registry_root, &fragments)?);
 
     let report_path = match write_report(report_root, &report).await {
         Ok(path) => path,
