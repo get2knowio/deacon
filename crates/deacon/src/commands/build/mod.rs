@@ -11,7 +11,7 @@ use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
 use anyhow::{Context, Result, anyhow};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::errors::{DeaconError, DockerError};
-use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
+use deacon_core::features::{FeatureMergeConfig, FeatureMerger, ResolvedFeature};
 use deacon_core::host_ca::{CorporateCaSet, discover_corporate_set};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -833,48 +833,75 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     // (`execute_compose_build_with_features` already built, tagged, and wrote the
     // lockfile), so only the Dockerfile / image-reference shapes need this
     // generic post-build layering pass.
-    let (image_id, feature_lockfile) = if features_present && !config.uses_compose() {
-        // Layer features on top of the just-built image. We pass a real tag
-        // (the deterministic `deacon-build:<hash>` tag, always applied by
-        // `execute_docker_build`) rather than the bare `sha256:...` image ID:
-        // the feature-install Dockerfile uses `FROM ${_DEV_CONTAINERS_BASE_IMAGE}`,
-        // and BuildKit interprets a bare `sha256:<digest>` as the remote repo
-        // `docker.io/library/sha256:<digest>` (pull-access-denied), whereas a
-        // local tag resolves to the just-built image.
-        let base_ref = result
-            .tags
-            .first()
-            .cloned()
-            .unwrap_or_else(|| result.image_id.clone());
-        let (feature_image, lockfile) = apply_features_and_lockfile(
-            &config,
-            &base_ref,
-            &workspace_folder,
-            &config_path,
-            host_ca_set.as_ref(),
-            args.build_output_mode,
+    let (image_id, feature_lockfile, resolved_features) =
+        if features_present && !config.uses_compose() {
+            // Layer features on top of the just-built image. We pass a real tag
+            // (the deterministic `deacon-build:<hash>` tag, always applied by
+            // `execute_docker_build`) rather than the bare `sha256:...` image ID:
+            // the feature-install Dockerfile uses `FROM ${_DEV_CONTAINERS_BASE_IMAGE}`,
+            // and BuildKit interprets a bare `sha256:<digest>` as the remote repo
+            // `docker.io/library/sha256:<digest>` (pull-access-denied), whereas a
+            // local tag resolves to the just-built image.
+            let base_ref = result
+                .tags
+                .first()
+                .cloned()
+                .unwrap_or_else(|| result.image_id.clone());
+            let (feature_image, lockfile, resolved_features) = apply_features_and_lockfile(
+                &config,
+                &base_ref,
+                &workspace_folder,
+                &config_path,
+                host_ca_set.as_ref(),
+                args.build_output_mode,
+            )
+            .await?;
+
+            // Re-point the base build's tags (the deterministic `deacon-build:<hash>`
+            // tag plus any `--image-name`s) at the feature-extended image. Without
+            // this, `--image-name` would still resolve to the pre-feature base image
+            // and the installed features would be invisible to consumers that pull
+            // the named tag.
+            for tag in &result.tags {
+                retag_image(&feature_image, tag).await?;
+            }
+
+            (feature_image, lockfile, resolved_features)
+        } else {
+            (result.image_id, None, Vec::new())
+        };
+
+    // #436: record `devcontainer.metadata` on the image this build produced —
+    // the entries a later `up` from that image, or VS Code / Zed / envbuilder,
+    // read to learn what the image carries. Compose builds produce their image
+    // through the compose path above and are not covered here.
+    //
+    // `--push`/`--output` builds may leave no local image to stamp, which is the
+    // same reason the base build skips `--iidfile` for them.
+    let mut metadata = result.metadata;
+    let image_id = if config.uses_compose() || args.push || args.output.is_some() {
+        image_id
+    } else {
+        let (reported, label) = stamp_devcontainer_metadata_label(
+            &image_id,
+            &result.tags,
+            &load_result.raw_config,
+            &resolved_features,
         )
         .await?;
-
-        // Re-point the base build's tags (the deterministic `deacon-build:<hash>`
-        // tag plus any `--image-name`s) at the feature-extended image. Without
-        // this, `--image-name` would still resolve to the pre-feature base image
-        // and the installed features would be invisible to consumers that pull
-        // the named tag.
-        for tag in &result.tags {
-            retag_image(&feature_image, tag).await?;
+        // Keep the reported labels describing the image that was actually produced;
+        // `metadata` was captured from the base build, before this label existed.
+        if let Some(label) = label {
+            metadata.insert("devcontainer.metadata".to_string(), label);
         }
-
-        (feature_image, lockfile)
-    } else {
-        (result.image_id, None)
+        reported
     };
 
     let final_result = BuildResult {
         image_id,
         tags: result.tags,
         build_duration: build_duration.as_secs_f64(),
-        metadata: result.metadata,
+        metadata,
         config_hash: config_hash.clone(),
         injected_ca_subjects: host_ca_set
             .as_ref()
@@ -1611,20 +1638,11 @@ async fn execute_image_reference_build(
         dockerfile_content.push('\n');
     }
 
-    // Add devcontainer metadata label.
-    // Per spec (devcontainers/cli#1199, v0.86.0), the label value is always a
-    // JSON array of partial-config entries, even when only a single entry is
-    // present. Consumers (VS Code, Zed, envbuilder) iterate and merge.
-    let metadata = serde_json::json!([{
-        "name": config.name.as_ref().unwrap_or(&"devcontainer".to_string()),
-        "image": image,
-    }]);
-    let metadata_str = serde_json::to_string(&metadata)?;
-    let escaped_metadata = metadata_str.replace('"', "\\\"");
-    dockerfile_content.push_str(&format!(
-        "LABEL \"devcontainer.metadata\"=\"{}\"\n",
-        escaped_metadata
-    ));
+    // No `devcontainer.metadata` LABEL here (#436): `name`/`image` are not
+    // metadata properties, and writing a value here would also mask the entries
+    // this base image inherits from `image`. The real label is stamped on the
+    // final image by `stamp_devcontainer_metadata_label`, which reads those
+    // inherited entries back off the built image.
 
     // Features (if any) are layered on top of this base by the post-build
     // `apply_features_and_lockfile` pass in `execute_build`: this synthetic
@@ -1708,7 +1726,9 @@ async fn retag_image(source: &str, target: &str) -> Result<()> {
 /// workspaces (`EROFS`/`EACCES`) the write is downgraded to a WARN so a
 /// read-only CI mount doesn't fail the build.
 ///
-/// Returns `(new_image_id, Some(lockfile_path))` on success.
+/// Returns `(new_image_id, Some(lockfile_path), resolved_features)` on success.
+/// The resolved Features are what `devcontainer.metadata` records one entry per
+/// (#436), so they travel back to the caller that stamps the label.
 #[instrument(skip(config))]
 async fn apply_features_and_lockfile(
     config: &DevContainerConfig,
@@ -1717,7 +1737,7 @@ async fn apply_features_and_lockfile(
     config_path: &Path,
     host_ca_set: Option<&CorporateCaSet>,
     build_output_mode: deacon_core::build::BuildOutputMode,
-) -> Result<(String, Option<PathBuf>)> {
+) -> Result<(String, Option<PathBuf>, Vec<ResolvedFeature>)> {
     use crate::commands::up::features_build::build_image_with_features;
     use deacon_core::build::BuildOptions;
     use deacon_core::container::ContainerIdentity;
@@ -1787,7 +1807,110 @@ async fn apply_features_and_lockfile(
         }
     };
 
-    Ok((feature_build.image_tag, written))
+    Ok((
+        feature_build.image_tag,
+        written,
+        feature_build.resolved_features,
+    ))
+}
+
+/// Stamp the `devcontainer.metadata` label the reference records on the image a
+/// build produces (#436). Returns the reference to report for that image and the
+/// label value written, if any.
+///
+/// The value comes from the SAME construction `up` stamps on containers —
+/// [`crate::commands::up::merged_config::container_metadata_entries`]: the entries
+/// the image already carries, then one per installed Feature, then the config
+/// pick. `raw_config` is the configuration as authored (pre-substitution), because
+/// this label travels with the image (#373).
+///
+/// It is a separate, metadata-only build (`FROM <image>` + `--label`) rather than
+/// a `--label` on the build that produced the image: the Feature entries are only
+/// known after the feature-layering pass, and the inherited entries are read back
+/// off the built image. When there is nothing to record, the reference writes no
+/// label at all — so neither do we, and no extra build runs.
+async fn stamp_devcontainer_metadata_label(
+    reported_image: &str,
+    tags: &[String],
+    raw_config: &DevContainerConfig,
+    features: &[ResolvedFeature],
+) -> Result<(String, Option<String>)> {
+    // `FROM` must name a tag: a bare `sha256:` digest makes BuildKit resolve it as
+    // the remote repository `docker.io/library/sha256` (#391). `tags` always holds
+    // the deterministic `deacon-build:<hash>` tag, already re-pointed at the
+    // feature-extended image when there was one.
+    let Some(from_ref) = tags.first() else {
+        return Ok((reported_image.to_string(), None));
+    };
+
+    let cli = deacon_core::docker::CliDocker::new();
+    let entries = crate::commands::up::merged_config::container_metadata_entries(
+        &cli, from_ref, raw_config, features,
+    )
+    .await;
+    if entries.is_empty() {
+        debug!("No devcontainer.metadata entries to record; leaving the label unset");
+        return Ok((reported_image.to_string(), None));
+    }
+    let metadata = serde_json::to_string(&serde_json::Value::Array(entries))
+        .context("Failed to serialize the devcontainer.metadata label")?;
+
+    let temp_dir = tempfile::tempdir().context("Failed to create devcontainer.metadata context")?;
+    let dockerfile_path = temp_dir.path().join("Dockerfile");
+    tokio::fs::write(&dockerfile_path, format!("FROM {}\n", from_ref))
+        .await
+        .context("Failed to write the devcontainer.metadata Dockerfile")?;
+
+    // Every tag that must resolve to the produced image, plus the reported
+    // reference when it is a tag of its own (the feature-extended image's).
+    let mut targets: Vec<&str> = tags.iter().map(String::as_str).collect();
+    let reported_is_digest = reported_image.starts_with("sha256:");
+    if !reported_is_digest && !targets.contains(&reported_image) {
+        targets.push(reported_image);
+    }
+
+    let mut build_args = vec![
+        "buildx".to_string(),
+        "build".to_string(),
+        "--load".to_string(),
+        // The `FROM` names an image that exists only in the local daemon store, so
+        // pin the docker-driver builder (same reason as `generate_build_args`, #391).
+        "--builder".to_string(),
+        "default".to_string(),
+        "--label".to_string(),
+        format!("devcontainer.metadata={}", metadata),
+        "-f".to_string(),
+        dockerfile_path.display().to_string(),
+    ];
+    for target in &targets {
+        build_args.push("-t".to_string());
+        build_args.push((*target).to_string());
+    }
+    build_args.push(temp_dir.path().display().to_string());
+
+    // Nothing to render: this build copies no layers and only rewrites the image
+    // config, so its output is captured for diagnostics rather than shown.
+    let stamped = cli
+        .build_image(
+            &build_args,
+            deacon_core::docker_retry::BuildIo::Captured(None),
+        )
+        .await
+        .context("Failed to stamp the devcontainer.metadata label on the built image")?;
+
+    debug!(
+        image = %stamped,
+        "Stamped devcontainer.metadata on the built image"
+    );
+
+    // The tags now name the stamped image; only a caller reporting a raw digest
+    // needs the new one.
+    let reported = if reported_is_digest {
+        stamped
+    } else {
+        reported_image.to_string()
+    };
+    Ok((reported, Some(metadata)))
 }
 
 /// Mirror of `up::helpers::is_readonly_fs_error` for build's write path. We
@@ -2052,17 +2175,11 @@ async fn execute_docker_build(
         build_args.push("--label".to_string());
         build_args.push(label);
 
-        // Add devcontainer metadata label (simplified for T011).
-        // Per spec (devcontainers/cli#1199, v0.86.0), the label value is always a
-        // JSON array of partial-config entries, even when only a single entry is
-        // present. Consumers (VS Code, Zed, envbuilder) iterate and merge.
-        let metadata_json = serde_json::json!([{
-            "configHash": config_hash,
-        }]);
-        let metadata_str = serde_json::to_string(&metadata_json)
-            .map_err(|e| anyhow!("Failed to serialize metadata: {}", e))?;
-        build_args.push("--label".to_string());
-        build_args.push(format!("devcontainer.metadata={}", metadata_str));
+        // `devcontainer.metadata` is NOT written here (#436). Its entries include
+        // one per installed Feature and the entries the base image already carries,
+        // neither of which is knowable before this build produces an image — so it
+        // is stamped by `stamp_devcontainer_metadata_label` once the final image
+        // (base, or feature-extended) exists.
 
         // Add user-specified labels
         for (key, value) in labels {
