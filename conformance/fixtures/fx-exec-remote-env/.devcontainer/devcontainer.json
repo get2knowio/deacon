@@ -1,0 +1,4 @@
+{
+  "name": "ParityExecEnv",
+  "image": "alpine:3.19"
+}

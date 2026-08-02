@@ -60,7 +60,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-040 boundary class for `exec`: a command that succeeds and writes NOTHING. Empty output is the edge of the stdout domain and is a different observation from output that was not captured — the distinction `present: false` exists to keep, and the one a comparison that treats empty as absent would silently lose."
+      "notes": "FR-040 boundary class for `exec`: a command that succeeds and writes NOTHING. Empty output is the edge of the stdout domain and is a different observation from output that was not captured \u2014 the distinction `present: false` exists to keep, and the one a comparison that treats empty as absent would silently lose."
     },
     {
       "id": "case-exec-compose-service",
@@ -364,7 +364,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-exec-dockerfile-running-cli-overlay`. Three sources of environment meet in one invocation — the image's own `ENV`, the configuration's `containerEnv`, and a `--remote-env` overlay — and all three must survive together. The `command -v conf-tool` PATH probe that used to share this argv now lives in case-exec-image-path-overlay. Splitting them was forced by the tolerance model, not by preference: the probe DOES diverge (deacon loses the image's `ENV PATH`), the divergence lands in arbitrary stdout TEXT, and a tolerance over the whole of `chan-stdout` is a wildcard by any reading — which is exactly why `chan-stdout` is excluded from SCALAR_OBSERVABLE. Keeping both subjects in one case would have meant either weakening that rule or letting a real divergence sit uncharacterized. Each case now has one subject, and the exit-code tolerance in the sibling is scoped to a case whose only exit code IS the PATH probe."
+      "notes": "Covers the high-risk triple `hrt-exec-dockerfile-running-cli-overlay`. Three sources of environment meet in one invocation \u2014 the image's own `ENV`, the configuration's `containerEnv`, and a `--remote-env` overlay \u2014 and all three must survive together. The `command -v conf-tool` PATH probe that used to share this argv now lives in case-exec-image-path-overlay. Splitting them was forced by the tolerance model, not by preference: the probe DOES diverge (deacon loses the image's `ENV PATH`), the divergence lands in arbitrary stdout TEXT, and a tolerance over the whole of `chan-stdout` is a wildcard by any reading \u2014 which is exactly why `chan-stdout` is excluded from SCALAR_OBSERVABLE. Keeping both subjects in one case would have meant either weakening that rule or letting a real divergence sit uncharacterized. Each case now has one subject, and the exit-code tolerance in the sibling is scoped to a case whose only exit code IS the PATH probe."
     },
     {
       "id": "case-exec-feature-path-ordering",
@@ -480,7 +480,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "The PATH half of the exec/dockerfile/cli-overlay pair, split out of case-exec-dockerfile-overlay so the divergence it carries is addressable by a scoped tolerance. The argv resolves the tool THROUGH A SHELL (`sh -c conf-tool`) rather than naming it as the exec argv, because those are two different lookups and only one of them is broken: `docker exec` resolves a bare argv against the container's own configuration and finds the tool on both sides, so `-- conf-tool` would pass vacuously. A shell inside the session reads `$PATH` as deacon handed it over, which is where the image's entry has gone missing — deacon exits 127, the reference runs the tool and exits 0. `sh -c` rather than `sh -lc` for the same reason: a login shell re-sources `/etc/profile`, which would put a third PATH in play and blur what the case is measuring. The earlier `command -v conf-tool` form was worse still — `command` is a shell BUILTIN, so as an exec argv it is not an executable at all and both CLIs failed identically with 127, agreeing about nothing. Characterized by bhv-exec-image-path-preserved / wvr-exec-image-path-dropped, tracked for fix at https://github.com/get2knowio/deacon/issues/370. No `scenarioContext`: the triple this exercises is already carried by its sibling, and declaring it twice would inflate the pairwise denominator with a combination nothing new is being learned about. When the fix lands, the tolerance stops being consumed and is reported stale, which is what forces it to be deleted alongside."
+      "notes": "The PATH half of the exec/dockerfile/cli-overlay pair, split out of case-exec-dockerfile-overlay so the divergence it carries is addressable by a scoped tolerance. The argv resolves the tool THROUGH A SHELL (`sh -c conf-tool`) rather than naming it as the exec argv, because those are two different lookups and only one of them is broken: `docker exec` resolves a bare argv against the container's own configuration and finds the tool on both sides, so `-- conf-tool` would pass vacuously. A shell inside the session reads `$PATH` as deacon handed it over, which is where the image's entry has gone missing \u2014 deacon exits 127, the reference runs the tool and exits 0. `sh -c` rather than `sh -lc` for the same reason: a login shell re-sources `/etc/profile`, which would put a third PATH in play and blur what the case is measuring. The earlier `command -v conf-tool` form was worse still \u2014 `command` is a shell BUILTIN, so as an exec argv it is not an executable at all and both CLIs failed identically with 127, agreeing about nothing. Characterized by bhv-exec-image-path-preserved / wvr-exec-image-path-dropped, tracked for fix at https://github.com/get2knowio/deacon/issues/370. No `scenarioContext`: the triple this exercises is already carried by its sibling, and declaring it twice would inflate the pairwise denominator with a combination nothing new is being learned about. When the fix lands, the tolerance stops being consumed and is reported stale, which is what forces it to be deleted alongside."
     },
     {
       "id": "case-exec-malformed-config-rejected",
@@ -531,7 +531,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-040 malformed class for `exec`: the target container is identified from the configuration, so a document that cannot be parsed stops the run before any container is looked up. The container-state is `none` deliberately — the case never gets far enough for one to exist."
+      "notes": "FR-040 malformed class for `exec`: the target container is identified from the configuration, so a document that cannot be parsed stops the run before any container is looked up. The container-state is `none` deliberately \u2014 the case never gets far enough for one to exist."
     },
     {
       "id": "case-exec-parity",
@@ -617,7 +617,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "FR-040 reference-lenient class for `exec`: the reference accepts a wrongly-typed `forwardPorts`, creates the container and then execs into it successfully; deacon refuses the document and never reaches the container. Same fixture, same waiver, one stage further along than the `up` case — which is the evidence that the leniency is not a read-time quirk."
+      "notes": "FR-040 reference-lenient class for `exec`: the reference accepts a wrongly-typed `forwardPorts`, creates the container and then execs into it successfully; deacon refuses the document and never reaches the container. Same fixture, same waiver, one stage further along than the `up` case \u2014 which is the evidence that the leniency is not a read-time quirk."
     },
     {
       "id": "case-exec-unsupported-missing-command",
@@ -674,6 +674,69 @@
         "tempdir": true
       },
       "notes": "FR-040 unsupported class for `exec`: the invocation is well-formed and the container is running, but the named executable does not exist inside it. Both CLIs must surface the container's own failure rather than substitute one of their own, and the exit code is where that shows."
+    },
+    {
+      "id": "case-exec-remote-env-propagation",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "scenarioContext": {
+        "sdim-operation": "exec",
+        "sdim-config-source": "image",
+        "sdim-container-state": "running",
+        "sdim-features": "none",
+        "sdim-layering": "single",
+        "sdim-output-mode": "human"
+      },
+      "inputClass": "valid",
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-remote-env"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remote-env",
+            "FOO=BAR",
+            "--",
+            "sh",
+            "-c",
+            "echo $FOO"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Ports `parity_exec::env-propagation` (res-exec-per-side-argv). A variable supplied with `--remote-env` must reach the command's environment on both sides. The residual recorded a need for PER-SIDE argument vectors, which was disproven: deacon declares `--remote-env` as the primary flag with `--env` as a legacy alias, so ONE shared argv exercises both CLIs. Measured before this case was written \u2014 both print `BAR`. Asserting stdout (not just the exit code) is the point: an exec that dropped the variable would still exit 0 and print an empty line."
     }
   ]
 }
