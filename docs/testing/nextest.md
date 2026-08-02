@@ -180,7 +180,7 @@ threads-required = 1
 
 **Characteristics:**
 - Compares deacon's behavior against the pinned upstream `@devcontainers/cli`
-  oracle (version in `fixtures/parity-corpus/oracle.json`)
+  oracle (version in `parity/oracle.json`)
 - Requires a controlled environment for deterministic comparison (the oracle on
   `PATH`, plus Docker for the container-backed groups)
 - Mildly throttled (`parity` = `max-threads 2`, `parity-cli` = `max-threads 8`)
@@ -221,7 +221,7 @@ fails the run with a cause-specific message.
 **Entry point:**
 ```bash
 # provision the pinned oracle once, then run the whole surface:
-npm install -g @devcontainers/cli@"$(jq -r .version fixtures/parity-corpus/oracle.json)"
+npm install -g @devcontainers/cli@"$(jq -r .version parity/oracle.json)"
 make test-parity
 ```
 
@@ -379,7 +379,7 @@ fn fs_heavy_large_tarball_extraction() { ... }
 fn smoke_basic_up_exec_down() { ... }
 
 // Parity: a scenario is DATA, not a test function — add a record to
-// conformance/registry/cases/<area>.json rather than a #[test] here.
+// parity/cases/<area>.json rather than a #[test] here.
 
 // Unit tests (default - no special prefix needed)
 #[test]

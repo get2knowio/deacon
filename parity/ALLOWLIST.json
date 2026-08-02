@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "bhv-compose-project-name-robust",
+      "summary": "deacon derives a valid, deacon-namespaced compose project name (deacon_<workspaceHash>_<configHash>) that docker compose always accepts and that does not collide with the reference's <folder>_devcontainer project, where the reference can emit an invalid or colliding name.",
+      "rationale": "Robustness differentiator (issue #265; docs/DIFFERENTIATORS.md). The reference derives <folder>_devcontainer verbatim, so a folder like `-myproj` yields an invalid --project-name docker compose rejects. deacon's derived name is always valid and isolated. Backed by case-up-compose-project-resources-differential, case-state-compose-feature-mounts and case-state-compose-sidecar-volume, each of which observes com.docker.compose.project and declares the name difference as a scoped tolerance rather than normalizing it away."
+    },
+    {
+      "id": "bhv-compose-service-image-independently-built",
+      "summary": "When a Compose service's image is extended with Features, each CLI builds that image itself, so Compose's `com.docker.compose.image` label records a different content digest on each side.",
+      "rationale": "Measured against oracle 0.87.0 on fx-state-compose-feature-mounts: deacon `sha256:2badca10…`, reference `sha256:35612053…`. The label carries a DIGEST of an image each side built separately from its own generated Dockerfile, so it differs by construction and can never agree — the same reason a built image's identity is not captured on `chan-image` at all. Comparing it would report a divergence on every run while saying nothing about behavior; what the two sides must agree on is what the image CONTAINS, which `env`, `user`, `workingDir` and the mount graph on this same channel do compare. Visible only when Features force a rebuild: the sibling case fx-state-compose-sidecar-volume runs the service image unmodified and this label agrees there, which is what keeps the tolerance from being a blanket excuse for the key."
+    },
+    {
+      "id": "bhv-container-keepalive-command",
+      "summary": "Both CLIs override the container command with a shell keep-alive that holds the container open for exec/lifecycle work and exits cleanly on SIGTERM; the command STRINGS differ. deacon uses `trap \"exit 0\" TERM INT; (sleep infinity || tail -f /dev/null) & wait $!`, the reference `echo Container started; trap \"exit 0\" 15; exec \"$@\"; while sleep 1 & wait $!; do :; done`.",
+      "rationale": "Classified as intentional ONLY because the observable behavior was measured equal, not because the difference looks cosmetic. `docker stop`: deacon 245 ms (single-container) / 138 ms (compose), reference 215 ms; exit code 0 on both sides. deacon's form additionally keeps the BusyBox fallback (`sleep infinity` is rejected on Alpine) and a PATH prefix that survives a feature rewriting PATH. An EARLIER version of this same field was recorded as intentional on the assumption that a keep-alive cannot matter behaviorally — that assumption was false and hid a 10,258 ms `docker stop` stall with a SIGKILL exit (fixed in e243921, T114). The difference between then and now is that the equivalence is measured."
+    },
+    {
+      "id": "ext-build-image-bookkeeping-label",
+      "summary": "deacon stamps one extra bookkeeping label, `org.deacon.configHash`, on the image a `build` produces; the reference CLI has no such label. Backs the scoped allowed-difference on the build image-discovery cases: the tolerance names that ONE key, never the `org.deacon.*` namespace."
+    },
+    {
+      "id": "ext-container-identity-labels",
+      "summary": "deacon records five extra identity/bookkeeping labels on a created container (configHash, config_name, name, source, workspaceHash) that the reference CLI has no concept of. Backs the scoped allowed-differences on the chan-container-state cases: each tolerance names ONE label key, never the devcontainer.* namespace."
+    },
+    {
+      "id": "ext-extends-resolution",
+      "summary": "deacon resolves the full `extends` chain eagerly across read-configuration/up/build (merging base config, rejecting missing/cyclic targets), an ahead-of-spec capability tracking the in-flight proposal devcontainers/spec#22 that the reference CLI v0.87.0 does not implement. Recorded as an extension so the extends divergences are never misreported as parity drift."
+    },
+    {
+      "id": "wvr-compose-project-file-set",
+      "summary": "Both CLIs layer a generated override on the workspace's Compose file and deliver it differently: deacon writes it to Compose's stdin, which Compose records as `-` in `com.docker.compose.project.config_files`; oracle 0.87.0 writes `/tmp/devcontainercli-vscode/docker-compose/docker-compose.devcontainer.containerFeatures-<id>.yml` and records that path.",
+      "rationale": "Both CLIs layer a generated override on the workspace's Compose file and deliver it differently: deacon writes it to Compose's stdin, which Compose records as `-` in `com.docker.compose.project.config_files`; oracle 0.87.0 writes `/tmp/devcontainercli-vscode/docker-compose/docker-compose.devcontainer.containerFeatures-<id>.yml` and records that path. `com.docker.compose.config-hash` differs as a direct consequence, because Compose hashes the merged file set. Neither delivery mechanism is spec-defined and neither is observable in the container beyond these two bookkeeping labels: the service, the project-relative network and volume, the mounts and the environment are all compared and all agree. Scoped to the two derived labels by name — the project NAME difference alongside them is a separate, separately backed tolerance (`bhv-compose-project-name-robust`), because an implementation could adopt either CLI's project naming and still deliver its override the other way.",
+      "added": "2026-07-26",
+      "expires": "2027-01-26",
+      "ruling": "unadjudicated"
+    },
+    {
+      "id": "wvr-container-metadata-label-serialization",
+      "summary": "The residual left after #373 closed the CONTENT difference in `devcontainer.metadata`: both values now record the same entries, and only their BYTE FORM differs.",
+      "rationale": "The residual left after #373 closed the CONTENT difference in `devcontainer.metadata`: both values now record the same entries, and only their BYTE FORM differs. Two causes, both measured at oracle 0.87.0 and both visible in the recorded pair above. (1) WHITESPACE: the reference emits `[ {…}, {…} ]` whenever the value reaches the container through an image build — written into a generated `LABEL` line and inherited — and compact `[{…}]` when it writes the container label directly (verified both ways). deacon always writes the container label directly, so it is always compact. Matching this would mean varying deacon's label formatting by whether an image build happened, mimicking an artifact of the reference's own build routing that no consumer can observe, since both parse to the same JSON. (2) KEY ORDER: deacon emits `containerEnv`/`remoteEnv` in `HashMap` iteration order rather than authored order, so a multi-key value is not byte-stable run-to-run. That one is a deacon defect, not an accepted difference — it is filed as `parity-drift` #394 and the fix (`IndexMap` on `DevContainerConfig`, ~366 references across 52 files) belongs in its own change; this waiver records it rather than hiding it. Scoped to the one label key on the two cases where an image build makes the difference visible — `case-state-dockerfile-nonroot` and `case-up-env-merge-differential`. The four other cases that reach this label WITHOUT an image build compare it byte-for-byte and MUST agree; their tolerances were deleted with #373 and their agreement is what proves the content fix. Self-invalidating: the moment deacon's label bytes match, this waiver reports stale.",
+      "added": "2026-07-29",
+      "expires": "2027-01-29",
+      "ruling": "fix deacon — https://github.com/get2knowio/deacon/issues/394"
+    },
+    {
+      "id": "wvr-discovery-named-subfolder",
+      "summary": "The spec's devcontainer-reference lists `.devcontainer/<folder>/devcontainer.json` (one level deep) as a discovery location.",
+      "rationale": "The spec's devcontainer-reference lists `.devcontainer/<folder>/devcontainer.json` (one level deep) as a discovery location. deacon searches it; the pinned reference v0.87.0 requires an explicit --config and exits non-zero. deacon is on the spec's side, so the difference is characterized rather than followed — the waiver records that the reference is blind to a location the spec names, and self-invalidates if a later oracle starts searching it.",
+      "added": "2026-07-26",
+      "expires": "2027-07-26"
+    },
+    {
+      "id": "wvr-malformed-json",
+      "summary": "JSONC with a hard syntax error.",
+      "rationale": "JSONC with a hard syntax error. deacon rejects at parse; the reference uses a recovering jsonc parser that accepts and drops whatever follows the break. ADJUDICATED 2026-08-02 and kept, with the measurements folded in because the original two-line rationale asserted the conclusion without them. deacon is NOT stricter than the format, only strict about it — measured against oracle 0.87.0 on four documents: line and block comments ACCEPTED by both; a trailing comma ACCEPTED by both; `\"features\":` with no value REJECTED by deacon, accepted by the reference; an unclosed object REJECTED by deacon, accepted by the reference. Everything valid JSONC permits, deacon takes. WHAT ACCEPTANCE COSTS: in the `\"features\":` document the author wrote a `features` key, and the reference's resolved configuration reports only `name` and `image` — the Features are gone, with no diagnostic and exit 0; the unclosed document loses everything after the break the same way. deacon reports `JSONC parsing error: Unexpected close brace on line 5 column 1`. That is the same failure shape this project refused to ship in its own code the day this was adjudicated (the duplicate-Features fix was held back precisely because it silently dropped a declared Feature — see gap-features-duplicate-in-one-document), so accepting here would put deacon on both sides of constitution IV. SPEC POSITION: devcontainer-reference.md names the format — metadata 'can be stored in a JSON with Comments file called devcontainer.json' — but says nothing about a file that is not valid JSONC, so the spec is genuinely silent and the behavior's `spec: unspecified` stands. Revisit if the spec ever defines recovery semantics for a malformed configuration, at which point deacon should follow it.",
+      "added": "2026-07-19",
+      "expires": "2027-01-19"
+    },
+    {
+      "id": "wvr-readconfig-authored-empty-omitted",
+      "summary": "Surfaced by the 024 US5 de-suppression, which narrowed `drop_absent_optional` to deacon's side.",
+      "rationale": "Surfaced by the 024 US5 de-suppression, which narrowed `drop_absent_optional` to deacon's side. While the rule ran on BOTH sides, an authored null, an authored empty collection and an omitted property all normalized to 'the key is absent on both sides', so the three FR-055 states produced ONE observation and the difference could not be seen. SHRUNK BY #398, which wrapped every modeled optional — including the eleven properties previously typed as bare collections — in `Option` with `skip_serializing_if`. Re-measured at oracle 0.87.0 on `fx-us5-null-empty-omitted`: `configuration.forwardPorts`, `configuration.containerEnv` and `nullEmptyOmitted.mounts` now AGREE, so their tolerances were DELETED rather than narrowed — a tolerance whose difference stopped reproducing is stale by design, and leaving it would suppress the next real difference on that path. WHAT IS STILL TOLERATED is the authored `\"name\": null`, on the raw key and on the derived FR-055 classification: deacon holds an authored null and an omission in the same `None`, so omitting unauthored optionals necessarily omits authored nulls too. That boundary MOVED rather than closed — before the fix both CLIs emitted `null` here and AGREED — which the pre-#398 version of this waiver predicted in as many words. Net: deacon went from ~40 unconditionally emitted keys to the 2 the reference emits for a minimal configuration, and the residual is one schema-invalid input shape. This remains a fidelity DEFECT, not a design choice, tracked at #398 with the remaining scope named there. Scoped to the named paths on the one case authored to demonstrate them; self-invalidates the moment a difference stops reproducing.",
+      "added": "2026-07-26",
+      "expires": "2027-01-26",
+      "ruling": "fix deacon — https://github.com/get2knowio/deacon/issues/398"
+    },
+    {
+      "id": "wvr-ruc-completed-hooks-not-rerun",
+      "summary": "Discovered by the 024 US4 error-path tier, which compares past the point where configuration read accepts on both sides.",
+      "rationale": "Discovered by the 024 US4 error-path tier, which compares past the point where configuration read accepts on both sides. `run-user-commands` re-runs the configured lifecycle commands on EVERY invocation in deacon; the reference records each hook's completion inside the container and skips one that already completed, reporting `{\"outcome\":\"success\"}` without running anything. Verified directly at oracle 0.87.0: after `devcontainer up`, a plain `devcontainer run-user-commands` does not re-run `postCreateCommand`, while after `devcontainer up --skip-post-create` it does — so the skip is keyed on completion, not on the command being absent. The observable consequence is confined to a FAILING hook: deacon exits non-zero and names the hook, the reference exits 0 having executed nothing, so the same broken setup is invisible on its side. deacon's direction is the one that keeps `run-user-commands` usable as an explicit re-run (its `--skip-post-create` / `--skip-post-attach` / `--skip-non-blocking-commands` flags are the opt-out, so silence would leave no way to ask for the work), and it is the direction the spec's account of lifecycle-command failure supports. Pinned in that direction by the `-direction` spec-expectation twins rather than by this waiver alone: a differential shows only that the two disagree.",
+      "added": "2026-07-26",
+      "expires": "2027-01-26"
+    },
+    {
+      "id": "wvr-unsupported-enum-values",
+      "summary": "deacon validates modelled fields against the pinned schema's closed enums during configuration resolution; the reference's read-configuration is a lenient parse-and-echo that accepts and prints the value back.",
+      "rationale": "deacon validates modelled fields against the pinned schema's closed enums during configuration resolution; the reference's read-configuration is a lenient parse-and-echo that accepts and prints the value back. This tolerance absorbs the REFERENCE's departure from the schema — bhv-readconfig-unsupported-enum-rejected is `follow-spec`, so nothing here waives a deacon deviation. It exists because the live-differential case would otherwise fail on a difference we expect to keep seeing, and it self-invalidates the day the reference starts validating.",
+      "added": "2026-07-26",
+      "expires": "2027-07-26"
+    },
+    {
+      "id": "wvr-upgrade-empty-feature-set",
+      "summary": "Asked to regenerate a lockfile for a configuration that declares no Features, the reference fails with `Failed to update lockfile` while deacon emits an empty lockfile and exits 0.",
+      "rationale": "Asked to regenerate a lockfile for a configuration that declares no Features, the reference fails with `Failed to update lockfile` while deacon emits an empty lockfile and exits 0. devcontainer-lockfile.md describes the lockfile document and nowhere makes an empty Feature set an error, so this tolerance absorbs the REFERENCE's departure from it — bhv-upgrade-empty-feature-set is `follow-spec`, so nothing here waives a deacon deviation. Unlike its read-configuration siblings the reference is the stricter side, but the direction of the deviation is the same. It exists because the live-differential case would otherwise fail on a difference we expect to keep seeing.",
+      "added": "2026-07-26",
+      "expires": "2027-07-26"
+    },
+    {
+      "id": "wvr-wrong-type-features",
+      "summary": "features is a bare string instead of the object the schema declares.",
+      "rationale": "features is a bare string instead of the object the schema declares. deacon rejects it (type-strict, matching forwardPorts); the reference keeps the raw JSON and accepts. This tolerance absorbs the REFERENCE's departure from the schema — bhv-readconfig-wrong-type-features-rejected is `follow-spec`, so nothing here waives a deacon deviation. It exists because the live-differential case would otherwise fail on a difference we expect to keep seeing, and it self-invalidates the day the reference starts enforcing the shape.",
+      "added": "2026-07-19",
+      "expires": "2027-01-19"
+    },
+    {
+      "id": "wvr-wrong-type-forwardports",
+      "summary": "forwardPorts is a bare string instead of the array the schema declares.",
+      "rationale": "forwardPorts is a bare string instead of the array the schema declares. deacon deserializes into a typed struct and rejects the type mismatch; the reference keeps the raw JSON and accepts. This tolerance absorbs the REFERENCE's departure from the schema — bhv-readconfig-wrong-type-forwardports-rejected is `follow-spec`, so nothing here waives a deacon deviation. It exists because the live-differential case would otherwise fail on a difference we expect to keep seeing, and it self-invalidates the day the reference starts enforcing the shape. See wrong-type-features for the sibling that closed the strictness inconsistency this note once flagged.",
+      "added": "2026-07-19",
+      "expires": "2027-01-19"
+    }
+  ]
+}

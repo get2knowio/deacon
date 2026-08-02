@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use parity_harness::load::Registry;
 use parity_harness::model::{CaseKind, ResourceGroup, TestCase};
-use parity_harness::{default_registry_dir, workspace_root};
+use parity_harness::{parity_root, workspace_root};
 
 use parity_harness::HarnessError;
 use parity_harness::evidence::Outcome;
@@ -36,7 +36,7 @@ use parity_harness::prereq::{DOCKER_PROBE_BOUND, probe_docker};
 use parity_harness::runner::{RunConfig, run_case};
 
 fn real_registry() -> Registry {
-    Registry::load(&default_registry_dir()).expect("the real conformance registry loads")
+    Registry::load(&parity_root()).expect("the real parity case set loads")
 }
 
 fn error_path_cases(registry: &Registry) -> Vec<&TestCase> {

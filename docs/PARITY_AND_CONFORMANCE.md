@@ -41,14 +41,21 @@ distinction here — see below.
 *characterized*: measured, explained, recorded. A divergence is a claim about behavior,
 never a placeholder for "we haven't looked yet".
 
-**Waiver / allowed difference** — a divergence a scenario may see without failing. Scoped
-to one `(behavior, observablePath)` pair; there are no global ignore lists. Each carries a
-rationale arguing from measured output.
+**Allowed difference (tolerance)** — a divergence a scenario may see without failing.
+Declared on the case, scoped to one `(behavior, observablePath)` pair; there are no global
+ignore lists. Each names a backing identity in `parity/ALLOWLIST.json`, where the rationale
+lives — argued from measured output.
 
-**Waivers are self-invalidating.** A tolerance whose difference *stops reproducing* fails
-the run as **stale**. Not politeness — a stale tolerance is strictly worse than none,
-because it keeps excusing a path where the difference is already fixed, and will silently
-excuse a *new* difference that appears there later.
+The split is deliberate: the case says WHERE the difference is tolerated, the allowlist
+says WHY. Restating the scope in the allowlist would be a second copy that drifts, so the
+loader computes the relationship instead and fails **both** ways — a tolerance naming an id
+no record defines (unbacked, excusing a difference on the authority of nothing) and a
+record no case references (an orphan, reading as characterized coverage nothing exercises).
+
+**Tolerances are self-invalidating.** One whose difference *stops reproducing* fails the
+run as **stale**. Not politeness — a stale tolerance is strictly worse than none, because
+it keeps excusing a path where the difference is already fixed, and will silently excuse a
+*new* difference that appears there later.
 
 **deacon is sometimes the conformant side.** When deacon follows the spec and the reference
 deviates, that is the reference's deviation, not work we owe. Filing it as a deacon
@@ -63,11 +70,11 @@ it is a decision about product scope. See the constitution.
 
 | Path | What it is |
 |---|---|
-| `conformance/registry/cases/<area>.json` | the scenarios — **data**, not code |
-| `conformance/registry/waivers/*.json` | tolerated differences, each with a rationale and an expiry |
-| `conformance/registry/behaviors/*.json` | the behavior record `SPEC_STATUS.md` is harvested from |
-| `conformance/fixtures/fx-*/` | one directory per fixture id, 1:1 with case references |
-| `fixtures/parity-corpus/oracle.json` | the oracle pin, `include_str!`-embedded at compile time |
+| `parity/cases/<area>.json` | the scenarios — **data**, not code |
+| `parity/fixtures/fx-*/` | one directory per fixture id, 1:1 with case references |
+| `parity/ALLOWLIST.json` | every tolerated difference's identity and its reasoning |
+| `parity/oracle.json` | the oracle pin, `include_str!`-embedded at compile time |
+| `parity/spec/113500f4/` | the vendored upstream spec revision the scenarios are pinned to |
 | `parity/SPEC_STATUS.md` | the hand-maintained answer to "does deacon behave like the CLI?" |
 | `crates/parity-harness/` | the runner. Dev-only; not a dependency of the shipped binary |
 

@@ -397,11 +397,9 @@ pub fn emit(run: &GroupRun) -> Result<(), HarnessError> {
 /// aggregator's execution-completeness gate, and that must mean "it never ran", not "its
 /// groups happened to be empty".
 async fn write_fragment(cfg: &DriverConfig, results: Vec<CaseResult>) -> Result<(), HarnessError> {
-    // A fragment is the PARITY AGGREGATOR's input, and its identity is the oracle the run
-    // compared against — that is what makes two fragments comparable at all. A lane that
-    // resolves no reference (026's container pull-request lane, `oracle: None`) has no such
-    // identity, and is deliberately absent from `fixtures/parity-corpus/registry.json`, so
-    // no execution-completeness gate is waiting on a fragment from it.
+    // A fragment's identity is the oracle the run compared against — that is what makes
+    // two fragments comparable at all. A lane that resolves no reference (`oracle: None`)
+    // has no such identity.
     //
     // Skipping is therefore correct, but it is announced rather than silent: a lane that
     // stopped writing a fragment it OWED would otherwise look identical to one that never

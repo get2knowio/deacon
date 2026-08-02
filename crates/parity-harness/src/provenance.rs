@@ -215,14 +215,11 @@ fn run_version(argv: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The currently pinned oracle version, read from `fixtures/parity-corpus/oracle.json`
+/// The currently pinned oracle version, read from `parity/oracle.json`
 /// (the source of truth for the `oracleVersion` staleness field). `None` if the pin file
 /// is absent/malformed.
 pub fn current_oracle_version_pin() -> Option<String> {
-    let path = crate::workspace_root()
-        .join("fixtures")
-        .join("parity-corpus")
-        .join("oracle.json");
+    let path = crate::parity_root().join("oracle.json");
     let raw = std::fs::read_to_string(path).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
     doc.get("version")?.as_str().map(str::to_string)

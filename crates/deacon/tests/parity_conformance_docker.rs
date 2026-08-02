@@ -23,15 +23,15 @@
 //! only "the binary was slow" and name nothing to fix.
 //!
 //! The error-path tier (US4) and the workflow/denormalized cases (US3/US5) land as DATA in
-//! `conformance/registry/cases/<area>.json`; whatever their area, a Docker resource group
+//! `parity/cases/<area>.json`; whatever their area, a Docker resource group
 //! routes them here with no change to this file.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use parity_harness::default_registry_dir;
 use parity_harness::load::Registry;
 use parity_harness::model::ResourceGroup;
+use parity_harness::parity_root;
 
 use parity_harness::driver::{self, DriverConfig, TIER_BUDGET};
 use parity_harness::oracle::Oracle;
@@ -67,8 +67,8 @@ async fn drive(group: ResourceGroup) {
     let oracle = ff(Oracle::acquire().await);
     let root = workspace_root();
 
-    let registry = Registry::load(&default_registry_dir())
-        .unwrap_or_else(|e| panic!("conformance registry must load: {e}"));
+    let registry = Registry::load(&parity_root())
+        .unwrap_or_else(|e| panic!("the parity case set must load: {e}"));
     let cases = driver::cases_in_group(&registry.cases, group);
     if cases.is_empty() {
         eprintln!(
@@ -81,7 +81,7 @@ async fn drive(group: ResourceGroup) {
         binary: BINARY.to_string(),
         deacon_path: PathBuf::from(env!("CARGO_BIN_EXE_deacon")),
         oracle: Some(oracle),
-        fixtures_root: root.join("conformance").join("fixtures"),
+        fixtures_root: root.join("parity").join("fixtures"),
         report_root: report_root(),
     });
 
@@ -149,8 +149,8 @@ async fn conformance_group_docker_exclusive() {
 
 /// The registry's error-path cases, id-sorted.
 fn error_path_cases() -> Vec<parity_harness::model::TestCase> {
-    let registry = Registry::load(&default_registry_dir())
-        .unwrap_or_else(|e| panic!("conformance registry must load: {e}"));
+    let registry = Registry::load(&parity_root())
+        .unwrap_or_else(|e| panic!("the parity case set must load: {e}"));
     let mut cases: Vec<_> = registry
         .cases
         .iter()
@@ -175,7 +175,7 @@ async fn tier_config(report_root: &std::path::Path) -> Arc<DriverConfig> {
         binary: BINARY.to_string(),
         deacon_path: PathBuf::from(env!("CARGO_BIN_EXE_deacon")),
         oracle: Some(oracle),
-        fixtures_root: root.join("conformance").join("fixtures"),
+        fixtures_root: root.join("parity").join("fixtures"),
         report_root: report_root.to_path_buf(),
     })
 }
@@ -572,8 +572,8 @@ async fn both_lifecycle_hook_forms_are_observed_distinctly() {
     let report_root = report_root().join("us5-lifecycle-forms");
     let cfg = tier_config(&report_root).await;
 
-    let registry = Registry::load(&default_registry_dir())
-        .unwrap_or_else(|e| panic!("conformance registry must load: {e}"));
+    let registry = Registry::load(&parity_root())
+        .unwrap_or_else(|e| panic!("the parity case set must load: {e}"));
     let cases: Vec<_> = registry
         .cases
         .iter()

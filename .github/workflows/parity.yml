@@ -31,9 +31,7 @@ on:
       - 'crates/parity-harness/**'
       - 'crates/deacon/tests/parity_*'
       - 'crates/deacon/tests/consistency_*'
-      - 'conformance/registry/**'
-      - 'conformance/fixtures/**'
-      - 'fixtures/parity-corpus/**'
+      - 'parity/**'
       - 'scripts/parity/**'
       - '.config/nextest.toml'
       - 'Makefile'
@@ -82,8 +80,8 @@ jobs:
         # so provisioning and harness can never disagree about the reference.
         run: |
           set -euo pipefail
-          VERSION="$(jq -r .version fixtures/parity-corpus/oracle.json)"
-          echo "Installing @devcontainers/cli@${VERSION} from fixtures/parity-corpus/oracle.json"
+          VERSION="$(jq -r .version parity/oracle.json)"
+          echo "Installing @devcontainers/cli@${VERSION} from parity/oracle.json"
           npm install -g "@devcontainers/cli@${VERSION}"
 
       # FR-014: the resolved reference must be EXACTLY the declared stable pin. Any other
@@ -94,7 +92,7 @@ jobs:
       - name: Assert the resolved reference is exactly the stable pin
         run: |
           set -euo pipefail
-          PINNED="$(jq -r .version fixtures/parity-corpus/oracle.json)"
+          PINNED="$(jq -r .version parity/oracle.json)"
           RESOLVED="$(devcontainer --version | tr -d '[:space:]')"
           if [ "$RESOLVED" != "$PINNED" ]; then
             echo "::error::resolved reference is ${RESOLVED}, declared stable pin is ${PINNED}."

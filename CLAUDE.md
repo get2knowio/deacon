@@ -11,7 +11,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 **Workspace Structure:**
 - `crates/deacon/` - CLI binary crate (argument parsing, command orchestration, UI)
 - `crates/core/` - Core library with domain logic (config parsing, container runtime, OCI registry, features/templates)
-- upstream [devcontainers/spec](https://github.com/devcontainers/spec) (pinned commit `113500f4`) - authoritative CLI behavior; `conformance/registry/` records deacon's conformance and every characterized divergence against it (see the Conformance Registry section)
+- upstream [devcontainers/spec](https://github.com/devcontainers/spec) (pinned commit `113500f4`) - authoritative CLI behavior; `parity/` holds the scenarios, fixtures and allowlist that record deacon's conformance against it (see the Differential Parity Suite section)
 - `.specify/memory/constitution.md` - Development constitution defining principles and constraints
 - `examples/` - Executable examples with `exec.sh` scripts demonstrating features
 
@@ -26,7 +26,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 ## Critical Development Principles
 
 **1. Spec-Parity as Source of Truth**
-- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `113500f4`, October 2025) — the single source of truth. Deacon's conformance against it, including every characterized divergence, is recorded in the repository-owned `conformance/registry/` (see the Conformance Registry section), not in prose.
+- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `113500f4`, October 2025) — the single source of truth. Deacon's conformance against it, including every characterized divergence, is recorded in the repository-owned `parity/` data root (see the Differential Parity Suite section), not in prose.
 - Data structures MUST match spec shapes exactly (map vs vec, field ordering, null handling)
 - Configuration resolution MUST use full extends chains via `ConfigLoader::load_with_extends`
 - Never implement shortcuts that deviate from spec-defined algorithms
@@ -366,17 +366,21 @@ machinery that had grown to 78% the size of the product it verified. If you find
 about to add a validation class, an obligation model, or a lane registry, that is the thing
 that was deleted — don't rebuild it.
 
-**Data** (`conformance/`, moving to `parity/`):
-- `registry/cases/<area>.json` — the scenarios. A case is DATA: ordered `operations[]`
-  (consumer subcommand + argv, `${WORKSPACE}` token, `fixtures`), an `oracleType`, and
-  per-channel `expected[]` assertions. Adding a scenario is a pure data edit — no new Rust.
-- `registry/waivers/*.json` — tolerated differences, each with a rationale and an `expires`.
-  Self-invalidating: a waiver whose difference stops reproducing fails as **stale**.
-- `registry/behaviors/*.json`, `extensions.json` — the source the hand-maintained
-  `parity/SPEC_STATUS.md` was harvested from.
-- `fixtures/` — one directory per `fx-` id, 1:1 with case references.
-- `fixtures/parity-corpus/oracle.json` — the pin (`@devcontainers/cli` 0.87.0), embedded at
-  compile time by `oracle.rs`. An oracle that is missing or off-pin **fails** the run.
+**Data** — one root, `parity/`:
+- `cases/<area>.json` — the scenarios. A case is DATA: ordered `operations[]`
+  (consumer subcommand + argv, `${WORKSPACE}`/`${IMAGE_TAG}`/`${CONTAINER_ID}` tokens,
+  `fixtures`), an `oracleType`, and per-channel `expected[]` assertions. Adding a scenario
+  is a pure data edit — no new Rust.
+- `fixtures/fx-*/` — one directory per fixture id, 1:1 with case references.
+- `ALLOWLIST.json` — every tolerated difference's IDENTITY (`wvr-`/`bhv-`/`ext-`) and its
+  reasoning. It deliberately does NOT carry the scope: a case's own `allowedDifferences`
+  name the behavior and the observable path, which is what keeps a tolerance scoped and
+  per-run stale-checked. `Registry::load` fails BOTH ways — a tolerance naming an id no
+  record defines (unbacked), and a record no case references (orphan).
+- `oracle.json` — the pin (`@devcontainers/cli` 0.87.0), embedded at compile time by
+  `oracle.rs`. An oracle that is missing or off-pin **fails** the run.
+- `spec/113500f4/` — the vendored upstream revision the scenarios are pinned to.
+- `SPEC_STATUS.md` — the hand-maintained answer to "does deacon behave like the CLI?".
 
 **Three oracle types**, dispatched in `oracle_type.rs`: `spec-expectation` (compare deacon
 to the declared assertion — no oracle needed), `live-differential` (deacon vs the verified
@@ -631,8 +635,8 @@ rediscover-and-investigate loop:
   (`bhv-readconfig-unknown-field-preserved`, `follow-spec`); silently dropping them WOULD
   be a bug. The differential runner (deleted in 023 US7: `parity_corpus_errors`) and its
   Tier 1c corpus are gone; these are now the declarative `case-errors-decl-*` cases in
-  `conformance/registry/cases.json`, driven by `parity_conformance_runner`. Waivers still
-  load from `conformance/registry/waivers/`.
+  `parity/cases/`, driven by `parity_conformance_runner`. Their tolerances resolve
+  against `parity/ALLOWLIST.json`.
 - **The three `bhv-readconfig-extends-*` behaviors carry `reference: divergent`, not
   `not-applicable`, and that is correct** — even though every other `deacon-extension`
   behavior uses `not-applicable`. The axis records whether the reference *has the surface*,
@@ -693,7 +697,7 @@ echo "$OUTPUT" | jq '.configuration'
 **Must-Read Documentation:**
 - `.specify/memory/constitution.md` - Development principles and constraints
 - `AGENTS.md` - Quick reference for AI assistants
-- `parity/SPEC_STATUS.md` - Hand-maintained record of deacon's behavior vs the reference CLI; `conformance/registry/cases/` holds the scenarios behind it (see Differential Parity Suite)
+- `parity/SPEC_STATUS.md` - Hand-maintained record of deacon's behavior vs the reference CLI; `parity/cases/` holds the scenarios behind it (see Differential Parity Suite)
 - `docs/ARCHITECTURE.md` - Cross-cutting patterns (env probe caching, etc.)
 - `.github/copilot-instructions.md` - Detailed development guidelines
 
@@ -856,6 +860,10 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
   scenarios as data, one normalizer, one comparison, one nightly lane that gates nothing.
   `parity/SPEC_STATUS.md` is the harvested, hand-maintained answer to "does deacon behave
   like the CLI?". See the Differential Parity Suite section.
-- Still in flight: retiring the five legacy `parity_*` carriers (each needs its residual
-  coverage ported first), folding waivers + extensions into `parity/ALLOWLIST.json`, and
-  moving the data root from `conformance/` to `parity/`.
+- The five legacy `parity_*` carriers are retired, their residual coverage ported as
+  declarative data. The waiver, aggregator and corpus modules are gone: the nextest exit
+  code is the verdict. The data root is `parity/`, with the 14 waiver files and 11
+  extension records folded into `parity/ALLOWLIST.json`.
+- Still in flight: the three-way binary split (`parity_hermetic` / `parity_docker` /
+  `parity_differential`, which needs `Oracle::acquire()` made conditional) and wiring the
+  pinned suite into `release.yml`.

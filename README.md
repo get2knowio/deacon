@@ -662,7 +662,7 @@ When adding new tests, classify them into the appropriate group:
 4. **Is it an end-to-end integration test?**
    - Yes (validates complete workflow) → `smoke`
    - Yes (compares with the upstream CLI) → **not a test function at all.** Add a
-     scenario record to `conformance/registry/cases/<area>.json`; the two
+     scenario record to `parity/cases/<area>.json`; the two
      `--profile parity` runners pick it up from its `resourceGroup`.
 
 **Audit test assignments:**

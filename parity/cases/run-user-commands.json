@@ -1,0 +1,761 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-errorpath-ruc-post-create-failure-direction",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "errorPathTier": true,
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-ruc-hook-failure"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:postCreate"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Pins the direction of the divergence characterized by `wvr-ruc-completed-hooks-not-rerun` for `postCreateCommand`, the hook whose differential (`case-run-user-commands-hook-failure`) was authored in 024 US3 believing the reference agreed. Direction-pinning twin (FR-043, the 023 T074 lesson). Its differential sibling proves only that the two CLIs disagree, and would stay green if BOTH started reporting success — at which point the record that was supposed to say which side is right would say nothing. This case asserts deacon's side outright: the run FAILS. That is the side the specification's account of lifecycle commands supports (a command that exits non-zero has not completed the container's setup) and the side that keeps `run-user-commands` usable as an explicit re-run, its `--skip-post-create` / `--skip-post-attach` / `--skip-non-blocking-commands` flags being the opt-out. The preceding `up` is asserted to SUCCEED, so a failure here can only come from the hook rather than from a container that never came up."
+    },
+    {
+      "id": "case-errorpath-ruc-post-start-failure",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-ruc-late-hooks"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/post-start-failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:postStart"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-run-user-commands-hook-failure",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon re-runs the configured lifecycle commands on every invocation and propagates the hook's non-zero exit; the reference skips a hook the container has already completed and reports success without running it.",
+          "waiverId": "wvr-ruc-completed-hooks-not-rerun"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, lifecycle stage, at `postStartCommand` — the LAST blocking hook, and the one whose failure is easiest to drop: it runs after the container is already usable, so an implementation that reports success once the container is up satisfies every earlier hook's case and not this one. Same shape and same characterized divergence as the `updateContentCommand` case (`wvr-ruc-completed-hooks-not-rerun`), kept separate because the two hooks fail at different points in the sequence. Direction pinned by `case-errorpath-ruc-post-start-failure-direction`."
+    },
+    {
+      "id": "case-errorpath-ruc-post-start-failure-direction",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "errorPathTier": true,
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-ruc-late-hooks"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/post-start-failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:postStart"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Pins the direction for `postStartCommand`, the twin of `case-errorpath-ruc-post-start-failure`. Direction-pinning twin (FR-043, the 023 T074 lesson). Its differential sibling proves only that the two CLIs disagree, and would stay green if BOTH started reporting success — at which point the record that was supposed to say which side is right would say nothing. This case asserts deacon's side outright: the run FAILS. That is the side the specification's account of lifecycle commands supports (a command that exits non-zero has not completed the container's setup) and the side that keeps `run-user-commands` usable as an explicit re-run, its `--skip-post-create` / `--skip-post-attach` / `--skip-non-blocking-commands` flags being the opt-out. The preceding `up` is asserted to SUCCEED, so a failure here can only come from the hook rather than from a container that never came up."
+    },
+    {
+      "id": "case-errorpath-ruc-update-content-failure",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-ruc-late-hooks"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/update-content-failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:updateContent"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-run-user-commands-hook-failure",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon re-runs the configured lifecycle commands on every invocation and propagates the hook's non-zero exit; the reference skips a hook the container has already completed and reports success without running it.",
+          "waiverId": "wvr-ruc-completed-hooks-not-rerun"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, lifecycle stage, at `updateContentCommand` — the hook BEFORE `postCreateCommand`, so the case pins that a mid-sequence failure stops the sequence rather than being carried past. The preceding `up` succeeds on a configuration with no hooks at all, so both sides reach the lifecycle stage from a clean container and the failing hooks arrive as a command-line overlay. The two sides then disagree: deacon runs the overlay's hooks and exits non-zero; the reference skips every hook the container has already completed and exits 0 having executed nothing. Tolerated on `chan-exit-code.exitCode` under `wvr-ruc-completed-hooks-not-rerun`; the DIRECTION is pinned by the spec-expectation twin `case-errorpath-ruc-update-content-failure-direction`, because a differential alone stays green if both sides start reporting success."
+    },
+    {
+      "id": "case-errorpath-ruc-update-content-failure-direction",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "errorPathTier": true,
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-ruc-late-hooks"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/update-content-failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:updateContent"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Pins the direction for `updateContentCommand`, the twin of `case-errorpath-ruc-update-content-failure`. Direction-pinning twin (FR-043, the 023 T074 lesson). Its differential sibling proves only that the two CLIs disagree, and would stay green if BOTH started reporting success — at which point the record that was supposed to say which side is right would say nothing. This case asserts deacon's side outright: the run FAILS. That is the side the specification's account of lifecycle commands supports (a command that exits non-zero has not completed the container's setup) and the side that keeps `run-user-commands` usable as an explicit re-run, its `--skip-post-create` / `--skip-post-attach` / `--skip-non-blocking-commands` flags being the opt-out. The preceding `up` is asserted to SUCCEED, so a failure here can only come from the hook rather than from a container that never came up."
+    },
+    {
+      "id": "case-run-user-commands-boundary-no-hooks",
+      "behaviors": [
+        "bhv-run-user-commands-hook-order"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 boundary class: a configuration that declares NO lifecycle hooks at all. Running no commands must succeed — the degenerate end of the hook sequence, and a plausible place to fail on an empty list."
+    },
+    {
+      "id": "case-run-user-commands-compose-workspace",
+      "behaviors": [
+        "bhv-run-user-commands-hook-order"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-down-compose"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. Running hooks against a Compose service container, where the hooks have to be executed in the named service rather than in whichever container the project brought up first."
+    },
+    {
+      "id": "case-run-user-commands-dockerfile-workspace",
+      "behaviors": [
+        "bhv-run-user-commands-hook-order",
+        "bhv-readconfig-extends-merged"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-dockerfile-extends"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "SC-004 requires every operation to carry a case for each configuration source the applicability rules permit for it. Running hooks in a container built from a Dockerfile. The image supplies the shell the hooks run in, which is the part a Dockerfile-based workspace can get wrong and an image-based one cannot. The 024 live run showed the divergence is not about hooks at all: this case's fixture is fx-up-dockerfile-extends, and oracle 0.87.0 cannot resolve `extends`, so the reference's `op-up` failed and its `run-user-commands` then reported 'Dev container not found.' Same root cause as case-up-dockerfile-extends-chain, and tolerated the same way. deacon's half — that a Dockerfile-supplied shell runs the hooks — is unchanged.",
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-extends-merged",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "Downstream of the same one-sided `extends` difference: the reference's `up` never produced a container for this workspace, so its `run-user-commands` reports 'Dev container not found.' and exits non-zero while deacon runs the hooks and exits 0. The pinned reference does not resolve `extends` at all: for this workspace `devcontainer up` fails with 'Dev container config ... is missing one of \"image\", \"dockerFile\" or \"dockerComposeFile\" properties', because the `build.dockerfile` is declared by the PARENT document. deacon resolves the chain and builds, so it exits 0 where the reference exits non-zero. An ahead-of-spec deacon capability recorded by ext-extends-resolution, not a defect on either side.",
+          "divergenceId": "ext-extends-resolution"
+        }
+      ]
+    },
+    {
+      "id": "case-run-user-commands-feature-contributed-hook",
+      "behaviors": [
+        "bhv-run-user-commands-hook-order"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-ruc-image-feature"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        },
+        {
+          "id": "op-read-feature-hook",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "grep",
+            "-c",
+            "feature-postCreate",
+            "/tmp/conformance-hooks"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read-feature-hook",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-read-feature-hook",
+          "assertion": {
+            "matches": "^1\\s*$"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-037, the Feature-contributed half: the installed Feature declares its own `postCreateCommand`, and it must run exactly ONCE in the `run-user-commands` pass. `grep -c` rather than a presence check is deliberate — a Feature hook that runs on every invocation instead of once is present either way, and presence is what a weaker assertion would confirm. CORRECTED after the 024 live run, which counted 2. The count was measuring the wrong thing: `up` runs `postCreate` and `run-user-commands` runs it again, so the file held two of EVERY hook — the configuration's own just as much as the Feature's, since both go through one merged list in aggregate_lifecycle_commands and neither is marker-gated on this path. Re-running on every invocation is deliberate and separately characterized (wvr-ruc-completed-hooks-not-rerun: the reference skips a completed hook, deacon re-runs, and deacon's direction is the one that keeps `run-user-commands` usable as an explicit re-run). Counting across BOTH invocations therefore asserted the negation of a behavior the registry had already accepted. `up --skip-post-create` isolates the pass under test so the count is what the behavior actually claims. The assertion is `matches ^1\\s*$` rather than `contains \"1\"` because `contains` would also pass on 11 or 21."
+    },
+    {
+      "id": "case-run-user-commands-feature-hook-sequence",
+      "behaviors": [
+        "bhv-run-user-commands-hook-order"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-ruc-image-feature"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        },
+        {
+          "id": "op-read-hooks",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "cat",
+            "/tmp/conformance-hooks"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read-hooks",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-read-hooks",
+          "assertion": {
+            "matches": "config-onCreate[\\s\\S]*config-updateContent[\\s\\S]*config-postCreate[\\s\\S]*config-postStart"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-037, the ordering half. Each hook appends its own name to a file inside the container, so the file IS the observed order — `onCreate`, then `updateContent`, then `postCreate`, then `postStart`. An exit code cannot distinguish 'ran in order' from 'ran at all', and the Feature-contributed `postCreateCommand` is asserted by its own sibling case so a failure names which of the two facts broke."
+    },
+    {
+      "id": "case-run-user-commands-hook-failure",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-ruc-hook-failure"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/failing.json"
+          ],
+          "expectFailurePhase": "lifecycle:postCreate"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-run-user-commands-hook-failure",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon re-runs the configured lifecycle commands on every invocation and propagates the hook's non-zero exit; the reference skips a hook the container has already completed and reports success without running it.",
+          "waiverId": "wvr-ruc-completed-hooks-not-rerun"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-037 hook failure: `postCreateCommand` exits 23, and the run must fail rather than report success for a container whose setup did not complete. The failing configuration is supplied as an override so the preceding `up` can succeed — a hook failure during creation is a different case, and conflating them would leave neither pinned. The two sides DISAGREE here, which 024 US4 established by running both: the reference skips a lifecycle command the container has already completed and exits 0 without executing the hook, so the failure is invisible on its side. Tolerated under `wvr-ruc-completed-hooks-not-rerun` and pinned in direction by `case-errorpath-ruc-post-create-failure-direction`."
+    },
+    {
+      "id": "case-run-user-commands-hook-order",
+      "behaviors": [
+        "bhv-run-user-commands-hook-order"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-ruc-image-feature"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-run-user-commands-image-single-feature-running`, alignment half: the container already exists and the configuration declares four hooks while an installed Feature contributes a fifth. Both CLIs must run them without failing."
+    },
+    {
+      "id": "case-run-user-commands-reference-lenient-wrong-type",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-forwardports-rejected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-wrong-type-forwardports"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-wrong-type-forwardports-rejected",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon rejects the document, so no hooks run; the reference runs them in the container it created.",
+          "waiverId": "wvr-wrong-type-forwardports"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 reference-lenient class for `run-user-commands`: the reference accepts the wrongly-typed `forwardPorts`, creates the container and runs the hooks; deacon refuses the document at every stage. Direction pinned by `case-errors-decl-wrong-type-forwardports`."
+    },
+    {
+      "id": "case-run-user-commands-unsupported-no-container",
+      "behaviors": [
+        "bhv-run-user-commands-hook-failure"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ],
+          "expectFailurePhase": "exec"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class: the configuration is valid and the request is well-formed, but there is no container to run the commands in. Running hooks against nothing has to fail; reporting success would be indistinguishable from having run them."
+    }
+  ]
+}

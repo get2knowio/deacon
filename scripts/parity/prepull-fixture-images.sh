@@ -18,7 +18,7 @@
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-fixtures="${root}/conformance/fixtures"
+fixtures="${root}/parity/fixtures"
 
 if [ ! -d "${fixtures}" ]; then
   echo "prepull: no ${fixtures} directory; nothing to warm" >&2

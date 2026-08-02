@@ -275,7 +275,7 @@ pub struct SourceRevision {
     /// Upstream location (informational).
     pub url: String,
     /// Repo-local machine-readable pin this must match (e.g.
-    /// `fixtures/parity-corpus/oracle.json`); staleness check V7 (later phase).
+    /// `parity/oracle.json`); staleness check V7 (later phase).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verified_against: Option<String>,
 }
@@ -437,41 +437,6 @@ pub struct TestCase {
     /// gathered?", not "what does this case exercise?".
     #[serde(default)]
     pub context: Vec<Condition>,
-    /// Declared **scenario** context (024, data-model.md §3): which value of each
-    /// `sdim-` scenario dimension this case exercises, in declaration order.
-    ///
-    /// Deliberately a separate field from [`context`](Self::context) and a separate
-    /// namespace from `dimensions.json` (research Decision 1): `applies_in_profile`
-    /// treats a condition on an unassigned environment dimension as UNSATISFIED, so
-    /// folding scenario dimensions into the environment model would silently drop
-    /// behaviors out of profile and shrink the very denominator this feature exists to
-    /// expose.
-    ///
-    /// A legacy case may omit it, covering no combination obligation. Well-formedness
-    /// of the assignment — every key a declared `sdim-`, every value one of its declared
-    /// values, the assignment total and not rule-excluded — is V26/V16 (US1), not a
-    /// load-time concern; this field only has to round-trip.
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub scenario_context: IndexMap<String, String>,
-    /// The **input class** this case exercises (024 US3, FR-040): which of the five
-    /// kinds of input the operation is fed.
-    ///
-    /// Declared rather than derived. Until US3 the per-operation report *inferred* the
-    /// class from what a record happened to carry, which could only ever distinguish
-    /// three of the five — `boundary` and `unsupported` have no derivable signal at all,
-    /// so they were reported permanently missing however many such cases existed. An
-    /// author who writes a boundary case has made a judgement, and the record is where a
-    /// judgement belongs; inference cannot represent it and a report built on inference
-    /// cannot measure FR-040.
-    ///
-    /// Absent means "infer as before" — the 88 pre-US3 records keep their derived class
-    /// rather than being retro-labelled by a tool.
-    ///
-    /// **Excluded from `caseHash`**: it classifies the input, it does not change what the
-    /// runner feeds the CLI, so labelling a case must never re-record its snapshot (the
-    /// same reasoning that excludes `notes` and `allowedDifferences`, research D3).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_class: Option<InputClass>,
     /// Membership in the **container-backed error-path tier** (024 US4, FR-041).
     ///
     /// The tier's cases start from an input configuration read ACCEPTS on both sides and
@@ -534,60 +499,6 @@ pub struct TestCase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
 }
-
-/// The five input classes a case may exercise (FR-040, 024 US3).
-///
-/// A closed set, so "which classes is this operation missing?" is answerable. The names
-/// are the ones the spec uses; the distinctions that matter in practice:
-///
-/// | Class | The input is | The operation |
-/// |---|---|---|
-/// | `valid` | well-formed and supported | succeeds |
-/// | `boundary` | at the edge of the accepted domain (empty collections, extreme values) | still accepts |
-/// | `malformed` | structurally or syntactically wrong | rejects |
-/// | `unsupported` | well-formed but naming something that cannot be provided | rejects, later |
-/// | `reference-lenient` | one the reference accepts and deacon rejects (or the reverse) | differs, with a pinned direction |
-///
-/// `reference-lenient` is the only class that is a statement about **two** implementations,
-/// which is why V16 requires such a case to be a `live-differential`: there is no way to
-/// observe the reference's leniency without running the reference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum InputClass {
-    /// Well-formed, supported input; the operation succeeds.
-    Valid,
-    /// At the edge of the accepted domain, still accepted.
-    Boundary,
-    /// Structurally or syntactically invalid; rejected.
-    Malformed,
-    /// Well-formed but naming something the implementation cannot provide.
-    Unsupported,
-    /// An input the two implementations judge differently.
-    ReferenceLenient,
-}
-
-impl InputClass {
-    /// Every class, in the order the reports render them.
-    pub const ALL: &'static [InputClass] = &[
-        InputClass::Valid,
-        InputClass::Boundary,
-        InputClass::Malformed,
-        InputClass::Unsupported,
-        InputClass::ReferenceLenient,
-    ];
-
-    /// The wire spelling used in records and reports.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            InputClass::Valid => "valid",
-            InputClass::Boundary => "boundary",
-            InputClass::Malformed => "malformed",
-            InputClass::Unsupported => "unsupported",
-            InputClass::ReferenceLenient => "reference-lenient",
-        }
-    }
-}
-
 /// The shape of a [`TestCase`] record: legacy (binary-backed) or declarative
 /// (data-driven), per research D2 (022-conformance-runner).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -757,7 +668,7 @@ pub const CONTAINER_SUBCOMMANDS: &[&str] = &["up", "down", "exec", "build", "run
 pub const FILESYSTEM_CHANNELS: &[&str] = &[CHAN_FILESYSTEM, CHAN_FILE_CONTENT];
 
 // -- Channel id constants (data-model §4) -----------------------------------------
-// Stable ids matching `conformance/registry/channels.json`. The first six are the
+// Stable ids matching `parity/channels.json`. The first six are the
 // pre-existing channels; the last five are added by 022-conformance-runner (T002).
 /// Process exit status.
 pub const CHAN_EXIT_CODE: &str = "chan-exit-code";
@@ -975,7 +886,7 @@ pub enum ResourceGroup {
 ///
 /// A tolerated divergence is scoped to `(behavior, observablePath, context)` and backed
 /// by a resolvable registry identity — exactly one of `waiverId`
-/// (`conformance/registry/waivers/wvr-*`) or `divergenceId` (a `bhv-`/`ext-` intentional
+/// (a `wvr-` record in `parity/ALLOWLIST.json`) or `divergenceId` (a `bhv-`/`ext-` intentional
 /// divergence record). It applies ONLY to its `(behavior, observablePath)` (FR-033);
 /// there are NO global ignore lists (FR-032). Excluded from `caseHash` (research D3).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1212,93 +1123,6 @@ pub struct Gap {
     pub tracking: Option<String>,
 }
 
-/// What a waiver attaches to (tagged union on `kind`).
-///
-/// Byte-for-byte the parity-harness `Scope`: `rename_all = "snake_case"` tags
-/// (`corpus_case`, `state_field`) so `parity-harness` can consume registry waivers
-/// through this crate's loader unchanged (research Decision 3).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Scope {
-    /// A single corpus case's accept/reject (and, when both accept, value) outcome.
-    CorpusCase { corpus: String, case: String },
-    /// A single observable-state field on a named fixture of a named binary.
-    /// `field` supports an exact match or a trailing-`*` prefix.
-    StateField {
-        binary: String,
-        fixture: String,
-        field: String,
-    },
-}
-
-/// The characterized outcome of a waiver (tagged union on `kind`).
-///
-/// Byte-for-byte the parity-harness `Expect`: `rename_all = "kebab-case"` tags
-/// (`both-reject`, `both-accept`, `deacon-stricter`, `reference-stricter`,
-/// `field-divergence`). Not `Eq`: `FieldDivergence` carries arbitrary JSON.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum Expect {
-    /// Both CLIs reject the input. Empty struct variant (not unit) so
-    /// `deny_unknown_fields` also rejects a stray sibling key.
-    BothReject {},
-    /// Both CLIs accept; resolved values are compared normally.
-    BothAccept {},
-    /// deacon rejects where the reference accepts — an intentional strictness
-    /// divergence (constitution IV). Optional informational stderr `signal`.
-    DeaconStricter {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        signal: Option<Vec<String>>,
-    },
-    /// deacon accepts where the reference rejects — an intentional ahead-of-spec
-    /// capability. Optional informational stderr `signal`.
-    ReferenceStricter {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        signal: Option<Vec<String>>,
-    },
-    /// A specific normalized-value difference is expected between the two CLIs.
-    FieldDivergence { ours: Value, reference: Value },
-}
-
-impl Expect {
-    /// Whether this expectation characterizes a divergence (deacon-stricter /
-    /// reference-stricter / field-divergence) rather than an agreement.
-    pub fn is_divergence(&self) -> bool {
-        matches!(
-            self,
-            Expect::DeaconStricter { .. }
-                | Expect::ReferenceStricter { .. }
-                | Expect::FieldDivergence { .. }
-        )
-    }
-}
-
-/// A migrated parity waiver, extended with registry links + expiry (`wvr-`) —
-/// `waivers/<id>.json` (a single record object, not a [`Collection`]).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Waiver {
-    pub id: String,
-    /// Linked behaviors; ≥1.
-    #[serde(default)]
-    pub behaviors: Vec<String>,
-    /// Harness-consumable scope, preserved from the parity schema.
-    pub scope: Scope,
-    /// Preserved parity expectation.
-    pub expect: Expect,
-    /// Required, non-empty rationale.
-    pub rationale: String,
-    /// ISO `YYYY-MM-DD`.
-    pub added: String,
-    /// ISO `YYYY-MM-DD`; `expires < today` → violation V6 (boundary passes).
-    pub expires: String,
-    /// Schema-known optional case input (an explicit `--config` argument) carried
-    /// over verbatim from the legacy parity `expect.json` shape; plays no part in
-    /// waiver semantics. Preserved so every migrated record round-trips.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config: Option<String>,
-}
-
 /// An intentional Deacon extension (`ext-`) — `extensions.json`. Each linked
 /// behavior MUST have `decision: deacon-extension` (V8 consistency, later phase).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1483,7 +1307,7 @@ pub enum Disposition {
 // Normative clause inventory (021-normative-clause-inventory, data-model.md §1–§3)
 // ---------------------------------------------------------------------------
 
-/// The spec-prose manifest — `conformance/spec/<rev-pin>/manifest.json`
+/// The spec-prose manifest — `parity/spec/<rev-pin>/manifest.json`
 /// (data-model.md §1). Records the vendored pinned prose documents, their SHA-256
 /// fingerprints, and a per-document consumer/authoring `scope`, keyed to a
 /// `spec`-kind [`SourceRevision`]. The prose companion to [`SchemasManifest`].
@@ -1675,7 +1499,7 @@ mod tests {
             parse_id("bhv-readconfig-malformed-jsonc-rejected").unwrap(),
             RecordType::Behavior
         );
-        assert_eq!(parse_id("case-parity-corpus").unwrap(), RecordType::Case);
+        assert_eq!(parse_id("case-readconfig-basic").unwrap(), RecordType::Case);
         assert_eq!(parse_id("gap-compose-marker").unwrap(), RecordType::Gap);
         assert_eq!(parse_id("wvr-extends-child").unwrap(), RecordType::Waiver);
         assert_eq!(
@@ -1847,57 +1671,6 @@ mod tests {
         round_trip(GapKind::Implementation, json!("implementation"));
     }
 
-    #[test]
-    fn scope_matches_parity_snake_case_tags() {
-        let corpus = Scope::CorpusCase {
-            corpus: "errors".into(),
-            case: "malformed-json".into(),
-        };
-        round_trip(
-            corpus,
-            json!({ "kind": "corpus_case", "corpus": "errors", "case": "malformed-json" }),
-        );
-        let field = Scope::StateField {
-            binary: "parity_observable_state".into(),
-            fixture: "compose-postgres".into(),
-            field: "label:com.docker.compose.project*".into(),
-        };
-        round_trip(
-            field,
-            json!({
-                "kind": "state_field",
-                "binary": "parity_observable_state",
-                "fixture": "compose-postgres",
-                "field": "label:com.docker.compose.project*"
-            }),
-        );
-    }
-
-    #[test]
-    fn expect_matches_parity_kebab_case_tags() {
-        round_trip(Expect::BothReject {}, json!({ "kind": "both-reject" }));
-        round_trip(Expect::BothAccept {}, json!({ "kind": "both-accept" }));
-        round_trip(
-            Expect::DeaconStricter { signal: None },
-            json!({ "kind": "deacon-stricter" }),
-        );
-        round_trip(
-            Expect::ReferenceStricter {
-                signal: Some(vec!["image".into()]),
-            },
-            json!({ "kind": "reference-stricter", "signal": ["image"] }),
-        );
-        round_trip(
-            Expect::FieldDivergence {
-                ours: json!("deacon-x"),
-                reference: json!("devcontainer-y"),
-            },
-            json!({ "kind": "field-divergence", "ours": "deacon-x", "reference": "devcontainer-y" }),
-        );
-        assert!(Expect::DeaconStricter { signal: None }.is_divergence());
-        assert!(!Expect::BothReject {}.is_divergence());
-    }
-
     // ---- deny_unknown_fields ----------------------------------------------
 
     #[test]
@@ -1934,7 +1707,7 @@ mod tests {
             kind: RevisionKind::Oracle,
             pin: "0.87.0".into(),
             url: "https://example".into(),
-            verified_against: Some("fixtures/parity-corpus/oracle.json".into()),
+            verified_against: Some("parity/oracle.json".into()),
         };
         let collection = Collection {
             schema_version: 1,
@@ -1944,7 +1717,7 @@ mod tests {
         assert_eq!(value["schemaVersion"], json!(1));
         assert_eq!(
             value["records"][0]["verifiedAgainst"],
-            json!("fixtures/parity-corpus/oracle.json")
+            json!("parity/oracle.json")
         );
         let back: Collection<SourceRevision> = serde_json::from_value(value).unwrap();
         assert_eq!(back, collection);

@@ -15,7 +15,7 @@
 //! [`DockerWorkspace::new_filesystem_only`], with Docker reclamation switched off. Its
 //! group means "significant filesystem operations, no Docker" — and *significant
 //! filesystem operations* is exactly the thing that must not happen inside
-//! `conformance/fixtures/`, which is version-controlled input shared by every other case.
+//! `parity/fixtures/`, which is version-controlled input shared by every other case.
 //! Running such a case in place would leave the repository dirty and let one case's writes
 //! become the next case's input. Reclaiming Docker for it, on the other hand, would make
 //! the config-only lane shell out to a daemon it is defined not to need.

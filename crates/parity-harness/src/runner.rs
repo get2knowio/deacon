@@ -160,7 +160,7 @@ pub(crate) async fn execute_ops(
     //
     // An `fs-heavy` case gets the same isolation for a different reason: its group means
     // "significant filesystem operations", and those must not land in
-    // `conformance/fixtures/`, which is version-controlled input every other case reads.
+    // `parity/fixtures/`, which is version-controlled input every other case reads.
     // Its workspace reclaims the temp dir ONLY — the config-only lane is defined to need
     // no daemon, so its cleanup must not shell out to one.
     //

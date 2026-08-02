@@ -1,6 +1,6 @@
 //! Oracle pin loading, resolution, and exact-version verification (research D3).
 //!
-//! The pin (`fixtures/parity-corpus/oracle.json`) is embedded at compile time via
+//! The pin (`parity/oracle.json`) is embedded at compile time via
 //! `include_str!`, so a malformed pin fails every parity test loudly the moment
 //! [`Oracle::acquire`] runs. Resolution honors the `DEACON_PARITY_DEVCONTAINER`
 //! override (the documented local workflow and the fault-injection seam) before
@@ -22,7 +22,7 @@ pub const ORACLE_OVERRIDE_ENV: &str = "DEACON_PARITY_DEVCONTAINER";
 pub const ORACLE_PACKAGE: &str = "@devcontainers/cli";
 
 /// The compile-time-embedded pin. A malformed pin is a hard, loud failure.
-const ORACLE_PIN_JSON: &str = include_str!("../../../fixtures/parity-corpus/oracle.json");
+const ORACLE_PIN_JSON: &str = include_str!("../../../parity/oracle.json");
 
 /// Bound on the `--version` query (2 min — matches the config-only ceiling).
 pub const VERSION_QUERY_BOUND: Duration = Duration::from_secs(120);
@@ -44,7 +44,7 @@ pub struct OraclePin {
 impl OraclePin {
     /// The (symbolic) location of the embedded pin, used in error messages.
     fn pin_path() -> PathBuf {
-        crate::workspace_root().join("fixtures/parity-corpus/oracle.json")
+        crate::parity_root().join("oracle.json")
     }
 
     /// Load and validate the embedded pin.

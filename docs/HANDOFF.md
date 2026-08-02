@@ -1,8 +1,7 @@
 # Handoff — waiver adjudication and the fixes it produced
 
 **Written 2026-08-02.** Working state, not project documentation: delete it when the queue
-is empty. Durable rules live in `conformance/RULES.md` and in
-`crates/conformance/src/parity_page.rs`'s module doc.
+is empty. Durable rules live in `docs/PARITY_AND_CONFORMANCE.md`.
 
 ## The standing rule
 
@@ -31,9 +30,8 @@ ruled *fix deacon* with the work not started, two not yet ruled.
 Regenerate the table any time — it is derived, never hand-maintained:
 
 ```bash
-jq -s '[.[].records[]]' conformance/registry/behaviors/*.json > /tmp/b.json
-jq -s '[.[].records[]]' conformance/registry/cases/*.json     > /tmp/c.json
-jq -s '.'               conformance/registry/waivers/*.json   > /tmp/w.json
+jq -s '[.[].records[]]' parity/cases/*.json      > /tmp/c.json
+jq        '.records'    parity/ALLOWLIST.json    > /tmp/w.json
 jq -rn --slurpfile b /tmp/b.json --slurpfile c /tmp/c.json --slurpfile w /tmp/w.json '
  ($b[0]|INDEX(.id)) as $B
 | ([$c[0][]|.allowedDifferences[]?|.waiverId]|map(select(.))|unique) as $cons
@@ -171,7 +169,7 @@ build.
 ## Two fixture findings, neither filed
 
 1. **A stray untracked file makes `fixtureHash` differ between this workspace and CI.**
-   `conformance/fixtures/fx-upgrade-overlay-lockfile/.devcontainer/devcontainer-lock.json`
+   `parity/fixtures/fx-upgrade-overlay-lockfile/.devcontainer/devcontainer-lock.json`
    was never committed — the only `*-lockfile*` fixture missing one, though `.gitignore:65`
    explicitly un-ignores that filename. `fixture_hash_dir` walks the working tree, so a
    recording made against this fixture reads fresh locally and stale in CI. No live

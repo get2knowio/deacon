@@ -645,8 +645,8 @@ pub struct DevContainerConfig {
     /// resolve `extends` at all: `read-configuration` echoes the field
     /// literally, and `up`/`build` fail to find an image because they never
     /// follow it. This is therefore a deliberate deacon capability, **not** a
-    /// parity guarantee — see `fixtures/parity-corpus/errors/README.md`
-    /// (characterized divergence) and `docs/DIFFERENTIATORS.md`. Tracked by
+    /// parity guarantee — see `ext-extends-resolution` in
+    /// `parity/ALLOWLIST.json` and `docs/DIFFERENTIATORS.md`. Tracked by
     /// issue #297.
     ///
     /// [devcontainers/spec#22]: https://github.com/devcontainers/spec/issues/22

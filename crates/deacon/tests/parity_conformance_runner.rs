@@ -22,9 +22,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use parity_harness::default_registry_dir;
 use parity_harness::load::Registry;
 use parity_harness::model::ResourceGroup;
+use parity_harness::parity_root;
 
 use parity_harness::driver::{self, DriverConfig};
 use parity_harness::oracle::Oracle;
@@ -58,12 +58,12 @@ async fn drive(group: ResourceGroup) {
     let oracle = ff(Oracle::acquire().await);
     let root = workspace_root();
 
-    let registry = Registry::load(&default_registry_dir())
-        .unwrap_or_else(|e| panic!("conformance registry must load: {e}"));
+    let registry = Registry::load(&parity_root())
+        .unwrap_or_else(|e| panic!("the parity case set must load: {e}"));
     let cases = driver::cases_in_group(&registry.cases, group);
     assert!(
         !registry.cases.is_empty(),
-        "expected the conformance registry to hold cases to drive"
+        "expected the parity case set to hold cases to drive"
     );
     if cases.is_empty() {
         eprintln!(
@@ -76,7 +76,7 @@ async fn drive(group: ResourceGroup) {
         binary: BINARY.to_string(),
         deacon_path: PathBuf::from(env!("CARGO_BIN_EXE_deacon")),
         oracle: Some(oracle),
-        fixtures_root: root.join("conformance").join("fixtures"),
+        fixtures_root: root.join("parity").join("fixtures"),
         report_root: report_root(),
     });
 

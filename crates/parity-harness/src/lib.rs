@@ -369,15 +369,17 @@ pub fn workspace_root() -> PathBuf {
         .unwrap_or(manifest)
 }
 
-/// The case/waiver data root: `<workspace_root>/conformance/registry`. Scenario records
-/// live under `cases/`, tolerances under `waivers/`. Single definition — every caller
-/// resolves the root through here rather than joining its own path.
 /// The vendored upstream spec revision these scenarios are pinned to. Bumped only on a
 /// conscious re-vendoring.
 pub const CURRENT_SPEC_PIN: &str = "113500f4";
 
-pub fn default_registry_dir() -> PathBuf {
-    workspace_root().join("conformance").join("registry")
+/// The parity data root: `<workspace_root>/parity`. Scenario records live under
+/// `cases/`, their inputs under `fixtures/`, the tolerated differences in
+/// `ALLOWLIST.json`, the oracle pin in `oracle.json`, the vendored spec under `spec/`.
+/// Single definition — every caller resolves the root through here rather than joining
+/// its own path.
+pub fn parity_root() -> PathBuf {
+    workspace_root().join("parity")
 }
 
 /// The report/artifact root: `DEACON_PARITY_REPORT_DIR` when set, else
@@ -444,7 +446,7 @@ mod tests {
     fn workspace_root_contains_fixtures_and_crate() {
         let root = workspace_root();
         assert!(
-            root.join("fixtures/parity-corpus/oracle.json").is_file(),
+            root.join("parity/oracle.json").is_file(),
             "workspace_root() should locate the oracle pin, got {root:?}"
         );
         assert!(root.join("crates/parity-harness/Cargo.toml").is_file());

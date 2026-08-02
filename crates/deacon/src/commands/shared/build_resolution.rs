@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn base_image_follows_multistage_and_arg_default() {
-        // Mirrors fixtures/parity-corpus/dockerfile-build/.devcontainer/Dockerfile:
+        // Mirrors the dockerfile-build parity fixture:
         // target `dev` FROMs `base`, which FROMs an ARG-parameterized external image.
         let content = "\
 ARG VARIANT=bookworm
