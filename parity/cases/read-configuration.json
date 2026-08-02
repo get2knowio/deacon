@@ -1549,7 +1549,17 @@
                   {
                     "sourceInformation": {
                       "userFeatureId": "./features/solo-tool"
-                    }
+                    },
+                    "internalVersion": "2",
+                    "features": [
+                      {
+                        "id": "solo-tool",
+                        "version": "1.0.0",
+                        "name": "Conformance solo-tool",
+                        "included": true,
+                        "consecutiveId": "solo-tool_0"
+                      }
+                    ]
                   }
                 ]
               }
@@ -1560,7 +1570,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Closes `features=single` x `layering=cli-overlay`. One Feature, one merge fragment: the fragment renames the configuration and the single declared Feature survives untouched. The pairing matters because a merge fragment and a Feature set are the two things an overlay can most easily get wrong together — replacing the base wholesale would drop the Feature, and deep-merging the `features` map wrongly would duplicate it — so the assertion names both the overlaid `name` and the surviving Feature id rather than either alone."
+      "notes": "Closes `features=single` x `layering=cli-overlay`. One Feature, one merge fragment: the fragment renames the configuration and the single declared Feature survives untouched. The pairing matters because a merge fragment and a Feature set are the two things an overlay can most easily get wrong together — replacing the base wholesale would drop the Feature, and deep-merging the `features` map wrongly would duplicate it — so the assertion names both the overlaid `name` and the surviving Feature id rather than either alone. It also carries the hermetic guard for #439's reported Feature shape: `id` is the Feature's OWN id (deacon reported the canonical `local:<absolute path>` before, leaking a host path into an identity field), plus `version`/`name` from the Feature's metadata, the constant `internalVersion`, and the install-order `consecutiveId`. The differential lane covers this shape too, but only with a live oracle; this case fails on a plain `dev-fast` run."
     },
     {
       "id": "case-readconfig-decl-basic",

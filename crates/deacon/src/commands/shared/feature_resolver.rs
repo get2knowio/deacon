@@ -10,7 +10,7 @@
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use deacon_core::config::DevContainerConfig;
 use deacon_core::features::{
@@ -174,6 +174,23 @@ pub(crate) async fn resolve_features_ordered<C: HttpClient>(
         .context("Failed to resolve feature installation order")?;
 
     Ok(plan.features)
+}
+
+/// Root of the host tree `up`/`build` stage feature content into, deterministic
+/// in the workspace hash: `${TMPDIR}/deacon-features-<workspace_hash>`.
+///
+/// Deriving the path does NOT create it. `read-configuration` builds nothing and
+/// must be able to report where a build *would* stage without leaving a
+/// directory behind; the staging pass creates the tree itself.
+pub(crate) fn feature_staging_root(workspace_hash: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("deacon-features-{}", workspace_hash))
+}
+
+/// The folder that directly contains the staged per-feature directories
+/// (`<id>_<install index>`), which is what the reference CLI reports as
+/// `featuresConfiguration.dstFolder`.
+pub(crate) fn feature_staging_dst_folder(workspace_hash: &str) -> PathBuf {
+    feature_staging_root(workspace_hash).join("features")
 }
 
 #[cfg(test)]
