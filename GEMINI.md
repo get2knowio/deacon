@@ -62,7 +62,7 @@ What did you change?
 ### C. Nextest Configuration for New Tests
 
 **ALL new integration tests MUST be configured in `.config/nextest.toml`**.
-1.  **Identify Resource Requirements** and choose a `test-group`: `docker-exclusive`, `docker-shared`, `fs-heavy`, `long-running`, `smoke`, `parity`.
+1.  **Identify Resource Requirements** and choose a `test-group`: `docker-exclusive`, `docker-shared`, `docker-slow-shared`, `env-probe`, `fs-heavy`, `long-running`, `smoke-cli`, `smoke-heavy`, `smoke-lite`. The `parity`/`parity-cli` groups are NOT for new test functions — they bound the two declarative runners, and a parity scenario is a data record in `parity/cases/<area>.json`.
 2.  **Add Override Rules** to ALL profiles (`default`, `dev-fast`, `full`, `ci`).
 3.  **Maximize Safe Parallelism**: Prefer `docker-shared` over `docker-exclusive`. Split test binaries by resource type.
 4.  **Verify** by running `make test-nextest`.

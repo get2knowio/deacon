@@ -423,11 +423,24 @@ those lanes are truthful by non-selection — a green fast run never implies par
 missing oracle, missing Docker, or a normalization failure FAILS with a cause-specific
 `HarnessError`.
 
-| Binary | Runs where | Purpose |
-|---|---|---|
-| `parity_conformance_runner` | `parity` | declarative cases, config-only groups |
-| `parity_conformance_docker` | `parity` | declarative cases, Docker-backed groups |
-| `parity_harness_faults` | `default`, `dev-fast` | hermetic guard: oracle mismatch, timeout, normalization failure, and the injected-difference proof that the comparison can fail |
+**Three lanes, split by what a case NEEDS rather than by what it is about** — which is
+what lets the majority of the suite gate every pull request:
+
+| Binary | Needs | Runs where | Cases |
+|---|---|---|---|
+| `parity_hermetic` | nothing | every profile, `dev-fast` included | 72 — `spec-expectation`, config-only |
+| `parity_docker` | Docker | wherever a daemon exists; the release gate | 46 — `spec-expectation` / `invariant-metamorphic`, Docker-backed |
+| `parity_differential` | Docker + the pinned oracle | `parity` ONLY (nightly) | 116 — every `live-differential` |
+| `parity_harness_faults` | nothing | `default`, `dev-fast` | hermetic guard: oracle mismatch, timeout, normalization failure, and the injected-difference proof that the comparison can fail |
+
+`driver::lane_of` decides a case's lane from its `oracleType` and `resourceGroup`, so a
+lane never *skips* a case it cannot run — a case it cannot run is in another lane, and the
+selection is written down rather than discovered at run time. A skip and a pass look
+identical in a report; a non-selection does not.
+
+`Oracle::acquire()` is called only by the differential lane. It used to run
+unconditionally, which is exactly why a hermetic lane could not exist: it failed on every
+machine without `@devcontainers/cli` installed, over cases that never invoke it.
 
 The five hand-written carriers (`parity_build`, `parity_exec`, `parity_up_exec`,
 `parity_observable_state`, `parity_state_diff`) are **gone**. Their residual coverage is
@@ -635,7 +648,7 @@ rediscover-and-investigate loop:
   (`bhv-readconfig-unknown-field-preserved`, `follow-spec`); silently dropping them WOULD
   be a bug. The differential runner (deleted in 023 US7: `parity_corpus_errors`) and its
   Tier 1c corpus are gone; these are now the declarative `case-errors-decl-*` cases in
-  `parity/cases/`, driven by `parity_conformance_runner`. Their tolerances resolve
+  `parity/cases/`, driven by the parity lane binaries. Their tolerances resolve
   against `parity/ALLOWLIST.json`.
 - **The three `bhv-readconfig-extends-*` behaviors carry `reference: divergent`, not
   `not-applicable`, and that is correct** — even though every other `deacon-extension`

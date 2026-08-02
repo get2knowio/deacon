@@ -21,19 +21,24 @@
 
 use std::path::Path;
 
-/// The live (oracle-comparing) parity binaries: the declarative runners. Exactly
-/// these must be selected by `[profile.parity]` and by no other profile.
+/// The LIVE (oracle-comparing) parity binary. Exactly this must be selected by
+/// `[profile.parity]` and by no other profile.
 ///
-/// A plain const rather than a data file. There are two of them, they change roughly
-/// once a year, and a JSON document with its own schema, loader and validation tests
-/// was several hundred lines spent restating this line.
-pub const LIVE_BINARIES: &[&str] = &["parity_conformance_runner", "parity_conformance_docker"];
+/// A plain const rather than a data file. There is one of them, and a JSON document with
+/// its own schema, loader and validation tests was several hundred lines spent restating
+/// this line.
+pub const LIVE_BINARIES: &[&str] = &["parity_differential"];
 
-/// Hermetic harness self-test binaries that intentionally carry the `parity_` name
-/// prefix but are NOT oracle-comparing: they must never be treated as live, and they
-/// MUST run in the ordinary lanes. Recognized by [`check_test_files`] so the
-/// file↔name match does not flag them as unregistered live binaries.
-pub const META_TEST_BINARIES: &[&str] = &["parity_harness_faults"];
+/// Parity binaries that carry the `parity_` name prefix but are NOT oracle-comparing, so
+/// they must never be treated as live and MUST run in the ordinary lanes.
+///
+/// Two kinds, both non-live for the same reason — they need no reference CLI:
+/// `parity_hermetic` and `parity_docker` run cases whose expectation is pinned in the
+/// record, and `parity_harness_faults` is the hermetic proof that the comparison can
+/// fail at all. Recognized by [`check_test_files`] so the file↔name match does not flag
+/// them as undeclared live binaries.
+pub const META_TEST_BINARIES: &[&str] =
+    &["parity_harness_faults", "parity_hermetic", "parity_docker"];
 
 /// Bidirectional file↔name match for `parity_*` sources under `tests_dir`. Returns
 /// human-readable problems (empty = OK).
@@ -526,7 +531,7 @@ mod tests {
 
     #[test]
     fn glob_match_prefix_and_wildcards() {
-        assert!(glob_match("parity_*", "parity_conformance_runner"));
+        assert!(glob_match("parity_*", "parity_differential"));
         assert!(glob_match("parity_*", "parity_"));
         assert!(!glob_match("parity_*", "consistency_x"));
         assert!(glob_match("*", "anything"));
@@ -542,56 +547,42 @@ mod tests {
     #[test]
     fn filter_selects_grammar() {
         // Exact and glob.
-        assert!(
-            filter_selects(
-                "binary(=parity_conformance_runner)",
-                "parity_conformance_runner"
-            )
-            .unwrap()
-        );
-        assert!(
-            !filter_selects(
-                "binary(=parity_conformance_runner)",
-                "parity_conformance_docker"
-            )
-            .unwrap()
-        );
-        assert!(filter_selects("binary(#parity_*)", "parity_conformance_runner").unwrap());
+        assert!(filter_selects("binary(=parity_differential)", "parity_differential").unwrap());
+        assert!(!filter_selects("binary(=parity_differential)", "parity_docker").unwrap());
+        assert!(filter_selects("binary(#parity_*)", "parity_differential").unwrap());
 
         // not / & / | precedence: `not a & b` == `(not a) & b`.
         assert!(
             !filter_selects(
-                "not binary(=parity_conformance_runner) & binary(#parity_*)",
-                "parity_conformance_runner"
+                "not binary(=parity_differential) & binary(#parity_*)",
+                "parity_differential"
             )
             .unwrap()
         );
         assert!(
             filter_selects(
-                "not binary(=parity_conformance_runner) & binary(#parity_*)",
-                "parity_conformance_docker"
+                "not binary(=parity_differential) & binary(#parity_*)",
+                "parity_docker"
             )
             .unwrap()
         );
 
         // The real exclusion forms used in nextest.toml.
-        let excl = "not (binary(=parity_conformance_runner) | binary(=parity_conformance_docker))";
-        assert!(!filter_selects(excl, "parity_conformance_runner").unwrap());
+        let excl = "not (binary(=parity_differential))";
+        assert!(!filter_selects(excl, "parity_differential").unwrap());
         assert!(filter_selects(excl, "something_else").unwrap());
 
         // docker/mvp form: the parity glob minus the named live binaries still selects
         // the hermetic meta-test binary, which is the point of the carve-out.
-        let docker = "binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_conformance_runner) | binary(=parity_conformance_docker))) | binary(#integration_*)";
-        assert!(!filter_selects(docker, "parity_conformance_runner").unwrap());
+        let docker = "binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_differential))) | binary(#integration_*)";
+        assert!(!filter_selects(docker, "parity_differential").unwrap());
         assert!(filter_selects(docker, "parity_harness_faults").unwrap());
 
         // test()/kind() predicates never select a specific binary here.
-        assert!(
-            !filter_selects("test(/^env_probe::tests::/)", "parity_conformance_runner").unwrap()
-        );
+        assert!(!filter_selects("test(/^env_probe::tests::/)", "parity_differential").unwrap());
 
         // Unsupported predicate fails loud.
-        assert!(filter_selects("mystery(=x)", "parity_conformance_runner").is_err());
+        assert!(filter_selects("mystery(=x)", "parity_differential").is_err());
     }
 
     #[test]

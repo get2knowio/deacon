@@ -180,7 +180,7 @@ threads-required = 1
 
 **Characteristics:**
 - Compares deacon's behavior against the pinned upstream `@devcontainers/cli`
-  oracle (version in `parity/oracle.json`)
+  oracle (version in `parity/oracle.json`) — this profile alone
 - Requires a controlled environment for deterministic comparison (the oracle on
   `PATH`, plus Docker for the container-backed groups)
 - Mildly throttled (`parity` = `max-threads 2`, `parity-cli` = `max-threads 8`)
@@ -191,13 +191,15 @@ explicitly:
 
 ```toml
 [profile.parity]
-default-filter = '(binary(=parity_conformance_runner) | binary(=parity_conformance_docker))'
+default-filter = 'binary(=parity_differential)'
 ```
 
-Two binaries, because the scenarios are DATA and the split is by resource need,
-not by subject: `parity_conformance_runner` drives the config-only resource
-groups and `parity_conformance_docker` the Docker-backed ones. Adding a scenario
-is a JSON edit; neither binary changes.
+ONE binary, because only `live-differential` cases need the reference CLI. The
+other two parity lanes carry their expectation in the record and therefore need
+no oracle, so they run in the ordinary lanes: `parity_hermetic` (no Docker
+either — it runs in `dev-fast`) and `parity_docker` (needs a daemon). The split
+is by what a case NEEDS, not by subject; adding a scenario is a JSON edit and no
+binary changes.
 
 The explicit list is deliberate. A `binary(#parity_*)` glob would also match
 `parity_harness_faults`, the **hermetic guard** that proves the comparison can

@@ -416,7 +416,7 @@ mod tests {
     async fn writes_fragment_atomically_and_roundtrips() {
         let dir = tempfile::tempdir().expect("tempdir");
         let frag = ReportFragment::new(
-            "parity_conformance_runner",
+            "parity_differential",
             sample_oracle(),
             now_rfc3339(),
             now_rfc3339(),
@@ -437,7 +437,7 @@ mod tests {
         // (a single shared file made concurrent test processes overwrite each other).
         let dir_path = frag.write_under(dir.path()).await.expect("write");
         assert!(
-            dir_path.ends_with("report/parity_conformance_runner"),
+            dir_path.ends_with("report/parity_differential"),
             "write_under returns the per-binary DIRECTORY: {dir_path:?}"
         );
         assert!(

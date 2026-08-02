@@ -22,7 +22,7 @@ on:
   # Guard the harness/corpus/pin themselves on PRs that touch them.
   #
   # 023 US6: after the migration the DECLARATIVE case records are the primary parity
-  # surface — `parity_conformance_runner` drives them and the four config-corpus carriers
+  # surface — `parity_differential` drives them and the four config-corpus carriers
   # that used to are gone. A trigger list naming only the old locations would let a
   # `cases.json` or fixture edit change what the live lane runs without running it, which
   # is the same silent-non-selection failure this lane exists to prevent.

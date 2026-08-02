@@ -4,7 +4,7 @@
 //! adding a case never adds a Rust test function (SC-001). The stub stands in for the
 //! real binary — a parity-harness test cannot expand `CARGO_BIN_EXE_deacon`; the real
 //! read-configuration case runs against real deacon in the parity lane
-//! (`parity_conformance_runner`). The record/replay-equivalence + 13-field-provenance
+//! (the parity lane binaries). The record/replay-equivalence + 13-field-provenance
 //! assertions land in User Story 2 (T030).
 
 use parity_harness::evidence::{CaseVerdict, ChannelVerdict, Outcome};

@@ -75,8 +75,8 @@ impl DockerWorkspace {
     ///
     /// Deliberately a separate constructor rather than a boolean on [`new`](Self::new):
     /// the two differ in whether cleanup may shell out to `docker`, and that is a property
-    /// of the lane a case runs in, not a tuning knob. `parity_conformance_runner` is
-    /// defined to need no daemon, so a workspace it creates must not try to reach one.
+    /// of the lane a case runs in, not a tuning knob. The config-only lanes are defined
+    /// to need no daemon, so a workspace they create must not try to reach one.
     pub fn new_filesystem_only() -> std::io::Result<DockerWorkspace> {
         let mut ws = DockerWorkspace::new(None)?;
         ws.reclaim_docker = false;

@@ -1,30 +1,26 @@
-//! Live differential run of the declarative conformance runner over the registry's
-//! DOCKER-BACKED declarative cases (024-deterministic-conformance-coverage T016/T018/T019,
-//! research Decision 4 / Decision 10).
+//! The DIFFERENTIAL parity lane: every `live-differential` case, run against the
+//! verified pinned reference CLI.
 //!
-//! The sibling of `parity_conformance_runner`: same shared runner, same data-driven cases,
-//! same fail-loud contract — but the groups that touch the container runtime, and therefore
-//! the tier that needs bounded concurrency and a wall-clock budget.
+//! This is the lane that answers "does deacon behave like the CLI?" by running BOTH and
+//! diffing. It needs the pinned oracle installed, so it runs ONLY under
+//! `cargo nextest run --profile parity` (nightly). Its two siblings need no oracle and
+//! gate pull requests instead: `parity_hermetic` (declared expectations, no Docker) and
+//! `parity_docker` (declared expectations, Docker-backed).
 //!
-//! Runs ONLY under `cargo nextest run --profile parity`. There is no opt-in env gate and no
-//! silent skip: a missing/mismatched oracle, absent Docker, a missing fixture, or a
-//! normalization failure FAILS the test with a cause-specific message (constitution IV).
+//! There is no opt-in env gate and no silent skip: a missing or mismatched oracle, absent
+//! Docker, a missing fixture, or a normalization failure FAILS with a cause-specific
+//! message (constitution IV).
 //!
-//! **One driver function per Docker `resourceGroup`** — `docker-shared` (safe concurrent
-//! daemon use; four cases at a time) and `docker-exclusive` (serial). `fs-heavy` is NOT
-//! here: per its model definition it is "significant filesystem operations, no Docker", so
-//! it stays with the config-only binary. Adding a case with an existing group is a pure
-//! data edit (SC-013).
+//! **One driver function per `resourceGroup`.** All four groups appear here, because
+//! whether a case needs the reference is independent of whether it needs a daemon — 67 of
+//! its cases are config-only and 49 are Docker-backed. Adding a case with an existing
+//! group is a pure data edit (SC-013).
 //!
 //! **Two bounds, doing different jobs.** Each case is bounded at five minutes inside the
 //! shared runner (FR-077b), so a wedged case is named and the rest of the group still runs.
-//! The tier as a whole is bounded at thirty minutes (FR-077a) and asserted HERE, explicitly,
-//! from its own measurements — not delegated to nextest's `slow-timeout`, which would report
-//! only "the binary was slow" and name nothing to fix.
-//!
-//! The error-path tier (US4) and the workflow/denormalized cases (US3/US5) land as DATA in
-//! `parity/cases/<area>.json`; whatever their area, a Docker resource group
-//! routes them here with no change to this file.
+//! The Docker tier as a whole is bounded at thirty minutes (FR-077a) and asserted HERE,
+//! explicitly, from its own measurements — not delegated to nextest's `slow-timeout`, which
+//! would report only "the binary was slow" and name nothing to fix.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -33,13 +29,13 @@ use parity_harness::load::Registry;
 use parity_harness::model::ResourceGroup;
 use parity_harness::parity_root;
 
-use parity_harness::driver::{self, DriverConfig, TIER_BUDGET};
+use parity_harness::driver::{self, DriverConfig, Lane, TIER_BUDGET};
 use parity_harness::oracle::Oracle;
 use parity_harness::prereq;
 use parity_harness::{HarnessError, report_root, workspace_root};
 
 /// This binary's name — the fragment key, the registry entry, and the tier-timing key.
-const BINARY: &str = "parity_conformance_docker";
+const BINARY: &str = "parity_differential";
 
 /// Fail the test with the error's cause-specific `Display` message (never `Debug`) so an
 /// oracle/prereq/normalization failure reads as its remedy.
@@ -47,32 +43,27 @@ fn ff<T>(r: Result<T, HarnessError>) -> T {
     r.unwrap_or_else(|e| panic!("{e}"))
 }
 
-/// Drive one Docker-backed resource group, then assert the tier budget.
+/// Drive one resource group's differential cases, then assert the Docker tier budget.
 ///
 /// A group with no cases is NOT a silent skip: it still writes its fragment (which is what
-/// proves the binary ran) and says so on stderr. Docker is still required and still checked
-/// — this binary exists precisely because these cases need a daemon, and "no case today"
-/// must not quietly become "no daemon needed".
+/// proves the binary ran) and says so on stderr. The prerequisites are still required and
+/// still checked — "no case today" must not quietly become "no oracle needed".
 async fn drive(group: ResourceGroup) {
-    assert!(
-        driver::needs_docker(group),
-        "`{BINARY}` drives the Docker-backed groups; `{}` needs no daemon and belongs to \
-         parity_conformance_runner",
-        driver::group_slug(group)
-    );
-
     // Prerequisites first, both fail-loud: an absent daemon or a mismatched oracle must
-    // fail this lane, never skip it to a green.
-    ff(prereq::require_docker().await);
+    // fail this lane, never skip it to a green. Docker is required only where the group
+    // needs it; the oracle is required unconditionally, because that is what this lane IS.
+    if driver::needs_docker(group) {
+        ff(prereq::require_docker().await);
+    }
     let oracle = ff(Oracle::acquire().await);
     let root = workspace_root();
 
     let registry = Registry::load(&parity_root())
         .unwrap_or_else(|e| panic!("the parity case set must load: {e}"));
-    let cases = driver::cases_in_group(&registry.cases, group);
+    let cases = driver::cases_in_lane_and_group(&registry.cases, Lane::Differential, group);
     if cases.is_empty() {
         eprintln!(
-            "note: no declarative case declares resourceGroup `{}` yet",
+            "note: no differential case declares resourceGroup `{}` yet",
             driver::group_slug(group)
         );
     }
@@ -88,14 +79,16 @@ async fn drive(group: ResourceGroup) {
     let run = ff(driver::drive_group(Arc::clone(&cfg), cases, group).await);
     ff(driver::emit(&run));
 
-    // Record THIS group's wall clock before asserting, so the assertion below folds in a
-    // complete picture of whatever has finished so far.
-    ff(driver::record_timing(&cfg, &run).await);
-    assert_tier_within_budget(&cfg);
+    if driver::needs_docker(group) {
+        // Record THIS group's wall clock before asserting, so the assertion below folds in
+        // a complete picture of whatever has finished so far.
+        ff(driver::record_timing(&cfg, &run).await);
+        assert_tier_within_budget(&cfg);
+    }
 
     assert!(
         run.failures.is_empty(),
-        "declarative conformance divergence(s) in resource group `{}`:\n{}",
+        "differential divergence(s) in resource group `{}`:\n{}",
         driver::group_slug(group),
         run.failures.join("\n"),
     );
@@ -124,13 +117,26 @@ fn assert_tier_within_budget(cfg: &DriverConfig) {
     }
 }
 
+/// Resource group `none` — the config-only differential cases (`read-configuration`,
+/// `doctor`, `build --output` and friends). The bulk of the lane.
+#[tokio::test]
+async fn differential_group_none() {
+    drive(ResourceGroup::None).await;
+}
+
+/// Resource group `fs-heavy` — significant filesystem work, no Docker.
+#[tokio::test]
+async fn differential_group_fs_heavy() {
+    drive(ResourceGroup::FsHeavy).await;
+}
+
 /// Resource group `docker-shared` — safe concurrent daemon use.
 ///
 /// Every Docker case runs in its own isolated external temp workspace, so its
 /// `devcontainer.local_folder` label (and therefore its container/network/volume names) is
 /// unique; four cases run at a time without colliding.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn conformance_group_docker_shared() {
+async fn differential_group_docker_shared() {
     drive(ResourceGroup::DockerShared).await;
 }
 
@@ -139,7 +145,7 @@ async fn conformance_group_docker_shared() {
 /// A case lands here when it manipulates state the daemon shares across containers, so its
 /// driver runs one case at a time even though the tier as a whole is concurrent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn conformance_group_docker_exclusive() {
+async fn differential_group_docker_exclusive() {
     drive(ResourceGroup::DockerExclusive).await;
 }
 
