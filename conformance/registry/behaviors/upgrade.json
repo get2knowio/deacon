@@ -18,8 +18,8 @@
       "applicability": [],
       "spec": "conformant",
       "reference": "divergent",
-      "decision": "intentional-divergence",
-      "notes": "The pinned reference treats the empty Feature set as an error (`Failed to update lockfile`, exit 1); deacon emits `{\"features\":{}}` and succeeds (observed 2026-07-26, src-obs-upgrade-empty-feature-set). Characterized rather than followed: an operation that cannot express 'nothing to pin' is unusable as an idempotent step in a script that does not know in advance whether the configuration has Features. Backed by wvr-upgrade-empty-feature-set."
+      "decision": "follow-spec",
+      "notes": "devcontainer-lockfile.md defines the lockfile as \"a JSON object with a `features` property\" and nowhere makes an empty Feature set an error, so `{\"features\":{}}` is the document the spec describes for a configuration that declares none. deacon emits it and exits 0; the pinned reference fails with `Failed to update lockfile`, exit 1 (observed 2026-07-26, src-obs-upgrade-empty-feature-set). The direction is inverted from the read-configuration family — here the reference is the STRICTER side — but the shape is the same: deacon does what the spec describes and the reference departs from it. It is also the behavior that composes, since an operation that cannot express 'nothing to pin' is unusable as an idempotent step in a script that does not know in advance whether the configuration has Features; that is corroboration, not the ground. Backed by src-spec-lockfile and wvr-upgrade-empty-feature-set."
     },
     {
       "id": "bhv-upgrade-regenerates-lockfile",

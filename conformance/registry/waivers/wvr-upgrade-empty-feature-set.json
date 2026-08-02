@@ -11,7 +11,7 @@
   "expect": {
     "kind": "reference-stricter"
   },
-  "rationale": "Asked to regenerate a lockfile for a configuration that declares no Features, the reference fails with `Failed to update lockfile` while deacon emits an empty lockfile and exits 0. deacon's behavior is the one that composes: a lockfile step in a script that does not know in advance whether the configuration has Features must not fail on the empty case. Characterized rather than followed.",
+  "rationale": "Asked to regenerate a lockfile for a configuration that declares no Features, the reference fails with `Failed to update lockfile` while deacon emits an empty lockfile and exits 0. devcontainer-lockfile.md describes the lockfile document and nowhere makes an empty Feature set an error, so this tolerance absorbs the REFERENCE's departure from it — bhv-upgrade-empty-feature-set is `follow-spec`, so nothing here waives a deacon deviation. Unlike its read-configuration siblings the reference is the stricter side, but the direction of the deviation is the same. It exists because the live-differential case would otherwise fail on a difference we expect to keep seeing.",
   "added": "2026-07-26",
   "expires": "2027-07-26"
 }

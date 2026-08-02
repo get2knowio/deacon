@@ -3,7 +3,7 @@
   "behaviors": ["bhv-readconfig-wrong-type-forwardports-rejected"],
   "scope": { "kind": "corpus_case", "corpus": "errors", "case": "wrong-type-forwardports" },
   "expect": { "kind": "deacon-stricter" },
-  "rationale": "forwardPorts is a bare string instead of an array. deacon deserializes into a typed struct and rejects the type mismatch; the reference keeps the raw JSON and accepts. Characterized divergence: typed (deacon) vs untyped (reference) read-configuration. Note deacon is NOT uniformly strict here — see wrong-type-features.",
+  "rationale": "forwardPorts is a bare string instead of the array the schema declares. deacon deserializes into a typed struct and rejects the type mismatch; the reference keeps the raw JSON and accepts. This tolerance absorbs the REFERENCE's departure from the schema — bhv-readconfig-wrong-type-forwardports-rejected is `follow-spec`, so nothing here waives a deacon deviation. It exists because the live-differential case would otherwise fail on a difference we expect to keep seeing, and it self-invalidates the day the reference starts enforcing the shape. See wrong-type-features for the sibling that closed the strictness inconsistency this note once flagged.",
   "added": "2026-07-19",
   "expires": "2027-01-19"
 }
