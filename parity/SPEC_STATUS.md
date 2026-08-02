@@ -24,11 +24,11 @@ alone. Where a row has no scenario yet, it says so.
 
 Of **83 recorded behaviors**:
 
-- **3** — open nonconformance — [#430](https://github.com/get2knowio/deacon/issues/430), [#437](https://github.com/get2knowio/deacon/issues/437), [#438](https://github.com/get2knowio/deacon/issues/438)
+- **2** — open nonconformance — [#430](https://github.com/get2knowio/deacon/issues/430), [#438](https://github.com/get2knowio/deacon/issues/438)
 - **10** — deacon follows the spec where the CLI does not
 - **11** — documented choice
 - **19** — deacon extension
-- **40** — conformant and matching
+- **41** — conformant and matching
 
 ## Coverage this document does *not* claim
 
@@ -109,14 +109,14 @@ oversight nobody noticed.
 
 | Behavior | Status | Evidence | Notes |
 |---|---|---|---|
-| On the Compose path, `devcontainer.metadata` records mount sources as the author wrote them, with `${localWorkspaceFolder}` left unsubstituted. | **open nonconformance** | 1 scenario | OPEN — filed as #437. Measured against oracle 0.87.0 on fx-state-compose-feature-mounts: for `source=${localWorkspaceFolder}/sib` the reference records… |
+| On the Compose path, `devcontainer.metadata` records mount sources as the author wrote them, with `${localWorkspaceFolder}` left unsubstituted. | matches the reference | 1 scenario | CLOSED — #437, a compose-path-only regression of #373. Both CLIs record the template on fx-state-compose-feature-mounts, verified at oracle 0.87.0. deacon built the label from the pre-substitution config all along; Docker Compose then interpolated `${localWorkspaceFolder}` in the generated override to the empty string, so `source=${localWorkspaceFolder}/sib` reached the container as `source=/sib`. The override now doubles every `$` in the values it emits, which is why the single-container path was never affected. |
 | The set of Compose files a CLI composes with, and the Compose labels derived from that set (`com.docker.compose.project.config_files`, `com.docker.compose.config-hash`). | documented choice | 3 scenarios | Measured at oracle 0.87.0: both CLIs layer an override on top of the workspace's Compose file, and each delivers it differently — deacon passes it on stdin (recorded as… |
 | deacon derives a valid, deacon-namespaced compose project name (deacon_<workspaceHash>_<configHash>) that docker compose always accepts and that does not collide with… | documented choice | 4 scenarios | Robustness differentiator (issue #265; docs/DIFFERENTIATORS.md). The reference derives <folder>_devcontainer verbatim, so a folder like `-myproj` yields an invalid… |
 | When a Compose service's image is extended with Features, each CLI builds that image itself, so Compose's `com.docker.compose.image` label records a different content… | documented choice | 1 scenario | Measured against oracle 0.87.0 on fx-state-compose-feature-mounts: deacon `sha256:2badca10…`, reference `sha256:35612053…`. The label carries a DIGEST of an image each… |
 | deacon stamps five identity/bookkeeping labels onto a created container that the reference CLI does not set at all (devcontainer.configHash, devcontainer.config_name,… | deacon extension | 10 scenarios | Measured against the pinned oracle 0.87.0 on fx-up-basic (024 Phase 5), not inferred. Newly RECORDABLE rather than newly true: the retired strip_intentional_labels rule… |
 | Both CLIs override the container command with a shell keep-alive that holds the container open for exec/lifecycle work and exits cleanly on SIGTERM; the command STRINGS… | documented choice | 9 scenarios | Classified as intentional ONLY because the observable behavior was measured equal, not because the difference looks cosmetic. `docker stop`: deacon 245 ms… |
 | The `devcontainer.metadata` label records the image metadata the configuration and each installed Feature contribute, with configuration values kept in the form the… | matches the reference | 7 scenarios | Surfaced by 024 US5, fixed under #373. Two differences were measured at oracle 0.87.0 and both are now closed: (1) the reference records a `{"id": "<feature>"}` entry… |
-| The BYTE FORM of the `devcontainer.metadata` label value — JSON whitespace and object key order — as distinct from the entries it records. | documented choice | 2 scenarios | Split out of `bhv-container-metadata-label-content` when #373 closed the CONTENT difference and left the byte form as the only thing still differing. Two causes, both… |
+| The BYTE FORM of the `devcontainer.metadata` label value — JSON whitespace and object key order — as distinct from the entries it records. | documented choice | 3 scenarios | Split out of `bhv-container-metadata-label-content` when #373 closed the CONTENT difference and left the byte form as the only thing still differing. Two causes, both… The Compose case joined it when #437 closed the CONTENT difference there too: the Feature layer forces the reference to build the service image, and a value that reaches the container through a build is written spaced. |
 | The observable container state after up (running status, labels, mounts, environment) matches the reference for the observed fixtures. | matches the reference | 1 scenario | Backed by the declarative chan-container-state cases — case-state-single-container, case-state-appport, case-state-mount-variety, case-state-dockerfile-nonroot and… |
 | The normalized observable-state diff between deacon and the reference is empty for the observed fixtures. | matches the reference | 7 scenarios | Backed by the declarative chan-container-state cases, which compare the whole normalized container state between the two CLIs: case-state-single-container,… |
 

@@ -1363,7 +1363,7 @@ impl ComposeProject {
             yaml.push_str("    environment:\n");
             // IndexMap preserves insertion order - no sorting needed
             for (key, value) in &self.additional_env {
-                let escaped = escape_yaml_value(value);
+                let escaped = escape_compose_value(value);
                 yaml.push_str(&format!("      {}: {}\n", key, escaped));
             }
         }
@@ -1407,7 +1407,7 @@ impl ComposeProject {
         if !self.deacon_labels.is_empty() {
             yaml.push_str("    labels:\n");
             for (key, value) in &self.deacon_labels {
-                let escaped = escape_yaml_value(value);
+                let escaped = escape_compose_value(value);
                 yaml.push_str(&format!("      {}: {}\n", key, escaped));
             }
             for svc in &self.run_services {
@@ -1422,7 +1422,7 @@ impl ComposeProject {
                 yaml.push_str(&format!("  {}:\n", svc));
                 yaml.push_str("    labels:\n");
                 for (key, value) in &self.deacon_labels {
-                    let escaped = escape_yaml_value(value);
+                    let escaped = escape_compose_value(value);
                     yaml.push_str(&format!("      {}: {}\n", key, escaped));
                 }
             }
@@ -1527,6 +1527,19 @@ impl ComposeProject {
         self.additional_env = cli_env;
         self
     }
+}
+
+/// Escape a value for the generated compose override.
+///
+/// Docker Compose interpolates `${…}` in every file it reads, so a `$` that must
+/// reach Docker verbatim has to be doubled (`$$`) — the same escape the keep-alive
+/// `wait $$!` above already spells out by hand. Without it Compose expands an unset
+/// variable to the empty string, which is how the `devcontainer.metadata` label
+/// recorded `source=/sib` for an authored `source=${localWorkspaceFolder}/sib`
+/// (#437, a compose-path-only regression of #373: the label must carry the
+/// configuration AS AUTHORED, templates intact, because it travels with the image).
+fn escape_compose_value(value: &str) -> String {
+    escape_yaml_value(&value.replace('$', "$$"))
 }
 
 /// Escape a value for YAML output.
@@ -2621,6 +2634,74 @@ mod tests {
         let cmd_pos = override_yaml.find("command:").unwrap();
         let env_pos = override_yaml.find("environment:").unwrap();
         assert!(cmd_pos < env_pos);
+    }
+
+    /// #437: the `devcontainer.metadata` label records the configuration AS
+    /// AUTHORED, so its `${localWorkspaceFolder}` templates must survive the
+    /// generated override. Compose interpolates `${…}` in every file it reads and
+    /// expands an unset variable to the empty string, so an unescaped `$` turned
+    /// `source=${localWorkspaceFolder}/sib` into `source=/sib` on the container —
+    /// a path that resolves nowhere. The single-container path never had the
+    /// problem, which is why the six fixtures verifying #373 missed it.
+    #[test]
+    fn test_generate_injection_override_escapes_compose_interpolation() {
+        let mut deacon_labels: IndexMap<String, String> = IndexMap::new();
+        deacon_labels.insert(
+            "devcontainer.metadata".to_string(),
+            r#"[{"id":"./mountprobe","mounts":[{"source":"${localWorkspaceFolder}/featmnt","target":"/feat-mnt","type":"bind"}]},{"mounts":["source=${localWorkspaceFolder}/sib,target=/workspaces/sib,type=bind"]}]"#
+                .to_string(),
+        );
+        let mut additional_env: IndexMap<String, String> = IndexMap::new();
+        additional_env.insert("LITERAL".to_string(), "a${NOT_A_VAR}b".to_string());
+
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: vec!["app".to_string(), "db".to_string()],
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env,
+            external_volumes: Vec::new(),
+            override_command: Some(true),
+            service_image_override: None,
+            deacon_labels,
+        };
+
+        let yaml = project.generate_injection_override().unwrap();
+
+        // Every `$` a value carries is doubled, on the primary service and on the
+        // extra `runServices` block that repeats the same labels.
+        assert_eq!(
+            yaml.matches("source=$${localWorkspaceFolder}/sib").count(),
+            2,
+            "metadata label must reach Compose escaped on both services: {yaml}"
+        );
+        assert_eq!(
+            yaml.matches(r#"\"source\":\"$${localWorkspaceFolder}/featmnt\""#)
+                .count(),
+            2,
+            "feature-contributed mount source must be escaped too: {yaml}"
+        );
+        assert!(
+            yaml.contains(r#"LITERAL: "a$${NOT_A_VAR}b""#),
+            "env values are literals too — Compose must not expand them: {yaml}"
+        );
+        assert!(
+            !yaml.contains("source=${localWorkspaceFolder}"),
+            "an unescaped template would be interpolated away: {yaml}"
+        );
+    }
+
+    #[test]
+    fn test_escape_compose_value_doubles_dollars() {
+        assert_eq!(escape_compose_value("plain"), "\"plain\"");
+        assert_eq!(escape_compose_value("$"), "\"$$\"");
+        assert_eq!(escape_compose_value("a${B}c"), "\"a$${B}c\"");
+        // Already-doubled input is data, not an escape — it doubles again.
+        assert_eq!(escape_compose_value("$$"), "\"$$$$\"");
     }
 
     #[test]
