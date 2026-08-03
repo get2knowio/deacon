@@ -774,8 +774,18 @@ pub enum Commands {
         /// Workspace folder to inspect (default: current directory)
         #[arg(long, value_name = "PATH")]
         workspace_folder: Option<PathBuf>,
-        /// Output format (text or json)
-        #[arg(long, value_enum, default_value = "text")]
+        /// Output format (text or json).
+        ///
+        /// `--output-format` is accepted as an alias: that is how the reference
+        /// CLI spells this flag, and accepting both lets one argv drive both
+        /// CLIs in the differential parity suite (#389). `--output` stays the
+        /// documented deacon spelling.
+        #[arg(
+            long,
+            visible_alias = "output-format",
+            value_enum,
+            default_value = "text"
+        )]
         output: OutputFormat,
         /// Fail CI with exit code 2 when any outdated feature is detected
         #[arg(long)]
