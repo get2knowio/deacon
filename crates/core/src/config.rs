@@ -101,44 +101,6 @@ where
     }
 }
 
-/// Deserialize the `features` map: an object, like every other object-shaped field,
-/// and additionally one in which no two keys may name the SAME Feature (#411).
-///
-/// A Feature's key carries its version, so `…/node:16` and `…/node:18` are distinct
-/// map keys naming one Feature at two versions. Across an `extends` chain or a CLI
-/// overlay that is a version bump and the later layer wins
-/// ([`ConfigLoader::merge_feature_maps`]). Within a single document there is no later
-/// layer, nothing to break the tie, and no reading under which installing both is what
-/// the author meant — so it is rejected here rather than guessed at.
-///
-/// This is the floor under the merge rule: the merge never has to invent a winner,
-/// because a document that would force it to cannot be loaded.
-fn deserialize_features_value<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<serde_json::Value>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = deserialize_optional_object_value(deserializer)?;
-
-    if let Some(serde_json::Value::Object(map)) = &value {
-        let mut seen: HashMap<String, &String> = HashMap::new();
-        for key in map.keys() {
-            let canonical = canonical_feature_id(key);
-            if let Some(first) = seen.insert(canonical.clone(), key) {
-                return Err(serde::de::Error::custom(format!(
-                    "`features` declares the same Feature twice: \"{first}\" and \"{key}\" \
-                     both resolve to \"{canonical}\". Two versions of one Feature cannot both \
-                     be installed; keep the one you want. (A parent and child in an `extends` \
-                     chain MAY differ here — the child's version wins.)"
-                )));
-            }
-        }
-    }
-
-    Ok(value)
-}
-
 /// Combine two optional collection properties, staying `None` when neither side
 /// authored one.
 ///
@@ -727,9 +689,17 @@ pub struct DevContainerConfig {
     ///
     /// `None` means the author wrote no `features`; `Some({})` means they wrote an
     /// empty object. Read it through [`Self::features`].
+    ///
+    /// Two keys MAY name one Feature at two versions (`…/git:1.3.1` and `…/git:1.3.2`).
+    /// The spec defines those as two distinct Features — `feature-dependencies.md`
+    /// §Definition: Feature Equality makes equality depend on the manifest digest, and
+    /// §Feature authorship states that "a single Feature may be installed more than
+    /// once" — and §Definition: Round Stable Sort supplies the tie-break that orders
+    /// them (oldest tag first). deacon rejected the shape until #430; it now installs
+    /// both, as the reference CLI does.
     #[serde(
         default,
-        deserialize_with = "deserialize_features_value",
+        deserialize_with = "deserialize_optional_object_value",
         skip_serializing_if = "Option::is_none"
     )]
     pub features: Option<serde_json::Value>,
@@ -2011,9 +1981,10 @@ impl ConfigMerger {
     ///   that configured the Feature keeps that configuration when a child only bumps the
     ///   version; the child can still override any individual option.
     ///
-    /// Within a SINGLE document two keys sharing a canonical id is a different situation —
-    /// there is no "later" layer to win — and is rejected at parse time instead; see
-    /// [`deserialize_features_value`].
+    /// Within a SINGLE document two keys sharing a canonical id is a different situation:
+    /// there is no "later" layer, so nothing replaces anything and BOTH Features install
+    /// (spec `feature-dependencies.md` §Feature authorship, #430). This rule only fires
+    /// when one layer overlays another.
     fn merge_feature_maps(
         base: &serde_json::Value,
         overlay: &serde_json::Value,
@@ -5618,23 +5589,35 @@ mod tests {
         assert_eq!(features.len(), 2);
     }
 
-    /// #411 (option B, the floor): within ONE document there is no later layer to win,
-    /// so a canonical-id collision is rejected at parse time rather than guessed at.
+    /// #430: within ONE document two keys naming one Feature at two versions are two
+    /// distinct Features and BOTH load. `feature-dependencies.md` §Definition: Feature
+    /// Equality makes OCI equality depend on the manifest digest, and §Feature authorship
+    /// states that "a single Feature may be installed more than once". deacon rejected
+    /// this shape until #430; the reference CLI has always accepted it.
     #[test]
-    fn test_features_same_feature_twice_in_one_document_is_rejected() {
-        let err = serde_json::from_str::<DevContainerConfig>(
+    fn test_features_same_feature_twice_in_one_document_is_accepted() {
+        let cfg: DevContainerConfig = serde_json::from_str(
             r#"{"features": {
-                "ghcr.io/devcontainers/features/node:16": {},
-                "ghcr.io/devcontainers/features/node:18": {}
+                "ghcr.io/devcontainers/features/git:1.3.2": {"version": "os-provided"},
+                "ghcr.io/devcontainers/features/git:1.3.1": {}
             }}"#,
         )
-        .expect_err("two tags of one Feature in one document must be rejected");
-        let msg = err.to_string();
-        assert!(msg.contains("declares the same Feature twice"), "{msg}");
-        assert!(msg.contains("node:16") && msg.contains("node:18"), "{msg}");
-        assert!(
-            msg.contains("ghcr.io/devcontainers/features/node"),
-            "the message must name the canonical id the two collide on: {msg}"
+        .expect("two tags of one Feature in one document are two Features");
+        let features = cfg.features().as_object().expect("features is an object");
+        assert_eq!(features.len(), 2, "both entries must survive: {features:?}");
+        // Both keys survive with their own options, and in DOCUMENT order — the
+        // install-order tie-break belongs to the resolver, not to the parse.
+        let keys: Vec<&String> = features.keys().collect();
+        assert_eq!(
+            keys,
+            vec![
+                "ghcr.io/devcontainers/features/git:1.3.2",
+                "ghcr.io/devcontainers/features/git:1.3.1"
+            ]
+        );
+        assert_eq!(
+            features["ghcr.io/devcontainers/features/git:1.3.2"],
+            serde_json::json!({"version": "os-provided"})
         );
     }
 

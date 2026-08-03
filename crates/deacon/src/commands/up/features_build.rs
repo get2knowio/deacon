@@ -471,6 +471,25 @@ fn parse_feature_options(value: &serde_json::Value) -> HashMap<String, OptionVal
         .collect()
 }
 
+/// Is a `dependsOn` target already in the feature set?
+///
+/// Compared by RESOURCE NAME (the id without version or digest) rather than by install
+/// key, deliberately. A hard dependency is written without a pin more often than not
+/// (`ghcr.io/devcontainers/features/common-utils`), and a user who declared that Feature
+/// at a specific version has already satisfied it — installing a second copy at `:latest`
+/// would ignore their pin. This is the one place the tag-less name is still the right
+/// question: the user's own two-version declaration is a deliberate double install
+/// (#430), an auto-pulled hard dependency is not.
+fn already_installed(
+    downloaded_features: &HashMap<String, DownloadedFeature>,
+    dep_install_key: &str,
+) -> bool {
+    let dep_resource = deacon_core::features::canonical_feature_id(dep_install_key);
+    downloaded_features
+        .keys()
+        .any(|k| deacon_core::features::canonical_feature_id(k) == dep_resource)
+}
+
 /// Shared core: parse features from `config`, download them, resolve the
 /// installation plan, and stage feature directories into a deterministic temp
 /// directory so BuildKit can mount them as the
@@ -514,11 +533,19 @@ async fn resolve_and_stage_features(
     // pointing at the on-disk directory so the downstream staging pipeline
     // (copy into BuildKit context + dependency resolution + Dockerfile
     // generation) treats them identically to fetched features.
+    //
+    // Every map below is keyed by a feature's INSTALL KEY: the tag-bearing OCI
+    // reference (`ghcr.io/devcontainers/features/git:1.3.1`) or `local:<abs path>`.
+    // The key must carry the version. A `features` map may legally declare one Feature
+    // at two versions — `feature-dependencies.md` §Definition: Feature Equality makes
+    // OCI equality depend on the manifest digest, and §Feature authorship states that
+    // "a single Feature may be installed more than once" — and keying on the tag-less
+    // resource name silently collapsed the two entries into one install (#430).
     let mut feature_refs: Vec<(String, FeatureRef)> = Vec::new();
     let mut feature_options_map: HashMap<String, HashMap<String, OptionValue>> = HashMap::new();
-    // Canonical id (registry/namespace/name, no tag) → user-provided feature ID
-    // (the key as it appears in `devcontainer.json`). The lockfile MUST be
-    // keyed by the user-provided form to match upstream `generateLockfile`.
+    // Install key → user-provided feature ID (the key as it appears in
+    // `devcontainer.json`). The lockfile MUST be keyed by the user-provided form to
+    // match upstream `generateLockfile`.
     let mut user_id_by_canonical: HashMap<String, String> = HashMap::new();
     let mut downloaded_features: HashMap<String, DownloadedFeature> = HashMap::new();
 
@@ -604,10 +631,10 @@ async fn resolve_and_stage_features(
                 })?;
 
             let feature_ref = FeatureRef::new(registry_url, namespace, name, tag);
-            let canonical_id = format!(
-                "{}/{}/{}",
-                feature_ref.registry, feature_ref.namespace, feature_ref.name
-            );
+            // Tag-bearing, and normalized (an untagged ref becomes `:latest`), so two
+            // spellings of the SAME version still collapse to one install while two
+            // versions stay two (#430).
+            let canonical_id = feature_ref.reference();
             (canonical_id, feature_ref)
         };
 
@@ -673,7 +700,7 @@ async fn resolve_and_stage_features(
                     ))
                 })?;
                 let dep_canonical = format!("local:{}", canonical_path.display());
-                if downloaded_features.contains_key(&dep_canonical) {
+                if already_installed(&downloaded_features, &dep_canonical) {
                     continue;
                 }
                 let metadata_path = canonical_path.join("devcontainer-feature.json");
@@ -714,11 +741,8 @@ async fn resolve_and_stage_features(
                         ))
                     })?;
                 let dep_ref = FeatureRef::new(registry_url, namespace, name, tag);
-                let dep_canonical = format!(
-                    "{}/{}/{}",
-                    dep_ref.registry, dep_ref.namespace, dep_ref.name
-                );
-                if downloaded_features.contains_key(&dep_canonical) {
+                let dep_canonical = dep_ref.reference();
+                if already_installed(&downloaded_features, &dep_canonical) {
                     continue;
                 }
                 info!(
