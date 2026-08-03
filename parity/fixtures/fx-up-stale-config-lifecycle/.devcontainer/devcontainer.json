@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceUpStaleLifecycleBefore",
+	"image": "alpine:3.19",
+	"containerEnv": { "CONF_GENERATION": "first" },
+	"postCreateCommand": "echo first >> ./generations.txt"
+}
