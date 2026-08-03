@@ -2293,6 +2293,17 @@ impl ContainerOps for CliRuntime {
         // Apply containerEnv variables from configuration. Only `containerEnv`
         // is baked onto the container at creation time.
         //
+        // `config.container_env()` is an `IndexMap`, so these flags are emitted in
+        // the order the author wrote them (#394). Do NOT expect that order to
+        // survive into the container: `docker inspect`'s `Config.Env` comes back
+        // in a DIFFERENT order, and the daemon is what reorders it — verified
+        // directly with `docker create --env AAA=1 --env ZZZ=2 …`, which inspects
+        // back reordered with no deacon code involved. That channel was never
+        // ours to make deterministic. What #394 made byte-stable and
+        // authored-order is the `devcontainer.metadata` LABEL, which deacon
+        // writes itself; a reader finding `Config.Env` unordered here is looking
+        // at Docker's behavior, not a regression of that fix.
+        //
         // A value still containing an unexpanded `${...}` shell reference — e.g.
         // a feature's `PATH=/usr/local/share/nvm/current/bin:${PATH}` (the
         // standard "prepend to the existing PATH" idiom) — must NOT be passed
