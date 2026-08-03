@@ -5,7 +5,7 @@
 //! ([`CA_ENV_VARS`]). Per Constitution V, every observable env-var name is a
 //! named constant (no scattered string literals).
 
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 /// Env var the machine owner sets to activate injection: `auto` or a PEM path.
 /// Resolved by the activation precedence helper (CLI flag > this > settings).
@@ -34,7 +34,7 @@ pub const CA_ENV_VARS: [&str; 6] = [
 ///
 /// Mirrors the secrets `or_insert_with` merge so user `containerEnv`/`remoteEnv`
 /// + CLI `--remote-env` values win over the synthesized defaults (FR-024).
-pub fn apply_ca_env_vars(env: &mut HashMap<String, String>, bundle_path: &str) {
+pub fn apply_ca_env_vars(env: &mut IndexMap<String, String>, bundle_path: &str) {
     for name in CA_ENV_VARS {
         env.entry(name.to_string())
             .or_insert_with(|| bundle_path.to_string());
@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn inserts_all_six_when_absent() {
-        let mut env = HashMap::new();
+        let mut env = IndexMap::new();
         apply_ca_env_vars(&mut env, HOST_CA_BUNDLE_PATH);
         assert_eq!(env.len(), 6);
         for name in CA_ENV_VARS {
@@ -57,7 +57,7 @@ mod tests {
 
     #[test]
     fn user_value_wins() {
-        let mut env = HashMap::new();
+        let mut env = IndexMap::new();
         env.insert("SSL_CERT_FILE".to_string(), "/user/custom.pem".to_string());
         apply_ca_env_vars(&mut env, HOST_CA_BUNDLE_PATH);
         // User's SSL_CERT_FILE preserved; the other five synthesized.
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn idempotent_second_apply_is_noop() {
-        let mut env = HashMap::new();
+        let mut env = IndexMap::new();
         apply_ca_env_vars(&mut env, HOST_CA_BUNDLE_PATH);
         apply_ca_env_vars(&mut env, "/other/path.pem");
         // First apply wins; second is a no-op (all already present).

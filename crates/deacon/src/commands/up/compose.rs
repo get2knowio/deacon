@@ -164,15 +164,13 @@ pub(crate) async fn execute_compose_up(
     // single-container path where `create_container` (docker.rs) reads
     // `config.container_env` directly. Found via the #267 parity suite.
     let mut merged_container_env: IndexMap<String, String> = IndexMap::new();
-    // `config.container_env` is a `HashMap`, whose iteration order is
-    // randomized per process. Insert in sorted-key order so the rendered
-    // compose override `environment:` block is deterministic run-to-run —
-    // otherwise the IndexMap (whose whole point is stable ordering) inherits
-    // the HashMap's nondeterminism for the containerEnv-derived lines.
-    let mut config_env_keys: Vec<&String> = config.container_env().keys().collect();
-    config_env_keys.sort();
-    for key in config_env_keys {
-        merged_container_env.insert(key.clone(), config.container_env()[key].clone());
+    // `config.container_env` is an `IndexMap` (#394), so iterating it yields the
+    // order the author wrote. This used to insert in sorted-key order to work
+    // around the `HashMap` it was — deterministic run-to-run, but still not the
+    // authored order the reference renders. The sort is redundant now, and
+    // keeping it would silently re-order what the author wrote.
+    for (key, value) in config.container_env() {
+        merged_container_env.insert(key.clone(), value.clone());
     }
     for (key, value) in effective_env {
         merged_container_env.insert(key.clone(), value.clone());
@@ -414,7 +412,9 @@ pub(crate) async fn execute_compose_up(
     // `or_insert` (never `insert`) is the precedence: configuration and CLI values
     // already present win the conflict, matching the single-container fix from 024 US5.
     // Keys are applied in sorted order so the rendered override block stays
-    // deterministic run-to-run, as with `config.container_env` above.
+    // deterministic run-to-run. Unlike `config.container_env` above — an `IndexMap`
+    // carrying the order the AUTHOR wrote since #394 — this map is Feature-contributed
+    // and is still a `HashMap`, so sorting is the only order available to it.
     if let Some(ref fb) = feature_build {
         let mut feature_env_keys: Vec<&String> = fb.combined_env.keys().collect();
         feature_env_keys.sort();

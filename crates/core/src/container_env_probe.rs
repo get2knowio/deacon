@@ -654,7 +654,7 @@ impl ContainerEnvironmentProber {
         &self,
         probed_env: &HashMap<String, String>,
         container_env_for_substitution: &HashMap<String, String>,
-        config_remote_env: Option<&HashMap<String, Option<String>>>,
+        config_remote_env: Option<&IndexMap<String, Option<String>>>,
         cli_env: &IndexMap<String, String>,
     ) -> HashMap<String, String> {
         let mut result = probed_env.clone();
@@ -1166,7 +1166,7 @@ mod tests {
         probed_env.insert("A".to_string(), "from_probed".to_string());
         probed_env.insert("KEEP".to_string(), "keep_me".to_string());
 
-        let mut config_remote_env: HashMap<String, Option<String>> = HashMap::new();
+        let mut config_remote_env: IndexMap<String, Option<String>> = IndexMap::new();
         // Config sets A to Some -> should override probed
         config_remote_env.insert("A".to_string(), Some("from_config".to_string()));
         // Config sets B to None -> should result in empty string
@@ -1204,7 +1204,7 @@ mod tests {
         let mut probed_env = HashMap::new();
         probed_env.insert("PATH".to_string(), "/usr/local/bin:/usr/bin".to_string());
 
-        let mut config_remote_env: HashMap<String, Option<String>> = HashMap::new();
+        let mut config_remote_env: IndexMap<String, Option<String>> = IndexMap::new();
         config_remote_env.insert(
             "PATH".to_string(),
             Some("${containerEnv:PATH}:/custom/bin".to_string()),
@@ -1253,7 +1253,7 @@ mod tests {
             "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
         );
 
-        let mut config_remote_env: HashMap<String, Option<String>> = HashMap::new();
+        let mut config_remote_env: IndexMap<String, Option<String>> = IndexMap::new();
         config_remote_env.insert(
             "R2_PATH".to_string(),
             Some("${containerEnv:PATH}".to_string()),

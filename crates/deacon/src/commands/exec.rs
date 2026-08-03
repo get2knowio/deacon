@@ -621,7 +621,7 @@ where
 
         // Load config.remote_env when we have configuration context; prefer resolved config
         // Track effective user: CLI --user overrides any config remoteUser; if absent, fall back to config
-        let mut config_remote_env: Option<HashMap<String, Option<String>>> = None;
+        let mut config_remote_env: Option<IndexMap<String, Option<String>>> = None;
         let mut config_remote_user: Option<String> = None;
 
         if let Some(config_ctx) = resolved_config.as_ref() {

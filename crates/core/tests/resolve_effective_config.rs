@@ -8,7 +8,7 @@ fn test_resolve_effective_config_merges_labels_and_substitutes() -> anyhow::Resu
     let base = DevContainerConfig {
         workspace_folder: Some("${localWorkspaceFolder}/project".to_string()),
         remote_env: {
-            let mut m = std::collections::HashMap::new();
+            let mut m = deacon_core::IndexMap::new();
             m.insert("BASE_VAR".to_string(), Some("base".to_string()));
             m.insert("EMPTY_VAR".to_string(), None);
             Some(m)

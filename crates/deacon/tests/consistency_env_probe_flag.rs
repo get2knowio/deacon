@@ -10,7 +10,6 @@ use deacon::commands::shared::resolve_env_and_user;
 use deacon_core::IndexMap;
 use deacon_core::container_env_probe::ContainerProbeMode;
 use deacon_core::docker::mock::{MockContainer, MockDocker};
-use std::collections::HashMap;
 
 #[tokio::test]
 async fn exec_honors_default_user_env_probe_login_shell() {
@@ -74,7 +73,7 @@ async fn up_shared_probe_helper_uses_login_shell() {
     ));
 
     let cli_env: IndexMap<String, String> = IndexMap::new();
-    let config_remote_env: HashMap<String, Option<String>> = HashMap::new();
+    let config_remote_env: IndexMap<String, Option<String>> = IndexMap::new();
 
     let resolution = resolve_env_and_user(
         &mock,

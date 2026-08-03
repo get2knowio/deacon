@@ -326,7 +326,11 @@ async fn execute_lifecycle_hooks(
     // spec §3 normalization). The lifecycle helper consumes container_env
     // separately, so we fold the CLI env into the config's container_env
     // for the duration of this exec.
-    let mut container_env = merged_config.container_env().clone();
+    // Collected into a `HashMap` because that is where the authored-order map
+    // (#394) stops: this becomes `docker exec -e K=V` flags, where order carries
+    // no meaning, and nothing downstream re-serializes it.
+    let mut container_env: HashMap<String, String> =
+        merged_config.container_env().clone().into_iter().collect();
     for (k, v) in &remote_env_pairs {
         container_env.insert(k.clone(), v.clone());
     }
@@ -998,13 +1002,13 @@ mod tests {
         // sources surface, with CLI overriding any conflicting key.
         let merged = DevContainerConfig {
             container_env: {
-                let mut m = std::collections::HashMap::new();
+                let mut m = deacon_core::IndexMap::new();
                 m.insert("FROM_CONTAINER".to_string(), "c".to_string());
                 m.insert("OVERRIDDEN".to_string(), "from-config".to_string());
                 Some(m)
             },
             remote_env: {
-                let mut m = std::collections::HashMap::new();
+                let mut m = deacon_core::IndexMap::new();
                 m.insert("FROM_REMOTE".to_string(), Some("r".to_string()));
                 m.insert("DROPPED".to_string(), None); // None-valued keys are skipped
                 Some(m)
@@ -1040,7 +1044,7 @@ mod tests {
         // exact env?" check.
         let merged = DevContainerConfig {
             container_env: {
-                let mut m = std::collections::HashMap::new();
+                let mut m = deacon_core::IndexMap::new();
                 m.insert("ZED".to_string(), "z".to_string());
                 m.insert("ALPHA".to_string(), "a".to_string());
                 m.insert("MID".to_string(), "m".to_string());
