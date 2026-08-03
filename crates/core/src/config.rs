@@ -26,6 +26,7 @@ use crate::container_env_probe::ContainerProbeMode;
 use crate::errors::{ConfigError, DeaconError, Result};
 use crate::features::canonical_feature_id;
 use crate::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
+use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -47,11 +48,11 @@ static EMPTY_OBJECT: LazyLock<serde_json::Value> =
     LazyLock::new(|| serde_json::Value::Object(serde_json::Map::new()));
 
 /// Empty map handed back by [`DevContainerConfig::container_env`].
-static EMPTY_STRING_MAP: LazyLock<HashMap<String, String>> = LazyLock::new(HashMap::new);
+static EMPTY_STRING_MAP: LazyLock<IndexMap<String, String>> = LazyLock::new(IndexMap::new);
 
 /// Empty map handed back by [`DevContainerConfig::remote_env`].
-static EMPTY_OPTIONAL_STRING_MAP: LazyLock<HashMap<String, Option<String>>> =
-    LazyLock::new(HashMap::new);
+static EMPTY_OPTIONAL_STRING_MAP: LazyLock<IndexMap<String, Option<String>>> =
+    LazyLock::new(IndexMap::new);
 
 /// Empty map handed back by [`DevContainerConfig::ports_attributes`].
 static EMPTY_PORT_ATTRIBUTES: LazyLock<HashMap<String, PortAttributes>> =
@@ -785,7 +786,7 @@ pub struct DevContainerConfig {
     /// `None` means the author wrote no `containerEnv`; `Some({})` means they
     /// wrote an empty object. Read it through [`Self::container_env`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub container_env: Option<HashMap<String, String>>,
+    pub container_env: Option<IndexMap<String, String>>,
 
     /// Environment variables to set in the remote environment.
     ///
@@ -794,7 +795,7 @@ pub struct DevContainerConfig {
     /// `None` means the author wrote no `remoteEnv`; `Some({})` means they wrote
     /// an empty object. Read it through [`Self::remote_env`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remote_env: Option<HashMap<String, Option<String>>>,
+    pub remote_env: Option<IndexMap<String, Option<String>>>,
 
     /// User to run commands as inside the container.
     ///
@@ -1036,12 +1037,12 @@ impl DevContainerConfig {
     }
 
     /// Container environment variables, empty when unauthored.
-    pub fn container_env(&self) -> &HashMap<String, String> {
+    pub fn container_env(&self) -> &IndexMap<String, String> {
         self.container_env.as_ref().unwrap_or(&EMPTY_STRING_MAP)
     }
 
     /// Remote environment variables, empty when unauthored.
-    pub fn remote_env(&self) -> &HashMap<String, Option<String>> {
+    pub fn remote_env(&self) -> &IndexMap<String, Option<String>> {
         self.remote_env
             .as_ref()
             .unwrap_or(&EMPTY_OPTIONAL_STRING_MAP)
@@ -1453,7 +1454,7 @@ impl DevContainerConfig {
 
         // Substitute container environment variables
         if let Some(ref container_env) = config.container_env {
-            let mut substituted_container_env = HashMap::new();
+            let mut substituted_container_env = IndexMap::new();
             for (key, value) in container_env {
                 let substituted_value = VariableSubstitution::substitute_string_advanced(
                     value, context, options, report,
@@ -1465,7 +1466,7 @@ impl DevContainerConfig {
 
         // Substitute remote environment variables
         if let Some(ref remote_env) = config.remote_env {
-            let mut substituted_remote_env = HashMap::new();
+            let mut substituted_remote_env = IndexMap::new();
             for (key, value) in remote_env {
                 if let Some(val) = value {
                     let substituted_value = VariableSubstitution::substitute_string_advanced(
@@ -2062,9 +2063,9 @@ impl ConfigMerger {
 
     /// Merge string maps with overlay taking precedence
     fn merge_string_maps(
-        base: &HashMap<String, String>,
-        overlay: &HashMap<String, String>,
-    ) -> HashMap<String, String> {
+        base: &IndexMap<String, String>,
+        overlay: &IndexMap<String, String>,
+    ) -> IndexMap<String, String> {
         let mut result = base.clone();
         result.extend(overlay.clone());
         result
@@ -2072,9 +2073,9 @@ impl ConfigMerger {
 
     /// Merge optional string maps with overlay taking precedence
     fn merge_optional_string_maps(
-        base: &HashMap<String, Option<String>>,
-        overlay: &HashMap<String, Option<String>>,
-    ) -> HashMap<String, Option<String>> {
+        base: &IndexMap<String, Option<String>>,
+        overlay: &IndexMap<String, Option<String>>,
+    ) -> IndexMap<String, Option<String>> {
         let mut result = base.clone();
         result.extend(overlay.clone());
         result
@@ -2337,7 +2338,7 @@ impl ConfigMerger {
 
         // Substitute remote_env values
         if let Some(ref remote_env) = resolved.remote_env {
-            let mut substituted_remote: HashMap<String, Option<String>> = HashMap::new();
+            let mut substituted_remote: IndexMap<String, Option<String>> = IndexMap::new();
             for (k, v_opt) in remote_env {
                 match v_opt {
                     Some(v) => {
@@ -4734,6 +4735,58 @@ mod tests {
         );
     }
 
+    /// #394: `containerEnv`/`remoteEnv` keep the order the author wrote them in
+    /// through the two passes that REBUILD the maps — variable substitution and
+    /// the merge. Both were `HashMap`, so anything serializing them downstream
+    /// (the `devcontainer.metadata` label, `read-configuration`, the compose
+    /// override) emitted an order that changed run to run.
+    #[test]
+    fn test_env_maps_keep_authored_order_through_substitution_and_merge() {
+        let temp_dir = TempDir::new().unwrap();
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+
+        // Neither alphabetical nor reverse-alphabetical, so a sort is visible too.
+        let mut config: DevContainerConfig = serde_json::from_str(
+            r#"{
+                "containerEnv": { "ZULU": "1", "ALPHA": "2", "MIKE": "3", "BRAVO": "4" },
+                "remoteEnv": { "R_ZULU": "z", "R_ALPHA": "a", "R_MIKE": "m" }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.container_env().keys().collect::<Vec<_>>(),
+            ["ZULU", "ALPHA", "MIKE", "BRAVO"],
+            "parsing must keep the authored order"
+        );
+
+        config = config.apply_variable_substitution(&context).0;
+        assert_eq!(
+            config.container_env().keys().collect::<Vec<_>>(),
+            ["ZULU", "ALPHA", "MIKE", "BRAVO"],
+            "substitution rebuilds the map and must keep the authored order"
+        );
+        assert_eq!(
+            config.remote_env().keys().collect::<Vec<_>>(),
+            ["R_ZULU", "R_ALPHA", "R_MIKE"]
+        );
+
+        // Merge: the base's order first, then the overlay's new keys in their own
+        // authored order (an overlay value overwrites in place, as `IndexMap`
+        // `extend` does).
+        let overlay: DevContainerConfig =
+            serde_json::from_str(r#"{ "containerEnv": { "MIKE": "overridden", "YANKEE": "5" } }"#)
+                .unwrap();
+        let merged = ConfigMerger::merge_two_configs(&config, &overlay);
+        assert_eq!(
+            merged.container_env().keys().collect::<Vec<_>>(),
+            ["ZULU", "ALPHA", "MIKE", "BRAVO", "YANKEE"]
+        );
+        assert_eq!(
+            merged.container_env().get("MIKE").map(String::as_str),
+            Some("overridden")
+        );
+    }
+
     #[test]
     fn test_port_spec_number() {
         let port = PortSpec::Number(3000);
@@ -6108,10 +6161,10 @@ mod tests {
         assert_eq!(merged.image, Some("base-image".to_string())); // base wins when overlay is None
 
         // Maps: key-merge (overlay wins per key)
-        let mut base_env = std::collections::HashMap::new();
+        let mut base_env = IndexMap::new();
         base_env.insert("A".to_string(), "1".to_string());
         base_env.insert("B".to_string(), "2".to_string());
-        let mut overlay_env = std::collections::HashMap::new();
+        let mut overlay_env = IndexMap::new();
         overlay_env.insert("B".to_string(), "override".to_string());
         overlay_env.insert("C".to_string(), "3".to_string());
         let base2 = DevContainerConfig {

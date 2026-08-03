@@ -722,6 +722,41 @@ mod tests {
         );
     }
 
+    /// #394: the `devcontainer.metadata` label records `containerEnv`/`remoteEnv`
+    /// in the order the author wrote them, and does so byte-identically for
+    /// identical input. Both fields were `HashMap`, whose iteration order is
+    /// randomized per process, so two `up` runs over the same configuration
+    /// produced containers whose label BYTES differed. Serializing the same
+    /// document twice here would not catch that — the same map instance iterates
+    /// the same way — so this parses the document afresh each time, which is what
+    /// a second `up` does.
+    #[test]
+    fn config_metadata_entry_records_env_in_authored_order() {
+        // Keys chosen so authored order is neither alphabetical nor reverse.
+        let document = r#"{
+                "image": "alpine:3.19",
+                "containerEnv": {
+                    "ZULU": "1", "ALPHA": "2", "MIKE": "3", "BRAVO": "4"
+                },
+                "remoteEnv": { "R_ZULU": "z", "R_ALPHA": "a", "R_MIKE": "m" }
+            }"#;
+
+        let serialize_once = || {
+            let config: DevContainerConfig = serde_json::from_str(document).unwrap();
+            serde_json::to_string(&config_metadata_entry(&config)).unwrap()
+        };
+
+        let first = serialize_once();
+        assert_eq!(
+            first,
+            r#"{"containerEnv":{"ZULU":"1","ALPHA":"2","MIKE":"3","BRAVO":"4"},"remoteEnv":{"R_ZULU":"z","R_ALPHA":"a","R_MIKE":"m"}}"#,
+            "the label entry must record the authored key order, not a map's iteration order"
+        );
+        for _ in 0..8 {
+            assert_eq!(first, serialize_once(), "label bytes must be reproducible");
+        }
+    }
+
     /// #373: every installed Feature gets an entry keyed by the id AS WRITTEN in
     /// devcontainer.json — that is what lets a consumer reading the label back
     /// reconstruct the Feature set. Measured against oracle 0.87.0, which records
@@ -1053,10 +1088,9 @@ mod image_metadata_merge_tests {
 
     use super::apply_image_metadata_label;
     use deacon_core::config::DevContainerConfig;
-    use std::collections::HashMap;
 
     fn user_config_with_env(pairs: &[(&str, &str)]) -> DevContainerConfig {
-        let mut container_env = HashMap::new();
+        let mut container_env = deacon_core::IndexMap::new();
         for (k, v) in pairs {
             container_env.insert((*k).to_string(), (*v).to_string());
         }

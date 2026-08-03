@@ -34,7 +34,7 @@ pub async fn resolve_env_and_user<D: Docker>(
     cli_user: Option<String>,
     config_remote_user: Option<String>,
     probe_mode: ContainerProbeMode,
-    config_remote_env: Option<&HashMap<String, Option<String>>>,
+    config_remote_env: Option<&IndexMap<String, Option<String>>>,
     cli_env: &IndexMap<String, String>,
     cache_folder: Option<&std::path::Path>,
 ) -> EnvUserResolution {

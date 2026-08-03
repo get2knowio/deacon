@@ -257,7 +257,13 @@ async fn execute_lifecycle_commands(
             .clone()
             .or_else(|| config.container_user.clone()),
         container_workspace_folder,
-        container_env: lifecycle_env,
+        // Where the authored-order map (#394) stops, deliberately: the lifecycle
+        // environment becomes `docker exec -e K=V` flags — order carries no meaning
+        // there — and it is merged with the unordered userEnvProbe result anyway.
+        // Nothing downstream of this point serializes the map, so the ordering the
+        // label and the compose override depend on is not lost here. The map itself
+        // is the #405 layering (remoteEnv over containerEnv) built above.
+        container_env: lifecycle_env.into_iter().collect(),
         skip_post_create: args.skip_post_create,
         skip_non_blocking_commands: args.skip_non_blocking_commands,
         non_blocking_timeout: Duration::from_secs(300), // 5 minutes default timeout
