@@ -434,44 +434,75 @@ pub(crate) async fn execute_compose_up(
         handle_lockfile_post_build(args, config_path, &fb.lockfile).await?;
     }
 
+    // The image the primary service container will actually RUN: the
+    // feature-extended tag when Features were built, else the service's own
+    // `image:`. Two things below need it — the `devcontainer.metadata` label
+    // deacon stamps (#322) and the image-metadata merge (#448) — so it is
+    // resolved once here rather than probed twice.
+    let effective_image = match &project.service_image_override {
+        Some(img) => Some(img.clone()),
+        None => match compose_manager
+            .get_command(&project)
+            .extract_service_shape(&project.service)
+            .await
+        {
+            Ok(ServiceShape::Image(img)) => Some(img),
+            _ => None,
+        },
+    };
+
     // #322: stamp the merged `devcontainer.metadata` on the compose service
     // container too (via `deacon_labels`, applied by the injection override), so
     // config living only in devcontainer.json — esp. `remoteEnv` — survives and
     // is recoverable by exec/read-configuration/set-up `--container-id`, exactly
-    // like the single-container path. The effective image is the feature-extended
-    // one when features were built, else the service's own `image:`.
-    {
-        use deacon_core::compose::ServiceShape;
-        let effective_image = match &project.service_image_override {
-            Some(img) => Some(img.clone()),
-            None => match compose_manager
-                .get_command(&project)
-                .extract_service_shape(&project.service)
-                .await
-            {
-                Ok(ServiceShape::Image(img)) => Some(img),
-                _ => None,
-            },
-        };
-        if let Some(img) = effective_image {
-            if let Some(json) = super::merged_config::build_container_metadata_label(
-                &runtime.cli_docker(),
-                &img,
-                raw_config,
-                feature_build
-                    .as_ref()
-                    .map(|fb| fb.resolved_features.as_slice())
-                    .unwrap_or(&[]),
-            )
-            .await
-            {
-                project.deacon_labels.insert(
-                    deacon_core::container::LABEL_DEVCONTAINER_METADATA.to_string(),
-                    json,
-                );
-            }
+    // like the single-container path.
+    if let Some(img) = effective_image.as_deref() {
+        if let Some(json) = super::merged_config::build_container_metadata_label(
+            &runtime.cli_docker(),
+            img,
+            raw_config,
+            feature_build
+                .as_ref()
+                .map(|fb| fb.resolved_features.as_slice())
+                .unwrap_or(&[]),
+        )
+        .await
+        {
+            project.deacon_labels.insert(
+                deacon_core::container::LABEL_DEVCONTAINER_METADATA.to_string(),
+                json,
+            );
         }
     }
+
+    // Spec parity (#448): fold the service image's `devcontainer.metadata` LABEL
+    // into the configuration, at lower precedence than the user's
+    // devcontainer.json — the SAME merge, at the same point in the flow (image
+    // ready, before lifecycle and env resolution), that the single-container
+    // path performs at `up/container.rs`. `merge_image_metadata_after_image_ready`
+    // stays the one implementation; there is no compose-specific re-reader.
+    //
+    // Without this a `remoteUser`, `remoteEnv` or lifecycle hook contributed
+    // only by the service image was honored by `up`'s single-container path and
+    // by every later `exec` / `run-user-commands` attach (#405), and silently
+    // dropped by a compose `up`'s own lifecycle run. Measured against the pinned
+    // reference CLI 0.87.0, which applies all three on the compose path.
+    //
+    // `raw_config` — the pre-substitution config the stamped LABEL is built from
+    // (#437) — is deliberately NOT merged into: the label records what the author
+    // wrote, not what the image contributed.
+    let merged_config = match effective_image.as_deref() {
+        Some(img) => {
+            super::merged_config::merge_image_metadata_after_image_ready(
+                &runtime.cli_docker(),
+                img,
+                config.clone(),
+            )
+            .await
+        }
+        None => config.clone(),
+    };
+    let config = &merged_config;
 
     // Apply `devcontainer.json` `mounts` (#266) and feature-contributed
     // `mounts` (#272) to the compose project. Run through `merge_mounts` in a
@@ -574,9 +605,9 @@ pub(crate) async fn execute_compose_up(
             &project,
             config,
             workspace_folder,
-            &args.docker_path,
+            args,
+            effective_env,
             force_pty,
-            args.mount_workspace_git_root,
         )
         .await?;
     }
@@ -735,15 +766,20 @@ pub(crate) async fn execute_compose_up(
     })
 }
 
-/// Execute post-create lifecycle for compose projects
-#[instrument(skip(project, config, docker_path))]
+/// Execute post-create lifecycle for compose projects.
+///
+/// `config` is the configuration AFTER the service image's `devcontainer.metadata`
+/// has been folded in (#448), so a `remoteUser`, `remoteEnv` or `postCreateCommand`
+/// contributed only by the image reaches this hook exactly as it does on the
+/// single-container path.
+#[instrument(skip(project, config, args, cli_remote_env))]
 pub(crate) async fn execute_compose_post_create(
     project: &ComposeProject,
     config: &DevContainerConfig,
     workspace_folder: &Path,
-    docker_path: &str,
+    args: &UpArgs,
+    cli_remote_env: &IndexMap<String, String>,
     force_pty: bool,
-    mount_workspace_git_root: bool,
 ) -> Result<()> {
     debug!("Executing post-create lifecycle for compose project");
 
@@ -763,11 +799,11 @@ pub(crate) async fn execute_compose_post_create(
     let container_workspace_folder = crate::commands::shared::derive_container_workspace_folder(
         config,
         workspace_folder,
-        mount_workspace_git_root,
+        args.mount_workspace_git_root,
     );
 
     // Get the primary container ID
-    let compose_manager = ComposeManager::with_docker_path(docker_path.to_string());
+    let compose_manager = ComposeManager::with_docker_path(args.docker_path.clone());
     let container_id = match compose_manager.get_primary_container_id(project).await? {
         Some(id) => id,
         None => {
@@ -786,6 +822,31 @@ pub(crate) async fn execute_compose_post_create(
         if let Some(cmd_str) = post_create_cmd.as_str() {
             debug!("Executing postCreateCommand: {}", cmd_str);
 
+            // Resolve the hook's user and environment through the SAME shared
+            // helper the single-container `up`, `exec` and `run-user-commands`
+            // use (CLAUDE.md principle 6): probe → config `remoteEnv` → CLI
+            // `--remote-env`, with `remoteUser` (else `containerUser`) as the
+            // exec user. This path passed `user: None` and an EMPTY env map, so
+            // the hook ran as the image's own user with none of the configured
+            // environment — which is what made the #448 image-metadata merge
+            // above unobservable, and dropped the workspace's own `remoteEnv`
+            // too. The same three-way miss `run-user-commands` had at #405.
+            let docker = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
+            let env_user = crate::commands::shared::resolve_env_and_user(
+                &docker,
+                &container_id,
+                None,
+                config
+                    .remote_user
+                    .clone()
+                    .or_else(|| config.container_user.clone()),
+                config.user_env_probe.unwrap_or(args.default_user_env_probe),
+                Some(config.remote_env()),
+                cli_remote_env,
+                args.container_data_folder.as_deref(),
+            )
+            .await;
+
             // Run from the container workspace folder if it exists, else fall
             // through (see the note above). Single-quote the path defensively;
             // container workspace paths do not contain single quotes in practice.
@@ -794,15 +855,14 @@ pub(crate) async fn execute_compose_post_create(
                 container_workspace_folder, cmd_str
             );
 
-            let docker = deacon_core::docker::CliDocker::new();
             let result = docker
                 .exec(
                     &container_id,
                     &["sh".to_string(), "-c".to_string(), wrapped_cmd],
                     ExecConfig {
-                        user: None,
+                        user: env_user.effective_user,
                         working_dir: None,
-                        env: std::collections::HashMap::new(),
+                        env: env_user.effective_env,
                         tty: force_pty,
                         interactive: false,
                         detach: false,

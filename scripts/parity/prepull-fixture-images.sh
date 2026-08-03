@@ -80,6 +80,19 @@ for df in "${fixtures}"/*/image/Dockerfile; do
   cfg="$(printf '%s\n' "${configs}" | grep "^${fx}/" | head -n1)"
   [ -n "${cfg}" ] || continue
   tag="$(config_image "${cfg}")"
+  if [ -z "${tag}" ]; then
+    # A COMPOSE fixture with a local base names it in the compose file, not in
+    # devcontainer.json — that config carries `dockerComposeFile` + `service` and no
+    # `image` key, so `config_image` finds nothing and the build was skipped silently.
+    # The `:local` tag is the one no registry provides, which is exactly the tag this
+    # loop exists to produce; a compose fixture whose services are all published images
+    # still resolves to nothing here and is left to the pull loop below.
+    # (`fx-up-compose-image-metadata`, #448.)
+    tag="$(find "${fx}" \( -name '*.yml' -o -name '*.yaml' \) -type f 2>/dev/null \
+             | sort \
+             | while read -r yml; do compose_images "${yml}"; done \
+             | grep ':local$' | head -n1)"
+  fi
   [ -n "${tag}" ] || continue
   echo "prepull: docker build ${tag}"
   docker build -q -t "${tag}" "${dir}" >/dev/null \

@@ -299,6 +299,54 @@
       "notes": "Covers the high-risk triple `hrt-up-compose-single-feature-restart`. The second `up` begins with the Compose project already running, so the declared `first-create-vs-restart` relationship is the oracle: re-entry must reattach to the project it created rather than stand up a second one. The process-graph channel is what makes a duplicated service container visible — an exit code cannot show it, and the observation captures EVERY container matching the workspace label for exactly that reason."
     },
     {
+      "id": "case-up-compose-image-metadata-differential",
+      "behaviors": [
+        "bhv-up-compose-image-metadata"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-image-metadata"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "up-compose-image-metadata.txt": "from-image-metadata from-workspace-config\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "up-compose-image-metadata.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "#448, measured against the pinned 0.87.0 before the fix was written: the reference's compose `up` ran the image-metadata `postCreateCommand` with both `META_ENV` (image) and `WS_ENV` (workspace) set; deacon wrote no file at all. The hook and `META_ENV` live ONLY in the service image's `devcontainer.metadata` label, and `WS_ENV` only in the workspace's `remoteEnv`, so the single marker line pins three of the four cells of the #448 matrix at once: the hook ran, the image's remoteEnv reached it, and the workspace's did too. `up`'s compose path never called `merge_image_metadata_after_image_ready`, and its post-create exec passed no user and an empty env, which is why the workspace's own `remoteEnv` was missing too.\n\nThe observation is the FILE, not the exit code: before the fix nothing was written and the status still said 0.\n\nThe fourth cell — the hook's USER — is deliberately NOT measured here, and the fixture declares no `remoteUser`. An image-metadata `remoteUser` does reach the hook after #448 (both CLIs report `\"remoteUser\":\"metauser\"` on this project), but a non-root hook can then only write into the bind-mounted workspace if its uid matches the host directory's owner: the reference applies `updateRemoteUserUID` on the compose path and remaps it, deacon applies that mapping on the single-container path only (#462). The first revision of this case DID declare `remoteUser` and passed locally purely because the dev container's uid and the image user's uid both happened to be 1000 — on GitHub's runners it failed with `Permission denied`. A case whose verdict turns on a uid coincidence cannot tell a #448 regression from its host, so the user cell moved to the Docker-gated `integration_compose_config_mounts::test_compose_up_merges_service_image_metadata`, which owns its workspace directory and makes it world-writable.\n\nNo spec-expectation twin: the fixture's base is a `:local` image built from its sibling Dockerfile by `scripts/parity/prepull-fixture-images.sh`, which only the nightly and release lanes run — so a Docker-lane twin would fail on the PR lane for a missing image rather than for a divergence (the same reason `case-run-user-commands-image-metadata-differential` is differential-only). The direction is pinned instead by the `assertion` carried HERE, evaluated against deacon's side on top of the comparison.\n\nOnly `chan-exit-code` and `chan-file-content` are observed. `chan-container-state` would drag in the whole compose project-name / label tolerance set that `case-up-compose-project-resources-differential` already carries, none of which is what this case is about."
+    },
+    {
       "id": "case-up-compose-project-resources",
       "behaviors": [
         "bhv-compose-project-name-robust"
