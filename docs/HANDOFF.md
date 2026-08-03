@@ -76,7 +76,7 @@ disposition — **each removal is a decision to block releases, not a cleanup.**
 | `wvr-outdated-malformed-lockfile-rejected` | ruled **KEEP** 2026-08-02 | **INERT** | 1 |
 | `wvr-up-changed-config-recreates` | ruled **KEEP** 2026-08-02 | **INERT** | 1 |
 | `wvr-readconfig-authored-empty-omitted` | ruled **FIX DEACON** — not started (#398) | live | 2 |
-| `wvr-container-metadata-label-serialization` | ruled **FIX DEACON** — not started (#394) | live | 2 |
+| `wvr-container-metadata-label-serialization` | ruled **FIX DEACON** — landed (#394); NARROWED to whitespace, now **unruled** on that residual | live | 2 |
 | `wvr-compose-project-file-set` | **unruled** | live | 1 |
 | `wvr-readconfig-merged-computed-empties` | **unruled** | **INERT** | **0** |
 
@@ -87,10 +87,13 @@ wrong, not different — that is why they were ruled that way:
   tracked at #398"*. What remains after #398's first pass is one schema-invalid shape: an
   authored `"name": null`, which deacon holds in the same `None` as an omission.
 - `wvr-container-metadata-label-serialization` — the key-order half: *"a deacon defect, not
-  an accepted difference… filed as `parity-drift` #394"*. Its whitespace half is a genuine
-  accept (the reference emits `[ {…}, {…} ]` only when the value arrives via an image
-  build; matching that means mimicking its build routing), so this waiver **narrows** when
-  #394 lands — it does not disappear.
+  an accepted difference… filed as `parity-drift` #394"*. **#394 has landed**
+  (`containerEnv`/`remoteEnv` are `IndexMap`; the label is authored-order and byte-stable
+  across runs, measured by `docker inspect`), and the waiver narrowed rather than
+  disappeared, as predicted. Its whitespace half is a genuine accept (the reference emits
+  `[ {…}, {…} ]` only when the value arrives via an image build; matching that means
+  mimicking its build routing) and has **never been ruled on** — so this record is back in
+  the unruled column on a smaller claim.
 
 **The two unruled ones**, with what I found before running out of session:
 
@@ -130,7 +133,7 @@ Not yet measured: whether `bhv-extends-feature-version-override` (#411, child's 
 wins across `extends`) is also non-spec. `extends` is a deacon extension with no reference
 equivalent, so it needs its own argument.
 
-### C. #394 is roughly 20 sites, not 366 across 52 files
+### C. #394 is roughly 20 sites, not 366 across 52 files — LANDED
 
 The waiver's *"~366 references across 52 files"* is its stated reason for deferring, and it
 is wrong by an order of magnitude. Measured by changing the two field types and letting the
@@ -153,6 +156,23 @@ consumers are shared structs every subcommand uses: `shared/env_user.rs`,
 also has a `container_env`, but that is Feature-contributed env and is a **different**
 thing. Verify with a real `up` and `docker inspect` of `devcontainer.metadata`, not a green
 build.
+
+**How it actually landed**, for the next type substitution of this shape. The estimate held
+(20 non-test sites), and so did the warning: the propagation stops at exactly TWO places,
+both of which had to be reasoned about rather than compiled through.
+
+- `ContainerLifecycleConfig.container_env` and `ExecConfig.env` stay `HashMap`. That map
+  becomes `docker exec -e K=V` flags, where order carries no meaning, and it is merged with
+  the userEnvProbe result (a `HashMap` by construction), so an ordered type there would be
+  ordered in name only. Both `.into_iter().collect()` sites carry a comment saying so.
+- `merge_environments` keeps its `HashMap` parameters: its only non-test caller passes the
+  lifecycle map, never a `DevContainerConfig` one. `build_effective_env`'s
+  `config_remote_env` DID have to become `IndexMap` — it takes `config.remote_env()`.
+
+The thing that nearly read as a bug and is not: a container's `Config.Env` is still not in
+authored order after the fix. Docker itself reorders `--env` flags — verified directly with
+`docker create --env AAA=1 --env ZZZ=2 …`, which inspects back in a different order. That
+channel was never deacon's to make deterministic; the label is.
 
 ### D. Older items, unstarted
 

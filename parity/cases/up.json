@@ -976,7 +976,7 @@
           "behavior": "bhv-container-metadata-label-serialization",
           "context": [],
           "observablePath": "chan-container-state.labels.devcontainer.metadata",
-          "rationale": "Only the BYTE FORM of this label differs now: the reference emits `[ {…}, {…} ]` when the value reaches the container through an image build (this case builds one) and deacon always emits compact `[{…}]`, and deacon's `containerEnv` key order is `HashMap` order rather than authored order. Both values parse to the same entries — #373 closed the content difference, and the four cases that reach this label without an image build now compare it byte-for-byte.",
+          "rationale": "Only JSON WHITESPACE differs now: the reference emits `[ {…}, {…} ]` when the value reaches the container through an image build (this case builds one) and deacon, which writes the container label directly, always emits compact `[{…}]`. Both values parse to the same entries in the same key order — #373 closed the content difference and #394 the key-order one (`containerEnv`/`remoteEnv` record the authored order now), and the four cases that reach this label without an image build compare it byte-for-byte.",
           "waiverId": "wvr-container-metadata-label-serialization"
         }
       ],
