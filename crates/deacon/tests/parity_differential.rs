@@ -336,10 +336,43 @@ async fn the_error_path_tier_reclaims_every_resource_it_creates() {
     }
     let after = residual_snapshot();
 
-    let leaked_containers = after
+    let mut leaked: std::collections::BTreeSet<String> = after
         .orphaned_containers
-        .difference(&before.orphaned_containers);
-    let leaked: Vec<&String> = leaked_containers.collect();
+        .difference(&before.orphaned_containers)
+        .cloned()
+        .collect();
+    let mut leaked_named: std::collections::BTreeSet<String> = after
+        .harness_named
+        .difference(&before.harness_named)
+        .cloned()
+        .collect();
+    let mut leaked_compose: std::collections::BTreeSet<String> = after
+        .orphaned_compose
+        .difference(&before.orphaned_compose)
+        .cloned()
+        .collect();
+
+    // A flagged resource gets a grace window before it is called a leak (#442). The
+    // "orphaned" predicate — named for a workspace directory that no longer exists — is
+    // satisfied TRANSIENTLY by a concurrent sibling's teardown: nextest runs two tests of
+    // this binary at a time, and a sibling case removes its temp workspace a beat before
+    // its network/container removal completes, so a snapshot taken in that gap attributes
+    // the sibling's mid-teardown residue to this tier. The doc comment above records the
+    // identical lesson for temp DIRECTORIES; this is the same reasoning applied to the
+    // Docker-side sets. Only what persists across the window is a leak: a sibling's
+    // teardown finishes in seconds, while a real leak — whose owner already unwound —
+    // has nothing left that will ever remove it, so the guard's power is untouched.
+    for _ in 0..10 {
+        if leaked.is_empty() && leaked_named.is_empty() && leaked_compose.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let now = residual_snapshot();
+        leaked.retain(|id| now.orphaned_containers.contains(id));
+        leaked_named.retain(|name| now.harness_named.contains(name));
+        leaked_compose.retain(|name| now.orphaned_compose.contains(name));
+    }
+
     assert!(
         leaked.is_empty(),
         "the tier left container(s) behind, each labelled with an isolated workspace that no \
@@ -347,19 +380,11 @@ async fn the_error_path_tier_reclaims_every_resource_it_creates() {
          created (FR-045)"
     );
 
-    let leaked_named: Vec<&String> = after
-        .harness_named
-        .difference(&before.harness_named)
-        .collect();
     assert!(
         leaked_named.is_empty(),
         "the tier left harness-named network(s)/volume(s) behind: {leaked_named:?}"
     );
 
-    let leaked_compose: Vec<&String> = after
-        .orphaned_compose
-        .difference(&before.orphaned_compose)
-        .collect();
     assert!(
         leaked_compose.is_empty(),
         "the tier left Compose network(s)/volume(s) behind, each named for an isolated \

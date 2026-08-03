@@ -196,14 +196,10 @@ impl DockerWorkspace {
                 .output();
         }
         for network in &self.networks {
-            let _ = std::process::Command::new("docker")
-                .args(["network", "rm", network])
-                .output();
+            remove_docker_resource_with_retry("network", network, false);
         }
         for volume in &self.volumes {
-            let _ = std::process::Command::new("docker")
-                .args(["volume", "rm", "-f", volume])
-                .output();
+            remove_docker_resource_with_retry("volume", volume, true);
         }
     }
 
@@ -232,12 +228,46 @@ impl DockerWorkspace {
             }
             let listing = String::from_utf8_lossy(&out.stdout);
             for name in compose_leftovers(&listing, &marker) {
-                let mut cmd = std::process::Command::new("docker");
-                cmd.arg(kind).arg("rm");
-                if kind == "volume" {
-                    cmd.arg("-f");
-                }
-                let _ = cmd.arg(name).output();
+                remove_docker_resource_with_retry(kind, name, kind == "volume");
+            }
+        }
+    }
+}
+
+/// Remove a network/volume, retrying briefly on failure (#442's persistent half).
+///
+/// `docker rm -f <container>` returns before the daemon has detached the container's
+/// endpoints, so a `network rm` issued right after the container sweep can fail with
+/// "active endpoints" — and a swallowed single-shot failure is a PERMANENT leak: the
+/// workspace directory is gone by the next observation, so the orphaned network survives
+/// every later sweep keyed on it and eventually exhausts the daemon's address pools.
+/// Bounded (a few attempts over ~5s), checks between attempts whether the resource is
+/// already gone (an "rm" of a nonexistent name also fails, and retrying THAT would turn
+/// the common already-clean path into a five-second stall), and never panics — this runs
+/// on the RAII drop path, unwind included.
+fn remove_docker_resource_with_retry(kind: &str, name: &str, force: bool) {
+    for attempt in 0..5u64 {
+        if attempt > 0 {
+            // Only worth waiting if the resource still exists; a failed `rm` of a name
+            // the daemon no longer knows is success in different clothes.
+            let exists = std::process::Command::new("docker")
+                .args([kind, "inspect", name])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if !exists {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500 * attempt));
+        }
+        let mut cmd = std::process::Command::new("docker");
+        cmd.arg(kind).arg("rm");
+        if force {
+            cmd.arg("-f");
+        }
+        if let Ok(out) = cmd.arg(name).output() {
+            if out.status.success() {
+                return;
             }
         }
     }
