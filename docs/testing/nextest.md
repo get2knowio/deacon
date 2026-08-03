@@ -230,7 +230,7 @@ make test-parity
 ```
 
 CI runs this as a nightly lane (`.github/workflows/parity.yml`) that **gates
-nothing** — it is not in the release path. See `docs/PARITY_AND_CONFORMANCE.md`
+nothing** — it is not in the release path. See `docs/PARITY.md`
 and `CLAUDE.md` § Differential Parity Suite for the full model.
 
 ### 7. `long-running`
