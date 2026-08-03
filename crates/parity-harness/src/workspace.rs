@@ -188,6 +188,16 @@ impl DockerWorkspace {
         // creates is named `<project>_<resource>`, and this workspace's basename
         // (`deacon-conf-<unique>`) appears in the project name of any project rooted here and
         // in no other. Same collision-safety the container sweep relies on (FR-037).
+        //
+        // CONTAINERS must join the name sweep, not only networks and volumes (#442's third
+        // and final half). A Compose SIDECAR (`<project>-db-1`) carries no
+        // `devcontainer.local_folder` label — only the primary container does — so the
+        // label sweep above never removes it, and while it exists its network's removal
+        // fails with "active endpoints" on EVERY retry: a permanent leak no settle window
+        // or retry loop can close, which is exactly the shape two nightly runs measured
+        // after those two fixes landed. Containers go first for the same dependency
+        // reason networks precede volumes below.
+        self.sweep_containers_by_name_marker();
         self.sweep_compose_leftovers();
 
         for image in &self.images {
@@ -230,6 +240,45 @@ impl DockerWorkspace {
             for name in compose_leftovers(&listing, &marker) {
                 remove_docker_resource_with_retry(kind, name, kind == "volume");
             }
+        }
+    }
+
+    /// Remove every CONTAINER whose name carries this workspace's unique basename — the
+    /// Compose containers the reference side creates, which the label sweep cannot see
+    /// (#442).
+    ///
+    /// Only the PRIMARY container of a devcontainer Compose project carries
+    /// `devcontainer.local_folder`; a sidecar service's container
+    /// (`<project>-<service>-1`) carries Compose's own labels and nothing of ours, so the
+    /// only handle on it is its NAME — which embeds the project, which embeds this
+    /// workspace's basename, unique by construction (FR-037). Without this sweep a
+    /// surviving sidecar pins its network's endpoints and the network removal below fails
+    /// on every retry: the permanent-leak shape two nightlies reproduced after the settle
+    /// window and the removal retry had both landed.
+    fn sweep_containers_by_name_marker(&self) {
+        let Some(marker) = self
+            .tempdir
+            .path()
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+        else {
+            return;
+        };
+        let list = std::process::Command::new("docker")
+            .args(["ps", "-aq", "--filter", &format!("name={marker}")])
+            .output();
+        let Ok(out) = list else { return };
+        if !out.status.success() {
+            return;
+        }
+        for id in String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+        {
+            let _ = std::process::Command::new("docker")
+                .args(["rm", "-f", id])
+                .output();
         }
     }
 }
