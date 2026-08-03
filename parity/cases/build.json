@@ -107,6 +107,74 @@
       "notes": "Replaces the `--cache-to` half of `parity_build::buildkit-only-features` (res-build-tolerant-outcome). What this establishes is bounded and worth stating: deacon accepts the flag, passes it through, and still produces the image. What it does NOT establish is that anything was cached. The export type is `inline` on purpose: it is the ONE type buildx's default `docker` driver supports across Docker versions, so the case measures deacon rather than the runner. It was `type=local,dest=…` and that was the environment-dependent part — cache export needs the `docker-container` driver on older Docker, so on a CI runner the build produced no image at all and the case failed for a reason that had nothing to do with deacon (measured: it passes on Docker 29.6.2 / BuildKit v0.31.2, fails on GitHub `ubuntu-latest`, and Podman has no equivalent). Local export was never the claim either — even where it succeeded it wrote nothing to the destination. Pinning the reachable claim and naming the unreachable one is the honest shape; the legacy unit instead tolerated failure and, in its failure arm, accepted any of three substrings one of which (`outcome`) appears in normal JSON success output, so it could not fail either way."
     },
     {
+      "id": "case-build-compose-feature-metadata-label",
+      "behaviors": [
+        "bhv-build-image-metadata-label",
+        "bhv-build-features-extended-image"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-compose-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "devcontainer.metadata": "[{\"id\":\"./features/marker\"},{\"containerEnv\":{\"PARITY_COMPOSE_METADATA\":\"authored-in-config\"},\"remoteUser\":\"root\"}]"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes the Compose half of #440. The Compose build shape produces its feature-extended image through `resolve_compose_feature_image` rather than the Dockerfile path, and for that reason was outside #436's fix: it stamped no `devcontainer.metadata` at all, so an image a Compose `build` produced told a later `up` (or VS Code / Zed / envbuilder) nothing about the Features installed in it. The label is pinned WHOLE and by value rather than by presence: the entries are ordered (each installed Feature, then the config pick, lowest precedence first), and a presence check would pass on a label that recorded the wrong thing or dropped the Feature. `source: image` is pinned because a `build` leaves no container, so evidence captured from one would be answering a different question. Image pinned to alpine:3.19."
+    },
+    {
       "id": "case-build-compose-service-shape",
       "behaviors": [
         "bhv-build-image-parity"
@@ -529,6 +597,74 @@
       "notes": "Replaces `parity_build::output-json-format` (res-build-tolerant-outcome) by PINNING the outcome instead of porting the tolerance. The legacy unit branched on success/failure and, in its failure arm, accepted stdout or stderr containing any of \"BuildKit is required\", \"outcome\" or \"Docker\" — and a `--output-format json` build prints `outcome` in its normal success output, so the failure arm could pass on almost anything. An assertion that cannot fail is worse than no assertion. `--output type=docker,dest=…` is deterministic wherever a build can run at all: it exports to a path the case owns, so there is a single correct outcome to pin. The claim is deliberately the ARTIFACT, not the echo — `exportPath` alone repeats the flag back and would pass on a build that wrote nothing, so `chan-filesystem` asserts the tar exists. `<WORKSPACE>` is the path token; the case writes inside its own isolated workspace, which the runner reclaims. Image pinned to alpine:3.19 (V18)."
     },
     {
+      "id": "case-build-output-metadata-label",
+      "behaviors": [
+        "bhv-build-image-metadata-label",
+        "bhv-build-output-export"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output",
+            "type=docker,dest=${WORKSPACE}/export.tar",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-output-metadata"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-build",
+          "assertion": {
+            "exists": "export.tar"
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "devcontainer.metadata": "[{\"containerEnv\":{\"PARITY_OUTPUT_METADATA\":\"authored-in-config\"},\"remoteUser\":\"root\"}]"
+              }
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "export.tar"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes the `--output` half of #440, and is deacon-only (`--output` has no reference counterpart), so a spec-expectation is its honest shape. A `--push`/`--output` build used to hand its export straight to BuildKit, which left no local image to stamp — the exported image therefore carried NO `devcontainer.metadata`, having previously carried a wrong one. deacon now builds into the daemon, stamps, and exports from there, which is what makes the label observable at all: the export pass also loads, so the tag the case assigns names the STAMPED image and `chan-image` can read the label off it. `chan-filesystem` keeps the artifact claim from `case-build-output-export-tar` — a stamped image that was never exported would satisfy the label assertion alone. Image pinned to alpine:3.19."
+    },
+    {
       "id": "case-build-platform-flag",
       "behaviors": [
         "bhv-build-platform-flag"
@@ -636,7 +772,7 @@
           "channel": "chan-stderr",
           "operation": "op-build",
           "assertion": {
-            "contains": "failed to push"
+            "contains": "failed to push 'registry.invalid/conformance-push:latest'"
           }
         }
       ],
@@ -647,7 +783,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Replaces `parity_build::push-json-output` (res-build-tolerant-outcome). The legacy unit pushed to `localhost:5000` and branched on whether that happened to be reachable, so its assertion depended on the machine. `registry.invalid` is RFC 2606 reserved and resolves nowhere, so the push ALWAYS fails and there is one outcome to pin: exit 1, and a diagnostic that names the push as the failing step. `contains` is used rather than a full match because the message body is BuildKit's, not deacon's, and pinning it would assert the daemon's wording. NOTE the message is currently about the WRONG registry: deacon also pushes its internal `deacon-build:<hash>` tag, which has no registry component and so resolves to Docker Hub, and that push fails first (#438). Both the current and the fixed behavior contain `failed to push`, so this assertion holds across the fix; #438 is what makes the named registry right. Image pinned to alpine:3.19 (V18)."
+      "notes": "Replaces `parity_build::push-json-output` (res-build-tolerant-outcome). The legacy unit pushed to `localhost:5000` and branched on whether that happened to be reachable, so its assertion depended on the machine. `registry.invalid` is RFC 2606 reserved and resolves nowhere, so the push ALWAYS fails and there is one outcome to pin: exit 1, and a diagnostic that names the push as the failing step AND the target it failed on. Naming the target is what makes this case observe `bhv-build-push-target-selection` rather than merely assert it: deacon used to hand the push to BuildKit, which pushed every `-t` tag including deacon's internal `deacon-build:<hash>` — no registry component, so Docker Hub — and that push failed FIRST, so the reported target was the wrong one (#438). Restructuring the publish step for #440 made the push deacon's own and scoped it to the image names the user supplied, so the message now names `registry.invalid/conformance-push:latest`. The quoted target is deacon's own wording; the daemon's reason for the failure is BuildKit/daemon phrasing and is deliberately not pinned. Image pinned to alpine:3.19 (V18)."
     },
     {
       "id": "case-build-reference-lenient-wrong-type",

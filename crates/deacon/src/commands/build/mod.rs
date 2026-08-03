@@ -769,6 +769,7 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             // service directly (shape-aware), tag it, and write the lockfile.
             execute_compose_build_with_features(
                 &config,
+                &load_result.raw_config,
                 &args,
                 &workspace_folder,
                 &config_path,
@@ -871,15 +872,25 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             (result.image_id, None, Vec::new())
         };
 
-    // #436: record `devcontainer.metadata` on the image this build produced —
+    // #436/#440: record `devcontainer.metadata` on the image this build produced —
     // the entries a later `up` from that image, or VS Code / Zed / envbuilder,
     // read to learn what the image carries. Compose builds produce their image
-    // through the compose path above and are not covered here.
+    // through the compose path above and stamp it there (they have the resolved
+    // Features on hand), so they are not covered here.
     //
-    // `--push`/`--output` builds may leave no local image to stamp, which is the
-    // same reason the base build skips `--iidfile` for them.
+    // `--push`/`--output` builds are stamped too: their publish step is deferred
+    // until after this pass so the image is local when it runs (#440). The single
+    // exception is a multi-platform export, which BuildKit will not `--load`.
+    let deferred_publish = defers_publish(&args);
+    let stampable = !config.uses_compose() && !exports_directly(&args);
     let mut metadata = result.metadata;
-    let image_id = if config.uses_compose() || args.push || args.output.is_some() {
+    let image_id = if !stampable {
+        if !config.uses_compose() && exports_directly(&args) {
+            warn!(
+                "A multi-platform --push/--output build leaves no local image to record \
+                 `devcontainer.metadata` on; the published image carries no metadata label"
+            );
+        }
         image_id
     } else {
         let (reported, label) = stamp_devcontainer_metadata_label(
@@ -887,6 +898,12 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             &result.tags,
             &load_result.raw_config,
             &resolved_features,
+            // When the export is deferred, this pass is also the exporter.
+            if deferred_publish {
+                args.output.as_deref()
+            } else {
+                None
+            },
         )
         .await?;
         // Keep the reported labels describing the image that was actually produced;
@@ -896,6 +913,20 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
         }
         reported
     };
+
+    // #440: a deferred push happens here, after the image carries its label.
+    if deferred_publish && args.push {
+        // Push what the user named. deacon's own `deacon-build:<hash>` bookkeeping
+        // tag has no registry component, so pushing it targets Docker Hub (#438);
+        // it is only reached when `--image-name` named nothing else to push, which
+        // is what handing the push to BuildKit did.
+        let targets: &[String] = if args.image_names.is_empty() {
+            &result.tags
+        } else {
+            &args.image_names
+        };
+        push_built_image(targets).await?;
+    }
 
     let final_result = BuildResult {
         image_id,
@@ -1465,9 +1496,13 @@ async fn execute_compose_build(
 /// (`resolve_compose_feature_image`), then tags that image with the
 /// deterministic `deacon-build:<hash>` tag plus any `--image-name`s and writes
 /// the feature lockfile next to the config.
-#[instrument(skip(config, args, workspace_folder, config_path, labels))]
+// `config` is the substituted configuration the build reads; `raw_config` is the
+// same document as authored, which is what travels with the image (#373).
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip(config, raw_config, args, workspace_folder, config_path, labels))]
 async fn execute_compose_build_with_features(
     config: &DevContainerConfig,
+    raw_config: &DevContainerConfig,
     args: &BuildArgs,
     workspace_folder: &Path,
     config_path: &Path,
@@ -1560,8 +1595,26 @@ async fn execute_compose_build_with_features(
         metadata.insert(key.clone(), value.clone());
     }
 
+    // #440: stamp `devcontainer.metadata` on the feature-extended image, through
+    // the SAME construction every other build shape uses. It happens here rather
+    // than in `execute_build` because this is where the resolved Features — one
+    // metadata entry each — are on hand. `--push`/`--output` are rejected for
+    // Compose configurations upstream of this call, so the label is always
+    // stamped onto a local image.
+    let (image_id, label) = stamp_devcontainer_metadata_label(
+        &feature_build.image_tag,
+        &all_tags,
+        raw_config,
+        &feature_build.resolved_features,
+        None,
+    )
+    .await?;
+    if let Some(label) = label {
+        metadata.insert("devcontainer.metadata".to_string(), label);
+    }
+
     Ok(BuildResult {
-        image_id: feature_build.image_tag,
+        image_id,
         tags: all_tags,
         build_duration: 0.0,
         metadata,
@@ -1829,11 +1882,17 @@ async fn apply_features_and_lockfile(
 /// known after the feature-layering pass, and the inherited entries are read back
 /// off the built image. When there is nothing to record, the reference writes no
 /// label at all — so neither do we, and no extra build runs.
+///
+/// `export` carries a deferred `--output` spec (#440). When set, this pass is
+/// also the exporter — it runs even with nothing to record, because skipping it
+/// would mean exporting nothing at all — and BuildKit writes the export instead
+/// of loading the result into the local daemon.
 async fn stamp_devcontainer_metadata_label(
     reported_image: &str,
     tags: &[String],
     raw_config: &DevContainerConfig,
     features: &[ResolvedFeature],
+    export: Option<&str>,
 ) -> Result<(String, Option<String>)> {
     // `FROM` must name a tag: a bare `sha256:` digest makes BuildKit resolve it as
     // the remote repository `docker.io/library/sha256` (#391). `tags` always holds
@@ -1848,12 +1907,18 @@ async fn stamp_devcontainer_metadata_label(
         &cli, from_ref, raw_config, features,
     )
     .await;
-    if entries.is_empty() {
+    let metadata = if entries.is_empty() {
         debug!("No devcontainer.metadata entries to record; leaving the label unset");
+        None
+    } else {
+        Some(
+            serde_json::to_string(&serde_json::Value::Array(entries))
+                .context("Failed to serialize the devcontainer.metadata label")?,
+        )
+    };
+    if metadata.is_none() && export.is_none() {
         return Ok((reported_image.to_string(), None));
     }
-    let metadata = serde_json::to_string(&serde_json::Value::Array(entries))
-        .context("Failed to serialize the devcontainer.metadata label")?;
 
     let temp_dir = tempfile::tempdir().context("Failed to create devcontainer.metadata context")?;
     let dockerfile_path = temp_dir.path().join("Dockerfile");
@@ -1869,19 +1934,35 @@ async fn stamp_devcontainer_metadata_label(
         targets.push(reported_image);
     }
 
-    let mut build_args = vec![
-        "buildx".to_string(),
-        "build".to_string(),
-        "--load".to_string(),
+    let mut build_args = vec!["buildx".to_string(), "build".to_string()];
+    match export {
+        None => build_args.push("--load".to_string()),
+        Some(spec) => {
+            build_args.push("--output".to_string());
+            build_args.push(spec.to_string());
+            // Also load, so the local tags (`--image-name` and the deterministic
+            // one) name the STAMPED image rather than the unstamped one the
+            // primary build loaded. `--load` alone is dropped as a duplicate of
+            // an explicit `type=docker` spec, so name the exporter directly —
+            // and only when the user's own spec is not already that exporter.
+            if !exports_to_daemon(spec) {
+                build_args.push("--output".to_string());
+                build_args.push("type=docker".to_string());
+            }
+        }
+    }
+    build_args.extend([
         // The `FROM` names an image that exists only in the local daemon store, so
         // pin the docker-driver builder (same reason as `generate_build_args`, #391).
         "--builder".to_string(),
         "default".to_string(),
-        "--label".to_string(),
-        format!("devcontainer.metadata={}", metadata),
         "-f".to_string(),
         dockerfile_path.display().to_string(),
-    ];
+    ]);
+    if let Some(metadata) = &metadata {
+        build_args.push("--label".to_string());
+        build_args.push(format!("devcontainer.metadata={}", metadata));
+    }
     for target in &targets {
         build_args.push("-t".to_string());
         build_args.push((*target).to_string());
@@ -1890,27 +1971,136 @@ async fn stamp_devcontainer_metadata_label(
 
     // Nothing to render: this build copies no layers and only rewrites the image
     // config, so its output is captured for diagnostics rather than shown.
-    let stamped = cli
-        .build_image(
-            &build_args,
-            deacon_core::docker_retry::BuildIo::Captured(None),
-        )
-        .await
-        .context("Failed to stamp the devcontainer.metadata label on the built image")?;
-
-    debug!(
-        image = %stamped,
-        "Stamped devcontainer.metadata on the built image"
-    );
-
-    // The tags now name the stamped image; only a caller reporting a raw digest
-    // needs the new one.
-    let reported = if reported_is_digest {
-        stamped
-    } else {
-        reported_image.to_string()
+    let io = deacon_core::docker_retry::BuildIo::Captured(None);
+    let reported = match export {
+        None => {
+            let stamped = cli
+                .build_image(&build_args, io)
+                .await
+                .context("Failed to stamp the devcontainer.metadata label on the built image")?;
+            debug!(
+                image = %stamped,
+                "Stamped devcontainer.metadata on the built image"
+            );
+            // The tags now name the stamped image; only a caller reporting a raw
+            // digest needs the new one.
+            if reported_is_digest {
+                stamped
+            } else {
+                reported_image.to_string()
+            }
+        }
+        Some(spec) => {
+            // `build_image` always appends `--iidfile`, which the `local` and
+            // `tar` exporters reject outright — and an export leaves no local
+            // image whose id could be reported anyway, so drive the build
+            // directly and keep reporting what the local build produced.
+            deacon_core::docker_retry::run_build_with_retry(
+                std::path::Path::new(cli.runtime_path()),
+                &build_args,
+                io,
+            )
+            .await
+            .with_context(|| format!("Failed to export the built image to '{}'", spec))?;
+            debug!(export = %spec, "Exported the built image");
+            reported_image.to_string()
+        }
     };
-    Ok((reported, Some(metadata)))
+    Ok((reported, metadata))
+}
+
+/// Whether this build's push/export is deferred until AFTER the image it
+/// produces has been stamped with `devcontainer.metadata` (#440).
+///
+/// A `--push`/`--output` build used to hand its export straight to the primary
+/// BuildKit invocation, which left no local image to stamp — so the image a
+/// consumer pulled or unpacked carried none of the metadata the reference
+/// records and every reader of it (a later `up`, VS Code, Zed, envbuilder)
+/// expects. Building into the local daemon first and publishing afterwards
+/// closes that gap.
+///
+/// The one shape it cannot cover is a multi-platform build: BuildKit refuses to
+/// `--load` a manifest list, so there is nothing local to stamp and the export
+/// stays on the primary build.
+fn defers_publish(args: &BuildArgs) -> bool {
+    (args.push || args.output.is_some())
+        && !args
+            .platform
+            .as_deref()
+            .is_some_and(|platform| platform.contains(','))
+}
+
+/// Whether this build hands its push/export straight to the primary BuildKit
+/// invocation, leaving no local image behind (see [`defers_publish`]).
+fn exports_directly(args: &BuildArgs) -> bool {
+    (args.push || args.output.is_some()) && !defers_publish(args)
+}
+
+/// Whether a buildx `--output` spec loads the result into the local daemon
+/// (`type=docker` with no destination) rather than writing it somewhere else.
+///
+/// Used to avoid naming the `docker` exporter twice in one invocation when the
+/// deferred export pass wants to load as well as export (#440).
+fn exports_to_daemon(spec: &str) -> bool {
+    let mut kind = None;
+    let mut has_destination = false;
+    for field in spec.split(',') {
+        match field.split_once('=') {
+            Some(("type", value)) => kind = Some(value.trim()),
+            Some(("dest", _)) | Some(("output", _)) => has_destination = true,
+            _ => {}
+        }
+    }
+    kind == Some("docker") && !has_destination
+}
+
+/// Push the tags a deferred `--push` build produced (#440).
+///
+/// The primary build no longer hands the push to BuildKit (see
+/// [`defers_publish`]), so each target is pushed from the local daemon once the
+/// image carries its `devcontainer.metadata` label. Progress streams as it
+/// arrives, with `docker push`'s own stdout relayed to stderr so the
+/// `--output-format json` contract (a single JSON document on stdout) holds.
+async fn push_built_image(targets: &[String]) -> Result<()> {
+    use tokio::io::AsyncBufReadExt;
+
+    for target in targets {
+        info!("Pushing '{}'", target);
+        let mut child = tokio::process::Command::new("docker")
+            .args(["push", target])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .with_context(|| format!("Failed to run 'docker push {}'", target))?;
+
+        if let Some(stdout) = child.stdout.take() {
+            let mut lines = tokio::io::BufReader::new(stdout).lines();
+            while let Some(line) = lines
+                .next_line()
+                .await
+                .with_context(|| format!("Failed to read 'docker push {}' output", target))?
+            {
+                eprintln!("{}", line);
+            }
+        }
+
+        let status = child
+            .wait()
+            .await
+            .with_context(|| format!("Failed to wait for 'docker push {}'", target))?;
+
+        if !status.success() {
+            // The daemon's own diagnostic already went to stderr above; name the
+            // step and the target so the failure is attributable.
+            return Err(DeaconError::Docker(DockerError::CLIError(format!(
+                "failed to push '{}': docker push exited with {}",
+                target, status
+            )))
+            .into());
+        }
+        debug!(target = %target, "Pushed the built image");
+    }
+    Ok(())
 }
 
 /// Mirror of `up::helpers::is_readonly_fs_error` for build's write path. We
@@ -2187,29 +2377,41 @@ async fn execute_docker_build(
             build_args.push(format!("{}={}", key, value));
         }
 
+        // #440: a `--push`/`--output` build whose publish step is deferred keeps
+        // its export off this invocation so the image lands in the local daemon
+        // and can be stamped with `devcontainer.metadata` first; the publish then
+        // happens in `execute_build`. Only the shapes `defers_publish` rules out
+        // (multi-platform) still hand the export straight to BuildKit here.
+        let defer_publish = defers_publish(args);
+        let produces_local_image = defer_publish || (!args.push && args.output.is_none());
+
         // Add --push flag if requested
-        if args.push {
+        if args.push && !defer_publish {
             build_args.push("--push".to_string());
         }
 
         // Add --output flag if requested
         if let Some(output) = &args.output {
-            build_args.push("--output".to_string());
-            build_args.push(output.clone());
+            if !defer_publish {
+                build_args.push("--output".to_string());
+                build_args.push(output.clone());
+            }
         }
 
-        // When using BuildKit without --push or --output, add --load to ensure
-        // the image is loaded into the local Docker daemon (BuildKit doesn't do this by default)
-        if use_buildkit && !args.push && args.output.is_none() {
+        // When using BuildKit and this invocation is the one that produces the
+        // local image, add --load to ensure the image is loaded into the local
+        // Docker daemon (BuildKit doesn't do this by default)
+        if use_buildkit && produces_local_image {
             build_args.push("--load".to_string());
         }
 
         // Retrieve the image ID via `--iidfile` instead of `docker build -q`
-        // stdout scraping (only when building locally — push/export may not
-        // produce a local image). Dropping `-q` lets BuildKit progress stream
+        // stdout scraping (only when building locally — a direct push/export may
+        // not produce a local image, and the `local`/`tar` exporters reject the
+        // flag outright). Dropping `-q` lets BuildKit progress stream
         // to stderr for the build-output UI while the digest still arrives
         // reliably. The temp file must outlive the build invocation below.
-        let iidfile = if !args.push && args.output.is_none() {
+        let iidfile = if produces_local_image {
             let f =
                 tempfile::NamedTempFile::new().context("Failed to create image ID temp file")?;
             build_args.push("--iidfile".to_string());
@@ -2293,11 +2495,12 @@ async fn execute_docker_build(
             }
         };
 
-        // Extract image metadata (skip if pushing or exporting as image may not be local)
-        let metadata = if args.push || args.output.is_some() {
-            HashMap::new()
-        } else {
+        // Extract image metadata (skip when this invocation pushed/exported
+        // directly, as the image may not be local)
+        let metadata = if produces_local_image {
             extract_image_metadata(&image_id).await?
+        } else {
+            HashMap::new()
         };
 
         // Collect all tags: deterministic tag plus user-specified tags
@@ -2624,6 +2827,61 @@ async fn execute_scan_command(command: &str, args: &BuildArgs) -> Result<i32> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn test_defers_publish_covers_push_and_output_but_not_multi_platform() {
+        // #440: a `--push`/`--output` build defers its publish so the image is
+        // local when `devcontainer.metadata` is stamped on it. A multi-platform
+        // build cannot be `--load`ed, so it keeps the direct export.
+        let local = BuildArgs::default();
+        assert!(!defers_publish(&local), "a plain build publishes nothing");
+        assert!(!exports_directly(&local));
+
+        let push = BuildArgs {
+            push: true,
+            ..BuildArgs::default()
+        };
+        assert!(defers_publish(&push));
+        assert!(!exports_directly(&push));
+
+        let export = BuildArgs {
+            output: Some("type=docker,dest=/tmp/out.tar".to_string()),
+            ..BuildArgs::default()
+        };
+        assert!(defers_publish(&export));
+        assert!(!exports_directly(&export));
+
+        let single_platform_push = BuildArgs {
+            push: true,
+            platform: Some("linux/amd64".to_string()),
+            ..BuildArgs::default()
+        };
+        assert!(defers_publish(&single_platform_push));
+
+        let multi_platform_push = BuildArgs {
+            push: true,
+            platform: Some("linux/amd64,linux/arm64".to_string()),
+            ..BuildArgs::default()
+        };
+        assert!(
+            !defers_publish(&multi_platform_push),
+            "BuildKit will not --load a manifest list"
+        );
+        assert!(exports_directly(&multi_platform_push));
+    }
+
+    #[test]
+    fn test_exports_to_daemon_only_for_a_destinationless_docker_exporter() {
+        // The deferred export pass names `type=docker` a second time so the local
+        // tags follow the stamped image — but only when the user's own spec is
+        // not already that exporter, which buildx would reject as a duplicate.
+        assert!(exports_to_daemon("type=docker"));
+        assert!(!exports_to_daemon("type=docker,dest=/tmp/out.tar"));
+        assert!(!exports_to_daemon("type=oci,dest=/tmp/out.tar"));
+        assert!(!exports_to_daemon("type=local,dest=/tmp/rootfs"));
+        assert!(!exports_to_daemon("type=registry"));
+        assert!(!exports_to_daemon("/tmp/rootfs"));
+    }
 
     #[test]
     fn test_temp_dir_guard_removes_dir_on_drop() {
