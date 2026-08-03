@@ -32,8 +32,13 @@ static RUN_SEQ: AtomicU64 = AtomicU64::new(0);
 /// reclaims its Docker resources on drop.
 #[derive(Debug)]
 pub struct DockerWorkspace {
-    /// Auto-removed on drop (after Docker cleanup).
-    tempdir: TempDir,
+    /// Held for its `Drop` alone: auto-removes the tree (after Docker cleanup). The
+    /// workspace directory lives INSIDE it; nothing reads this field.
+    _tempdir: TempDir,
+    /// The lowercase-named workspace directory the case actually runs in (see `new` —
+    /// Compose lowercases project names, so the basename must already be lowercase for
+    /// the name-marker sweeps and the reclamation guard's predicate to match).
+    workspace: PathBuf,
     /// Collision-resistant id, unique per process across concurrent cases.
     run_id: String,
     /// `deacon` binary path for `down` (best-effort); `None` skips the down call.
@@ -58,8 +63,36 @@ impl DockerWorkspace {
         let tempdir = tempfile::Builder::new().prefix("deacon-conf-").tempdir()?;
         let seq = RUN_SEQ.fetch_add(1, Ordering::Relaxed);
         let run_id = format!("dcr-{}-{seq}", std::process::id());
+
+        // The WORKSPACE is a lowercase-named child of the random tempdir, not the tempdir
+        // itself (#442, the fourth and root cause of the leak family). Docker Compose
+        // LOWERCASES its project name, and the reference CLI derives that project from the
+        // workspace directory's basename — so a mixed-case `tempfile` basename
+        // (`deacon-conf-0GWl5d`) yields Compose resources named for a basename that exists
+        // nowhere (`deacon-conf-0gwl5d_default`), which every name-marker sweep here and
+        // the reclamation guard's workspace-exists predicate then compare CASE-SENSITIVELY
+        // and miss. Measured live: the leaked network's
+        // `com.docker.compose.project.working_dir` was the mixed-case dir while every
+        // resource name was its lowercase fold. A lowercase basename makes the project
+        // name EQUAL the basename, and every existing comparison is correct as written.
+        // The parent tempdir still provides collision-free randomness (its suffix is
+        // folded into the child's name; a case-folded collision needs two live parents
+        // agreeing on 6 alphanumerics modulo case) and removes the child on drop.
+        let parent_name = tempdir
+            .path()
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let suffix = parent_name
+            .strip_prefix("deacon-conf-")
+            .unwrap_or(&parent_name)
+            .to_lowercase();
+        let workspace = tempdir.path().join(format!("deacon-conf-{suffix}-{seq}"));
+        std::fs::create_dir(&workspace)?;
+
         Ok(DockerWorkspace {
-            tempdir,
+            _tempdir: tempdir,
+            workspace,
             run_id,
             deacon_path: deacon_path.map(Path::to_path_buf),
             reclaim_docker: true,
@@ -85,7 +118,7 @@ impl DockerWorkspace {
 
     /// The isolated workspace directory (the `--workspace-folder` for the case's ops).
     pub fn path(&self) -> &Path {
-        self.tempdir.path()
+        &self.workspace
     }
 
     /// The collision-resistant run id — unique across concurrent cases in this process.
@@ -102,7 +135,7 @@ impl DockerWorkspace {
     /// Materialize a fixture directory tree into the workspace (recursive copy). Repeated
     /// calls layer fixtures into the same workspace.
     pub fn materialize(&self, fixture_dir: &Path) -> std::io::Result<()> {
-        copy_tree(fixture_dir, self.tempdir.path())
+        copy_tree(fixture_dir, &self.workspace)
     }
 
     /// Track a built image tag for removal at cleanup.
@@ -134,12 +167,12 @@ impl DockerWorkspace {
             return;
         }
         self.reclaimed = true;
-        let ws = self.tempdir.path().to_string_lossy().into_owned();
+        let ws = self.workspace.to_string_lossy().into_owned();
 
         if let Some(deacon) = &self.deacon_path {
             let _ = std::process::Command::new(deacon)
                 .args(["down", "--remove", "--workspace-folder", &ws])
-                .current_dir(self.tempdir.path())
+                .current_dir(&self.workspace)
                 .output();
         }
 
@@ -221,8 +254,7 @@ impl DockerWorkspace {
     /// still attaches to it, and the container sweep has already run by this point.
     fn sweep_compose_leftovers(&self) {
         let Some(marker) = self
-            .tempdir
-            .path()
+            .workspace
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
         else {
@@ -257,8 +289,7 @@ impl DockerWorkspace {
     /// window and the removal retry had both landed.
     fn sweep_containers_by_name_marker(&self) {
         let Some(marker) = self
-            .tempdir
-            .path()
+            .workspace
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
         else {
