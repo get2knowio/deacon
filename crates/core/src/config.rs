@@ -661,6 +661,20 @@ pub struct DevContainerConfig {
     /// Human-readable name for the development container.
     ///
     /// Reference: [Container Configuration - name](https://containers.dev/implementors/json_reference/#name)
+    ///
+    /// An authored `"name": null` — schema-invalid, since the schema types this as a
+    /// string — collapses into the same `None` as an omission, so `read-configuration`
+    /// cannot tell them apart where the reference can (#398 residual). That is real, but
+    /// it is **not** a `name`-shaped problem and a double-`Option` here would not close
+    /// it: measured against the pinned oracle, the reference preserves an authored `null`
+    /// on *every* property, because its `read-configuration` echoes the parsed document.
+    /// deacon drops it on every `Option<T>` field (`remoteUser`, `forwardPorts`, `capAdd`,
+    /// `postCreateCommand`, `workspaceFolder`, `shutdownAction`, `init`, … all verified),
+    /// flattens it inside nested structs (`hostRequirements: {cpus: null}` → `{}`), and
+    /// **rejects** it outright on the strict object fields (`features`/`customizations`
+    /// via `deserialize_object_value`). Reaching parity is therefore a whole-struct
+    /// three-state change plus a reversal of that strictness for a schema-invalid value,
+    /// not a one-field patch. Left as measured pending adjudication.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
@@ -1589,6 +1603,25 @@ impl DevContainerConfig {
     }
 
     /// Check if this configuration uses Docker Compose
+    ///
+    /// Both `dockerComposeFile` **and** `service` must be present. That is the spec's own
+    /// definition of the scenario — `devcontainer-reference.md` §"Docker Compose based"
+    /// lists exactly those two as "The required parameters", and
+    /// `devcontainerjson-reference.md` marks each **Required** "when using Docker Compose".
+    ///
+    /// The test is **presence, not truthiness**: an authored `""`, `[]` or `[""]` still
+    /// selects Compose, because emptiness is a property of the path list, not of whether
+    /// the author declared a Compose configuration. A JSON `null` deserializes to `None`
+    /// and therefore reads as unauthored.
+    ///
+    /// Measured divergence (#399, oracle `@devcontainers/cli` 0.87.0): the reference keys
+    /// this off `dockerComposeFile` **alone** — key presence, including an authored
+    /// `null` — so a document naming a Compose file but no `service` is a Compose
+    /// configuration to it and a single-container one here. That changes the reported
+    /// `workspace.workspaceFolder`/`workspaceMount`. Emptiness is NOT the axis: with
+    /// `service` present, `""` / `[]` / `[""]` produce byte-identical
+    /// `read-configuration` output on both sides. Left as measured pending adjudication;
+    /// deacon is the side that matches the spec text above.
     ///
     /// ## Returns
     ///
@@ -4364,6 +4397,58 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    /// `uses_compose` keys off PRESENCE of both spec-required Compose parameters, never
+    /// off whether the compose path list happens to be empty (#399).
+    ///
+    /// The issue reduced its divergence to `{"dockerComposeFile": "", "build": {}}` and
+    /// concluded deacon treats the *empty value* as "no Compose file". It does not — the
+    /// shrunk document simply omits `service`. Measured against the pinned oracle, all
+    /// three degenerate shapes with `service` present produce byte-identical
+    /// `read-configuration` output on both sides; the divergence is entirely the
+    /// `service` term, which the spec requires and the reference does not consult.
+    #[test]
+    fn test_uses_compose_is_presence_not_emptiness() {
+        use serde_json::json;
+
+        let with_service = |compose: serde_json::Value| DevContainerConfig {
+            docker_compose_file: Some(compose),
+            service: Some("app".to_string()),
+            ..Default::default()
+        };
+
+        // Degenerate path lists are still authored Compose configurations.
+        for shape in [json!(""), json!([]), json!([""])] {
+            let config = with_service(shape.clone());
+            assert!(
+                config.uses_compose(),
+                "an authored `dockerComposeFile` of {shape} must still select Compose"
+            );
+        }
+        // ...and they contribute no usable path, which is a separate question.
+        assert!(with_service(json!("")).get_compose_files() == vec![""]);
+        assert!(with_service(json!([])).get_compose_files().is_empty());
+
+        // `service` is the term the reference does not consult. Per
+        // devcontainer-reference.md §"Docker Compose based" both are required.
+        let no_service = DevContainerConfig {
+            docker_compose_file: Some(json!("docker-compose.yml")),
+            ..Default::default()
+        };
+        assert!(!no_service.uses_compose());
+        let no_compose_file = DevContainerConfig {
+            service: Some("app".to_string()),
+            ..Default::default()
+        };
+        assert!(!no_compose_file.uses_compose());
+
+        // An authored JSON `null` deserializes to `None`, so it reads as unauthored —
+        // where the reference's `'dockerComposeFile' in config` test routes it to Compose.
+        let parsed: DevContainerConfig =
+            serde_json::from_str(r#"{"dockerComposeFile": null, "service": "app"}"#).unwrap();
+        assert!(parsed.docker_compose_file.is_none());
+        assert!(!parsed.uses_compose());
     }
 
     #[test]
