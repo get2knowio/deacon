@@ -638,24 +638,14 @@ where
                     // fall back to `root`. Re-apply that same image-metadata merge
                     // against the running container's image before resolving the
                     // effective config, so exec runs as the same user `up` reported.
-                    let base =
-                        crate::commands::up::merged_config::merge_image_metadata_after_image_ready(
-                            docker_client,
-                            &container_info.image,
-                            config_ctx.config.clone(),
-                        )
-                        .await;
-                    match deacon_core::config::ConfigMerger::resolve_effective_config(
-                        &base,
-                        Some(&container_info.labels),
+                    // Shared with `run-user-commands` (#405).
+                    crate::commands::shared::container_metadata::resolve_config_against_container(
+                        docker_client,
+                        &container_info,
+                        config_ctx.config.clone(),
                         config_ctx.workspace_folder.as_path(),
-                    ) {
-                        Ok((resolved_config, _report)) => resolved_config,
-                        Err(e) => {
-                            tracing::warn!("Failed to resolve effective config with labels: {}", e);
-                            base
-                        }
-                    }
+                    )
+                    .await
                 }
                 Ok(None) => config_ctx.config.clone(),
                 Err(e) => {

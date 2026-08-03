@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceRucImageMetadata",
+	"image": "deacon-parity-ruc-image-metadata:local",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+}
