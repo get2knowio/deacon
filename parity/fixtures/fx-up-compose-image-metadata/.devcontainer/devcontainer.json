@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceUpComposeImageMetadata",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"shutdownAction": "stopCompose",
+	"remoteEnv": {
+		"WS_ENV": "from-workspace-config"
+	}
+}
