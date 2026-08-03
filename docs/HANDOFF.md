@@ -78,10 +78,10 @@ disposition — **each removal is a decision to block releases, not a cleanup.**
 | `wvr-malformed-json` | ruled **KEEP** 2026-08-02 | live | 7 |
 | `wvr-outdated-malformed-lockfile-rejected` | ruled **KEEP** 2026-08-02 | **INERT** | 1 |
 | `wvr-up-changed-config-recreates` | ruled **KEEP** 2026-08-02 | **INERT** | 1 |
-| `wvr-readconfig-authored-empty-omitted` | ruled **FIX DEACON** — not started (#398) | live | 2 |
+| `wvr-readconfig-authored-empty-omitted` | ruled **KEEP** 2026-08-03 — residual not owed (whole-document verbatim echo, same axis as the rejection family); #398 closed | live | 2 |
 | `wvr-container-metadata-label-serialization` | ruled **FIX DEACON** — landed (#394); NARROWED to whitespace, now **unruled** on that residual | live | 2 |
-| `wvr-compose-project-file-set` | **unruled** | live | 1 |
-| `wvr-readconfig-merged-computed-empties` | **unruled** | **INERT** | **0** |
+| `wvr-compose-project-file-set` | ruled **KEEP** 2026-08-03 — spec silent on override delivery; all container observables equal | live | 1 |
+| `wvr-readconfig-merged-computed-empties` | ruled **KEEP** 2026-08-03 — `-Infinity` is spec-invalid; reproducing it would adopt a bug | live (#423) | 1 |
 
 **The two ruled "fix deacon, drop the waiver"** admit in their own rationales that deacon is
 wrong, not different — that is why they were ruled that way:
