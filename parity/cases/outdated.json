@@ -468,6 +468,65 @@
       "notes": "Covers the high-risk triple `hrt-outdated-extends-chain-image-single-feature`. The chain's BASE link contributes the only Feature, so an implementation that reads the top document alone reports an empty table and exits 0 — a silent miss, not an error. The regex pins the row's identifier and both pinned columns while leaving `latest` free."
     },
     {
+      "id": "case-outdated-extends-chain-features-differential",
+      "behaviors": [
+        "bhv-outdated-extends-chain-features"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-outdated-extends-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-outdated",
+          "assertion": {
+            "jsonSubset": {
+              "features": {
+                "ghcr.io/devcontainers/features/git:1.3.2": {
+                  "current": "1.3.2",
+                  "wanted": "1.3.2"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-outdated-extends-chain-features",
+          "context": [],
+          "observablePath": "chan-structured-output.features.ghcr.io/devcontainers/features/git:1.3.2",
+          "rationale": "The chain's BASE link contributes the only Feature. deacon resolves `extends` before reporting, so the report carries this entry; the reference does not implement `extends`, finds no Feature map in the top document, and reports `{}`. Measured at oracle 0.87.0 on this fixture: deacon `{\"features\":{\"ghcr.io/devcontainers/features/git:1.3.2\":{\"current\":\"1.3.2\",\"wanted\":\"1.3.2\",\"latest\":\"1.3.8\",…}}}`, reference `{\"features\":{}}`, both exit 0. Scoped to the ONE report key the chain contributes — a tolerance on `features` would excuse any future disagreement about any Feature, including one both sides can see. The key is one-sided, so the whole entry collapses to this single path and the registry-dependent `latest` inside it never becomes a source of flake.",
+          "waiverId": "wvr-outdated-extends-chain-features"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The differential half of `case-outdated-extends-chain-features`, which pins deacon's side alone and therefore cannot notice the day the reference starts resolving `extends`. Restores the self-invalidating enforcement `wvr-outdated-extends-chain-features` lost when #435 dropped it as an unreferenced record (#423 named the class).\n\nInvoked with the reference's `--output-format json` spelling, which deacon accepts as a visible alias for its own `--output` (#389). That alias is what makes this case possible at all: the difference lives in WHAT is reported, and `chan-stdout`'s diverging path is the bare channel id by design (arbitrary text, so a whole-channel tolerance would be a wildcard, FR-032), while the exit codes agree at 0. Structured output is the only channel on which this divergence is addressable.\n\nThe assertion on deacon's side is deliberate and not redundant with the comparison: a differential alone cannot fail when both sides are equally wrong, and 'the report is empty' is exactly the shape both sides could arrive at."
+    },
+    {
       "id": "case-outdated-image-lockfile-overlay",
       "behaviors": [
         "bhv-outdated-reports-feature-versions"
@@ -628,6 +687,49 @@
         "tempdir": true
       },
       "notes": "Regression evidence for #406. The lockfile is present and fails validation (`resolved` is not an OCI digest reference). Before the fix the error was swallowed at `debug!` and the command reported `current` from the configuration instead of the lockfile, exit 0 — indistinguishable from having no lockfile at all, which is precisely the state it must NOT be confused with. Exit code and a stderr diagnostic naming the file are both asserted: exiting non-zero without saying which file is wrong leaves the user no better off than the silent version. Deliberately spec-expectation and waiver-backed rather than a live differential: the reference exits 0 on this same input because it never reads the lockfile for `outdated` at all (#407 divergence 3), so the difference is deacon consuming an input the reference does not, characterized by wvr-outdated-malformed-lockfile-rejected."
+    },
+    {
+      "id": "case-outdated-malformed-lockfile-rejected-differential",
+      "behaviors": [
+        "bhv-outdated-malformed-lockfile-rejected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-outdated",
+          "subcommand": "outdated",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-outdated-malformed-lockfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-outdated",
+          "assertion": {
+            "equals": 1
+          }
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-outdated-malformed-lockfile-rejected",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "The lockfile is present and fails validation (`resolved` is `\"x\"`, not an OCI digest reference). deacon reads `devcontainer-lock.json` for `outdated` — it is where the reported `current` comes from — so an invalid one fails the run rather than silently changing the answer (#406). The reference never reads a lockfile for this subcommand, so it has nothing to reject and reports from the configuration alone. Measured at oracle 0.87.0 on this fixture: deacon 1, reference 0.",
+          "waiverId": "wvr-outdated-malformed-lockfile-rejected"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The differential half of `case-outdated-malformed-lockfile-rejected`, which pins deacon's exit 1 and never runs the reference. Restores the self-invalidating enforcement `wvr-outdated-malformed-lockfile-rejected` lost when #435 dropped it as an unreferenced record (#423 named the class): a tolerance that is never computed can never report stale, so the record's claim went unchecked for as long as it stood.\n\nObserved on `chan-exit-code` and nothing else, deliberately. `chan-structured-output` would diverge too, but for a reason that says nothing: deacon's failed run writes no parseable document, so its evidence is `present:false` against the reference's report, and the diverging path is the bare channel id no tolerance may name (FR-032). The exit code is where the difference is both real and addressable.\n\nThe assertion pins deacon's side at 1, so a run in which deacon silently succeeded — the #406 regression exactly — fails here rather than being absorbed as 'the two agree'."
     },
     {
       "id": "case-outdated-no-features-empty-report",

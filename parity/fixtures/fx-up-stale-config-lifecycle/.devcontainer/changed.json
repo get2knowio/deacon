@@ -1,0 +1,6 @@
+{
+	"name": "ConformanceUpStaleLifecycleAfter",
+	"image": "alpine:3.19",
+	"containerEnv": { "CONF_GENERATION": "second" },
+	"postCreateCommand": "echo second >> ./generations.txt"
+}

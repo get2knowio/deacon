@@ -1945,6 +1945,76 @@
       "notes": "Covers the high-risk triple `hrt-up-image-single-feature-stale-config`. The second `up` runs against a configuration that has since changed (a different `containerEnv` generation), supplied as a command-line override because the runner materializes a fixture once and does not edit it mid-case — the observable situation is identical either way. RE-POINTED after the 024 live run. The case was an `invariant-metamorphic` asserting `first-create-vs-restart`, and that relationship simply is not deacon's contract: deacon's container identity includes a configHash, so a CHANGED document is a different identity and produces a NEW container. Reuse is the dangerous branch — the container would keep the Feature layer built from the OLD configuration while every reported value came from the NEW one — so recreating is the direction worth keeping, and the metamorphic oracle had no relationship kind that could express it (the closed set is idempotence / first-create-vs-restart / resume). Asserting the relationship anyway would have pinned a behavior deacon deliberately does not have. The reference does reattach, verified directly at oracle 0.87.0; that difference is recorded as bhv-up-changed-config-recreates-container and waived by wvr-up-changed-config-recreates. What the recreate does NOT license is leaving the superseded container running, which deacon currently does and which is tracked as a defect at https://github.com/get2knowio/deacon/issues/371 — when that lands, this case gains a container-count assertion."
     },
     {
+      "id": "case-up-stale-config-reentry-differential",
+      "behaviors": [
+        "bhv-up-changed-config-recreates-container"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-first",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-stale-config-lifecycle"
+          ]
+        },
+        {
+          "id": "op-up-changed",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/changed.json"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-changed",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up-changed",
+          "assertion": {
+            "jsonSubset": {
+              "generations.txt": "first\nsecond\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "generations.txt"
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-up-changed-config-recreates-container",
+          "context": [],
+          "observablePath": "chan-file-content.generations.txt",
+          "rationale": "The whole divergence, read in the user's workspace. Each generation of the configuration appends its own name from `postCreateCommand`, and `postCreate` runs on CREATE. deacon's identity includes a configHash, so the changed document is a new identity: it creates a second container, the hook runs again, and the file reads `first\\nsecond`. The reference reattaches to the container the first `up` built, so nothing is created, the hook does not run, and the file still reads `first`. Measured at oracle 0.87.0 on this fixture: deacon `\"first\\nsecond\\n\"` from container ids `d796c31240e5` then `32ae762fd677`, the reference `\"first\\n\"` from `e98be9c32a41` returned by BOTH of its runs. Scoped to the one file the fixture writes; it is the only path in the case's `fsAllowlist`, so the tolerance cannot reach anything else.",
+          "waiverId": "wvr-up-changed-config-recreates"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The differential half of `case-up-stale-config-reentry`, which pins deacon's recreate and never runs the reference. Restores the self-invalidating enforcement `wvr-up-changed-config-recreates` lost when #435 dropped it as an unreferenced record (#423 named the class): the record asserted a measured difference that nothing re-measured.\n\nWHY THE DIVERGENCE IS READ ON THE HOST FILESYSTEM, which took two wrong turns to get right and is the durable part of this case.\n\nFirst, the literal observation — the reference's two `up` runs return the same containerId, deacon's return two — is not comparable across sides at all: each CLI creates its own containers, so `containerId` differs by construction on EVERY `up` case and would say nothing here.\n\nSecond, and less obvious: reading it from the created container does not work either, even though the container plainly carries the answer (deacon's `CONF_GENERATION=second` and `…/changed.json` in `devcontainer.config_file` against the reference's `first` and `…/devcontainer.json`). An earlier draft of this case observed exactly that on `chan-container-state` and passed — then failed roughly one run in three. The cause is a real interaction, not a flake to retry away: deacon leaves the SUPERSEDED container running (https://github.com/get2knowio/deacon/issues/371), so after the second `up` the workspace label matches TWO containers, and the runner's probe sorts their ids lexicographically and observes the first. Container ids are random hex, so which of the two generations gets observed is a coin flip. Any case that asserts container state after a deacon recreate has that ambiguity until #371 lands.\n\nThe hook marker has neither problem. It is captured from the host workspace, so it does not depend on which container the probe picked, and `postCreate` running exactly once per created container is the same fact the container state was standing in for — stated where a user would actually meet it. This is also the waiver's own safety argument made concrete: the container the reference hands back was provisioned from a document that no longer exists, and the work the new document asks for never happens.\n\nThe assertion pins deacon's side at `first\\nsecond`, so a run in which deacon started reattaching too would fail here rather than passing as 'the two agree'. The fixture is deliberately separate from `fx-up-stale-config`: that one is shared with the spec-expectation sibling and with nothing to gain from a lifecycle hook, and it carries a local Feature this case does not observe.\n\nWhat this case does NOT license is leaving the superseded container running — see #371 above; when that lands, both stale-config cases gain a container-count assertion."
+    },
+    {
       "id": "case-up-unsupported-image-reference",
       "behaviors": [
         "bhv-up-exec-parity"

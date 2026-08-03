@@ -57,6 +57,29 @@ run as **stale**. Not politeness — a stale tolerance is strictly worse than no
 it keeps excusing a path where the difference is already fixed, and will silently excuse a
 *new* difference that appears there later.
 
+Which records are backed and which are orphans is no longer a question anyone answers by
+hand — `Registry::load` fails on both. What is still worth querying ad hoc is the SHAPE of
+the tolerance surface: how many observable paths each record excuses, across how many
+cases. A record excusing many paths on many cases is doing more work than its one rationale
+may cover.
+
+```bash
+jq -s '[.[].records[]]' parity/cases/*.json  > /tmp/c.json
+jq       '.records'     parity/ALLOWLIST.json > /tmp/w.json
+jq -rn --slurpfile c /tmp/c.json --slurpfile w /tmp/w.json '
+  ([$c[0][] | .id as $case | (.allowedDifferences // [])[]
+    | {id: (.waiverId // .divergenceId), case: $case}]) as $tol
+| $w[0][] | .id as $wid
+| [$wid, ([$tol[] | select(.id == $wid)] | length | tostring),
+   ([$tol[] | select(.id == $wid) | .case] | unique | length | tostring)] | @tsv' \
+| column -t   # record → tolerances → distinct cases
+```
+
+Two things that have cost time here. A tolerance names its backing id in **either**
+`waiverId` **or** `divergenceId`, so a query reading only one silently under-counts. And
+`$tol[] | select(.id == $wid)` must bind the id to a variable first: `$tol | index(.id)`
+pipes the whole **array** into `.id` and quietly yields nothing.
+
 **deacon is sometimes the conformant side.** When deacon follows the spec and the reference
 deviates, that is the reference's deviation, not work we owe. Filing it as a deacon
 divergence-to-fix is the most common way this record goes wrong, which is why
@@ -176,6 +199,18 @@ diff your run's diverging case ids against a recent `main` nightly.
    the measurement in the rationale.
 3. **Update `parity/SPEC_STATUS.md` in the same commit.** It is hand-maintained; a row
    describing yesterday's behavior is worse than no row.
+
+**A `wvr-` record is the maintainer's to grant, and the maintainer's to retire.** The
+standing rule, in the maintainer's words:
+
+> "I want almost no waivers — a waiver should be when you and I have discussed the item and
+> I've agreed that a waiver makes sense. And there will be very few cases where I will think
+> a waiver makes sense."
+
+So: never author one on the harness's say-so, and never remove one on it either. Bring each
+up individually; do not batch rulings. A ruling is recorded by folding an `ADJUDICATED
+<date> and KEPT` sentence — with the argument, not just the verdict — into the record's own
+`rationale`, so the reasoning travels with the thing it excuses.
 
 ## Verifying locally
 
