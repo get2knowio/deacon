@@ -2209,7 +2209,7 @@
             "${WORKSPACE}"
           ],
           "fixtures": [
-            "fx-upgrade-overlay-lockfile"
+            "fx-readconfig-lockfile-present"
           ]
         }
       ],
@@ -2228,7 +2228,7 @@
             "jsonSubset": {
               "configuration": {
                 "features": {
-                  "ghcr.io/devcontainers/features/git:1.3.2": {}
+                  "ghcr.io/devcontainers/features/git:1": {}
                 }
               }
             }
@@ -2238,7 +2238,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "A workspace whose Features are already pinned by a committed `devcontainer-lock.json`. Reading the configuration reports the DECLARED Feature set — resolution against the lockfile belongs to `upgrade` and `up`, not to a configuration read — so this case is what makes the `lockfile` value reachable under `read-configuration` without claiming the read consumes it. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
+      "notes": "`read-configuration` reports the DECLARED Feature reference and never consults `devcontainer-lock.json`. The fixture is built so that claim can FAIL: `fx-readconfig-lockfile-present` commits a real lockfile pinning `ghcr.io/devcontainers/features/git` at `1.3.1`, while the configuration declares the floating `ghcr.io/devcontainers/features/git:1`. The declared form and the locked form are therefore DIFFERENT strings, so an implementation that resolved the read against the lockfile would report `…git:1.3.1` and fail the assertion below. Until #423 the case pointed at `fx-upgrade-overlay-lockfile`, which committed no lockfile at all and whose stray working-tree copy pinned the SAME version the config declared — so the case advertised evidence it could not produce, on two counts. Verified in code, not assumed: `crates/deacon/src/commands/read_configuration.rs` appears in no lockfile-reading path (`lockfile.rs`, `outdated.rs`, `upgrade.rs`, `up/*` and `build/*` are the readers). Measured at oracle 0.87.0 on this fixture: the reference reports the same declared `ghcr.io/devcontainers/features/git:1`, so this is deacon agreeing with the reference rather than a divergence — the case stays `spec-expectation` so it gates every pull request in `parity_hermetic` instead of only the nightly. Resolution against a lockfile belongs to `upgrade` and `up`; see the sibling `case-upgrade-regenerates-lockfile`, whose fixture deliberately has NO lockfile because `upgrade` regenerates rather than consumes one."
     },
     {
       "id": "case-readconfig-malformed-json-differential",
@@ -2279,6 +2279,54 @@
         "tempdir": true
       },
       "notes": "The differential half of the migrated `malformed-json` unit. Its spec-expectation twin (`case-errors-decl-malformed-json`) pins that deacon rejects a hard JSONC syntax error; this half records that the reference does not, so the pair states BOTH the direction and the difference rather than either alone."
+    },
+    {
+      "id": "case-readconfig-merged-computed-empties",
+      "behaviors": [
+        "bhv-readconfig-merged-computed-empties-omitted"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-merged-computed-empties"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-merged-computed-empties-omitted",
+          "context": [],
+          "observablePath": "chan-structured-output.mergedConfiguration.hostRequirements",
+          "rationale": "`mergedConfiguration` is SYNTHESIZED by both CLIs rather than echoed, so a computed-empty value there carries no authorship information. For a configuration authoring only an image the reference emits `hostRequirements: {cpus: null, memory: \"-Infinity\", storage: \"-Infinity\"}` — `Math.max()` over an empty set, serialized — and deacon omits the property. Reproducing that shape would be adopting a quirk rather than achieving parity, so the difference is tolerated on this one path.",
+          "waiverId": "wvr-readconfig-merged-computed-empties"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "First scenario for `bhv-readconfig-merged-computed-empties-omitted` (#423). Until now this was the one behavior whose SPEC_STATUS row cited an allowlist record and no scenario — and the record it cited did not exist: #435 folded the waiver files into `parity/ALLOWLIST.json`, whose loader rejects any record no case references, so the four waivers nothing consumed were dropped. The row read \"allowlist only\" over an empty allowlist. MEASURED at oracle 0.87.0 on this fixture rather than taken from the record: the reference emits `containerEnv: {}`, `remoteEnv: {}`, `portsAttributes: {}` and `hostRequirements: {cpus: null, memory: \"-Infinity\", storage: \"-Infinity\"}`; deacon emits none of the four. ONE of the four is observable, and the tolerance says so. `normalize.rs::drop_absent_optional` runs on BOTH sides of `mergedConfiguration` and removes a listed key whose value carries no information, so the reference's three empty objects and deacon's three absences normalize alike and AGREE; a tolerance naming them would be stale the day it was written. `hostRequirements` is the exception only because its value is a POPULATED object, so it survives the rule. Confirmed by running this case with no tolerance at all: the group reported exactly one divergence over 68 cases, `Diverge at chan-structured-output.mergedConfiguration.hostRequirements`, and nothing else. FIXTURE CONSTRAINT, measured while scoping this: the configuration must author `image` and at most `name`. Adding `remoteUser` or any `features` entry gives the merged configuration a metadata entry that contributes host requirements and the reference then emits `hostRequirements: null`, which `drop_absent_optional` removes — leaving nothing to observe and making this case vacuous. That is precisely why the 24 `case-merged-decl-*` variants, which all author more than an image, never surfaced this difference."
     },
     {
       "id": "case-readconfig-null-empty-omitted",
