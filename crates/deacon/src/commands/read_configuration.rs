@@ -16,6 +16,7 @@ use deacon_core::container::ContainerSelector;
 
 use deacon_core::features::{
     FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger, OptionValue, ResolvedFeature,
+    canonical_feature_id,
 };
 use deacon_core::io::Output;
 use deacon_core::oci::{FeatureRef, default_fetcher_with_config};
@@ -499,8 +500,12 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
                 .fetch_feature(&feature_ref)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to fetch feature '{}': {}", feature_id, e))?;
+            // Tag-bearing, matching `feature_resolver::resolve_one_feature` — the
+            // dependsOn closure below dedups against these ids, so the two loops must
+            // agree. Two versions of one Feature are two distinct Features that both
+            // install (#430); the metadata id is `"git"` for both and cannot key them.
             (
-                downloaded.metadata.id.clone(),
+                feature_ref.reference(),
                 feature_ref.reference(),
                 downloaded.metadata,
             )
@@ -565,7 +570,12 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
                 &dep_key, &dep_value, config_dir, fetcher,
             )
             .await?;
-            if !resolved_features.iter().any(|f| f.id == dep.id) {
+            // Resource-name match, mirroring `resolve_features_ordered`: an unpinned
+            // hard dependency is satisfied by the user's pinned declaration (#430).
+            if !resolved_features
+                .iter()
+                .any(|f| canonical_feature_id(&f.id) == canonical_feature_id(&dep.id))
+            {
                 authored_values.insert(dep.id.clone(), dep_value.clone());
                 resolved_features.push(dep);
             }

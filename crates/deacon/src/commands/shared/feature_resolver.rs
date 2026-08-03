@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 
 use deacon_core::config::DevContainerConfig;
 use deacon_core::features::{
-    FeatureDependencyResolver, OptionValue, ResolvedFeature, parse_feature_metadata,
+    FeatureDependencyResolver, OptionValue, ResolvedFeature, canonical_feature_id,
+    parse_feature_metadata,
 };
 use deacon_core::oci::{FeatureFetcher, FeatureRef, HttpClient};
 use deacon_core::registry_parser::parse_registry_reference;
@@ -70,8 +71,15 @@ pub(crate) async fn resolve_one_feature<C: HttpClient>(
             .fetch_feature(&feature_ref)
             .await
             .with_context(|| format!("Failed to fetch feature '{}'", feature_id))?;
+        // The canonical id is the TAG-BEARING reference, not the Feature's metadata id.
+        // A `features` map may declare one Feature at two versions, which the spec
+        // defines as two distinct Features that both install
+        // (`feature-dependencies.md` §Definition: Feature Equality, §Feature authorship);
+        // keying on the metadata id — `"git"` for both — collapsed them into one node of
+        // the dependency graph and dropped the second (#430). The Feature's OWN id is
+        // still reported from `metadata.id`; this field is the graph key.
         (
-            downloaded.metadata.id.clone(),
+            feature_ref.reference(),
             feature_ref.reference(),
             downloaded.metadata,
         )
@@ -158,7 +166,14 @@ pub(crate) async fn resolve_features_ordered<C: HttpClient>(
         deps.sort_by(|a, b| a.0.cmp(&b.0)); // deterministic despite the unordered map
         for (dep_key, dep_value) in deps {
             let dep = resolve_one_feature(&dep_key, &dep_value, config_dir, fetcher).await?;
-            if !resolved_features.iter().any(|f| f.id == dep.id) {
+            // Matched on the RESOURCE NAME (id without version): a hard dependency is
+            // usually written unpinned, and a user who declared that Feature at a
+            // specific version has already satisfied it. Only the user's own two-version
+            // declaration is a deliberate double install (#430).
+            if !resolved_features
+                .iter()
+                .any(|f| canonical_feature_id(&f.id) == canonical_feature_id(&dep.id))
+            {
                 debug!(dependency = %dep_key, "Auto-installing transitive dependsOn feature");
                 resolved_features.push(dep);
             }

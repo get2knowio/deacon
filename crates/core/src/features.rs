@@ -795,6 +795,101 @@ fn strip_oci_tag(reference: &str) -> &str {
     }
 }
 
+/// Extract the OCI tag from a feature reference, or `None` when it carries none.
+///
+/// The inverse of [`strip_oci_tag`], sharing its "is this colon a tag separator or a
+/// registry port?" rule so the two can never disagree about where a reference splits.
+fn oci_tag_of(reference: &str) -> Option<&str> {
+    let stripped = strip_oci_tag(reference);
+    (stripped.len() < reference.len()).then(|| &reference[stripped.len() + 1..])
+}
+
+/// One dot-separated component of a version tag, ordered numerically when it is a
+/// number and lexicographically otherwise. Numbers sort before words.
+///
+/// Comparing the components rather than the whole string is what makes `1.9.0`
+/// precede `1.10.0`; a string comparison puts them the other way round.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum VersionPart {
+    Numeric(u64),
+    Text(String),
+}
+
+/// A tag's position on the spec's "oldest to newest" axis.
+///
+/// Variant order IS the ordering: an untagged reference (a local Feature, whose id is a
+/// path) sorts first, then version tags oldest-to-newest, then any other named tag, and
+/// finally `latest` — which `feature-dependencies.md` calls "the 'most new'".
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum TagOrder {
+    Untagged,
+    Version(Vec<VersionPart>),
+    Named(String),
+    Latest,
+}
+
+impl TagOrder {
+    fn of(reference: &str) -> Self {
+        let Some(tag) = oci_tag_of(reference) else {
+            return TagOrder::Untagged;
+        };
+        if tag.eq_ignore_ascii_case("latest") {
+            return TagOrder::Latest;
+        }
+        let parts: Vec<VersionPart> = tag
+            .split('.')
+            .map(|p| match p.parse::<u64>() {
+                Ok(n) => VersionPart::Numeric(n),
+                Err(_) => VersionPart::Text(p.to_string()),
+            })
+            .collect();
+        // A "version" tag is one that starts with a number (`1`, `1.3`, `1.3.1`); a
+        // tag like `os-provided` is a name and is ordered among names instead.
+        match parts.first() {
+            Some(VersionPart::Numeric(_)) => TagOrder::Version(parts),
+            _ => TagOrder::Named(tag.to_string()),
+        }
+    }
+}
+
+/// The per-Feature key that orders one round, per `feature-dependencies.md`
+/// §"Definition: Round Stable Sort".
+///
+/// The spec sorts the Features committed in a round by:
+///
+/// 1. "each Feature lexiographically by their fully qualified resource name (For
+///    OCI-published Features, that means the ID without version or digest.)"; if equal,
+/// 2. "each Feature from oldest to newest tag (`latest` being the 'most new')"; if equal,
+/// 3. their options; if equal, their digest-resolved canonical name.
+///
+/// Step 2 exists for exactly one situation, and it is the one #430 was about: a `features`
+/// map declaring one Feature at two versions. Sorting the raw id STRING cannot implement
+/// either step — `…/git:1.10.0` precedes `…/git:1.9.0` lexicographically, and
+/// `…/go:1` sorts *after* `…/go-lang:1` because `-` < `:` — so the key is built
+/// structurally from the two parts instead.
+///
+/// Steps 3+ collapse into the trailing full id. Within one resource name at one tag the id
+/// is already distinct and deterministic, which is what the spec asks for "in instances of
+/// ambiguity (i.e. sort alphanumerically by identifier)".
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RoundSortKey {
+    resource: String,
+    tag: TagOrder,
+    id: String,
+}
+
+impl RoundSortKey {
+    /// Derive the key from a feature id (`ResolvedFeature::id`, which is also the
+    /// dependency graph's node key).
+    fn of(id: &str) -> Self {
+        RoundSortKey {
+            resource: strip_oci_tag(id).to_string(),
+            tag: TagOrder::of(id),
+            id: id.to_string(),
+        }
+    }
+}
+
 /// Resolves a feature reference written in *features-object* form (the same
 /// syntax used for `dependsOn`/`installsAfter`/`overrideFeatureInstallOrder`)
 /// to the canonical `ResolvedFeature.id`.
@@ -1087,8 +1182,8 @@ impl FeatureDependencyResolver {
                 .and_then(|p| p.iter().position(|o| o == id))
                 .unwrap_or(usize::MAX)
         };
-        // Sort key for the ready set: (override position, lexicographic id).
-        let sort_key = |id: &str| (priority_index(id), id.to_string());
+        // Sort key for the ready set: (override position, Round Stable Sort key).
+        let sort_key = |id: &str| (priority_index(id), RoundSortKey::of(id));
 
         let mut in_degree: HashMap<String, usize> = HashMap::new();
         let mut adj_list: HashMap<String, HashSet<String>> = HashMap::new();
@@ -1122,8 +1217,8 @@ impl FeatureDependencyResolver {
             }
         }
 
-        // Min-heap (via Reverse) over the ready set, keyed by (priority, id).
-        let mut ready: BinaryHeap<Reverse<(usize, String)>> = BinaryHeap::new();
+        // Min-heap (via Reverse) over the ready set, keyed by (priority, round-sort key).
+        let mut ready: BinaryHeap<Reverse<(usize, RoundSortKey)>> = BinaryHeap::new();
         for (node, &degree) in &in_degree {
             if degree == 0 {
                 ready.push(Reverse(sort_key(node)));
@@ -1134,6 +1229,7 @@ impl FeatureDependencyResolver {
         let mut processed = 0;
 
         while let Some(Reverse((_, current))) = ready.pop() {
+            let current = current.id;
             result.push(current.clone());
             processed += 1;
 
@@ -1233,7 +1329,9 @@ impl FeatureDependencyResolver {
                 return Err(FeatureError::DependencyCycle { cycle_path });
             }
 
-            current_level.sort(); // Deterministic ordering
+            // Deterministic ordering — the spec's Round Stable Sort (resource name, then
+            // oldest tag first), not a raw string sort. See `RoundSortKey`.
+            current_level.sort_by_key(|id| RoundSortKey::of(id));
             processed += current_level.len();
 
             // Process all nodes in the current level
@@ -2888,6 +2986,67 @@ mod tests {
         assert_eq!(plan.len(), 0);
         assert!(plan.is_empty());
         assert_eq!(plan.feature_ids(), Vec::<String>::new());
+    }
+
+    /// #430 / `feature-dependencies.md` §Definition: Round Stable Sort — "Compare and
+    /// sort each Feature from oldest to newest tag (`latest` being the 'most new')",
+    /// applied only when the resource names compare equal.
+    #[test]
+    fn round_sort_key_orders_by_resource_then_oldest_tag() {
+        let key = |id: &str| RoundSortKey::of(id);
+        let ordered = |a: &str, b: &str| key(a) < key(b);
+
+        // Same resource, ordered by tag age — the one rule written for a `features`
+        // map that names one Feature twice.
+        assert!(ordered("ghcr.io/o/git:1.3.1", "ghcr.io/o/git:1.3.2"));
+        // Numeric, not lexicographic: a string sort puts 1.10.0 before 1.9.0.
+        assert!(ordered("ghcr.io/o/git:1.9.0", "ghcr.io/o/git:1.10.0"));
+        // A shorter version prefix is the older tag.
+        assert!(ordered("ghcr.io/o/git:1", "ghcr.io/o/git:1.3"));
+        // `latest` is the "most new" and sorts after every version and named tag.
+        assert!(ordered("ghcr.io/o/git:9.9.9", "ghcr.io/o/git:latest"));
+        assert!(ordered("ghcr.io/o/git:os-provided", "ghcr.io/o/git:latest"));
+
+        // Resource name wins over tag, and is compared on the tag-STRIPPED form: with a
+        // raw string sort `go:1` lands after `go-lang:1`, because '-' < ':'.
+        assert!(ordered("ghcr.io/o/go:1", "ghcr.io/o/go-lang:1"));
+        assert!(ordered("ghcr.io/o/go:9.9.9", "ghcr.io/o/node:1.0.0"));
+
+        // A registry port is not a tag, and a local Feature's path id has no tag at all.
+        assert_eq!(key("localhost:5000/o/feat").tag, TagOrder::Untagged);
+        assert_eq!(key("local:/ws/.devcontainer/foo").tag, TagOrder::Untagged);
+        assert_eq!(
+            key("localhost:5000/o/feat").resource,
+            "localhost:5000/o/feat"
+        );
+    }
+
+    /// The end-to-end consequence of the key: two versions of ONE Feature both appear in
+    /// the plan, oldest tag first, regardless of the order the `features` map declared
+    /// them in (#430).
+    #[test]
+    fn resolver_installs_both_versions_of_one_feature_oldest_tag_first() {
+        // Declared newest-first on purpose: declaration order and tag order disagree.
+        let mut newer = create_test_feature("git", vec![], HashMap::new());
+        newer.id = "ghcr.io/devcontainers/features/git:1.3.2".to_string();
+        newer.source = newer.id.clone();
+        let mut older = create_test_feature("git", vec![], HashMap::new());
+        older.id = "ghcr.io/devcontainers/features/git:1.3.1".to_string();
+        older.source = older.id.clone();
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let plan = resolver
+            .resolve(&[newer, older])
+            .expect("two versions of one Feature resolve");
+
+        assert_eq!(
+            plan.feature_ids(),
+            vec![
+                "ghcr.io/devcontainers/features/git:1.3.1".to_string(),
+                "ghcr.io/devcontainers/features/git:1.3.2".to_string(),
+            ],
+            "both Features must install, oldest tag first"
+        );
     }
 
     // Helper function to create test features
