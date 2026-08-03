@@ -201,6 +201,40 @@ jobs:
         sudo docker system prune -af --volumes
         sudo docker builder prune -af
 
+    # An EXPLICIT engine precondition, in the same spirit as `parity.yml`'s BuildKit
+    # assertion: `parity_docker` runs here as a blocking PR lane, and its case data pins
+    # capabilities MEASURED on a modern engine. The runner's preinstalled Docker is older,
+    # and buildx's default `docker` driver on it cannot perform several exports — which
+    # showed up twice as a "divergence" that was really the substrate:
+    #   * `case-build-cache-to-flag` with `--cache-to type=local` (now `type=inline`), and
+    #   * `case-build-output-export-tar` with `--output type=docker,dest=…`, which has no
+    #     portable reformulation because exporting a tar IS its subject.
+    # Establishing the engine here is what lets those cases assert an outcome instead of
+    # tolerating "succeeded OR failed".
+    #
+    # Pinned, never floating: `29.6.2` is the exact engine the suite's capability pins were
+    # measured on. Raising it is a deliberate, verify-first change, not a drift.
+    - name: Pin a modern Docker engine (capability precondition)
+      uses: docker/setup-docker-action@v5
+      with:
+        version: v29.6.2
+        set-host: true
+
+    - name: Verify the pinned engine and its exporter capability
+      # Fail LOUD and early rather than letting a `build` case report a divergence that is
+      # really a missing exporter. Probes the capability itself, not just the version.
+      run: |
+        set -euo pipefail
+        docker version
+        probe="$(mktemp -d)"
+        printf 'FROM alpine:3.18\n' > "$probe/Dockerfile"
+        if ! docker buildx build --output "type=docker,dest=$probe/probe.tar" "$probe"; then
+          echo "::error::MACHINERY PRECONDITION FAILED (not a parity divergence): this engine cannot export \`type=docker,dest=…\`. The pinned parity cases assume it. Fix the engine pin above; do not weaken the case data."
+          exit 1
+        fi
+        test -s "$probe/probe.tar"
+        echo "engine exporter capability verified"
+
     - name: Acquire GHCR bearer token (read-only)
       run: |
         set -euo pipefail
@@ -293,5 +327,18 @@ jobs:
         TOKEN=$(curl -fsSL "$TOKEN_URL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
         echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
+    # `parity_docker` is excluded here, and that is a SELECTION rather than a skip — the
+    # mirror of the platform gate on `parity_hermetic` (#441). The parity harness probes the
+    # container runtime through the literal `docker` CLI (`workspace.rs` discovery and
+    # reclamation, `observe/mod.rs` container probe) and its case data is Docker-MEASURED.
+    # Under `DEACON_CONTAINER_RUNTIME=podman` deacon creates a podman container that a
+    # `docker` probe cannot see, so every case can only ever "observe nothing" — a failure
+    # about the substrate, never about deacon. Measured: `case-down-dockerfile-workspace`
+    # reported exactly that ("op-up succeeded but no container carries the label
+    # devcontainer.local_folder=…").
+    #
+    # The filterset INTERSECTS with the profile's `default-filter`, so this removes exactly
+    # the two `parity_docker` tests and leaves the other 381 — the same 381 that already
+    # pass here. `parity_hermetic` is unaffected: it is runtime-agnostic.
     - name: Run integration suite against Podman (full failure set)
-      run: cargo nextest run --profile mvp-integration --no-fail-fast
+      run: cargo nextest run --profile mvp-integration --no-fail-fast -E 'not binary(=parity_docker)'

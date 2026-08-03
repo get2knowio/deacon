@@ -53,7 +53,7 @@
             "--workspace-folder",
             "${WORKSPACE}",
             "--cache-to",
-            "type=local,dest=${WORKSPACE}/bkcache",
+            "type=inline",
             "--image-name",
             "${IMAGE_TAG}",
             "--output-format",
@@ -104,7 +104,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Replaces the `--cache-to` half of `parity_build::buildkit-only-features` (res-build-tolerant-outcome). What this establishes is bounded and worth stating: deacon accepts the flag, passes it through, and still produces the image. What it does NOT establish is that anything was cached — measured on Docker 29.6.2 with the default `docker` driver, `type=local,dest=…` creates no directory at the destination, so an assertion that the cache exists would fail for reasons that have nothing to do with deacon. Pinning the reachable claim and naming the unreachable one is the honest shape; the legacy unit instead tolerated failure and, in its failure arm, accepted any of three substrings one of which (`outcome`) appears in normal JSON success output, so it could not fail either way."
+      "notes": "Replaces the `--cache-to` half of `parity_build::buildkit-only-features` (res-build-tolerant-outcome). What this establishes is bounded and worth stating: deacon accepts the flag, passes it through, and still produces the image. What it does NOT establish is that anything was cached. The export type is `inline` on purpose: it is the ONE type buildx's default `docker` driver supports across Docker versions, so the case measures deacon rather than the runner. It was `type=local,dest=…` and that was the environment-dependent part — cache export needs the `docker-container` driver on older Docker, so on a CI runner the build produced no image at all and the case failed for a reason that had nothing to do with deacon (measured: it passes on Docker 29.6.2 / BuildKit v0.31.2, fails on GitHub `ubuntu-latest`, and Podman has no equivalent). Local export was never the claim either — even where it succeeded it wrote nothing to the destination. Pinning the reachable claim and naming the unreachable one is the honest shape; the legacy unit instead tolerated failure and, in its failure arm, accepted any of three substrings one of which (`outcome`) appears in normal JSON success output, so it could not fail either way."
     },
     {
       "id": "case-build-compose-service-shape",
