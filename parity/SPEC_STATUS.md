@@ -22,13 +22,13 @@ alone. Where a row has no scenario yet, it says so.
 
 ## Summary
 
-Of **83 recorded behaviors**:
+Of **84 recorded behaviors**:
 
 - **1** — open nonconformance — [#430](https://github.com/get2knowio/deacon/issues/430)
 - **8** — deacon follows the spec where the CLI does not
 - **11** — documented choice
 - **19** — deacon extension
-- **44** — conformant and matching
+- **45** — conformant and matching
 
 Two rows moved from "deacon follows the spec where the CLI does not" to "conformant and
 matching" at [#439](https://github.com/get2knowio/deacon/issues/439) — not because deacon
@@ -192,6 +192,7 @@ oversight nobody noticed.
 |---|---|---|---|
 | A lifecycle hook that exits non-zero fails the run rather than being reported as a successful setup. | deacon follows the spec, the CLI deviates | 7 scenarios | The failing hook arrives as a command-line override so the preceding `up` can succeed: a hook failure during creation is a different case, and conflating the two would… |
 | Lifecycle hooks run in spec order — onCreate, updateContent, postCreate, postStart — and a Feature-contributed hook runs exactly once alongside the configuration's own. | matches the reference | 6 scenarios | Observed by having each hook append its own name to a file inside the container, so the file IS the order. `grep -c` rather than a presence check pins the Feature hook's… |
+| The running container's image `devcontainer.metadata` contributes `remoteUser`, `remoteEnv` and lifecycle hooks to `run-user-commands`, as it already does to `up` and `exec`. | matches the reference | 1 scenario | Fixes #405. Measured against the pin on a base image whose label carried all three and a devcontainer.json that declared none: the reference ran the image's `postCreateCommand`, as `metauser`, with `META_ENV` set; deacon ran nothing, as `root`, with neither — the exit code was 0 on both sides, so only the marker file showed it. `exec` had done this merge inline since #223 and `run-user-commands` loaded the workspace config alone, which is the whole asymmetry. The merge is now the one shared `container_metadata::resolve_config_against_container`, and `remoteEnv` is layered over `containerEnv` for the hook environment the way `up` layers it. Backed by `case-run-user-commands-image-metadata-differential` (nightly; its `assertion` also pins deacon's side) and by the Docker-gated `run_user_commands_feature_lifecycle::run_user_commands_honors_image_metadata_user_env_and_hook` on the PR lane. `up`'s COMPOSE path never calls the merge either — still open, tracked on #405. |
 
 ### `secrets`
 

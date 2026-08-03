@@ -665,6 +665,63 @@
       "notes": "Covers the high-risk triple `hrt-run-user-commands-image-single-feature-running`, alignment half: the container already exists and the configuration declares four hooks while an installed Feature contributes a fifth. Both CLIs must run them without failing."
     },
     {
+      "id": "case-run-user-commands-image-metadata-differential",
+      "behaviors": [
+        "bhv-run-user-commands-image-metadata"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-ruc-image-metadata"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-ruc",
+          "assertion": {
+            "jsonSubset": {
+              "ruc-image-metadata.txt": "metauser from-image-metadata\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "ruc-image-metadata.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "#405, measured against the pinned 0.87.0 before the fix was written: the reference's `run-user-commands` ran the image-metadata `postCreateCommand`, as `metauser`, with `META_ENV` set; deacon ran nothing, as `root`, with neither. `remoteUser`, `remoteEnv` and the hook live ONLY in the image's `devcontainer.metadata` label — the fixture's devcontainer.json declares none of the three — and `up` runs with `--skip-post-create`, so the marker file can only be written by `run-user-commands` and its single line pins all three at once. The observation is the FILE, not the exit code: before the fix nothing was written and the status still said 0.\n\nNo spec-expectation twin: the fixture's base is a `:local` image built from its sibling Dockerfile by `scripts/parity/prepull-fixture-images.sh`, which only the nightly and release lanes run — so a Docker-lane twin would fail on the PR lane for a missing image rather than for a divergence (the same reason `case-tier1-decl-object-form-metadata` is differential-only). The direction is pinned instead by the `assertion` carried HERE, which is evaluated against deacon's side on top of the comparison, and by the Docker-gated `run_user_commands_feature_lifecycle::run_user_commands_honors_image_metadata_user_env_and_hook`."
+    },
+    {
       "id": "case-run-user-commands-reference-lenient-wrong-type",
       "behaviors": [
         "bhv-readconfig-wrong-type-forwardports-rejected"

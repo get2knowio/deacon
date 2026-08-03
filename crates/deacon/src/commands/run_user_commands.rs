@@ -205,15 +205,48 @@ async fn execute_lifecycle_commands(
     // Compose config without an explicit workspaceFolder resolves to `/` (the
     // reference default), not the single-container `/workspaces/<basename>` the
     // service never mounts (#294/#295).
-    let mounts = {
+    let container_info = {
         use deacon_core::docker::Docker;
         match cli.inspect_container(container_id).await {
-            Ok(Some(info)) => info.mounts,
-            _ => Vec::new(),
+            Ok(Some(info)) => Some(info),
+            _ => None,
         }
     };
+    let mounts = container_info
+        .as_ref()
+        .map(|info| info.mounts.clone())
+        .unwrap_or_default();
+
+    // #405: fold the running container's image `devcontainer.metadata` into the
+    // workspace config, exactly as `exec` does — otherwise a `remoteUser`,
+    // `remoteEnv` or lifecycle hook contributed only by image metadata is
+    // silently ignored here while `up` and `exec` honor it. The reference CLI
+    // 0.87.0 runs its user commands with all three applied (measured).
+    let merged_config = match container_info.as_ref() {
+        Some(info) => {
+            crate::commands::shared::container_metadata::resolve_config_against_container(
+                cli,
+                info,
+                config.clone(),
+                workspace_folder,
+            )
+            .await
+        }
+        None => config.clone(),
+    };
+    let config = &merged_config;
+
     let container_workspace_folder =
         crate::commands::shared::resolve_container_cwd(config, workspace_folder, &mounts, true);
+
+    // `remoteEnv` is layered over `containerEnv` for user commands, matching the
+    // `up` flow (`resolve_env_and_user` → `build_effective_env`) and the
+    // reference CLI. A `None` value means "set to the empty string" per the
+    // spec's null handling.
+    let mut lifecycle_env = config.container_env().clone();
+    for (name, value) in config.remote_env() {
+        lifecycle_env.insert(name.clone(), value.clone().unwrap_or_default());
+    }
 
     // Create container lifecycle configuration
     let lifecycle_config = ContainerLifecycleConfig {
@@ -224,7 +257,7 @@ async fn execute_lifecycle_commands(
             .clone()
             .or_else(|| config.container_user.clone()),
         container_workspace_folder,
-        container_env: config.container_env().clone(),
+        container_env: lifecycle_env,
         skip_post_create: args.skip_post_create,
         skip_non_blocking_commands: args.skip_non_blocking_commands,
         non_blocking_timeout: Duration::from_secs(300), // 5 minutes default timeout

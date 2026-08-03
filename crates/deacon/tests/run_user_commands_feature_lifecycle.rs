@@ -158,3 +158,132 @@ fn test_run_user_commands_runs_feature_lifecycle_commands() {
         "run-user-commands must still execute the config's postCreateCommand"
     );
 }
+
+/// Read a file out of the container, or `None` when it does not exist.
+fn read_marker(container_id: &str, path: &str) -> Option<String> {
+    let output = std::process::Command::new("docker")
+        .args(["exec", container_id, "cat", path])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Removes the fixture image the metadata test builds.
+struct ImageGuard(String);
+impl Drop for ImageGuard {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("docker")
+            .args(["rmi", "-f", &self.0])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
+/// #405: `run-user-commands` must honor the image's `devcontainer.metadata`, the
+/// way `up` and `exec` already do.
+///
+/// Everything lifecycle-relevant lives ONLY in the base image's label — the
+/// devcontainer.json declares no `remoteUser`, no `remoteEnv` and no hook — so
+/// the single marker line pins all three at once: the hook ran at all, it ran as
+/// `metauser`, and it saw `META_ENV`. Before the fix nothing was written and the
+/// exit code was still 0, which is why the assertion is on the FILE.
+///
+/// This is the PR-lane twin of the nightly
+/// `case-run-user-commands-image-metadata-differential`, whose fixture base is a
+/// `:local` image only the parity/release lanes build.
+#[test]
+fn run_user_commands_honors_image_metadata_user_env_and_hook() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping run_user_commands_honors_image_metadata_user_env_and_hook: Docker not available"
+        );
+        return;
+    }
+
+    let name = "Deacon RUC Image Metadata Test";
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    // A base image whose `devcontainer.metadata` label carries the remote user,
+    // the remote environment and the lifecycle hook.
+    let image_dir = root.join("image");
+    fs::create_dir_all(&image_dir).unwrap();
+    fs::write(
+        image_dir.join("Dockerfile"),
+        "FROM debian:bookworm-slim\n\
+         RUN useradd -m -s /bin/bash metauser\n\
+         LABEL devcontainer.metadata='[{\"remoteUser\":\"metauser\",\
+         \"remoteEnv\":{\"META_ENV\":\"from-image-metadata\"},\
+         \"postCreateCommand\":\"echo $(whoami) ${META_ENV:-UNSET} > /tmp/ruc-image-metadata.flag\"}]'\n",
+    )
+    .unwrap();
+
+    let tag = format!(
+        "deacon-ruc-image-metadata-test-{}:latest",
+        std::process::id()
+    );
+    let built = std::process::Command::new("docker")
+        .args(["build", "-q", "-t", &tag])
+        .arg(&image_dir)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(built, "the metadata-carrying fixture image must build");
+    let _image_guard = ImageGuard(tag.clone());
+
+    fs::create_dir_all(root.join(".devcontainer")).unwrap();
+    fs::write(
+        root.join(".devcontainer/devcontainer.json"),
+        format!(
+            r#"{{
+  "name": "{name}",
+  "image": "{tag}",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${{localWorkspaceFolder}},target=/workspace,type=bind"
+}}"#
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("deacon")
+        .unwrap()
+        .current_dir(root)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(root)
+        .arg("--remove-existing-container")
+        .arg("--skip-post-create")
+        .assert()
+        .success();
+
+    let container_id = find_container(name).expect("container should exist after up");
+    let _guard = ContainerGuard(container_id.clone());
+
+    assert!(
+        !marker_present(&container_id, "/tmp/ruc-image-metadata.flag"),
+        "the image-metadata postCreate must not have run yet (up --skip-post-create)"
+    );
+
+    Command::cargo_bin("deacon")
+        .unwrap()
+        .current_dir(root)
+        .arg("run-user-commands")
+        .arg("--workspace-folder")
+        .arg(root)
+        .assert()
+        .success();
+
+    let marker = read_marker(&container_id, "/tmp/ruc-image-metadata.flag").expect(
+        "run-user-commands must execute the lifecycle hook contributed by image metadata (#405)",
+    );
+    assert_eq!(
+        marker.trim_end(),
+        "metauser from-image-metadata",
+        "the hook must run as the image-metadata remoteUser with the image-metadata remoteEnv \
+         applied (#405)"
+    );
+}
