@@ -228,6 +228,14 @@ impl Drop for ImageGuard {
 ///
 /// Measured against the pinned reference CLI 0.87.0, which writes exactly this
 /// line on this fixture.
+///
+/// The workspace is made world-writable below, and that is load-bearing: the
+/// hook runs as the image's non-root `metauser`, and deacon does NOT apply
+/// `updateRemoteUserUID` on the compose path (the reference does — #462), so
+/// `metauser` keeps the image's uid inside the container. Without the `chmod`
+/// this test would pass only on a host whose uid happens to equal that uid and
+/// fail everywhere else with `Permission denied` — a verdict about the host, not
+/// about #448. Permissions are therefore removed from what this test measures.
 #[test]
 fn test_compose_up_merges_service_image_metadata() {
     if !is_docker_available() {
@@ -238,6 +246,14 @@ fn test_compose_up_merges_service_image_metadata() {
     let temp_dir = TempDir::new().unwrap();
     let workspace = temp_dir.path();
     let _down = DeaconDownGuard(workspace);
+
+    // See the note above: the hook writes into this directory as a non-root
+    // container user whose uid is the IMAGE's, not the host's.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(workspace, fs::Permissions::from_mode(0o777)).unwrap();
+    }
 
     // Unique tag so parallel runs in the docker-shared group never collide.
     let image_tag = format!(
@@ -252,15 +268,21 @@ fn test_compose_up_merges_service_image_metadata() {
 
     // The hook is the STRING form: deacon's compose post-create runs
     // `postCreateCommand` only when it is a string. The array/object forms and
-    // the other lifecycle phases are a separate pre-existing gap on this path,
-    // and using the string form keeps this test measuring the metadata merge.
+    // the other lifecycle phases are a separate pre-existing gap on this path
+    // (#460), and using the string form keeps this test measuring the merge.
+    //
+    // `metauser` is pinned to uid 1234 rather than letting `adduser` pick the
+    // first free uid (1000, the commonest host uid there is). Together with the
+    // `chmod` above that makes the uid MISmatch the norm here instead of an
+    // accident, so a regression in the world-writable setup surfaces as a
+    // failure everywhere rather than only on hosts that happen to disagree.
     let image_dir = workspace.join("image");
     fs::create_dir_all(&image_dir).unwrap();
     fs::write(
         image_dir.join("Dockerfile"),
         concat!(
             "FROM alpine:3.19\n",
-            "RUN adduser -D -s /bin/sh metauser\n",
+            "RUN adduser -D -u 1234 -s /bin/sh metauser\n",
             "LABEL devcontainer.metadata='[{\"remoteUser\":\"metauser\",",
             "\"remoteEnv\":{\"META_ENV\":\"from-image-metadata\"},",
             "\"postCreateCommand\":\"echo $(whoami) ${META_ENV:-UNSET} ${WS_ENV:-UNSET} ",
