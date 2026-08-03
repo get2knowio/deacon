@@ -84,6 +84,21 @@ pub struct RunContext {
     /// `docker inspect` — so a case pays a single inspect, and no observer blocks the async
     /// executor (finding #4). `None` when no container exists / it was removed.
     pub container_inspect: Option<serde_json::Value>,
+    /// The full `docker inspect` object for the IMAGE a `build` operation produced,
+    /// captured once by the runner from the tag the case passed as `--image-name
+    /// ${IMAGE_TAG}`.
+    ///
+    /// Separate from [`RunContext::container_inspect`] because a `build` leaves an image
+    /// and no container: the container probe finds nothing, and folding the two into one
+    /// field would make "no container" and "no image" indistinguishable at the observer.
+    /// `None` when the case ran no build (or the build failed).
+    pub image_inspect: Option<serde_json::Value>,
+    /// The tag the runner assigned this run's `${IMAGE_TAG}`, when the case used one.
+    ///
+    /// Carried so the normalizer can rewrite it to `<IMAGE_TAG>` (`image_tag_token`): the
+    /// tag is unique per case run and per side, so a reported `imageName` is otherwise
+    /// different by construction on every run and on both sides.
+    pub image_tag: Option<String>,
     /// The case's `fsAllowlist` — the path/glob allowlist the filesystem observer is
     /// scoped to (clarify Q1: allowlist-scoped, never a full-tree diff). Empty for cases
     /// with no filesystem expectation.
@@ -143,6 +158,8 @@ impl RunContext {
             side,
             container_id: None,
             container_inspect: None,
+            image_inspect: None,
+            image_tag: None,
             fs_allowlist: Vec::new(),
             authored_properties,
             outcomes: HashMap::new(),

@@ -66,7 +66,7 @@ fn a_channel_with_no_observer_is_not_declared_observable() {
 fn observed_channels_is_exactly_the_set_with_an_observer() {
     // Read `channels.json` directly: the slim loader carries scenarios only, and this
     // assertion is precisely about the channel universe the scenarios are written against.
-    let path = parity_harness::default_registry_dir().join("channels.json");
+    let path = parity_harness::parity_root().join("channels.json");
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("channels.json must be readable at {}: {e}", path.display()));
     let doc: serde_json::Value = serde_json::from_str(&raw).expect("channels.json is valid JSON");
@@ -267,7 +267,6 @@ mod runner_faults {
             oracle: Some(&oracle),
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
 
         let err = run_case(&unobservable_case(), &cfg)
@@ -297,7 +296,6 @@ mod runner_faults {
             oracle: None,
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
         let mut case = unobservable_case();
         case.id = "case-unobservable-spec".to_string();
@@ -337,7 +335,6 @@ mod runner_faults {
             oracle: Some(&oracle),
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
         let mut case = unobservable_case();
         case.id = "case-partly-observable".to_string();
@@ -381,7 +378,6 @@ mod runner_faults {
             oracle: Some(&oracle),
             fixtures_root: &fixtures,
             report_root: &dir.path().join("report"),
-            snapshots_root: &dir.path().join("snapshots"),
         };
         // A Docker-backed case (isolated workspace + RAII guard), whose op is config-only
         // so the case needs no daemon: the sequencing under test is the guard's, not

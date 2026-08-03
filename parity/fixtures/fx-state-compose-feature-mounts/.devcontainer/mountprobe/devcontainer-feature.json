@@ -1,0 +1,9 @@
+{
+	"id": "mountprobe",
+	"version": "1.0.0",
+	"name": "Mount Probe",
+	"containerEnv": { "FEATURE_ENV_CONTROL": "yes" },
+	"mounts": [
+		{ "source": "${localWorkspaceFolder}/featmnt", "target": "/feat-mnt", "type": "bind" }
+	]
+}

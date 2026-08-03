@@ -11,7 +11,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 **Workspace Structure:**
 - `crates/deacon/` - CLI binary crate (argument parsing, command orchestration, UI)
 - `crates/core/` - Core library with domain logic (config parsing, container runtime, OCI registry, features/templates)
-- upstream [devcontainers/spec](https://github.com/devcontainers/spec) (pinned commit `113500f4`) - authoritative CLI behavior; `conformance/registry/` records deacon's conformance and every characterized divergence against it (see the Conformance Registry section)
+- upstream [devcontainers/spec](https://github.com/devcontainers/spec) (pinned commit `113500f4`) - authoritative CLI behavior; `parity/` holds the scenarios, fixtures and allowlist that record deacon's conformance against it (see the Differential Parity Suite section)
 - `.specify/memory/constitution.md` - Development constitution defining principles and constraints
 - `examples/` - Executable examples with `exec.sh` scripts demonstrating features
 
@@ -26,7 +26,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 ## Critical Development Principles
 
 **1. Spec-Parity as Source of Truth**
-- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `113500f4`, October 2025) — the single source of truth. Deacon's conformance against it, including every characterized divergence, is recorded in the repository-owned `conformance/registry/` (see the Conformance Registry section), not in prose.
+- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `113500f4`, October 2025) — the single source of truth. Deacon's conformance against it, including every characterized divergence, is recorded in the repository-owned `parity/` data root (see the Differential Parity Suite section), not in prose.
 - Data structures MUST match spec shapes exactly (map vs vec, field ordering, null handling)
 - Configuration resolution MUST use full extends chains via `ConfigLoader::load_with_extends`
 - Never implement shortcuts that deviate from spec-defined algorithms
@@ -354,623 +354,161 @@ let env_user = resolve_env_and_user(
 
 See `docs/ARCHITECTURE.md` for implementation checklist and code references.
 
-## Parity Test Harness (`crates/parity-harness/`)
+## Differential Parity Suite (`crates/parity-harness/`)
 
-Live parity tests compare deacon against the **pinned** `@devcontainers/cli`
-oracle (version in `fixtures/parity-corpus/oracle.json`). The dev-only
-`parity-harness` crate (`publish = false`) owns every shared mechanic: oracle
-resolution + **exact**-version verification (`oracle`), Docker/fixture
-prerequisite checks (`prereq`), bounded CLI execution with raw stdout/stderr
-capture (`exec`), the **single** normalization/equivalence module (`normalize` —
-one rule chain, `config_document_rules`, shared by the legacy `config`/
-`merged_config` entry points AND the declarative `chan-structured-output`
-channel), the waiver + registry loaders (`waiver`, `registry`), run-report
-fragments (`report`), the equivalent-or-stricter ledger (`equivalence`), and the
-`parity-report` / `conformance-snapshot` / `equivalence-report` bins. The parity
-registry MODEL and the corpus discovery rule live one crate down, in
-`deacon-conformance::parity_corpus`, so the hermetic tooling can call the same
-definitions without a dependency cycle; `parity_harness::registry` re-exports them.
+The whole instrument, in one sentence: **run deacon and the pinned reference CLI over the
+same scenarios, normalize both outputs, and diff them.** A difference is either a bug (an
+issue) or a documented choice (one allowlist entry). Every wild bug becomes a scenario
+before it is fixed.
 
-**Selection is profile-based, never an env-var opt-in.** The legacy
-`DEACON_PARITY=1` gate and the `cargo test` side-channel are retired. The **six**
-surviving live binaries run **only** under `cargo nextest run --profile parity`
-(whose `default-filter` is an explicit `binary(=…)` allow-list — NOT a
-`parity_*` glob, which would wrongly capture the hermetic guards
-`parity_harness_faults` / `parity_registry_check`):
+This replaced ~90k LOC of conformance/registry/coverage/discovery/drift/certification
+machinery that had grown to 78% the size of the product it verified. If you find yourself
+about to add a validation class, an obligation model, or a lane registry, that is the thing
+that was deleted — don't rebuild it.
 
-| Surviving live binary | Status |
-|---|---|
-| `parity_conformance_runner` | the authoritative declarative runner — every migrated case runs here |
-| `parity_build` | 6/6 units residual (`res-build-image-discovery`, `res-build-tolerant-outcome`) |
-| `parity_exec` | 3/4 migrated; `res-exec-per-side-argv` blocks deletion |
-| `parity_up_exec` | equivalence-clean, but its legacy case is the ONLY evidence for `bhv-exec-container-id-metadata` |
-| `parity_observable_state` | 7/7 units residual (research D4) |
-| `parity_state_diff` | 8/8 units residual (research D4) |
+**Data** — one root, `parity/`:
+- `cases/<area>.json` — the scenarios. A case is DATA: ordered `operations[]`
+  (consumer subcommand + argv, `${WORKSPACE}`/`${IMAGE_TAG}`/`${CONTAINER_ID}` tokens,
+  `fixtures`), an `oracleType`, and per-channel `expected[]` assertions. Adding a scenario
+  is a pure data edit — no new Rust.
+- `fixtures/fx-*/` — one directory per fixture id, 1:1 with case references.
+- `ALLOWLIST.json` — every tolerated difference's IDENTITY (`wvr-`/`bhv-`/`ext-`) and its
+  reasoning. It deliberately does NOT carry the scope: a case's own `allowedDifferences`
+  name the behavior and the observable path, which is what keeps a tolerance scoped and
+  per-run stale-checked. `Registry::load` fails BOTH ways — a tolerance naming an id no
+  record defines (unbacked), and a record no case references (orphan).
+- `oracle.json` — the pin (`@devcontainers/cli` 0.87.0), embedded at compile time by
+  `oracle.rs`. An oracle that is missing or off-pin **fails** the run.
+- `spec/113500f4/` — the vendored upstream revision the scenarios are pinned to.
+- `SPEC_STATUS.md` — the hand-maintained answer to "does deacon behave like the CLI?".
 
-Four config-corpus carriers plus their shared runner module were **deleted** in
-023 (US7) once the equivalence ledger proved their declarative replacements lose
-nothing. Each is gone, not merely quiescent:
+**Three oracle types**, dispatched in `oracle_type.rs`: `spec-expectation` (compare deacon
+to the declared assertion — no oracle needed), `live-differential` (deacon vs the verified
+pinned oracle), `invariant-metamorphic` (a declared relationship across ≥2 operations —
+idempotence, first-create-vs-restart — rather than a fixed output).
 
-- `parity_corpus_tier1` — deleted; its 24 units became 24 `case-tier1-decl-*`
-- `parity_corpus_merged` — deleted; its 24 units became 24 `case-merged-decl-*`
-- `parity_corpus_errors` — deleted; its 9 units became 11 `case-errors-decl-*`
-  (two rejections needed a second, spec-expectation twin case to pin the DIRECTION
-  the differential alone could not — see the T072 note in that spec's tasks.md)
-- `parity_read_configuration` — deleted; its 2 units became 2 `case-readconfig-decl-*`
-- `corpus_runner` — deleted (the shared module all four called)
+**Observable channels** (`observe/`, one module each): `chan-exit-code`, `chan-stdout`,
+`chan-stderr`, `chan-structured-output`, `chan-filesystem`, `chan-file-content`,
+`chan-image`, `chan-process-graph`, `chan-injected-process`, `chan-temporal`,
+`chan-container-state`. Evidence is captured RAW then normalized by the single
+`normalize.rs` using named, field-specific rules (`path_token`, `label_semantic`,
+`mount_source_canonical`, `path_env_segmented`, `null_preserving`) — nothing is blanket
+removed.
 
-Their in-repo fixture trees went with them. `fetch_realworld_corpus.py` was **deleted** in
-025 US7 (T109), having outlived 023: its 33 pinned entries are now the Rust-owned strict-JSON
-`conformance/discovery/corpus.json`, where the immutable-reference rule (**D4**) runs
-hermetically on every PR, and the fetch — with content-digest verification — lives in
-`parity_harness::discovery::corpus_fetch`.
+**An assertion that cannot fail is worse than no assertion.** Four real instances, every
+one committed, every one found only by injecting a difference: a `jsonSubset: {}` matches
+ANY value; a `contains` assertion cannot see APPENDED output; an `assertion` on a
+`live-differential` expectation was loaded and never evaluated; and a **stale tolerance**
+— one whose difference no longer reproduces — was computed and then discarded by the
+driver, so it kept excusing a path where the difference had already been fixed. The last
+two are now failures. `model.rs::is_vacuous_assertion` and the loader test exist for the
+first two; keep them. **After writing any assertion, break it once and watch it fail** —
+that is how all four were found, and it is cheaper than any amount of reading.
 
-Every other profile (`default`/`full`/`ci`/`dev-fast`/`mvp-integration`) excludes
-the live set, so those lanes are truthful by **non-selection**: a green fast/CI
-run never implies live parity ran. There is no silent skip — a missing/mismatched
-oracle, missing Docker, or a normalization failure **fails** the run with a
-cause-specific `HarnessError`. `make test-parity` is a thin alias:
-`cargo nextest run --profile parity` then `cargo run -p parity-harness --bin
-parity-report`.
+Two rules that follow, both learned by tripping over them:
 
-**Registry + waiver model.** `fixtures/parity-corpus/registry.json` enumerates
-the surviving live binaries and the internal-consistency binaries (`corpora` is
-now empty — the corpora retired with the binaries that drove them); the hermetic
-`parity_registry_check` test enforces registry ↔ `tests/*.rs` ↔
-`.config/nextest.toml` agreement structurally on every PR, and (023 US6) that no
-Makefile / workflow / nextest / registry / docs reference points at a removed
-surface. Characterized divergences are **waiver records** under
-`conformance/registry/waivers/` — each with `id`, `scope`, `expect`, required
-`rationale`, `added` — loaded by `waiver.rs` via the conformance loader. Waivers
-are self-invalidating: one whose difference stops reproducing fails as *stale*.
-Never silently waive a real divergence; fix deacon or characterize with rationale.
+- **A tolerance is consumed by the MOST SPECIFIC covering path, not the first match.**
+  Diverging paths are built by joining object keys with `.`, and Docker label keys contain
+  dots, so `labels.com.docker.compose.project` and
+  `labels.com.docker.compose.project.config_files` are two separate flat keys the prefix
+  rule cannot distinguish from a parent and its child. First-match let the shorter swallow
+  the longer, and the longer then reported stale.
+- **`case.cleanup` is declared on every case and consumed by nothing.** Reclamation is the
+  `DockerWorkspace` RAII guard, unconditionally. Do not reach for a fixed global resource
+  name (a named volume, a fixed host port) on the assumption the field will clean it up.
 
-**A bin has no `CARGO_BIN_EXE_deacon`.** Any parity *bin* that runs deacon must
-BUILD it and take the path cargo reports (`cargo build -p deacon
---message-format json`), never look for `target/{release,debug}/deacon` and use
-whichever exists. `equivalence-report` did the latter and silently judged a
-three-day-old release artifact against the current oracle, manufacturing a
-`stricter` verdict out of a binary nobody was testing (023 T115). The mirror
-image is worse: a stale build that happened to agree would have authorized
-deleting real coverage.
+**Selection is profile-based; there is no env-var opt-in and no silent skip.** Live parity
+runs ONLY under `cargo nextest run --profile parity`. Every other profile excludes it, so
+those lanes are truthful by non-selection — a green fast run never implies parity ran. A
+missing oracle, missing Docker, or a normalization failure FAILS with a cause-specific
+`HarnessError`.
 
-**CI:** the `parity / live-certification` lane (`.github/workflows/parity.yml`)
-provisions the pinned oracle and runs the profile + aggregator + the equivalence
-ledger; it is separate from the normal PR lanes. When adding a live binary,
-register it in `registry.json` AND add nextest overrides in ALL profiles (parity
-selection + the exclusions), or `parity_registry_check` fails. See
-`specs/018-harden-parity-harness/quickstart.md`.
+**Three lanes, split by what a case NEEDS rather than by what it is about** — which is
+what lets the majority of the suite gate every pull request:
 
-## Conformance Registry (`conformance/`)
-
-The repository-owned conformance registry is the **authoritative record** of deacon's
-conformance — and every characterized divergence — against the upstream spec. It is also
-the authoritative source-pin and **waiver** location (`parity-harness` loads waivers from
-it via the conformance loader; the legacy `fixtures/parity-corpus/waivers/` +
-`errors/*/expect.json` are retired).
-
-**Data layout** (strict-JSON, version-controlled, hand-edited under `conformance/registry/`):
-- `revisions.json` (source pins, e.g. spec commit + oracle version), `dimensions.json`,
-  `channels.json` (11 observable channels), `profiles.json`, `cases/<area>.json`,
-  `gaps.json`, `extensions.json`, `residuals.json`
-- `scenario.json` / `applicability.json` / `obligation-dispositions/<area>.json` /
-  `regressions.json` — the 024 coverage model; see "Deterministic Coverage Model" below
-- `behaviors/*.json` — per-area behavior records, each with a **three-axis disposition**
-  (`spec` × `reference` × `decision`); there is no "different but acceptable" state
-- `sources/*.json` — source-unit provenance (`spec`/`schema`/`cli`/`observed`)
-- `waivers/wvr-*.json` — one file per waiver (`scope`/`expect`/`rationale`/`added`/`expires`)
-- `conformance/RULES.md` — the contradiction rules R1–R8, gap-vs-waiver distinction,
-  the out-of-scope note, AND the "Constraint inventory" section (V11–V14, disposition
-  arity, drift workflow) — kept in validate.rs/RULES.md lockstep
-
-**Schema constraint inventory** (020-schema-constraint-inventory) — the pinned schema
-surface, machine-extracted and classified under the consumer-only scope:
-- `conformance/schemas/<pin>/` — the byte-exact vendored upstream schemas + `manifest.json`
-  (SHA-256 fingerprints); re-vendored only at a new pin, never edited in place
-- `conformance/inventory/constraints.json` — **machine-owned** canonical inventory (`cst-`
-  units); the sole output of `inventory generate`, hand edits caught as V14
-- `conformance/registry/classifications/<doc>.json` — **hand-authored** `cls-` records, one
-  per manifest document key; each `cst-` unit carries exactly one disposition
-  (`behavior-mapped` / `non-testable` / `not-applicable`). `inventory generate` NEVER
-  touches these.
-
-**Normative clause inventory** (021-normative-clause-inventory) — the prose companion to
-020: the pinned `docs/specs/` Markdown surface, canonicalized from human-authored
-(optionally LLM-proposed) clause records and classified under the consumer-only scope. No
-LLM/network in any CI-facing command:
-- `conformance/spec/<pin>/` — the byte-exact vendored upstream `docs/specs/` Markdown (18
-  ratified docs at `113500f4`: 14 `consumer`, 4 `authoring`) + `manifest.json` (SHA-256
-  fingerprints + per-document `scope`); re-vendored only at a new pin, never edited in place.
-- `conformance/inventory/clauses.json` — **machine-owned** canonical clause inventory
-  (`clu-` units, substance-anchored ids: `hash8` over `document ‖ normalize_substance`,
-  location EXCLUDED so a pure move keeps its id/disposition); the sole output of `clause
-  generate` (canonicalization + excerpt/strength verification, NOT extraction), hand edits
-  caught as V14/V15.
-- `conformance/registry/clause-classifications/<doc>.json` + `authoring.json` —
-  **hand-authored** `clc-` records: a per-clause record for every consumer clause, a
-  document-scope `not-applicable` default (`clc-doc-<key>`) for the four authoring docs plus
-  per-clause `behavior-mapped` overrides for the consumer install/apply clauses inside
-  `features`/`templates`. Resolution: per-clause wins; else the authoring doc-scope default
-  (never for `consumer` docs, never for `ambiguous` clauses — both V13/V12); else unclassified
-  (V12). `clause generate` NEVER touches these.
-
-**Commands** (dev-only, `cargo run -p deacon-conformance -- <cmd>`; NOT part of the
-`deacon` consumer CLI):
-- `validate` — structural integrity (violation classes V1–V15 + SCHEMA; V11–V14 generalized
-  to inventory units = constraints AND clauses, V15 = clause↔source integrity); reports all
-  violations in one run. Gates every PR via the hermetic `registry_valid` test.
-- `clause generate` — canonicalize the committed clause records against the vendored pinned
-  prose (recompute ids/fingerprints, verify each excerpt is present at its heading, cross-check
-  strength ↔ keywords); byte-stable atomic write; fail-loud on any integrity error.
-- `clause check` — regenerate in memory and byte-compare against `clauses.json`.
-- `clause diff <old> <new> [--format json|md]` — deterministic drift diff (match key: the
-  substance-anchored id; **moves are first-class**: new/removed/moved/changed/non-material).
-- `clause scaffold` — emit skeleton `clc-` records (sentinel `"UNREVIEWED"`, loader-rejected):
-  per-clause for consumer/ambiguous clauses, one per-document for uncovered authoring docs.
-- `report` — deterministic `report.json` + `report.md` into `target/conformance/`
-  (byte-stable, no timestamps/absolute-paths). Knobs: `--registry <dir>` (fixtures),
-  `--today <YYYY-MM-DD>` (waiver-expiry evaluation), `report --out-dir`. Includes an
-  inventory section (unit counts, disposition tallies, unclassified/stale queues).
-- `certify` — strict release gate: exit `1` iff any gap record exists OR any in-profile
-  behavior is uncovered OR any V11/V12/V13/V14 (unclassified/stale/malformed/provenance);
-  `not-applicable`/`non-testable` and waivers are listed but non-blocking. Wired (blocking)
-  into the `verify` job of `.github/workflows/release.yml`.
-- `inventory generate` — extract the vendored pinned schemas into the canonical committed
-  inventory (fingerprint-verified, atomic write).
-- `inventory check` — regenerate in memory and byte-compare against the committed inventory
-  (the CLI face of the hermetic determinism test).
-- `inventory diff <old> <new> [--format json|md]` — deterministic revision diff (match key
-  `document`/`pointer`/`kind`; added/removed/changed/non-material) for drift review.
-- `inventory scaffold` — emit skeleton `cls-` records (sentinel `"UNREVIEWED"`, loader-
-  rejected) to stdout for every unclassified unit; never writes the registry.
-- `coverage generate|check|report|scaffold` — the 024 obligation tooling (see
-  "Deterministic Coverage Model"). `generate` is the sole writer of
-  `conformance/obligations/obligations.json`; `report` is **read-only and never gates**
-  (its exit code reflects whether it could WRITE its artifacts, never what they say).
-
-**Inventory violation classes**: **V11** stale classification (`constraint` absent from the
-inventory); **V12** unclassified (zero) or duplicated (>1) unit — every unit of every kind
-needs exactly one; **V13** malformed classification (id-tail mirror, `behaviors` arity/
-existence vs disposition, `rationale` presence); **V14** provenance (manifest fingerprint,
-inventory `revision` ≠ registry schema pin, committed ≠ regenerated). The committed inventory
-is machine-owned; classifications are hand-authored; **generation never touches classification
-files**. Re-vendoring on a pin bump: see `specs/020-schema-constraint-inventory/quickstart.md`
-("Re-vendoring") — regenerate, `inventory diff`, V11/V12 enumerate the review queue, classify
-until `certify` unblocks; disposition is never inherited by name.
-
-**Record a divergence:** follow the recipe in `conformance/RULES.md` and
-`specs/019-conformance-registry/quickstart.md` (add/extend a behavior with all three
-axes, link its source unit, cover it with a case/waiver/gap, then `validate`). Statuses
-are **evidence-backed** claims — no test case or waiver yet means `reference: unknown` →
-`decision: unresolved-gap` → a `gap-*` record.
-
-**Declarative conformance runner** (022-conformance-runner) — cases are DATA a shared
-runner executes, not pointers to hand-written Rust tests. A `cases/<area>.json` record is either
-**legacy** (`executable.binary` → a `parity_*` Rust test) or **declarative**
-(`operations` + `oracleType` + `expected`); never both, never neither (exactly-one-of
-enforced fail-loud at load). Adding a case/assertion/fixture is a pure data edit — NO new
-Rust function (SC-001). The hermetic data/validation/staleness logic lives in
-`deacon-conformance`; the live execution/observation/record logic in `parity-harness`.
-- **Declarative case shape** (data-model.md §1): ordered `operations[]` (consumer
-  subcommand + argv, `${WORKSPACE}` token, `fixtures`, optional `relationship` for
-  metamorphic); `oracleType`; per-channel `expected[]` (`assertion` shapes per
-  contract observer-channel.md); scoped `allowedDifferences[]`; `fsAllowlist`; `cleanup`;
-  `resourceGroup` (nextest group for Docker cases). Excluded from `caseHash`: `notes`,
-  `allowedDifferences`, `behaviors` — annotating never re-records a snapshot (D3).
-- **Four oracle types** (one explicit dispatch in `oracle_type.rs`, re-pointed by changing
-  ONLY `oracleType`): `spec-expectation` (compare to the declared `assertion`, deacon
-  only), `live-differential` (deacon vs the verified pinned oracle), `snapshot` (deacon vs
-  a committed provenance-checked snapshot), `invariant-metamorphic` (evaluate a declared
-  RELATIONSHIP — idempotence / first-create-vs-restart / resume — across ≥2 operations,
-  not a fixed output).
-- **Observable channels + observers** (`observe/`, one module per channel; **11 total**,
-  each needing ≥3 covering cases and a `reg-` regression record): CLI-process
-  (`chan-exit-code`/`chan-stdout`/`chan-stderr`/`chan-structured-output`), `chan-filesystem`/
-  `chan-file-content` (allowlist-scoped, NEVER full-tree), and the Docker channels
-  `chan-image`/`chan-process-graph`/`chan-injected-process`/`chan-temporal`/
-  `chan-container-state`. Evidence is
-  captured RAW then normalized by the **single** `normalize.rs` — named, field-specific
-  rules (`path_token`/`label_semantic`/`mount_source_canonical`/`path_env_segmented`/
-  `null_preserving`); nothing blanket-removed (FR-029); raw + normalized persisted SEPARATELY.
-  `NORMALIZER_VERSION` (single source of truth in `deacon-conformance::snapshot`,
-  re-exported by `parity-harness::normalize`) participates in snapshot staleness.
-- **Docker cases** run in an ISOLATED external temp workspace (`workspace.rs`) with
-  collision-resistant names (unique workspace path → unique `devcontainer.local_folder`
-  label) and an RAII cleanup guard that reclaims container/network/volume/temp-dir on
-  success AND unwind. Image inputs MUST be pinned (`@sha256:`/concrete tag, never `latest`
-  — V18).
-- **Committed snapshots** live under `conformance/snapshots/<os-arch>/<case-id>/` as three
-  files — `provenance.json` (the FR-017 identity/env fields: oracle/source/node/docker/
-  compose versions, case/fixture hashes, imageDigests, normalizerVersion, argv, platform/
-  arch, `capturedAt`), `raw.json`, `normalized.json` (raw + normalized SEPARATE, FR-016).
-  Replay fails as **stale** naming the FIRST drifted EVIDENCE-DETERMINING input
-  (caseHash/fixtureHash/oracle/source/imageDigests/normalizerVersion — NOT
-  capturedAt/platform/arch, which are selectors, and NOT the host tool versions
-  node/docker/compose, which are informational: gating staleness on them would make every
-  snapshot stale on every machine but the recorder's, breaking cross-machine CI replay —
-  a genuine host-version effect on evidence shows up as a divergence instead); a missing
-  snapshot for the current `os-arch` is **no-reference-for-platform** (a coverage gap,
-  distinct from stale and from a silent skip).
-- **Runner/refresh/check split** (all dev-only, Principle II — NEVER a shipped `deacon`
-  subcommand): `conformance snapshot check|diff` (hermetic, `deacon-conformance` bin,
-  read-only — recompute hashes + probe env vs committed provenance; NEVER writes);
-  `conformance-snapshot refresh` (`parity-harness` bin — the REVIEWED record path: requires
-  the verified oracle + Docker + Node fail-loud, runs the reference, writes the three files
-  ATOMICALLY, prints a review diff — the git diff is the review surface); and the live test
-  binary `parity_conformance_runner` (`crates/deacon/tests/`, `--profile parity` only) that
-  drives the runner over every declarative case. Ordinary `cargo nextest run` NEVER rewrites
-  a committed snapshot (`only_the_refresh_bin_writes_committed_snapshots` guards this).
-- **Scoped allowed differences** (US4) — a tolerated divergence is `(behavior, context,
-  observablePath)` + exactly one resolvable `waiverId` (a real `wvr-`) or `divergenceId`
-  (an `ext-`/intentional-divergence behavior). NO global ignore lists (a bare-channel
-  `observablePath` is rejected fail-loud at load, FR-032); duplicates conflict at load
-  (FR-035); dangling ids are V19. A covered divergence verdicts `allowed-difference` (with
-  the backing id in the detail); an uncovered path stays `diverge`; an unconsumed tolerance
-  (its difference stopped reproducing) is reported STALE — the SAME self-invalidating
-  pattern as `waiver.rs`, not a fork (FR-043/034).
-- **New validation classes** (`validate.rs`, all block a PR via `registry_valid`): **V16**
-  declarative-case well-formedness (shape, `oracleType` present, consumer-surface
-  subcommand, spec-expectation ⇒ assertions, `fsAllowlist` iff a filesystem channel);
-  **V17** committed-snapshot integrity (orphan/malformed, in `validate_path_with_inventory`);
-  **V18** Docker-case pinned image inputs; **V19** allowed-difference identity resolution;
-  **V20** invariant-metamorphic arity (≥2 ops + a `relationship` referencing a sibling op).
-  `certify` surfaces committed-snapshot coverage + `no-reference-for-platform` as
-  NON-BLOCKING info (a snapshot is a reviewed artifact, not a release gate); it still blocks
-  ONLY on gaps/uncovered/inventory/clause. See `specs/022-conformance-runner/quickstart.md`.
-
-## Migration Tooling (023-migrate-parity-to-conformance)
-
-The migration that moved parity coverage into the declarative record added three command
-groups. All are **dev-only** — `deacon --help` gains nothing from any of them, and
-`parity_registry_check` asserts that on every PR.
-
-**`cargo run -p deacon-conformance -- baseline <generate|check>`** — the frozen
-pre-migration inventory, `conformance/migration/baseline.json`. **Machine-owned**: one
-record per baseline unit, where a unit is *the finest granularity for which the
-pre-migration system reported an independent outcome*. Membership is derived (corpus
-units from the production discovery functions, guard units by scanning each program's
-real `#[test]` functions), so it cannot be gamed; each unit's `assertion` is authored
-once, at freeze, in `crates/conformance/src/baseline.rs` so regeneration reproduces it
-byte-for-byte. **Retained as evidence, never rewritten.** Its V25 drift gate is
-**retired** (T099): once a superseded carrier is deleted the enumeration cannot reproduce
-a pre-migration record by construction, so a permanent gate would forbid ever retiring
-the machinery the migration exists to retire. `baseline check` still reports drift
-informationally.
-
-**`cargo run -p deacon-conformance -- migration <report|check|scaffold>`** — the
-conservation accounting (`contracts/migration-report.md`), written to
-`target/conformance/migration-report.{json,md}` (git-ignored, byte-stable, no timestamps
-or absolute paths). `report`/`check` prove every baseline unit has exactly one
-disposition (`migrated` / `deduplicated` / `residual` / `retired`), that no rejection lost
-its direction or diagnostic, that the behavior denominator did not inflate, and which
-carriers are deletable. `scaffold` emits skeleton mapping/residual records to **stdout**
-with `UNREVIEWED` sentinels the loader rejects — generation never writes a hand-authored
-file. `--ledger <file>` folds in an equivalence ledger; it is **opt-in** because a
-git-ignored artifact must never change a hermetic command's exit code.
-
-**`cargo run -p parity-harness --bin equivalence-report [--carrier <name>]`** — the
-equivalent-or-stricter ledger (`target/parity/equivalence.json`) that gates deleting a
-superseded carrier. It runs each carrier's OWN test binary and reads the `ReportFragment`
-it already writes, so it re-implements no comparison (FR-030), then runs the declarative
-replacement and relates the two **on outcome, never message text**. `equivalent` and
-`stricter` permit deletion; `more-permissive` blocks it; a `stricter` with no
-`characterizedAs` is suppression, not an improvement, and also blocks. Reached via
-`make test-parity-equivalence`.
-
-**Two things the deletion predicate learned the hard way**, both encoded now:
-- A unit maps one-to-one to its replacement case, but a **legacy case may claim several
-  behaviors from one reported outcome** (research D2's inverse defect). Deleting such a
-  carrier silently uncovers the rest, which `validate` only reports as V5 *after* the
-  irreversible act. `deletion_status` therefore blocks any carrier that is the sole
-  evidence for a behavior.
-- Deleting a fixture directory because `fixtureMapping` says a migrated carrier consumed
-  it is not sufficient: the mapping records *which carrier used it*, not *that it was the
-  only user*. `fixtures/config/{basic,with-variables}` had to be restored because a
-  `deacon-core` test also reads them.
-
-**Residual vs gap** (`conformance/RULES.md`): a `res-` record admits missing
-*representation* — the coverage still exists, carried by a program not yet retired — so it
-never blocks certification, but it does block deleting its `blockedCarrier`. A `gap-`
-record admits missing *coverage* and always blocks. Do not conflate them.
-
-## Deterministic Coverage Model (024-deterministic-conformance-coverage)
-
-The registry says whether each *behavior* is covered. This says whether the *scenario
-space* is — and, where it is not, makes the hole a counted, dispositioned number instead
-of an unknown. All commands are **dev-only** and hermetic (no network, no Docker, no
-oracle); `parity_registry_check` asserts `deacon --help` gains nothing from any of them.
-
-**The scenario model lives in its OWN namespace.** `conformance/registry/scenario.json`
-declares six `sdim-` dimensions — `operation` (10 values; it partitions the space and is
-never itself a pair member), `config-source`, `container-state`, `features`, `layering`,
-`output-mode`. They MUST NOT be added to `dimensions.json`: `applies_in_profile` treats a
-condition on an unassigned dimension as *unsatisfied*, so a scenario dim there would
-silently drop behaviors out of profile and shrink the very denominator this work exposes
-(research D1). `applicability.json` carries 8 `rule-` exclusions (each with a `ground`
-naming the mechanism, not "out of scope") and 14 hand-selected `hrt-` high-risk triples.
-
-**Two obligation kinds, never multiplied.** `conformance/obligations/obligations.json` is
-**machine-owned**, the sole output of `coverage generate`: `obl-bhv-*` (one per in-profile
-behavior) and `obl-cmb-*` (per-operation pairwise + the selected triples). A behavior is
-NOT crossed with the scenario space — that product is the combinatorial explosion the
-model exists to avoid. Ids are substance-anchored, so a reordered or renamed triple keeps
-its id and its disposition.
-
-**Every applicable obligation carries exactly one `odp-` disposition**, hand-authored in
-`conformance/registry/obligation-dispositions/<area>.json`: `case` (+ `cases`),
-`non-testable` (+ a `rationale` naming a ground), `waived` (+ a scoped `wvr-` with
-`expires`), or `gap` (+ a `gap-`). A high-risk triple accepts only `case` or `gap` —
-an argument may not stand in for evidence where interaction defects hide. Explicit
-records take **precedence over the evidence**, which is the point (a human can say the
-mechanical `scenarioContext` match is not real coverage) and also the trap: a commit that
-adds cases and only registers the new BEHAVIOR dispositions leaves the combination records
-reading `gap` while a case matches. Add a case ⇒ flip its `odp-cmb-*` in the same commit.
-
-**Five reporting buckets**, in `target/conformance/coverage-{pairwise,triples,operations,
-observables}.{json,md}` (git-ignored, byte-stable): `covered` / `waived` / `non-testable` /
-`gap` / `inactive-environment`, plus `undispositioned`, which must be **zero**.
-**Reporting never gates** — `coverage report`'s exit code never depends on what it
-reports; `certify` is the gate.
-
-**Violation classes** (`validate.rs`, all block a PR via `registry_valid`): **V26**
-scenario-model integrity (dead value; rule naming an unknown dimension/value; rule with no
-ground; a case `scenarioContext` that is partial, undeclared, or itself excluded — assign
-**every** dimension or none); **V27** obligation provenance (committed ≠ regenerated,
-`revision` mismatch, a unit referencing a removed value — a hand edit and a stale
-regeneration are indistinguishable and both fail); **V28** an applicable obligation with
-zero or more than one disposition; **V29** malformed disposition (filler rationale; a
-triple dispositioned by rationale/waiver; a stale disposition whose obligation no longer
-resolves; a `waived` naming a blanket-scope waiver); **V30** injected-regression integrity
-(a declared channel with no `reg-` record; a record naming a channel with no observer).
-
-**The injected-regression harness proves the channels are LIVE.**
-`cargo run -p parity-harness --bin coverage-regressions` (`make test-parity-regressions`,
-wired into the parity lane) applies each `reg-` record in `regressions.json` to the
-**evidence source** — a process result, an inspect document, file bytes — and requires the
-case to go from clean to failing on that channel. `inertCount` must be **zero**. Injecting
-into an observer's *return* value is forbidden and does not compile: every entry point is
-generic over a sealed `EvidenceSource` trait no observer output can implement. A
-perturbation that never landed is a fail-loud `InjectionInapplicable`, deliberately NOT
-`inert` — a mis-authored record must never masquerade as a dead channel.
-
-**Two findings this machinery produced, worth not re-learning.** A `jsonSubset: {}`
-assertion matches ANY value, so the channel was declared, observed, and incapable of
-failing; and a `contains` assertion cannot see APPENDED output by construction. Both were
-real, both were in committed cases, and only the injected run found them. **SC-005's
-floor** — no channel below three covering cases — exists for the same reason: a channel
-carried by one case is one authoring mistake from unobserved.
-
-**Before authoring cases for a gap pair, check the value is REACHABLE for that operation.**
-A `gap` obligation asserts nothing was covered; it does not assert coverage is possible.
-`templates-apply` × `output-mode=structured` was counted as a gap for a subcommand that has
-no `--output-format`, writes nothing to stdout, and whose every case observes only
-exit-code / filesystem / file-content / stderr — eight uncoverable pairs sitting in the
-denominator as if they were work. The instrument for those is an **applicability rule**
-(`rule-` in `applicability.json`, with a `ground` naming the mechanism), NOT five cases that
-declare `structured` while observing the filesystem; that would satisfy the mechanical
-`scenarioContext` match and cover nothing, which is precisely why explicit dispositions
-outrank the evidence. The cheap way to find candidates: a `(dimension, value)` appearing in
-that operation's gap pairs and in **none** of its covered pairs. Most such values are
-genuinely uncovered and do want cases — but that list is where the unreachable ones hide.
-
-See `specs/024-deterministic-conformance-coverage/quickstart.md` for the add-a-case,
-find-what-is-missing, disposition-the-queue, and drift workflows.
-
-## Parity & Conformance: Vocabulary, Gates, and the Build-Out Loop
-
-This ties the two preceding sections together. The **harness** (`parity-harness`) *surfaces*
-deacon-vs-oracle differences; the **registry** (`deacon-conformance`) *characterizes* each
-one. They are separate machinery — keep them distinct even though both say "parity".
-
-**Vocabulary — divergence vs gap vs out-of-scope** (full rules in `conformance/RULES.md`):
-
-- **Divergence** — a difference we have **characterized**: we know what deacon does, what the
-  reference does, and why (`reference: divergent`, backed by a **case or waiver**). Two
-  flavors:
-  - *deacon behind/wrong → fix*: deacon is nonconformant and we want parity. Decision
-    `follow-spec` / `align-with-reference`. Tracked as a GitHub `parity-drift`/`bug` issue
-    until the fix lands. (Current examples live under the `parity-drift` label.)
-  - *intentional → accept*: a deliberate difference or deacon capability. Decision
-    `intentional-divergence` (backed by a `wvr-` waiver) or `deacon-extension` (an `ext-`
-    record). Never blocks; waivers self-invalidate when the difference stops reproducing.
-- **Gap** — an **admission of missing work/knowledge**: `reference: unknown`,
-  `decision: unresolved-gap`, a `gap-*` record. No evidence stands behind it. **Always blocks
-  `certify`.** A gap can never be certified around; resolve it (add a case → it becomes a
-  divergence/conformant, delete the gap in the same change) or it stays a release blocker.
-- **Out of scope** — deacon-internal or non-behavioral differences with **no observable
-  effect** on stdout/stderr/exit-code/container-state/filesystem, or **no reference
-  equivalent** at all. Recorded **nowhere** (RULES.md). Do NOT seed these as gaps — the
-  compose lifecycle-marker case (issue #117, closed in the PR that added this note) was
-  exactly such a mis-seed: markers are deacon-internal, the reference has no concept of them.
-
-**Three lanes, two gates — do NOT conflate them** (this genuinely confuses):
-
-| Lane | Workflow | In the release path? | Gates on |
+| Binary | Needs | Runs where | Cases |
 |---|---|---|---|
-| `parity / live-certification` | `parity.yml` | **No** | live divergences (red never blocks a release) |
-| Conformance `certify` | `release.yml` § `verify` | **Yes** | gaps / uncovered behaviors / V28–V29 |
-| `discovery` | `discovery.yml` | **No** | **nothing** — status reflects whether it RAN, never what it found |
+| `parity_hermetic` | a Linux host | every profile, `dev-fast` included; Linux only (#441) | 72 — `spec-expectation`, config-only |
+| `parity_docker` | Docker | wherever a daemon exists; the release gate | 46 — `spec-expectation` / `invariant-metamorphic`, Docker-backed |
+| `parity_differential` | Docker + the pinned oracle | `parity` ONLY (nightly) | 116 — every `live-differential` |
+| `parity_harness_faults` | nothing | `default`, `dev-fast` | hermetic guard: oracle mismatch, timeout, normalization failure, and the injected-difference proof that the comparison can fail |
 
-- **`parity / live-certification` lane** (`.github/workflows/parity.yml`) — surfaces the live
-  divergences. It is **NOT in the release path**: `release.yml` never runs it, so a **red
-  parity lane never blocks a release**. Triggers on PRs touching parity paths
-  (`crates/parity-harness/**`, `crates/deacon/tests/parity_*`, `fixtures/parity-corpus/**`,
-  `.config/nextest.toml`, `Makefile`, the workflow itself) + nightly. Needs Docker + the
-  pinned oracle, so it cannot run locally in this workspace — verify hermetic pieces locally,
-  rely on this lane for the live comparison.
-- **Conformance `certify`** (wired into `release.yml`'s `verify` job) — the **only**
-  conformance gate **in** the release path. Blocks a release iff a `gap-*` record exists, an
-  in-profile behavior is uncovered, or an obligation is undispositioned / malformed / stale
-  (V28/V29); waivers, `non-testable`, and committed-snapshot coverage are listed but
-  non-blocking. Keep the registry gap-free (or every open gap consciously accepted) so
-  releases aren't surprise-blocked. **`coverage report` is NOT a gate** — its exit code
-  never reflects what it reports; it feeds `certify`, it does not duplicate it.
-- **`discovery` lane** (`.github/workflows/discovery.yml`, nightly + manual) — a **third** lane
-  that **gates nothing**. It searches for differences nobody curated; a campaign that finds forty
-  of them exits `0`. Only a *machinery* failure (unverifiable oracle, normalization failure,
-  unwritable data root) is non-zero. A stochastic gate would make green non-reproducible, which
-  is precisely why status is machinery-only — see the section below.
+`driver::lane_of` decides a case's lane from its `oracleType` and `resourceGroup`, so a
+lane never *skips* a case it cannot run — a case it cannot run is in another lane, and the
+selection is written down rather than discovered at run time. A skip and a pass look
+identical in a report; a non-selection does not.
 
-**The build-out loop (apply these defaults).** When the harness surfaces a difference:
+`Oracle::acquire()` is called only by the differential lane. It used to run
+unconditionally, which is exactly why a hermetic lane could not exist: it failed on every
+machine without `@devcontainers/cli` installed, over cases that never invoke it.
 
-1. **Classify** it: divergence (which flavor?), gap, or out-of-scope (→ record nowhere).
-2. **Record it in the registry** — the authoritative, durable home. Add/extend a behavior
-   (three axes) + its source unit + coverage (case / waiver / gap), then `validate`. A new
-   case needs a full `scenarioContext` (V26) and its `odp-cmb-*` records flipped off `gap`
-   in the SAME commit, or the coverage report keeps reporting a hole that is filled.
-3. For a *fix-flavored* divergence, **also file/link a GitHub issue** (`parity-drift` label)
-   for the fix work, and cross-link it from the behavior's `notes`. Issue = the fix task;
-   registry = the characterization. **Both, cross-linked** — that is the default.
-4. **Fix or waive.** Fixing a gap means adding a real case and deleting the `gap-*` record in
-   the same change; accepting an intentional divergence means a `wvr-` waiver (rationale +
-   `expires`), never weakening `certify`.
+The five hand-written carriers (`parity_build`, `parity_exec`, `parity_up_exec`,
+`parity_observable_state`, `parity_state_diff`) are **gone**. Their residual coverage is
+declarative data now, which needed three runner capabilities the model lacked:
 
-Defaults for the work itself:
-- **Each build-out step is its own small, CI-gated PR** (Conventional-Commit title;
-  `feat`/`fix`/`chore` — never `test`/`style`).
-- **A new live parity binary** MUST be registered in `fixtures/parity-corpus/registry.json`
-  AND get nextest overrides in ALL profiles (parity selection + the exclusions), or
-  `parity_registry_check` fails. Keep it **fail-loud** — no `#[ignore]`, no silent skip (the
-  harness's whole value is truthful non-selection).
-- **A new observable channel** MUST get a `reg-` regression record (V30) and reach the
-  three-case floor (SC-005). A channel nothing can fail on is worse than an absent one: it
-  reports green forever.
-- **Never** make `certify` non-blocking or silently delete a real gap to go green; that is the
-  one move the whole model exists to prevent.
+- **`${IMAGE_TAG}`** — a per-run, per-side image name the runner assigns, tracks for
+  reclamation, and rewrites to `<IMAGE_TAG>` in evidence. A `build` leaves an image and no
+  container, so the container probe sees nothing; the case says `--image-name ${IMAGE_TAG}`
+  and `chan-image` inspects what was produced. The image's own identity (id, digests, tags)
+  is deliberately **not** captured — the two sides build separately, so it differs by
+  construction.
+- **`${CONTAINER_ID}`** — the id of a container an earlier operation in the same case
+  created, which is what makes `exec --container-id` (no workspace, no config) expressible.
+  Using it before any container exists fails loud rather than expanding to nothing.
+- **An `assertion` on a `live-differential` expectation is now evaluated** against deacon's
+  side, on top of the comparison. It used to be loaded and ignored. A differential alone
+  cannot fail when both sides are equally wrong; a case that knows what the output should
+  *be* can now say so.
 
-## Exploratory Parity Discovery (025-exploratory-parity-discovery)
+**`.config/nextest.toml` gotcha, learned the hard way.** Editing the profiles once silently
+dropped the `default-filter` from four of them, so `dev-fast` selected every Docker binary.
+`tomllib` still reports a profile as *present* when only its `[[…overrides]]` blocks
+survive — so "the profile exists" is NOT the check. After any edit, assert that **every**
+profile carries a filter.
 
-The registry says whether each *curated* behavior is covered; the coverage model says whether the
-*scenario space* is. This searches for differences **nobody curated** — and hands each one over as
-a reviewable candidate that a human, never a program, may promote into the record. All commands
-are **dev-only**; `parity_registry_check` asserts `deacon --help` gains nothing from any of them.
+**CI: one nightly lane that gates nothing.** `.github/workflows/parity.yml` installs the
+pinned oracle, prepulls fixture images, and runs the profile. It is **not** in the release
+path. `release.yml` runs fmt/clippy/tests only.
 
-**Two data roots, deliberately siblings.** `conformance/discovery/` (`findings.json`,
-`campaigns.json`, `corpus.json`) is a sibling of `conformance/registry/`, **not** a child. No
-registry loader path reaches it, so nothing a campaign finds can influence `validate` or
-`certify`. The one permitted cross-root reference points *out* of the queue
-(`Finding::promotedTo` → a registry case), never into it. `conformance/registry/metamorphic.json`
-(`mrl-` relation records) is the exception that lives in the registry proper, because a relation
-is a curated assertion, not a finding.
+**The nightly is RED, and the queue is 14 cases in three root causes** (measured
+2026-08-02, full lane, `--no-fail-fast`):
 
-**Never gates — the rule the whole lane rests on.** A discovery command's exit status reflects
-**whether it ran**, never **what it found**. A campaign that surfaces forty differences exits
-`0`; one that cannot verify the oracle exits non-zero. Any command whose status depends on its
-findings becomes a gate the moment someone wires it into CI, and a stochastic gate makes green
-non-reproducible. The single exception is `discovery-proof`, and it is *not* finding-dependent:
-it asserts a property of the **machinery** (an injected difference must traverse all six stages),
-so non-zero means the pipeline is broken — exactly the thing that should fail a lane.
+| Cases | Diverging path | Verdict |
+|---|---|---|
+| 11 × `case-merged-decl-*` | `featuresConfiguration.{dstFolder,featureSets}` | **deacon's fidelity gap** — #439. deacon models `dstFolder`/`internalVersion`/`computedDigest` with reference-matching serde names and hardcodes them to `None` (`read_configuration.rs:598-616`); the digest is already in hand (`sourceInformation.manifestDigest` is byte-identical), `internalVersion` is the constant `"2"`, and deacon has a deterministic staging-dir analog (`features_build.rs:849`). The reference's timestamped `dstFolder` path is a *normalization* concern (tokenize like `${IMAGE_TAG}`), NOT grounds for a tolerance — an earlier read proposed allowlisting this and was wrong. |
+| 2 × `case-build-image-{args,labels}-differential` | `chan-image.labels.devcontainer.metadata` | #436 |
+| 1 × `case-state-compose-feature-mounts` | `chan-container-state.labels.devcontainer.metadata` | #437 |
 
-**Hermetic vs live split.**
-- **Hermetic** (`cargo run -p deacon-conformance -- discovery <check|report|triage|split|scaffold>`)
-  — no network, no Docker, no oracle. `discovery_hermetic` + `discovery_cli` run in the `default`
-  and `dev-fast` lanes. `check` is read-only by construction; `triage` is the ONLY writer of
-  `classification`; `scaffold` writes **nothing** (stdout only, `UNREVIEWED` sentinels the loader
-  rejects).
-- **Live** (`cargo run -p parity-harness --bin <discovery-campaign|discovery-proof>`) — four
-  campaign tiers: `metamorphic` (deacon-only, no oracle/Docker/network), `config-differential`
-  (nightly), `container-differential` (invoked-only; its 5-min per-candidate ceiling would starve
-  the scheduled window), `corpus` (weekly, network-backed). Selected **only** by
-  `[profile.discovery]`, whose `default-filter` is an explicit `binary(=…)` allow-list — never a
-  `discovery_*` glob, which would capture the hermetic guard `discovery_hermetic` and silently
-  drop it from the fast lane (the exact mistake the parity profile documents making with
-  `parity_harness_faults` / `parity_registry_check`).
+**#376's headline is stale — do not go looking for the `path_token` defect it
+hypothesizes.** Its table (127 occurrences over `configFilePath`, `rootFolderPath`,
+`configFolderPath`, `workspaceFolder`, `mergedConfiguration.*Commands`,
+`otherPortsAttributes.*`) was measured on run 30193096270, when the suite was ONE
+monolithic test that ran to completion. Those paths are now at **zero** occurrences in a
+full run — genuinely fixed, not hidden.
 
-**D-classes vs V-classes — different roots, different consequences.** V-classes (`validate`)
-police the **registry** and block a PR; several feed `certify` and block a release. D-classes
-(`discovery check`) police the **discovery root** and block a PR *only* on the integrity of the
-queue itself — they can never block a release, because a finding is not coverage.
+They *looked* hidden for a while, and that is the lesson worth keeping: once the runner was
+split into per-group tests, the nightly's default fail-fast began cancelling after the
+first group failed (run 30737990462: 26 selected, 19 never ran), so it reported two
+observable paths and left the Docker groups unexamined. **The lane therefore runs with
+`--no-fail-fast`** — its job is to enumerate a work queue, and a run that stops at the
+first item cannot tell one broken thing from forty. Keep the flag.
 
-| Class | Guards |
-|---|---|
-| **D1** | derived-id mismatch / duplicate id / empty witnesses; a signature naming an undeclared channel; an unresolvable `firstObserved`/`lastObserved`, witness, `splitFrom`, or campaign `profile`; a `split` ancestor with <2 children; non-finite `spaceCoveredFraction`; empty seed |
-| **D2** | a `triaged`/`promoted`/`no-longer-reproducing` finding with no classification; an `untriaged`/`split` one carrying one; a `promoted` finding classified `normalizer-defect` / `fixture-defect` |
-| **D3** | a `promoted` finding with no `promotedTo`, or naming a case absent from the registry; a `promotedTo` in any other state |
-| **D4** | a corpus `commit` that is not 40-hex (a branch or tag is mutable); malformed `contentDigest`; non-derived or duplicate corpus id/name |
-| **D5** | a `schemaPin` / `prosePin` / `oracleVersion` naming a revision absent from `revisions.json` |
+Before assuming a change made things worse, diff your run's diverging case ids against a
+recent `main` nightly (`gh run list --workflow=parity.yml --branch=main`); identical sets
+mean your change is neutral.
 
-**Promotion is a human act, structurally.** There is no code path from a finding to a registry
-write — asserted behaviourally *and* by source scan (`no_discovery_source_references_a_registry_or_snapshot_writer`).
-`certify`'s verdict is byte-identical with a queue full of unreviewed findings and with an empty
-one. To promote: `discovery scaffold <fnd-id>` (or `--tolerate` for a **scoped** `wvr-` waiver —
-a blanket scope is refused, not emitted), then hand-edit the registry using that output as a
-starting point, then `validate`. A finding is a *candidate* for an assertion and never blocks; a
-gap is missing coverage and always blocks — do not conflate them (`conformance/RULES.md`).
+**Verifying locally.** Docker works in this dev container and the pinned oracle installs
+cleanly (`npm install -g @devcontainers/cli@0.87.0`) — verify parity changes for real
+rather than reasoning about them. Docker-backed cases run in isolated temp workspaces with
+an RAII cleanup guard; if a run is cancelled partway, orphaned containers accumulate and
+will trip the resource-reclamation guard on the next run. Reclaim them by removing
+containers whose `devcontainer.local_folder` label names a directory that no longer exists.
 
-See `specs/025-exploratory-parity-discovery/quickstart.md`.
-
-## Continuous Conformance Operation (026-continuous-conformance-certification)
-
-The registry says whether each behavior is covered; the coverage model says whether the
-scenario space is; discovery searches for what nobody curated. This **operates** all of it:
-five explicit lanes, upstream drift detection, and a release-grade certification report.
-All commands are dev-only; `parity_registry_check` asserts `deacon --help` gains nothing.
-
-**Five lanes, declared as data** (`conformance/lanes/lanes.json` — a THIRD sibling of
-`registry/`, alongside `discovery/`, so a CI-config edit can never change a release
-verdict):
-
-| Lane | Profile | Blocks? | Needs |
-|---|---|---|---|
-| `lane-pr-hermetic` | `default`/`dev-fast` | yes | nothing |
-| `lane-pr-docker` | `pr-docker` | yes | container engine (**never the oracle**) |
-| `lane-nightly-stable` | `parity`, `discovery` | **no** | engine + pinned oracle + network |
-| `lane-canary` | `canary` | **no** | engine + network |
-| `lane-release-certification` | — (runs no binary) | yes | nothing |
-
-**The denominator is DERIVED, never authored** (`lane.rs::derive_execution_units`): the two
-class enumerations (registry `V*` **and** discovery `D*`), the declarative cases, the
-conformance-owned test programs (those referencing `deacon_conformance`/`parity_harness`),
-and the committed snapshot replay targets. A hand-authored list would let an omitted unit
-satisfy "every unit is assigned" while being covered by nothing — **V34** would become a
-rubber stamp. Programs and classes are selected by an explicit allow-list (a glob captures
-a new binary silently); **cases** are selected by a derived predicate over `oracleType` ×
-`resourceGroup` and validated to PARTITION the case space, so a predicate may capture a new
-case but can never drop one.
-
-**Certification is hermetic and reads a receipt.** `certify` never installs, resolves, or
-invokes the reference implementation and needs no engine or network (SC-013). It learns
-that container-backed execution happened from the **execution manifest** the container lane
-emits (`target/conformance/execution-manifest.json`), which carries the revision and
-per-case hashes so a manifest from another revision — or one predating a case edit — is
-rejected rather than accepted. `certify --report-dir` emits `certification.{json,md}` on
-**both** verdicts, so a blocked release still ships the artifact explaining why.
-
-**Nine blocking conditions** (FR-041), all reported in one run, each naming its record, and
-**no flag downgrades any of them**: unclassified source change · uncovered behavior · stale
-snapshot · unknown runner omission · expired waiver · unresolved gap · incorrect oracle ·
-missing required execution · silently skipped case.
-
-**Two refinements worth not re-deriving:**
-- *Snapshot staleness blocks; snapshot coverage blocks only for the profile under
-  certification.* 022 made coverage non-blocking because "a snapshot is a reviewed artifact,
-  not a release gate", and that still holds for platforms nobody certifies — blocking on
-  every missing snapshot would pressure maintainers to record snapshots to go green, the
-  blessing pressure this feature removes.
-- *The manifest is required exactly when execution was required.* A registry declaring no
-  container-backed case owes no receipt. Not an escape hatch: the required set is derived
-  from the registry's own cases, so adding one re-arms the gate immediately.
-
-**Drift and canary gate NOTHING.** A `drift-scan` that surfaces all five source kinds exits
-`0`; only an unreachable upstream, an unresolvable pin, an unwritable location, or an
-attempted out-of-scope write is non-zero. Automation's permitted writes are exactly
-`conformance/drift/` and `target/drift/`; a proposed diff touching a registry record,
-snapshot, or pin **aborts** rather than being narrowed and committed. Observations are NOT
-pins — the pin stays in `revisions.json` and stays human-only.
-
-`lastCompletedRun` in `observations.json` is what makes "no drift" distinguishable from
-"did not run"; without it both are the same empty array, and an empty array reads as
-reassurance. Same shape in the upgrade proposal: `"entries": []` is investigated-and-clean,
-a **missing section key** is not-investigated and does not parse.
-
-**New classes**: **V34** lane integrity · **V35** execution-manifest integrity · **V36**
-drift-record integrity · **D6** canary-pin integrity. D6 is a D-class, not a V-class,
-because the class boundary follows the root boundary — a V-numbered canary check would put
-canary state on a path reaching `certify`. See `conformance/RULES.md` and
-`specs/026-continuous-conformance-certification/quickstart.md`.
-
-**Gotcha**: V31/V32 were already taken by 025's metamorphic relation catalogue. This
-feature's classes are V34–V36; check `RULES.md`'s class table before claiming a number.
+**Recording what we learn.** `parity/SPEC_STATUS.md` is the hand-maintained answer to "does
+deacon behave like the CLI?" — five plain statuses, each row stating its evidence. When a
+scenario teaches us something, the row changes in the same commit. The distinction that
+matters most and is easiest to get wrong: an observable difference where **deacon is the
+conformant side** is the reference's deviation, not work we owe.
 
 ## Pre-Implementation Checklist
 
@@ -1130,8 +668,8 @@ rediscover-and-investigate loop:
   (`bhv-readconfig-unknown-field-preserved`, `follow-spec`); silently dropping them WOULD
   be a bug. The differential runner (deleted in 023 US7: `parity_corpus_errors`) and its
   Tier 1c corpus are gone; these are now the declarative `case-errors-decl-*` cases in
-  `conformance/registry/cases.json`, driven by `parity_conformance_runner`. Waivers still
-  load from `conformance/registry/waivers/` via `deacon-conformance`.
+  `parity/cases/`, driven by the parity lane binaries. Their tolerances resolve
+  against `parity/ALLOWLIST.json`.
 - **The three `bhv-readconfig-extends-*` behaviors carry `reference: divergent`, not
   `not-applicable`, and that is correct** — even though every other `deacon-extension`
   behavior uses `not-applicable`. The axis records whether the reference *has the surface*,
@@ -1142,15 +680,6 @@ rediscover-and-investigate loop:
   That is an observable difference on a surface both sides expose, so it is `divergent`, and
   RULES.md line "Backs which reference status: `divergent`" is why each one is waiver-backed.
   Do not "normalize" these three to match their siblings.
-- **A residual's `blockedCarrier` naming a binary absent from
-  `fixtures/parity-corpus/registry.json` is not an orphan.** `res-harness-fault-injection`
-  (`parity_harness_faults`) and `res-harness-registry-structural` (`parity_registry_check`)
-  look dangling because that registry lists only the *live parity* binaries, and both of
-  those are deliberately hermetic guards excluded from the parity profile's allow-list.
-  `blockedCarrier` is validated (V23, `validate.rs`) against **baseline units**, not against
-  the parity registry — both programs are present in `conformance/migration/baseline.json`,
-  so both resolve. Both residuals are `disposition: permanent` anyway, so the carrier is
-  never deletable.
 
 ## Output Streams Contract
 
@@ -1201,7 +730,7 @@ echo "$OUTPUT" | jq '.configuration'
 **Must-Read Documentation:**
 - `.specify/memory/constitution.md` - Development principles and constraints
 - `AGENTS.md` - Quick reference for AI assistants
-- `conformance/registry/` + `conformance/RULES.md` - Authoritative conformance record (behaviors, dispositions, waivers, gaps) against the upstream spec; see the Conformance Registry section
+- `parity/SPEC_STATUS.md` - Hand-maintained record of deacon's behavior vs the reference CLI; `parity/cases/` holds the scenarios behind it (see Differential Parity Suite)
 - `docs/ARCHITECTURE.md` - Cross-cutting patterns (env probe caching, etc.)
 - `.github/copilot-instructions.md` - Detailed development guidelines
 
@@ -1347,57 +876,27 @@ RUST_LOG=debug cargo run -- up --container-data-folder /tmp/cache
 ```
 
 ## Active Technologies
-- Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing (009-complete-feature-support)
-- N/A (devcontainer.json configuration files) (009-complete-feature-support)
-- N/A (Markdown documentation only) (011-update-readme-scope)
-- Rust 1.70+ (Edition 2021) + okio (async runtime, JoinSet for parallel), serde/serde_json (JSON parsing), indexmap (ordered maps for object format), clap (CLI), tracing (logging) (012-fix-lifecycle-formats)
-- Rust 1.70+ (Edition 2021) + serde, tracing, thiserror, clap (existing — no new dependencies) (014-named-config-search)
-- N/A (filesystem-only config discovery) (014-named-config-search)
-- Rust, Edition 2024, MSRV 1.95 (`workspace.package` in root `Cargo.toml`); `unsafe_code = "deny"` workspace-wide. + `tokio` (rt/process/fs/io-util/net), `clap` (CLI), `serde`/`serde_json` (registry + marker JSON), `tracing` (daemon logging), `thiserror` (core domain errors), `anyhow` (binary boundary), `directories-next` (user-data folder), `libc` (already in core). **New (Unix-only):** `nix` (features `process`, `signal` — safe `setsid()`, `kill()`, `Pid`, process-liveness checks without raw `unsafe`); `fs2` (advisory `flock` on the registry, auto-released on process death). (015-auto-forward-ports)
-- Two host-side JSON files under the user-data folder (default `~/.deacon/`): a host-global `forwarded_ports.json` registry and per-container `forward_daemon_<container_id>.pid` markers; per-container `forward_daemon_<container_id>.log` log files. All writes use the temp-file + `fs::rename` atomic pattern (`crates/core/src/cache/disk.rs::save_index`). (015-auto-forward-ports)
-- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + `reqwest` 0.12 (rustls-tls / ring — **unchanged**), `rustls-native-certs` (new, (016-host-ca-injection)
-- `{user_data_folder}/settings.json` (atomic write, sibling of `trusted_workspaces.json`); (016-host-ca-injection)
-- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + `serde`/`serde_json` (settings + fragment parsing), `indexmap` 2.x with `serde` (declaration-ordered `profiles` map — already a core dep), `clap` (global `--profile` flag + `DEACON_PROFILE` env), `tracing` (applied-profile diagnostic), `thiserror` (core domain errors), `anyhow` (binary boundary) (017-user-profiles)
-- `{user_data_folder}/settings.json` — read-only in this feature (no write path); default `~/.deacon/settings.json`, honoring global `--user-data-folder` (017-user-profiles)
-- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide); no Python after porting (the three corpus-runner scripts are retired) + existing workspace deps only — `serde`/`serde_json`, `tokio` (process + time for bounded oracle invocations), `thiserror`, `tracing`; `cargo-nextest` as the sole test executor; Node 20+/npm in the certification lane to install the oracle (018-harden-parity-harness)
-- files — `fixtures/parity-corpus/oracle.json` (pin), `fixtures/parity-corpus/registry.json` (parity registry), waiver records under `conformance/registry/waivers/` (the authoritative location since 019-conformance-registry; formerly `errors/*/expect.json` + `waivers/*.json`); run artifacts under `target/parity/` (report fragments + raw outputs), overridable via `DEACON_PARITY_REPORT_DIR` (018-harden-parity-harness)
-- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only (`serde`/`serde_json`, `indexmap`, (019-conformance-registry)
-- strict-JSON files under `conformance/registry/` (version-controlled, hand-edited, (019-conformance-registry)
-- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json` (schema (020-schema-constraint-inventory)
-- strict-JSON files — vendored schemas under `conformance/schemas/<rev>/` (020-schema-constraint-inventory)
-- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing crate deps only — `serde`/`serde_json` (record (021-normative-clause-inventory)
-- strict-JSON + vendored Markdown — vendored prose under (021-normative-clause-inventory)
-- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json`, `indexmap` (declaration order), `sha2` (already used in `deacon-conformance` for `hash8`/fingerprints → case/fixture hashing), `tokio` (bounded async exec + streamed capture, already in `parity-harness`), `thiserror` (`HarnessError`/domain errors), `tracing`, `toml` (nextest-profile drift check, already a `parity-harness` dep), `tempfile` (isolated external workspaces, dev-dep); no new runtime crates (022-conformance-runner)
-- strict-JSON, version-controlled — extend `conformance/registry/cases.json` (declarative case shape) + `channels.json` (new channels); new committed evidence tree `conformance/snapshots/<os>-<arch>/<case-id>/{provenance,raw,normalized}.json` (atomic temp-file + `fs::rename` writes) (022-conformance-runner)
-- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json` (strict-JSON records), `indexmap` (declaration order), `sha2` (unit/case/fixture hashing), `tokio` (bounded async exec in the harness), `thiserror` (domain errors), `tracing`, `toml` (nextest-profile drift check), `tempfile` (dev-dep, isolated workspaces). **No new crates, no new dependencies** (research D6). (023-migrate-parity-to-conformance)
-- strict-JSON, version-controlled. New: `conformance/migration/baseline.json` (frozen inventory), `conformance/migration/mapping.json` (unit → case/residual), `conformance/registry/residuals.json` (residual records). Extended: `conformance/registry/cases.json`. Generated (git-ignored): `target/conformance/migration-report.{json,md}`, `target/parity/equivalence.json`. All writes atomic (temp file + `fs::rename`). (023-migrate-parity-to-conformance)
-- strict-JSON, version-controlled. New hand-authored: `conformance/registry/scenario.json` (`sdim-` scenario dimensions), `conformance/registry/applicability.json` (`rule-` exclusions + `hrt-` high-risk triples), `conformance/registry/obligation-dispositions/<area>.json` (`odp-` records), `conformance/registry/regressions.json` (`reg-` records). New machine-owned: `conformance/obligations/obligations.json` (`obl-`, sole output of `coverage generate`). Migrated: `cases.json` → `cases/<area>.json`. Generated (git-ignored): `target/conformance/coverage-{pairwise,triples,operations,observables}.{json,md}`, `target/conformance/regressions.json`. All writes atomic. (024-deterministic-conformance-coverage)
-- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide) + existing workspace deps only — `serde`/`serde_json` (strict-JSON records), `indexmap` (declaration order), `sha2` (`hash8` signature/fixture ids), `tokio` (bounded async exec), `thiserror` (domain errors), `tracing`, `tempfile` (dev-dep, isolated workspaces). **No new crates** — including no RNG crate (research D2). (025-exploratory-parity-discovery)
-- strict-JSON, version-controlled. New root `conformance/discovery/` (queue, campaigns, corpus manifest) — a sibling of `registry/`, deliberately outside it. New registry file `conformance/registry/metamorphic.json` (`mrl-` relation records). Generated artifacts under `target/discovery/` (git-ignored, byte-stable). All writes atomic (temp file + `fs::rename`). (025-exploratory-parity-discovery)
-- Rust, Edition 2024, MSRV 1.95 + existing workspace deps only — **no new crates**; network reuses the 025 precedent of driving `git` (blob-filtered partial clone) and `npm` as bounded subprocesses, so there is no HTTP client, no API token, and no rate limit. (026-continuous-conformance-certification)
-- strict-JSON, version-controlled. New roots `conformance/lanes/` (hand-authored `lane-` records) and `conformance/drift/` (machine-owned upstream observations) — both siblings of `registry/`, unreachable by any registry loader. New `conformance/discovery/canary.json` (`cnr-` canary pins, in the DISCOVERY root so canary state cannot reach `certify`). Generated (git-ignored): `target/conformance/{execution-manifest,certification}.{json,md}`, `target/drift/{scan,upgrade-proposal}.{json,md}`. All writes atomic. (026-continuous-conformance-certification)
+
+- Rust, Edition 2024, MSRV 1.95 (`unsafe_code = "deny"` workspace-wide)
+- Product deps: `clap`, `serde`/`serde_json`, `indexmap`, `tokio`, `reqwest` (rustls),
+  `tracing`, `thiserror` (core), `anyhow` (binary), `nix`/`fs2` (Unix port-forward daemon)
+- Test tooling: `cargo-nextest` (the sole test executor), `tempfile`
+- `crates/parity-harness` is dev-only (`publish = false`) and is NOT a dependency of the
+  shipped binary
 
 ## Recent Changes
-- 024-deterministic-conformance-coverage: Filled the coverage gaps the migration froze in
-  place, and made the remaining hole MEASURED rather than unknown. Added a constrained
-  **scenario** context model in its OWN namespace (`sdim-`) — scenario dimensions MUST NOT
-  join `dimensions.json`, because `applies_in_profile` treats a condition on an unassigned
-  dimension as unsatisfied, so a scenario dim there would silently drop behaviors out of
-  profile and shrink the very denominator this work exposes (research D1). Added 8
-  applicability rules and 14 hand-selected high-risk triples, two obligation kinds
-  (`obl-bhv`/`obl-cmb`, never multiplied), a mandatory disposition per obligation
-  (`odp-`), violation classes V26–V30, the `coverage generate|check|report|scaffold`
-  command group, a Docker-backed error-path tier, and 11 injected regressions proving
-  every declared channel can fail. Split `cases.json` into `cases/<area>.json`. The end
-  state is deliberate: `certify` reports NOT certified on 10 `gap-pairwise-<operation>`
-  records — the feature measures and exposes the residual combination hole, it does not
-  claim to close it. See the "Deterministic Coverage Model" section.
-- 023-migrate-parity-to-conformance: Migrated the hand-written parity corpora into declarative
-  conformance cases under a conservation constraint. Froze `conformance/migration/baseline.json`,
-  added the `baseline` / `migration` command groups and the `equivalence-report` bin, added
-  residual records (`res-`) and violation classes V21–V24 (retiring V25), retired the blanket
-  `prune` normalization for named scoped rules (`NORMALIZER_VERSION` 2 → 3), and deleted four
-  superseded live carriers plus their fixtures once the equivalence ledger cleared them. See the
-  "Migration Tooling" section.
-- 018-harden-parity-harness: Added the dev-only `crates/parity-harness/` crate (oracle resolution + exact-version verify, bounded exec with raw capture, the single `normalize` module, waiver/registry loaders, report fragments + `parity-report` aggregator bin); moved live parity onto the dedicated `[profile.parity]` nextest profile; retired the `DEACON_PARITY=1` gate and the three Python corpus runners; added the `parity / live-certification` CI lane. See the "Parity Test Harness" section.
-- 009-complete-feature-support: Added Rust 1.70+ (Edition 2021) + clap, serde, tokio, reqwest (rustls TLS), tracing
+
+- **Replaced the conformance machinery with a differential parity suite.** Deleted the
+  `deacon-conformance` crate and the discovery / drift / canary / coverage / certification
+  layers built on it (~90k LOC, 78% the size of the product), along with four workflows,
+  three nextest profiles and the `certify` release gate. What survives is the kernel:
+  scenarios as data, one normalizer, one comparison, one nightly lane that gates nothing.
+  `parity/SPEC_STATUS.md` is the harvested, hand-maintained answer to "does deacon behave
+  like the CLI?". See the Differential Parity Suite section.
+- The five legacy `parity_*` carriers are retired, their residual coverage ported as
+  declarative data. The waiver, aggregator and corpus modules are gone: the nextest exit
+  code is the verdict. The data root is `parity/`, with the 14 waiver files and 11
+  extension records folded into `parity/ALLOWLIST.json`.
+- Still in flight: the three-way binary split (`parity_hermetic` / `parity_docker` /
+  `parity_differential`, which needs `Oracle::acquire()` made conditional) and wiring the
+  pinned suite into `release.yml`.

@@ -80,10 +80,15 @@ docs/
 | Coverage report | `make coverage` |
 
 Test groups live in `.config/nextest.toml` (`docker-exclusive`,
-`docker-shared`, `fs-heavy`, `long-running`, `smoke`, `parity`). When you
-add an integration test that touches Docker or filesystem heavily, add a
-group override to all profiles in that file so the suite stays
-parallel-safe.
+`docker-shared`, `docker-slow-shared`, `env-probe`, `fs-heavy`,
+`long-running`, `smoke-cli`, `smoke-heavy`, `smoke-lite`). When you add an
+integration test that touches Docker or filesystem heavily, add a group
+override to all profiles in that file so the suite stays parallel-safe.
+
+The `parity` / `parity-cli` groups are not somewhere you add a test function:
+they bound the two declarative runners, which are driven by DATA. A parity
+scenario is a record in `parity/cases/<area>.json` — see
+`docs/PARITY_AND_CONFORMANCE.md`.
 
 ## Adding Dependencies
 Add to workspace root for shared dependencies:

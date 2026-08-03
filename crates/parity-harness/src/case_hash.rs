@@ -2,7 +2,7 @@
 //!
 //! [`case_hash`] is SHA-256 over the **canonicalized behavior-affecting inputs** of a
 //! declarative case — `operations`, `oracleType`, `expected`, `fsAllowlist`,
-//! `scenarioContext`, and the referenced fixture hashes — and NOTHING else. `notes`,
+//! and the referenced fixture hashes — and NOTHING else. `notes`,
 //! `allowedDifferences`, and
 //! any other human prose are excluded, so annotating a case never invalidates its
 //! committed snapshot (clarify Q4). [`fixture_hash`] is SHA-256 over the fixture
@@ -139,36 +139,21 @@ fn collect_files(
 }
 
 /// Compute `caseHash`: SHA-256 over the canonical JSON of the behavior-affecting
-/// inputs `{ operations, oracleType, expected, fsAllowlist, scenarioContext,
-/// fixtureHashes }` — and nothing else (research D3, data-model §1/§3).
-/// `fixture_hashes` is the list of [`fixture_hash`] values for every fixture the case's
-/// operations reference, in a caller-fixed order.
-///
-/// `scenarioContext` is included (024 T011) because it declares **what the case
-/// exercises**: changing it changes which combination obligations the case discharges,
-/// so its committed snapshot must be re-recorded and re-reviewed rather than silently
-/// carried over. Object-key order does not matter — [`canonicalize`] sorts it — so
-/// reformatting the assignment never re-records.
-///
-/// The key is **omitted when the assignment is empty**, which is the only conditional
-/// in the input document and is deliberate. A case with no `scenarioContext` declares
-/// nothing about what it exercises, so there is nothing to have changed; hashing an
-/// empty map would invalidate every snapshot recorded before this field existed, for a
-/// record whose bytes did not change (the field is `skip_serializing_if` empty, so
-/// "absent" and "present but empty" are the same record). Staleness must mean the
-/// evidence-determining inputs drifted, never that the hash function grew a field.
+/// inputs `{ operations, oracleType, expected, fsAllowlist, fixtureHashes }` — and
+/// nothing else (research D3, data-model §1/§3). `fixture_hashes` is the list of
+/// [`fixture_hash`] values for every fixture the case's operations reference, in a
+/// caller-fixed order.
 ///
 /// Excluded by construction: `id`, `behaviors`, `context` (environment, a selector for
 /// where evidence is gathered, not what is exercised), `notes`, `allowedDifferences`,
-/// `inputClass`, `errorPathTier`, `cleanup`, `resourceGroup`, and the legacy
-/// `executable` / `outcomes` — none affect what the runner observes. `inputClass` and
-/// `errorPathTier` are the 024 additions to that list and belong on it for the same
-/// reason as `notes`: both classify a case, neither changes a byte the runner feeds the
-/// CLI, so labelling one must never mark its snapshot stale.
+/// `errorPathTier`, `cleanup`, `resourceGroup`, and the legacy `executable` /
+/// `outcomes` — none affect what the runner observes. They classify a case; none
+/// changes a byte the runner feeds the CLI, so labelling one must never mark its
+/// snapshot stale.
 pub fn case_hash(case: &TestCase, fixture_hashes: &[String]) -> String {
     // Build the canonical input document explicitly so the field set is a deliberate,
     // reviewable allow-list rather than "whatever the record happens to carry".
-    let mut input = match serde_json::json!({
+    let input = match serde_json::json!({
         "operations": case.operations,
         "oracleType": case.oracle_type,
         "expected": case.expected,
@@ -180,12 +165,6 @@ pub fn case_hash(case: &TestCase, fixture_hashes: &[String]) -> String {
         // than unwrapped (constitution V — panic-free).
         _ => Map::new(),
     };
-    if !case.scenario_context.is_empty() {
-        input.insert(
-            "scenarioContext".to_string(),
-            serde_json::json!(case.scenario_context),
-        );
-    }
     sha256_hex(&canonical_bytes(&Value::Object(input)))
 }
 
@@ -300,55 +279,6 @@ mod tests {
             "changing referenced fixture hashes must change caseHash"
         );
 
-        // 024 T011: scenarioContext declares WHAT the case exercises, so changing it
-        // must re-record the snapshot — while merely reordering the assignment (an
-        // insignificant object-key order) must not.
-        let mut scoped = declarative_case();
-        scoped
-            .scenario_context
-            .insert("sdim-operation".to_string(), "up".to_string());
-        scoped
-            .scenario_context
-            .insert("sdim-config-source".to_string(), "compose".to_string());
-        assert_ne!(
-            case_hash(&base, &[]),
-            case_hash(&scoped, &[]),
-            "adding a scenarioContext must change caseHash"
-        );
-
-        let mut retargeted = scoped.clone();
-        retargeted
-            .scenario_context
-            .insert("sdim-config-source".to_string(), "image".to_string());
-        assert_ne!(
-            case_hash(&scoped, &[]),
-            case_hash(&retargeted, &[]),
-            "changing a scenarioContext value must change caseHash"
-        );
-
-        let mut reordered = declarative_case();
-        reordered
-            .scenario_context
-            .insert("sdim-config-source".to_string(), "compose".to_string());
-        reordered
-            .scenario_context
-            .insert("sdim-operation".to_string(), "up".to_string());
-        assert_eq!(
-            case_hash(&scoped, &[]),
-            case_hash(&reordered, &[]),
-            "scenarioContext key ORDER is insignificant and must not re-record"
-        );
-
-        // An EMPTY assignment declares nothing and must hash exactly as it did before
-        // the field existed — otherwise introducing the field would mark every
-        // previously recorded snapshot stale without any input having changed.
-        let mut emptied = declarative_case();
-        emptied.scenario_context.clear();
-        assert_eq!(
-            case_hash(&base, &[]),
-            case_hash(&emptied, &[]),
-            "an empty scenarioContext must not contribute to caseHash"
-        );
         // The stronger form of that guard lives in `tests/snapshot_staleness.rs`, which
         // recomputes the real committed case's hash and compares it to the caseHash
         // recorded in its committed provenance.

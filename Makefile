@@ -295,19 +295,15 @@ test-smoke: ## Run smoke tests only (all files matching tests/smoke_*.rs) (match
 test-parity: install-nextest ## Run live parity certification (needs the pinned devcontainer CLI + Docker)
 	@set -euo pipefail; \
 	./scripts/nextest/assert-installed.sh; \
-	# Thin alias (018-harden-parity-harness, research D12): the harness owns ALL \
-	# resolution/version/gating logic. Step 1 runs the live comparison under the \
-	# dedicated parity profile (each binary fails loudly on a missing/mismatched \
-	# oracle — there is no opt-in env gate). Step 2 aggregates the per-binary \
-	# report fragments and enforces the six completeness gates, exiting nonzero on \
-	# any gap. `set -e` stops at the first failing step. \
+	# Thin alias: the harness owns ALL resolution/version/gating logic. The runners \
+	# fail loudly on a missing or mismatched oracle — there is no opt-in env gate — \
+	# so the nextest exit code IS the verdict. \
 	# Report fragments are per-case files (024 D-1) that nobody truncates, so a \
-	# case deleted or renamed since the last run would linger and be aggregated as \
-	# if it had just run. Clear the tree so the report describes THIS run only. \
+	# case deleted or renamed since the last run would linger. Clear the tree so \
+	# the report describes THIS run only. \
 	rm -rf target/parity/report; \
 	./scripts/parity/prepull-fixture-images.sh; \
-	cargo nextest run --profile parity; \
-	cargo run -p parity-harness --bin parity-report
+	cargo nextest run --profile parity --no-fail-fast
 
 .PHONY: test-parity-all
 test-parity-all: ## Alias for test-parity (live parity certification)

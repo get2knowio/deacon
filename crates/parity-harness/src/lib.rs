@@ -3,10 +3,9 @@
 //! This crate is the single home for the deacon parity comparison machinery that
 //! the `crates/deacon/tests/parity_*` binaries consume: oracle resolution and
 //! exact-version verification, bounded CLI execution with always-on raw capture,
-//! the one canonical normalization module, waiver/registry loaders, and run-report
-//! fragment writing. It exists as a crate (not a `tests/` include-module) so the
-//! logic has first-class unit tests, clippy/fmt coverage, and can host the
-//! `parity-report` aggregator binary.
+//! the one canonical normalization module, the case loader, and run-report fragment
+//! writing. It exists as a crate (not a `tests/` include-module) so the logic has
+//! first-class unit tests and clippy/fmt coverage.
 //!
 //! Design invariants (constitution IV — no silent fallbacks):
 //! - Every prerequisite absence, oracle mismatch, malformed output, normalization
@@ -20,7 +19,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-pub mod aggregate;
 pub mod case_hash;
 pub mod compare;
 pub mod driver;
@@ -32,13 +30,11 @@ pub mod normalize;
 pub mod observe;
 pub mod oracle;
 pub mod oracle_type;
-pub mod parity_corpus;
 pub mod prereq;
+pub mod provenance;
 pub mod registry;
 pub mod report;
 pub mod runner;
-pub mod snapshot;
-pub mod waiver;
 pub mod workspace;
 
 /// The one error taxonomy for the whole harness (data-model §9, FR-005).
@@ -134,22 +130,6 @@ pub enum HarnessError {
     )]
     Normalization { case: String, cause: String },
 
-    /// A loaded waiver no longer matches reality (case gone or expected difference
-    /// no longer observed).
-    #[error(
-        "waiver `{id}` is stale: its case is gone or the characterized difference is no longer \
-         observed. Remedy: remove or update the waiver record — stale waivers silently narrow \
-         coverage."
-    )]
-    WaiverStale { id: String },
-
-    /// A waiver record failed schema/uniqueness validation.
-    #[error(
-        "invalid waiver record at {path:?}: {cause}. Remedy: fix the record to match the waiver \
-         schema (unknown fields are rejected; ids must be unique)."
-    )]
-    WaiverInvalid { path: PathBuf, cause: String },
-
     /// A report fragment or artifact could not be written.
     #[error(
         "parity report write failed: {cause}. Remedy: ensure the report directory is writable — \
@@ -157,18 +137,6 @@ pub enum HarnessError {
          passing run)."
     )]
     Report { cause: String },
-
-    /// A corpus had fewer discovered cases than its registered minimum.
-    #[error(
-        "corpus `{corpus}` has {found} case(s) but the registry requires at least {min}. Remedy: \
-         restore the missing cases or correct the registry minimum — a shrinking corpus silently \
-         erodes coverage."
-    )]
-    CorpusTooSmall {
-        corpus: String,
-        found: usize,
-        min: usize,
-    },
 
     // --- Declarative conformance runner (022-conformance-runner, T012) ---------
     // Cause-specific fail-loud variants for the runner: a declared Docker/Node channel
@@ -401,25 +369,22 @@ pub fn workspace_root() -> PathBuf {
         .unwrap_or(manifest)
 }
 
-/// The case/waiver data root: `<workspace_root>/conformance/registry`. Scenario records
-/// live under `cases/`, tolerances under `waivers/`. Single definition — every caller
-/// resolves the root through here rather than joining its own path.
 /// The vendored upstream spec revision these scenarios are pinned to. Bumped only on a
 /// conscious re-vendoring.
 pub const CURRENT_SPEC_PIN: &str = "113500f4";
 
-pub fn default_registry_dir() -> PathBuf {
-    workspace_root().join("conformance").join("registry")
-}
-
-/// Alias kept for the call sites that spell it this way.
-pub fn conformance_registry_root() -> PathBuf {
-    default_registry_dir()
+/// The parity data root: `<workspace_root>/parity`. Scenario records live under
+/// `cases/`, their inputs under `fixtures/`, the tolerated differences in
+/// `ALLOWLIST.json`, the oracle pin in `oracle.json`, the vendored spec under `spec/`.
+/// Single definition — every caller resolves the root through here rather than joining
+/// its own path.
+pub fn parity_root() -> PathBuf {
+    workspace_root().join("parity")
 }
 
 /// The report/artifact root: `DEACON_PARITY_REPORT_DIR` when set, else
-/// `<workspace_root>/target/parity`. Both the test binaries and the aggregator
-/// resolve it identically (contracts/execution-contract.md).
+/// `<workspace_root>/target/parity`. Every test binary resolves it identically
+/// (contracts/execution-contract.md).
 pub fn report_root() -> PathBuf {
     if let Some(dir) = std::env::var_os(REPORT_DIR_ENV) {
         return PathBuf::from(dir);
@@ -481,7 +446,7 @@ mod tests {
     fn workspace_root_contains_fixtures_and_crate() {
         let root = workspace_root();
         assert!(
-            root.join("fixtures/parity-corpus/oracle.json").is_file(),
+            root.join("parity/oracle.json").is_file(),
             "workspace_root() should locate the oracle pin, got {root:?}"
         );
         assert!(root.join("crates/parity-harness/Cargo.toml").is_file());

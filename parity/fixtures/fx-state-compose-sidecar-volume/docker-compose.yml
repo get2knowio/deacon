@@ -1,0 +1,11 @@
+services:
+  app:
+    image: debian:bookworm-slim
+    command: ["sleep", "infinity"]
+    volumes:
+      - appdata:/data
+  db:
+    image: debian:bookworm-slim
+    command: ["sleep", "infinity"]
+volumes:
+  appdata:

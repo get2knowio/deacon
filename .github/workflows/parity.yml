@@ -1,15 +1,16 @@
-# Live parity certification (018-harden-parity-harness, research D11).
+# The live differential parity lane.
 #
-# The SINGLE lane that provisions the pinned reference `@devcontainers/cli` and
-# runs the live comparison. Every OTHER lane excludes the live parity binaries by
-# nextest profile, so status stays truthful (FR-014). The check appears as
-# `parity / live-certification` — a snapshot/replay mode, if ever added, MUST use
-# a distinct name and report `mode` (FR-017).
+# The SINGLE lane that provisions the pinned reference `@devcontainers/cli` and runs
+# the live comparison. Every OTHER lane excludes the live parity binaries by nextest
+# profile, so their status stays truthful by non-selection: a green fast run never
+# implies parity ran.
 #
-# Provisioning ONLY happens here; ALL pass/fail/gating logic lives in the harness
-# and the aggregator. There is deliberately NO `continue-on-error` anywhere: any
-# failing step fails the lane, and `target/parity/` is uploaded even on red runs
-# so the raw outputs + report fragments are always diagnosable.
+# This lane GATES NOTHING. It is not in the release path.
+#
+# Provisioning only happens here; ALL pass/fail logic lives in the harness, and the
+# nextest exit code is the verdict. There is deliberately NO `continue-on-error`
+# anywhere: any failing step fails the lane, and `target/parity/` is uploaded even on
+# red runs so the raw outputs and report fragments are always diagnosable.
 name: parity
 
 on:
@@ -21,7 +22,7 @@ on:
   # Guard the harness/corpus/pin themselves on PRs that touch them.
   #
   # 023 US6: after the migration the DECLARATIVE case records are the primary parity
-  # surface — `parity_conformance_runner` drives them and the four config-corpus carriers
+  # surface — `parity_differential` drives them and the four config-corpus carriers
   # that used to are gone. A trigger list naming only the old locations would let a
   # `cases.json` or fixture edit change what the live lane runs without running it, which
   # is the same silent-non-selection failure this lane exists to prevent.
@@ -30,10 +31,7 @@ on:
       - 'crates/parity-harness/**'
       - 'crates/deacon/tests/parity_*'
       - 'crates/deacon/tests/consistency_*'
-      - 'conformance/registry/**'
-      - 'conformance/fixtures/**'
-      - 'conformance/snapshots/**'
-      - 'fixtures/parity-corpus/**'
+      - 'parity/**'
       - 'scripts/parity/**'
       - '.config/nextest.toml'
       - 'Makefile'
@@ -82,8 +80,8 @@ jobs:
         # so provisioning and harness can never disagree about the reference.
         run: |
           set -euo pipefail
-          VERSION="$(jq -r .version fixtures/parity-corpus/oracle.json)"
-          echo "Installing @devcontainers/cli@${VERSION} from fixtures/parity-corpus/oracle.json"
+          VERSION="$(jq -r .version parity/oracle.json)"
+          echo "Installing @devcontainers/cli@${VERSION} from parity/oracle.json"
           npm install -g "@devcontainers/cli@${VERSION}"
 
       # FR-014: the resolved reference must be EXACTLY the declared stable pin. Any other
@@ -94,7 +92,7 @@ jobs:
       - name: Assert the resolved reference is exactly the stable pin
         run: |
           set -euo pipefail
-          PINNED="$(jq -r .version fixtures/parity-corpus/oracle.json)"
+          PINNED="$(jq -r .version parity/oracle.json)"
           RESOLVED="$(devcontainer --version | tr -d '[:space:]')"
           if [ "$RESOLVED" != "$PINNED" ]; then
             echo "::error::resolved reference is ${RESOLVED}, declared stable pin is ${PINNED}."
@@ -148,15 +146,26 @@ jobs:
         run: ./scripts/parity/prepull-fixture-images.sh
 
       - name: Run live parity comparison
-        run: cargo nextest run --profile parity
-
-      - name: Aggregate + enforce completeness gate
-        run: cargo run -p parity-harness --bin parity-report
+        # The nextest exit code IS the verdict. A divergence with no covering tolerance,
+        # a tolerance whose difference no longer reproduces (stale), a missing oracle, an
+        # absent Docker daemon and a normalization failure all fail here with a
+        # cause-specific error. Nothing downstream re-decides it.
+        #
+        # `--no-fail-fast` is REQUIRED, not a preference. This lane's job is to enumerate
+        # the diverging set as a work queue; the default cancel-on-first-failure truncates
+        # it to whichever group happened to fail first. Measured on run 30737990462:
+        # 26 tests selected, `differential_group_none` failed at 53s, and 19 of 26 never
+        # ran — so the nightly reported two observable paths while the Docker groups went
+        # unexamined. A run that stops at the first item cannot distinguish one broken
+        # thing from forty, which is precisely the red-by-default state this suite exists
+        # to end. Each group already bounds itself (five minutes per case, FR-077b), so
+        # running them all costs wall clock, never a hang.
+        run: cargo nextest run --profile parity --no-fail-fast
 
       - name: Upload parity artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: parity-report
+          name: parity-evidence
           path: target/parity/
           if-no-files-found: warn

@@ -1,0 +1,2130 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-errorpath-up-feature-dependency-cycle",
+      "behaviors": [
+        "bhv-up-feature-install-failure"
+      ],
+      "context": [],
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-up-feature-cycle"
+          ],
+          "expectFailurePhase": "build"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, Feature-installation stage, failing EARLIER than the install-script case: two local Features whose `dependsOn` entries name each other, so no installation order exists. Every individual record is well-formed and configuration read accepts on both sides; the contradiction only appears once the dependency graph is resolved. Paired with the failing-`install.sh` case deliberately — one fails inside an install, the other before any install runs, and an implementation can propagate one while defaulting the other to declaration order and installing both Features anyway. Both sides fail (verified against oracle 0.87.0)."
+    },
+    {
+      "id": "case-errorpath-up-feature-install-failure",
+      "behaviors": [
+        "bhv-up-feature-install-failure"
+      ],
+      "context": [],
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-up-feature-install-failure"
+          ],
+          "expectFailurePhase": "build"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, Feature-installation stage: a local Feature whose `install.sh` exits 29. Configuration read accepts on both sides — a Feature reference is just a key, and nothing reads the install script until it runs — and the failure appears while the Feature is being layered into the image, which is why the declared phase is `build`: on BOTH implementations Features are installed by a Docker build over the base image, so there is no separate install phase for the closed failure-phase set to name. The claim under test is that the failure PROPAGATES: swallowing it would produce a container that looks complete and is missing the Feature, which no success-path case can distinguish. Both sides fail (verified against oracle 0.87.0)."
+    },
+    {
+      "id": "case-errorpath-up-invalid-run-args",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-up-invalid-run-args"
+          ],
+          "expectFailurePhase": "container-create"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, container-creation stage: `runArgs` carries `--cpus not-a-number`. The document is a well-formed array of strings and both CLIs read it without complaint — `runArgs` is passed through to the runtime verbatim by design, so neither can know the value is bad. The daemon rejects it at create time, after the image is resolved and before any container exists. Chosen over a malformed-config input precisely because nothing upstream of the daemon could have caught it, which is what makes it a later-STAGE failure rather than a slow configuration error. Both sides fail (verified against oracle 0.87.0)."
+    },
+    {
+      "id": "case-errorpath-up-missing-mount-source",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "errorPathTier": true,
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errorpath-up-missing-mount-source"
+          ],
+          "expectFailurePhase": "container-create"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Error-path tier, container-creation stage: a bind mount whose SOURCE path does not exist on the host. The mount string parses, the target is sane, and configuration read echoes it on both sides; only the daemon, at create time, can observe that the source is absent. Distinct from the `runArgs` case in where the rejection comes from — an argument the runtime CLI refuses to parse versus a request the daemon refuses to satisfy — and the two are worth pinning separately because a CLI can validate its own argv construction without ever asking the daemon. Both sides fail (verified against oracle 0.87.0)."
+    },
+    {
+      "id": "case-up-boundary-empty-collections",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-boundary-empty-collections"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 boundary class for `up`: every collection-valued field present and empty. An empty `features` map, an empty `runArgs` and an empty `mounts` are each a plausible place to emit an argument with nothing after it, which fails at container creation rather than at configuration read."
+    },
+    {
+      "id": "case-up-compose-env-merge-precedence",
+      "behaviors": [
+        "bhv-up-container-env-merge-precedence"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-compose-env-precedence"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "envMap": {
+                "CONF_LAYER": "config-wins",
+                "CONF_ONLY_CONFIG": "config",
+                "CONF_ONLY_FEATURE": "feature"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The COMPOSE half of `bhv-up-container-env-merge-precedence`, which is stated over \"the created container\" and not over one container shape. Its single-container twin `case-up-env-merge-precedence` could not have caught the compose defect: `commands/up/compose.rs` built the service's environment from `config.container_env` plus CLI `--remote-env` and never read `feature_build.combined_env`, so a Feature's `containerEnv` was baked into the extended image and then dropped from the compose service's `environment:` block. Fixed in 8772e7c; this case is the evidence (#374).\n\nThe same three variables as the twin, for the same reason: `CONF_LAYER` is declared by BOTH layers and must take the configuration's value, while `CONF_ONLY_CONFIG` and `CONF_ONLY_FEATURE` are declared by one layer each. Without the feature-only variable, a regression that made the configuration win by DROPPING the Feature layer entirely — which is precisely the compose defect — would pass."
+    },
+    {
+      "id": "case-up-compose-feature-restart",
+      "behaviors": [
+        "bhv-up-feature-install-order",
+        "bhv-up-restart-reuses-container"
+      ],
+      "context": [],
+      "oracleType": "invariant-metamorphic",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-first",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-feature"
+          ]
+        },
+        {
+          "id": "op-up-again",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "relationship": {
+            "kind": "first-create-vs-restart",
+            "againstOp": "op-up-first"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-again"
+        },
+        {
+          "channel": "chan-process-graph",
+          "operation": "op-up-again"
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up-again"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-up-compose-single-feature-restart`. The second `up` begins with the Compose project already running, so the declared `first-create-vs-restart` relationship is the oracle: re-entry must reattach to the project it created rather than stand up a second one. The process-graph channel is what makes a duplicated service container visible — an exit code cannot show it, and the observation captures EVERY container matching the workspace label for exactly that reason."
+    },
+    {
+      "id": "case-up-compose-project-resources",
+      "behaviors": [
+        "bhv-compose-project-name-robust"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-compose-resources"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "composeProjectResources": {
+                "networks": [
+                  "default"
+                ],
+                "volumes": [
+                  "conf-us5-compose-data"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The Compose half of FR-054. The project-RELATIVE names are what the two CLIs must agree on; the project NAME itself is a characterized divergence (deacon derives `deacon_<workspaceHash>_<configHash>`, the reference `<dir>_devcontainer`). Until 024 US5 the `compose_project_prefix` rewrite that produces these relative names was applied but never registered, and it discarded the project name leaving no trace — `composeProjectResources.project` now records what was stripped."
+    },
+    {
+      "id": "case-up-compose-project-resources-differential",
+      "behaviors": [
+        "bhv-compose-project-file-set",
+        "bhv-compose-project-name-robust",
+        "bhv-container-keepalive-command"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-compose-resources"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-compose-project-name-robust",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (both stop in ~200 ms on SIGTERM). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
+          "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-compose-project-name-robust",
+          "context": [],
+          "observablePath": "chan-container-state.labelNamespaces.devcontainer",
+          "rationale": "deacon stamps five identity labels the reference does not set, so the `devcontainer` namespace's key SET differs. Scoped to that one namespace — the derived grouping is what makes a one-sided label visible (FR-052), and the per-key paths below stay named individually.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-project-name-robust",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.configHash",
+          "rationale": "deacon sets `devcontainer.configHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-project-name-robust",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.config_name",
+          "rationale": "deacon sets `devcontainer.config_name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-project-name-robust",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.name",
+          "rationale": "deacon sets `devcontainer.name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-project-name-robust",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.source",
+          "rationale": "deacon sets `devcontainer.source`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-project-name-robust",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
+          "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-project-name-robust",
+          "context": [],
+          "observablePath": "chan-container-state.composeProjectResources.project",
+          "rationale": "deacon derives `deacon_<workspaceHash>_<configHash>`; the reference derives `<workspace-dir>_devcontainer`. Scoped to the project NAME — the project-relative `networks` and `volumes` alongside it stay compared, which is the whole reason the prefix rewrite exists.",
+          "divergenceId": "bhv-compose-project-name-robust"
+        },
+        {
+          "behavior": "bhv-container-keepalive-command",
+          "context": [],
+          "observablePath": "chan-container-state.entrypoint",
+          "rationale": "On a Compose service the keep-alive lands on `entrypoint` rather than `cmd`: the reference overrides the service entrypoint with its own keep-alive wrapper, deacon leaves the entrypoint unset and lets the service's own command hold the container open. The same characterized difference as the single-container `cmd` tolerance, on the field Compose puts it in; `cmd` is compared here and agrees.",
+          "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-compose-project-file-set",
+          "context": [],
+          "observablePath": "chan-container-state.labels.com.docker.compose.project.config_files",
+          "rationale": "deacon delivers its generated Compose override on stdin (recorded as `-`); the reference writes it to a temporary file under its own cache directory and names that path.",
+          "waiverId": "wvr-compose-project-file-set"
+        },
+        {
+          "behavior": "bhv-compose-project-file-set",
+          "context": [],
+          "observablePath": "chan-container-state.labels.com.docker.compose.config-hash",
+          "rationale": "Compose hashes the merged file set, so this differs as a direct consequence of the override-delivery difference above.",
+          "waiverId": "wvr-compose-project-file-set"
+        },
+        {
+          "behavior": "bhv-compose-project-name-robust",
+          "context": [],
+          "observablePath": "chan-container-state.labels.com.docker.compose.project",
+          "rationale": "deacon derives `deacon_<workspaceHash>_<configHash>`; the reference derives `<workspace-dir>_devcontainer`. The same difference the `composeProjectResources.project` tolerance names, reported by Compose's own label.",
+          "divergenceId": "bhv-compose-project-name-robust"
+        },
+        {
+          "behavior": "bhv-compose-project-name-robust",
+          "context": [],
+          "observablePath": "chan-container-state.mountSources./data",
+          "rationale": "A Compose named volume's real name carries the project prefix, so the raw mount SOURCE inherits the project-name difference. Scoped to this one destination — every other mount source, and the project-relative volume name in `composeProjectResources.volumes`, stay compared.",
+          "divergenceId": "bhv-compose-project-name-robust"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The cross-CLI half of FR-054: the same Compose project must yield the same relative network and volume, and the project NAME difference is declared rather than normalized out of sight."
+    },
+    {
+      "id": "case-up-compose-service-graph",
+      "behaviors": [
+        "bhv-up-mount-source-and-shape"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "image": "alpine:3.19",
+              "labels": {
+                "com.docker.compose.service": "app",
+                "devcontainer.source": "deacon",
+                "devcontainer.config_name": "ConformanceUpComposeBasic"
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-process-graph",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "mounts": [
+                {
+                  "source": "<WORKSPACE>",
+                  "target": "/workspace",
+                  "type": "bind",
+                  "ro": false
+                },
+                {
+                  "target": "/data",
+                  "type": "volume",
+                  "ro": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "status": "running"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The Compose counterpart of the image-backed Docker-channel case, and the third covering case for `chan-image` and `chan-process-graph` (SC-005's floor). Two claims a Compose `up` can only make on those channels. `chan-image`: the service container is created from the image the Compose file DECLARES (`alpine:3.19`) and still carries deacon's `devcontainer.*` identity alongside Compose's own labels — delegation to Compose without losing identity, which a derived-image substitution would break. `chan-process-graph`: both mounts the service declares are present with their SHAPE — the workspace bind and the named volume — which is what distinguishes a service brought up from its Compose definition from one created directly. The volume's `source` is deliberately not pinned: it is the daemon's `/var/lib/docker/volumes/<project>_...` path and the project name is workspace-derived, so pinning it would assert the temp directory rather than the graph. The network is left out for the same reason (`<project>_default`)."
+    },
+    {
+      "id": "case-up-docker-channels",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "labels": {
+                "devcontainer.source": "deacon"
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-injected-process",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "env": {
+                "CONF_TOKEN": "us5"
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-process-graph",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "mounts": [
+                {
+                  "source": "<WORKSPACE>",
+                  "type": "bind",
+                  "ro": false
+                }
+              ],
+              "networks": [
+                "bridge"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "status": "running"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Declarative Docker-backed spec-expectation case (022-conformance-runner US5): `deacon up` in an ISOLATED external temp workspace (collision-resistant, guaranteed cleanup) exercises all four Docker channels — chan-image (deacon stamps devcontainer.source), chan-injected-process (containerEnv CONF_TOKEN injected), chan-process-graph (mount/network/volume graph captured), chan-temporal (container running). Image pinned to alpine:3.19 (V18). The chan-process-graph assertion was an empty `jsonSubset: {}` until 024 US6 — which matches ANY graph, so the channel was inert by construction: the case declared it, observed it, and could not fail on it. It now pins the workspace bind (source, type, read-write) and the network the container joined, which is the graph's headline claim and what reg-process-graph-workspace-mount-vanished perturbs."
+    },
+    {
+      "id": "case-up-dockerfile-extends-chain",
+      "behaviors": [
+        "bhv-up-feature-install-order",
+        "bhv-readconfig-extends-merged"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-dockerfile-extends"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-up-dockerfile-extends-chain-absent`. The `build.dockerfile` is declared by the PARENT document, so the build context has to be resolved relative to the directory of the file that declared it rather than the child's. Getting that wrong fails the build outright, which is why the exit code is a sufficient observable here and a differential is worth the reference run. The 024 live run showed the differential is one-sided: deacon builds and the REFERENCE fails, because oracle 0.87.0 has no `extends` support at all. That is the already-recorded deacon extension (ext-extends-resolution) surfacing in `up` rather than in `read-configuration`, so the case links bhv-readconfig-extends-merged and scopes a tolerance to the exit code. deacon's own half of the assertion — that the parent-declared build context resolves relative to the file that declared it — is unchanged and still the reason the case exists.",
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-extends-merged",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "The pinned reference does not resolve `extends` at all: for this workspace `devcontainer up` fails with 'Dev container config ... is missing one of \"image\", \"dockerFile\" or \"dockerComposeFile\" properties', because the `build.dockerfile` is declared by the PARENT document. deacon resolves the chain and builds, so it exits 0 where the reference exits non-zero. An ahead-of-spec deacon capability recorded by ext-extends-resolution, not a defect on either side.",
+          "divergenceId": "ext-extends-resolution"
+        }
+      ]
+    },
+    {
+      "id": "case-up-dockerfile-feature-image",
+      "behaviors": [
+        "bhv-up-feature-install-order",
+        "bhv-up-effective-user-uid-gid"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-dockerfile-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "env": [
+                "CONF_IMAGE_ENV=dockerfile"
+              ],
+              "entrypoint": [
+                "/bin/sh"
+              ],
+              "labels": {
+                "devcontainer.source": "deacon",
+                "devcontainer.config_file": "<WORKSPACE>/.devcontainer/devcontainer.json",
+                "devcontainer.metadata": "[{\"id\":\"./features/marker\"},{\"containerEnv\":{\"CONF_CASE\":\"up-dockerfile-feature\"},\"containerUser\":\"dev\",\"remoteUser\":\"dev\"}]"
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-injected-process",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "user": "dev",
+              "env": {
+                "CONF_CASE": "up-dockerfile-feature",
+                "CONF_IMAGE_ENV": "dockerfile"
+              },
+              "path": [
+                "/usr/local/sbin",
+                "/usr/local/bin",
+                "/usr/sbin",
+                "/usr/bin",
+                "/sbin",
+                "/bin"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "status": "running"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The Dockerfile-with-a-Feature combination, which was a pairwise gap, observed on the two channels that can see the DIFFERENCE a Feature layer makes. The Feature layer rebuilds the image, so everything the Dockerfile established has to survive that rebuild: `chan-image` pins the Dockerfile's `ENV` and the base entrypoint on the image the container was finally created from, and `chan-injected-process` pins that the same value reaches the process alongside the configuration's `containerEnv` and under the configured non-root `containerUser`. A Feature layer built `FROM` the wrong base, or built and then not used, passes an outcome-only assertion and fails both of these. `PATH` is asserted segment-wise (the `path_env_segmented` rule), not as a string. `cwd` is deliberately NOT asserted: deacon leaves the container's `WorkingDir` empty here, and pinning that would record an uncharacterized value as an expectation."
+    },
+    {
+      "id": "case-up-entrypoint-chain-differential",
+      "behaviors": [
+        "bhv-up-feature-entrypoint-chain"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-entrypoint-chain"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up"
+        }
+      ],
+      "fsAllowlist": [
+        "entrypoint-chain.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The cross-CLI half of FR-048. Compared on the EFFECT (the chain file) rather than the container command, because the two CLIs construct the chain differently and comparing the construction would report a difference that says nothing about whether the entrypoints ran."
+    },
+    {
+      "id": "case-up-entrypoint-chained-features",
+      "behaviors": [
+        "bhv-up-feature-entrypoint-chain"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-entrypoint-chain"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "entrypoint-chain.txt": "conf-ep-a\nconf-ep-b\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "entrypoint-chain.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-048: entrypoints contributed by TWO Features. The file's exact contents pin both that each entrypoint ran and the ORDER they ran in — `overrideFeatureInstallOrder` makes an order the two Features would otherwise leave ambiguous deterministic, which is US5 acceptance scenario 5. Raw `Config.Entrypoint` is deliberately not asserted: deacon mounts a generated wrapper and the reference inlines the scripts, so the mechanism differs while the effect does not."
+    },
+    {
+      "id": "case-up-env-merge-differential",
+      "behaviors": [
+        "bhv-container-metadata-label-content",
+        "bhv-container-metadata-label-serialization",
+        "bhv-up-container-env-merge-precedence",
+        "bhv-up-path-construction"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-env-precedence"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-up-container-env-merge-precedence",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (both stop in ~200 ms on SIGTERM). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
+          "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-up-container-env-merge-precedence",
+          "context": [],
+          "observablePath": "chan-container-state.labelNamespaces.devcontainer",
+          "rationale": "deacon stamps five identity labels the reference does not set, so the `devcontainer` namespace's key SET differs. Scoped to that one namespace — the derived grouping is what makes a one-sided label visible (FR-052), and the per-key paths below stay named individually.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-up-container-env-merge-precedence",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.configHash",
+          "rationale": "deacon sets `devcontainer.configHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-up-container-env-merge-precedence",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.config_name",
+          "rationale": "deacon sets `devcontainer.config_name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-up-container-env-merge-precedence",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.name",
+          "rationale": "deacon sets `devcontainer.name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-up-container-env-merge-precedence",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.source",
+          "rationale": "deacon sets `devcontainer.source`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-up-container-env-merge-precedence",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
+          "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-container-metadata-label-serialization",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.metadata",
+          "rationale": "Only the BYTE FORM of this label differs now: the reference emits `[ {…}, {…} ]` when the value reaches the container through an image build (this case builds one) and deacon always emits compact `[{…}]`, and deacon's `containerEnv` key order is `HashMap` order rather than authored order. Both values parse to the same entries — #373 closed the content difference, and the four cases that reach this label without an image build now compare it byte-for-byte.",
+          "waiverId": "wvr-container-metadata-label-serialization"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The cross-CLI half of FR-049/FR-050, comparing the WHOLE container state — every environment variable and every PATH segment — with only the characterized keep-alive command and identity labels tolerated."
+    },
+    {
+      "id": "case-up-env-merge-precedence",
+      "behaviors": [
+        "bhv-up-container-env-merge-precedence"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-env-precedence"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "envMap": {
+                "CONF_LAYER": "config-wins",
+                "CONF_ONLY_CONFIG": "config",
+                "CONF_ONLY_FEATURE": "feature"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-049. Three variables, because one is not enough: `CONF_LAYER` is declared by BOTH layers and must take the configuration's value; `CONF_ONLY_CONFIG` and `CONF_ONLY_FEATURE` are declared by one layer each, so a change that made the configuration win by DROPPING the Feature layer altogether fails here rather than passing. This case found a real defect — deacon merged the Feature layer over the configuration's — fixed in the same change."
+    },
+    {
+      "id": "case-up-exec-decl-traditional",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-exec-traditional"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-lc",
+            "cat /tmp/parity_marker /tmp/parity_env_marker"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Migrated from parity_up_exec::traditional: after `up` on a traditional (non-compose) workspace, both CLIs' `exec` reach that workspace's own container and observe the same postCreate markers — including the #332 parity that neither CLI substitutes `${containerEnv:VAR}` inside a lifecycle command string (both must print the same EMPTY marker). Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-up-feature-single-differential",
+      "behaviors": [
+        "bhv-up-feature-install-order"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-feature-single"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-032, the alignment half: both CLIs create a container from a pinned image with one LOCAL Feature installed. A local Feature is used deliberately — it keeps the case off the network and inside the Docker tier's budget while exercising the same resolution and install path an OCI Feature takes."
+    },
+    {
+      "id": "case-up-feature-single-installed",
+      "behaviors": [
+        "bhv-up-feature-install-order"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-feature-single"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "cat",
+            "/usr/local/share/conformance/install-order"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "marker"
+          }
+        },
+        {
+          "channel": "chan-injected-process",
+          "operation": "op-exec",
+          "assertion": {
+            "jsonSubset": {
+              "env": {
+                "CONF_CASE": "up-feature-single"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The content half: the differential shows the two CLIs agree on the outcome, which is not the same as showing the Feature was installed. This case reads the marker the Feature's `install.sh` wrote INSIDE the container — the lesson from the `--image-name` defect, where an outcome-only assertion reported success for an image that had no Feature in it."
+    },
+    {
+      "id": "case-up-idempotent",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "oracleType": "invariant-metamorphic",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-1",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        },
+        {
+          "id": "op-up-2",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "relationship": {
+            "kind": "idempotence",
+            "againstOp": "op-up-1"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up-2"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Declarative invariant-metamorphic case (022-conformance-runner US6): a second `deacon up` on the same isolated workspace must be IDEMPOTENT — it reuses the running container created by the first up (same container id, still running) rather than recreating it. The oracle verdicts on the DECLARED RELATIONSHIP between op-up-2 and op-up-1's chan-temporal state, not a fixed output (FR-008). Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-up-label-namespaces-and-network",
+      "behaviors": [
+        "bhv-container-identity-labels",
+        "bhv-state-container-parity"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "labelNamespaces": {
+                "devcontainer": [
+                  "devcontainer.configHash",
+                  "devcontainer.config_file",
+                  "devcontainer.config_name",
+                  "devcontainer.local_folder",
+                  "devcontainer.metadata",
+                  "devcontainer.name",
+                  "devcontainer.source",
+                  "devcontainer.workspaceHash"
+                ]
+              },
+              "networks": [
+                "bridge"
+              ],
+              "cmd": [
+                "-c"
+              ],
+              "entrypoint": [
+                "/bin/sh"
+              ]
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-052 and the non-Compose half of FR-054. The label assertion is on the derived NAMESPACE grouping, which is what makes 'one side populates a namespace the other leaves empty' an ordinary comparison instead of an enumeration of every key either CLI might ever emit; the differential cases carry the matching tolerance. `networks`, `cmd` and `entrypoint` are pinned here too — all three were captured but not compared before 024, and the keep-alive defect (#290) is what a captured-but-uncompared field costs."
+    },
+    {
+      "id": "case-up-lifecycle-array-form",
+      "behaviors": [
+        "bhv-up-lifecycle-command-forms"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-lifecycle-array"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-array.txt": "array-form\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-array.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-047, the array (argv) form. The marker file is the observation, not the exit code: a hook that silently did not run still leaves `up` exiting 0. `workspaceFolder`/`workspaceMount` are declared so the container path is FIXED, which is what lets the host-side filesystem observer read what the in-container hook wrote."
+    },
+    {
+      "id": "case-up-lifecycle-cwd",
+      "behaviors": [
+        "bhv-up-lifecycle-command-cwd"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-lifecycle-cwd"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-cwd.txt": "/workspace\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-cwd.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The hook records its OWN working directory (`pwd`) into a file at an absolute path, so the assertion pins the directory that was used rather than merely the fact that something was written. Writing to a RELATIVE path would have been the shorter fixture and the worse evidence: a file that lands outside the bind mount and a hook that never ran leave the host observer with the same empty allowlist. `workspaceFolder`/`workspaceMount` fix the container path so the expected value is a constant."
+    },
+    {
+      "id": "case-up-lifecycle-object-differential",
+      "behaviors": [
+        "bhv-up-lifecycle-command-forms"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-lifecycle-object"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up"
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-object-first.txt",
+        "lifecycle-object-second.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The cross-CLI half of FR-047 for the form that has room to disagree: the object form's named commands. The two spec-expectation twins pin deacon's side outright, so a difference that stops reproducing cannot quietly take the evidence with it."
+    },
+    {
+      "id": "case-up-lifecycle-object-form",
+      "behaviors": [
+        "bhv-up-lifecycle-command-forms"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-lifecycle-object"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-object-first.txt": "object-first\n",
+              "lifecycle-object-second.txt": "object-second\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-object-first.txt",
+        "lifecycle-object-second.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-047, the object (named commands) form — and both spellings of a named command, a string and an argv array. Each command writes its OWN file: the spec does not order named commands, so asserting one file's contents would pin an order neither CLI promises."
+    },
+    {
+      "id": "case-up-malformed-config-rejected",
+      "behaviors": [
+        "bhv-readconfig-malformed-jsonc-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-malformed-json"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 malformed class for `up`: a hard JSONC syntax error stops the run at configuration resolution, before any container exists. The declared failure phase is the assertion that matters — an implementation that reached container creation and failed there would produce the same non-zero exit for a different reason."
+    },
+    {
+      "id": "case-up-mount-source-shape-differential",
+      "behaviors": [
+        "bhv-container-metadata-label-content",
+        "bhv-up-mount-source-and-shape"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-mount-source-shape"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-up-mount-source-and-shape",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (both stop in ~200 ms on SIGTERM). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
+          "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-up-mount-source-and-shape",
+          "context": [],
+          "observablePath": "chan-container-state.labelNamespaces.devcontainer",
+          "rationale": "deacon stamps five identity labels the reference does not set, so the `devcontainer` namespace's key SET differs. Scoped to that one namespace — the derived grouping is what makes a one-sided label visible (FR-052), and the per-key paths below stay named individually.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-up-mount-source-and-shape",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.configHash",
+          "rationale": "deacon sets `devcontainer.configHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-up-mount-source-and-shape",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.config_name",
+          "rationale": "deacon sets `devcontainer.config_name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-up-mount-source-and-shape",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.name",
+          "rationale": "deacon sets `devcontainer.name`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-up-mount-source-and-shape",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.source",
+          "rationale": "deacon sets `devcontainer.source`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-up-mount-source-and-shape",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
+          "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The cross-CLI half of FR-053. Both CLIs must place the same three mounts with the same sources and shapes; only the characterized keep-alive command and identity labels are tolerated."
+    },
+    {
+      "id": "case-up-mount-source-vs-shape",
+      "behaviors": [
+        "bhv-up-mount-source-and-shape"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-mount-source-shape"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "mountSources": {
+                "/mnt/ro": "<WORKSPACE>/ro",
+                "/mnt/rw": "<WORKSPACE>/rw",
+                "/mnt/vol": "conf-us5-mount-vol",
+                "/workspace": "<WORKSPACE>"
+              },
+              "mounts": {
+                "/mnt/ro": {
+                  "mountType": "bind",
+                  "ro": true
+                },
+                "/mnt/rw": {
+                  "mountType": "bind",
+                  "ro": false
+                },
+                "/mnt/vol": {
+                  "mountType": "volume",
+                  "ro": false
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-053, with the two axes separated by construction: `/mnt/ro` and `/mnt/rw` share a SHAPE and differ in SOURCE, `/mnt/rw` and `/mnt/vol` share a read-only flag and differ in TYPE. Swapping the two bind sources changes only `mountSources` and swapping the read-only flag changes only `mounts`, so a failure says which axis moved. Before 024 US5 the source axis was unobservable: the snapshot recorded only the bind's leaf component, and `ro`/`rw` are different directories with different leaves only by luck of naming."
+    },
+    {
+      "id": "case-up-path-construction",
+      "behaviors": [
+        "bhv-up-path-construction"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-env-precedence"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "pathSegments": [
+                "/opt/conf-feature/bin",
+                "/usr/local/bin",
+                "/bin"
+              ]
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-050. The Feature contributes `/opt/conf-feature/bin` through the `PATH=…:${PATH}` prepend idiom; the base image's own segments must survive it, which is why two of them are asserted too — a PATH that had been REPLACED rather than prepended would still contain the Feature's segment. PATH reached this channel only after 024 US5 stopped `drop_noise_env` removing it at capture."
+    },
+    {
+      "id": "case-up-reference-lenient-wrong-type",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-forwardports-rejected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-wrong-type-forwardports"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-wrong-type-forwardports-rejected",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon rejects a wrongly-typed `forwardPorts` before creating anything; the reference accepts it and completes the run.",
+          "waiverId": "wvr-wrong-type-forwardports"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 reference-lenient class for `up`, and the part of the story a `read-configuration` case cannot tell: the reference's leniency is not confined to its parse-and-echo command. It accepts `forwardPorts` written as a bare string and goes on to CREATE A CONTAINER, where deacon refuses the document. The direction is pinned by the spec-expectation twin on the same fixture."
+    },
+    {
+      "id": "case-up-running-reattach-process-context",
+      "behaviors": [
+        "bhv-up-restart-reuses-container",
+        "bhv-up-container-env-merge-precedence"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-first",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        },
+        {
+          "id": "op-up-again",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-again",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-injected-process",
+          "operation": "op-up-again",
+          "assertion": {
+            "jsonSubset": {
+              "env": {
+                "CONF_TOKEN": "us5"
+              },
+              "path": [
+                "/usr/local/sbin",
+                "/usr/local/bin",
+                "/usr/sbin",
+                "/usr/bin",
+                "/sbin",
+                "/bin"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up-again",
+          "assertion": {
+            "jsonSubset": {
+              "status": "running"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`up` against a container that is ALREADY RUNNING — the pairwise combination `image` x `running`, and `running` x `features: none`, both previously gaps. The sibling metamorphic case proves re-entry does not create a second container; this one asserts what the reattached container's process context still IS, which the relationship oracle does not look at (it produces a `chan-temporal` verdict only). A reattach that silently dropped the configured `containerEnv`, or reattached to a container built before it was set, satisfies \"same container, still running\" and fails here."
+    },
+    {
+      "id": "case-up-stale-config-reentry",
+      "behaviors": [
+        "bhv-up-changed-config-recreates-container"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-first",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-stale-config"
+          ]
+        },
+        {
+          "id": "op-up-changed",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--override-config",
+            "${WORKSPACE}/.devcontainer/changed.json"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-changed",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-temporal",
+          "operation": "op-up-changed",
+          "assertion": {
+            "jsonSubset": {
+              "running": true,
+              "status": "running"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-up-image-single-feature-stale-config`. The second `up` runs against a configuration that has since changed (a different `containerEnv` generation), supplied as a command-line override because the runner materializes a fixture once and does not edit it mid-case — the observable situation is identical either way. RE-POINTED after the 024 live run. The case was an `invariant-metamorphic` asserting `first-create-vs-restart`, and that relationship simply is not deacon's contract: deacon's container identity includes a configHash, so a CHANGED document is a different identity and produces a NEW container. Reuse is the dangerous branch — the container would keep the Feature layer built from the OLD configuration while every reported value came from the NEW one — so recreating is the direction worth keeping, and the metamorphic oracle had no relationship kind that could express it (the closed set is idempotence / first-create-vs-restart / resume). Asserting the relationship anyway would have pinned a behavior deacon deliberately does not have. The reference does reattach, verified directly at oracle 0.87.0; that difference is recorded as bhv-up-changed-config-recreates-container and waived by wvr-up-changed-config-recreates. What the recreate does NOT license is leaving the superseded container running, which deacon currently does and which is tracked as a defect at https://github.com/get2knowio/deacon/issues/371 — when that lands, this case gains a container-count assertion."
+    },
+    {
+      "id": "case-up-unsupported-image-reference",
+      "behaviors": [
+        "bhv-up-exec-parity"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-unsupported-image"
+          ],
+          "expectFailurePhase": "container-create"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class for `up`: the configuration is well-formed and every field is valid, but it names an image reference that no registry serves. Nothing can reject this at configuration read — which is the point of the class, and the reason the failure phase is `container-create` rather than `config-resolution`."
+    },
+    {
+      "id": "case-up-user-created-by-feature",
+      "behaviors": [
+        "bhv-up-effective-user-uid-gid"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-user-feature"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "id -u; id -g; id -un"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": "4343\n4343\nfeatureuser\n"
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "userSpec": {
+                "name": "featureuser",
+                "uid": null,
+                "gid": null
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-051's second half: the user is created by a FEATURE's install script, so `containerUser`/`remoteUser` name an identity that does not exist in the base image and only exists if the Feature actually ran. Distinct uid/gid (4343) from the image-created case (4242) so a fixture mix-up cannot pass either case."
+    },
+    {
+      "id": "case-up-user-uid-gid-nonroot",
+      "behaviors": [
+        "bhv-up-effective-user-uid-gid"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-user-nonroot"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "id -u; id -g; id -un"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": "4242\n4242\nconfuser\n"
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "userSpec": {
+                "name": "confuser",
+                "uid": null,
+                "gid": null
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "FR-051, the image-created non-root user. Both halves are asserted: the DECLARATION (`userSpec`, parsed from the container's `Config.User`) and the EFFECT (`id -u`/`id -g`/`id -un` inside the container). The declaration alone would pass for a user that does not exist; the ids alone would not say which user was asked for. `uid`/`gid` are asserted as null because the declaration names a user rather than numeric ids — an unset id is not an id of 0."
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+	"name": "ConformanceBuildImageArgs",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"args": { "PARITY_BUILD_ARG": "passed-from-config" }
+	}
+}

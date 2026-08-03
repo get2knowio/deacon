@@ -6,7 +6,7 @@ kind of thing worth calling out in a blog post or on the project page.
 
 > Scope rule: entries here must be *net-positive* differences a user would be glad
 > about (better DX, security, performance, robustness) — **not** spec divergences
-> that are bugs. Bugs/divergences-to-fix live in `fixtures/parity-corpus/REPORT.md`.
+> that are bugs. Open nonconformances live in `parity/SPEC_STATUS.md`, each with an issue link.
 > When you land a change that makes Deacon distinctively better, add it here.
 
 ## Developer experience
@@ -43,7 +43,7 @@ kind of thing worth calling out in a blog post or on the project page.
     extensibility model assumes tools tolerate unknown fields; deacon honors that.
     (`crates/core/src/config.rs` — strict `deserialize_object_value` for
     `features`/`customizations`; `#[serde(flatten)] extra` round-trips unknown
-    top-level fields. Differential coverage: `fixtures/parity-corpus/errors/`.)
+    top-level fields. Differential coverage: the `case-errors-decl-*` scenarios in `parity/cases/`.)
 
   Recorded in the conformance registry under the `read-configuration` area: the
   strict-early-error cases as `intentional-divergence` behaviors
@@ -71,7 +71,7 @@ kind of thing worth calling out in a blog post or on the project page.
   `ext-extends-resolution` (behaviors `bhv-readconfig-extends-merged`,
   `bhv-readconfig-extends-missing-rejected`, `bhv-readconfig-extends-cycle-rejected`),
   which is their single characterization — the duplicate `wvr-extends-*` waivers were
-  retired 2026-08-01. Also described in `fixtures/parity-corpus/errors/README.md`.
+  retired 2026-08-01.
   (Issue #297.)
 
 ## Robustness

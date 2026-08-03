@@ -1,0 +1,2 @@
+Intentionally empty: this error case has NO devcontainer config.
+Its accept/reject expectation is declared on the case that uses it, in parity/cases/.

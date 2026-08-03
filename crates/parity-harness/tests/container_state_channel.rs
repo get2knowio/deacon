@@ -92,7 +92,11 @@ fn capture(name: &str, labels: Value) -> parity_harness::evidence::RawChannelEvi
 /// The normalized evidence for a side, under the channel's real token policy.
 fn normalized(name: &str, labels: Value) -> parity_harness::evidence::NormalizedChannelEvidence {
     let raw = capture(name, labels);
-    let tokens = tokens_for_channel(CHAN_CONTAINER_STATE, Path::new(&format!("/tmp/{name}")));
+    let tokens = tokens_for_channel(
+        CHAN_CONTAINER_STATE,
+        Path::new(&format!("/tmp/{name}")),
+        None,
+    );
     normalize_channel(CHAN_CONTAINER_STATE, &raw, &tokens, Side::Deacon)
 }
 

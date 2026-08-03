@@ -2,10 +2,9 @@
 //!
 //! nextest runs test binaries in parallel with no ordering, so a shared report
 //! file would race. Each live parity binary instead writes ONE fragment to
-//! `<report_root>/report/<binary>.json`; the `parity-report` aggregator later
-//! folds the fragments into the run report and checks completeness. Failure to
-//! write a fragment is [`HarnessError::Report`], which the caller MUST propagate
-//! as a test failure — a run whose result cannot be recorded is not a passing run.
+//! `<report_root>/report/<binary>.json`. Failure to write a fragment is
+//! [`HarnessError::Report`], which the caller MUST propagate as a test failure — a run
+//! whose result cannot be recorded is not a passing run.
 
 use std::path::PathBuf;
 
@@ -45,7 +44,6 @@ impl From<&VerifiedOracle> for OracleInfo {
 #[serde(rename_all = "kebab-case")]
 pub enum Outcome {
     Pass,
-    PassWaived,
     Fail,
 }
 
@@ -87,7 +85,6 @@ pub struct CaseResult {
     pub outcome: Outcome,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub cause: Option<Cause>,
-    pub waivers_applied: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub diff_summary: Option<String>,
     pub raw: RawPaths,
@@ -100,23 +97,6 @@ impl CaseResult {
             case: case.into(),
             outcome: Outcome::Pass,
             cause: None,
-            waivers_applied: Vec::new(),
-            diff_summary: None,
-            raw,
-        }
-    }
-
-    /// A pass justified by one or more active waivers.
-    pub fn pass_waived(
-        case: impl Into<String>,
-        waivers_applied: Vec<String>,
-        raw: RawPaths,
-    ) -> Self {
-        CaseResult {
-            case: case.into(),
-            outcome: Outcome::PassWaived,
-            cause: None,
-            waivers_applied,
             diff_summary: None,
             raw,
         }
@@ -133,23 +113,17 @@ impl CaseResult {
             case: case.into(),
             outcome: Outcome::Fail,
             cause: Some(cause),
-            waivers_applied: Vec::new(),
             diff_summary,
             raw,
         }
     }
 
-    /// Schema invariants: `fail` requires a cause; `pass-waived` requires at least
-    /// one waiver id.
+    /// Schema invariant: `fail` requires a cause.
     fn validate(&self) -> Result<(), String> {
         match self.outcome {
             Outcome::Fail if self.cause.is_none() => {
                 Err(format!("case `{}`: fail without a cause", self.case))
             }
-            Outcome::PassWaived if self.waivers_applied.is_empty() => Err(format!(
-                "case `{}`: pass-waived without any waiver id",
-                self.case
-            )),
             _ => Ok(()),
         }
     }
@@ -234,8 +208,7 @@ impl ReportFragment {
     /// living on unguarded in the carriers 023 did not retire (024 D-1).
     ///
     /// Per-case files make concurrent writers additive instead of destructive: two
-    /// processes writing different cases of one binary touch different paths, and
-    /// [`crate::aggregate::read_fragments`] merges them back.
+    /// processes writing different cases of one binary touch different paths.
     ///
     /// **Omissions are per-case files too, and that is not incidental.** Parking them on a
     /// shared `_meta.json` reintroduced the very defect above one level down: every writer
@@ -443,13 +416,13 @@ mod tests {
     async fn writes_fragment_atomically_and_roundtrips() {
         let dir = tempfile::tempdir().expect("tempdir");
         let frag = ReportFragment::new(
-            "parity_corpus_tier1",
+            "parity_differential",
             sample_oracle(),
             now_rfc3339(),
             now_rfc3339(),
             vec![
                 CaseResult::pass("case-a", sample_raw()),
-                CaseResult::pass_waived("case-b", vec!["errors/x".into()], sample_raw()),
+                CaseResult::pass("case-b", sample_raw()),
                 CaseResult::fail(
                     "case-c",
                     Cause::Divergence,
@@ -464,7 +437,7 @@ mod tests {
         // (a single shared file made concurrent test processes overwrite each other).
         let dir_path = frag.write_under(dir.path()).await.expect("write");
         assert!(
-            dir_path.ends_with("report/parity_corpus_tier1"),
+            dir_path.ends_with("report/parity_differential"),
             "write_under returns the per-binary DIRECTORY: {dir_path:?}"
         );
         assert!(
@@ -485,7 +458,8 @@ mod tests {
         }
         let all = round_tripped.join("\n");
         assert!(all.contains("\"mode\": \"live\""));
-        assert!(all.contains("\"outcome\": \"pass-waived\""));
+        assert!(all.contains("\"outcome\": \"pass\""));
+        assert!(all.contains("\"outcome\": \"fail\""));
         assert!(all.contains("\"cause\": \"divergence\""));
     }
 
@@ -501,7 +475,6 @@ mod tests {
                 case: "c".into(),
                 outcome: Outcome::Fail,
                 cause: None,
-                waivers_applied: vec![],
                 diff_summary: None,
                 raw: sample_raw(),
             }],

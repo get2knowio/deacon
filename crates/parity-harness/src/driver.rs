@@ -14,10 +14,11 @@
 //!    to know which cases may share a daemon — which is exactly what `resourceGroup` says.
 //!
 //! So the case set is partitioned by [`ResourceGroup`] and each group gets its own driver
-//! function, across two binaries: `parity_conformance_runner` owns the config-only groups
-//! ([`ResourceGroup::None`], [`ResourceGroup::FsHeavy`] — the latter is significant
-//! filesystem work, explicitly *not* Docker) and `parity_conformance_docker` owns the
-//! Docker-backed ones ([`ResourceGroup::DockerShared`], [`ResourceGroup::DockerExclusive`]).
+//! function. A second, independent axis — [`Lane`] — partitions by what a case NEEDS
+//! (Docker? the pinned oracle?), which is what lets the hermetic and pinned-Docker
+//! majorities gate every pull request while only the oracle-dependent cases stay nightly.
+//! The two axes cross into the three test binaries `parity_hermetic`, `parity_docker` and
+//! `parity_differential`.
 //!
 //! **SC-013 is preserved.** `ResourceGroup` is a CLOSED set and every variant already has a
 //! driver, so adding a case with an existing group stays a pure data edit. Only introducing
@@ -29,10 +30,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::model::{CaseKind, ResourceGroup, TestCase};
+use crate::model::{CaseKind, OracleType, ResourceGroup, TestCase};
 
 use crate::HarnessError;
-use crate::evidence::{CaseVerdict, Outcome};
+use crate::evidence::{CaseVerdict, ChannelVerdict, Outcome};
 use crate::oracle::VerifiedOracle;
 use crate::report::{
     CaseResult, Cause, OracleInfo, RawPaths, ReportFragment, VerdictReport, now_rfc3339,
@@ -76,8 +77,7 @@ pub fn group_slug(group: ResourceGroup) -> &'static str {
     }
 }
 
-/// Whether a group needs the container runtime — i.e. whether its driver belongs in
-/// `parity_conformance_docker` rather than `parity_conformance_runner`.
+/// Whether a group needs the container runtime.
 ///
 /// `fs-heavy` is deliberately NOT Docker: per its model definition it is "significant
 /// filesystem operations, no Docker", so it stays with the config-only binary and gets the
@@ -109,6 +109,78 @@ pub fn default_concurrency(group: ResourceGroup) -> usize {
     }
 }
 
+/// Concurrency for one (lane, group) pair.
+///
+/// Identical to [`default_concurrency`] except for the hermetic config-only groups, which
+/// run eight at a time. A hermetic case is a bounded `deacon` invocation against its own
+/// temp workspace with no daemon, no reference process and no shared resource, so nothing
+/// serializes them but the historical default — and this lane runs on EVERY pull request,
+/// where 72 sub-second cases taken one at a time is over a minute of pure latency in the
+/// loop developers run most.
+///
+/// The Docker groups keep their existing numbers, which encode real daemon contention:
+/// raising those would trade a correctness property for wall clock.
+pub fn concurrency_for(lane: Lane, group: ResourceGroup) -> usize {
+    match (lane, group) {
+        (Lane::Hermetic, ResourceGroup::None | ResourceGroup::FsHeavy) => 8,
+        _ => default_concurrency(group),
+    }
+}
+
+/// Which lane a case can run in, decided by what it NEEDS rather than by what it is
+/// about.
+///
+/// The two axes are independent and both are prerequisites, not preferences: a case that
+/// runs the reference cannot run without the pinned oracle installed, and a case that
+/// creates a container cannot run without a daemon. Splitting on them is what lets the
+/// hermetic majority gate every pull request while the oracle-dependent majority stays
+/// nightly — and, crucially, it is why a fast lane never has to *skip* anything. A skip is
+/// indistinguishable from a pass; non-selection is visible in the lane's own definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lane {
+    /// No Docker and no oracle: a `spec-expectation` case in a config-only group. It
+    /// compares deacon against a DECLARED assertion, so it can run anywhere.
+    Hermetic,
+    /// Docker but no oracle: a `spec-expectation` or `invariant-metamorphic` case in a
+    /// Docker group. Its expectation is pinned in the record, so it needs a daemon but
+    /// not the reference.
+    Docker,
+    /// Needs the pinned oracle, with or without Docker: every `live-differential` case.
+    Differential,
+}
+
+impl Lane {
+    /// The stable slug, for diagnostics and artifact names.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Lane::Hermetic => "hermetic",
+            Lane::Docker => "docker",
+            Lane::Differential => "differential",
+        }
+    }
+
+    /// Whether this lane must resolve and verify the pinned oracle before running.
+    ///
+    /// Only [`Lane::Differential`] does. Acquiring it unconditionally is what made a
+    /// hermetic binary impossible: every machine without `@devcontainers/cli` installed
+    /// failed a lane whose cases never invoke it.
+    pub fn needs_oracle(self) -> bool {
+        matches!(self, Lane::Differential)
+    }
+}
+
+/// The lane a case belongs to. `live-differential` always needs the reference; anything
+/// else is decided by its resource group.
+pub fn lane_of(case: &TestCase) -> Lane {
+    if case.oracle_type == Some(OracleType::LiveDifferential) {
+        Lane::Differential
+    } else if needs_docker(group_of(case)) {
+        Lane::Docker
+    } else {
+        Lane::Hermetic
+    }
+}
+
 /// Every declarative case belonging to `group`, in the registry's id-sorted order.
 pub fn cases_in_group(cases: &[TestCase], group: ResourceGroup) -> Vec<TestCase> {
     let mut selected: Vec<TestCase> = cases
@@ -119,6 +191,19 @@ pub fn cases_in_group(cases: &[TestCase], group: ResourceGroup) -> Vec<TestCase>
         .collect();
     selected.sort_by(|a, b| a.id.cmp(&b.id));
     selected
+}
+
+/// Every declarative case in `lane` AND `group`, in id-sorted order — the selection one
+/// driver function runs.
+pub fn cases_in_lane_and_group(
+    cases: &[TestCase],
+    lane: Lane,
+    group: ResourceGroup,
+) -> Vec<TestCase> {
+    cases_in_group(cases, group)
+        .into_iter()
+        .filter(|c| lane_of(c) == lane)
+        .collect()
 }
 
 /// Owned, `'static` inputs a driver hands to each spawned case task.
@@ -138,8 +223,6 @@ pub struct DriverConfig {
     pub fixtures_root: PathBuf,
     /// Root the raw stdout/stderr artifacts and report fragments are written under.
     pub report_root: PathBuf,
-    /// Committed-snapshots root.
-    pub snapshots_root: PathBuf,
 }
 
 impl DriverConfig {
@@ -155,7 +238,6 @@ impl DriverConfig {
             oracle: self.oracle.as_ref(),
             fixtures_root: &self.fixtures_root,
             report_root: &self.report_root,
-            snapshots_root: &self.snapshots_root,
         }
     }
 }
@@ -237,8 +319,22 @@ pub async fn drive_group(
     cases: Vec<TestCase>,
     group: ResourceGroup,
 ) -> Result<GroupRun, HarnessError> {
+    // The lane is read off the cases rather than passed in: every case in one driver call
+    // belongs to one lane by construction (`cases_in_lane_and_group` selected them), and
+    // deriving it here keeps the concurrency decision at the single place that applies it.
+    let lane = cases.first().map(lane_of).unwrap_or(Lane::Differential);
+    drive_group_with_concurrency(cfg, cases, group, concurrency_for(lane, group)).await
+}
+
+/// [`drive_group`] with an explicit bound — the seam the concurrency unit tests use.
+async fn drive_group_with_concurrency(
+    cfg: Arc<DriverConfig>,
+    cases: Vec<TestCase>,
+    group: ResourceGroup,
+    concurrency: usize,
+) -> Result<GroupRun, HarnessError> {
     let started = Instant::now();
-    let concurrency = default_concurrency(group).max(1);
+    let concurrency = concurrency.max(1);
     let permits = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let mut set: tokio::task::JoinSet<CaseTaskResult> = tokio::task::JoinSet::new();
 
@@ -320,6 +416,23 @@ pub async fn drive_group(
                     )),
                     _ => failures.push(format!("{}: {}", verdict.case_id, summarize(&verdict))),
                 }
+                // A tolerance whose difference no longer reproduces FAILS, on the same
+                // footing as an un-allowlisted divergence.
+                //
+                // This is what makes the allowlist self-invalidating rather than a place
+                // differences go to be forgotten. The runner has always COMPUTED the stale
+                // set (`CaseVerdict::stale_allowed_differences`), but nothing acted on it
+                // here, so a tolerance outlived its difference silently — and a stale
+                // tolerance is strictly worse than none: it keeps a real, newly-appearing
+                // difference at that path excused forever.
+                if !verdict.stale_allowed_differences.is_empty() {
+                    failures.push(format!(
+                        "{}: stale tolerance(s) — the difference no longer reproduces, so \
+                         remove or re-characterize: {}",
+                        verdict.case_id,
+                        verdict.stale_allowed_differences.join(", ")
+                    ));
+                }
                 verdicts.push(verdict);
             }
             // FR-077b: attributed to the case, reported as that case's failure, group
@@ -383,11 +496,9 @@ pub fn emit(run: &GroupRun) -> Result<(), HarnessError> {
 /// aggregator's execution-completeness gate, and that must mean "it never ran", not "its
 /// groups happened to be empty".
 async fn write_fragment(cfg: &DriverConfig, results: Vec<CaseResult>) -> Result<(), HarnessError> {
-    // A fragment is the PARITY AGGREGATOR's input, and its identity is the oracle the run
-    // compared against — that is what makes two fragments comparable at all. A lane that
-    // resolves no reference (026's container pull-request lane, `oracle: None`) has no such
-    // identity, and is deliberately absent from `fixtures/parity-corpus/registry.json`, so
-    // no execution-completeness gate is waiting on a fragment from it.
+    // A fragment's identity is the oracle the run compared against — that is what makes
+    // two fragments comparable at all. A lane that resolves no reference (`oracle: None`)
+    // has no such identity.
     //
     // Skipping is therefore correct, but it is announced rather than silent: a lane that
     // stopped writing a fragment it OWED would otherwise look identical to one that never
@@ -579,6 +690,20 @@ fn raw_paths(case_id: &str, first_op: &str) -> RawPaths {
 /// Map a case verdict to a report-fragment case result (agree/allowed-difference pass;
 /// anything else fails with a cause).
 fn case_result(verdict: &CaseVerdict, raw: RawPaths) -> CaseResult {
+    // A stale tolerance fails the case in the FRAGMENT too, not only in the group's
+    // failure list — otherwise the recorded artifact says `pass` for a case the run
+    // failed on, and the report and the exit status disagree about what happened.
+    if !verdict.stale_allowed_differences.is_empty() {
+        return CaseResult::fail(
+            verdict.case_id.clone(),
+            Cause::Divergence,
+            Some(format!(
+                "stale tolerance(s): {}",
+                verdict.stale_allowed_differences.join(", ")
+            )),
+            raw,
+        );
+    }
     match verdict.overall {
         // `no-reference-for-platform` is a NON-BLOCKING coverage gap (no snapshot recorded
         // for THIS platform yet), never a divergence — consistent with the runner's
@@ -601,15 +726,53 @@ fn case_result(verdict: &CaseVerdict, raw: RawPaths) -> CaseResult {
     }
 }
 
-/// A compact, path-free summary of a case's diverging channels for the fragment.
+/// A compact summary of a case's diverging channels, NAMING the observable paths that
+/// diverged.
+///
+/// The paths are the whole point. `chan-image: Diverge` says a case failed; it does not say
+/// whether one label key differs or the entire image configuration does, so triage begins by
+/// re-running the case by hand to find out. Since the nightly ships red (#376, ~127
+/// occurrences concentrated in four path-valued fields), a summary that omits the path turns
+/// a work queue into noise — which is the state this suite exists to leave behind.
+///
+/// [`crate::compare`] already records them in the verdict's `detail`; this only stops
+/// discarding them. Paths are truncated to [`MAX_SUMMARIZED_PATHS`] with an explicit
+/// `+N more` rather than silently, so a summary never reads as complete when it is not.
 fn summarize(verdict: &CaseVerdict) -> String {
     verdict
         .channels
         .iter()
         .filter(|c| c.outcome != Outcome::Agree && c.outcome != Outcome::AllowedDifference)
-        .map(|c| format!("{}: {:?}", c.channel, c.outcome))
+        .map(|c| match diverging_paths(c) {
+            paths if paths.is_empty() => format!("{}: {:?}", c.channel, c.outcome),
+            paths => format!("{}: {:?} at {}", c.channel, c.outcome, paths.join(", ")),
+        })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+/// How many diverging paths a channel's summary names before it says `+N more`.
+const MAX_SUMMARIZED_PATHS: usize = 8;
+
+/// The observable paths a channel verdict diverged at, as `compare` recorded them.
+fn diverging_paths(channel: &ChannelVerdict) -> Vec<String> {
+    let Some(paths) = channel
+        .detail
+        .as_ref()
+        .and_then(|d| d.get("divergingPaths"))
+        .and_then(|p| p.as_array())
+    else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = paths
+        .iter()
+        .take(MAX_SUMMARIZED_PATHS)
+        .map(|p| p.as_str().unwrap_or_default().to_string())
+        .collect();
+    if paths.len() > MAX_SUMMARIZED_PATHS {
+        out.push(format!("+{} more", paths.len() - MAX_SUMMARIZED_PATHS));
+    }
+    out
 }
 
 /// The per-case bound the drivers run under, re-exported so a driver's diagnostics can
@@ -621,7 +784,7 @@ pub const fn case_bound() -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Operation, OracleType};
+    use crate::model::Operation;
 
     fn declarative(id: &str, group: Option<ResourceGroup>) -> TestCase {
         TestCase {
@@ -733,9 +896,28 @@ mod tests {
         assert_eq!(default_concurrency(ResourceGroup::FsHeavy), 1);
     }
 
+    #[test]
+    fn only_the_hermetic_lane_raises_config_only_concurrency() {
+        // A hermetic case shares nothing, so eight at a time is safe and is what keeps the
+        // pull-request lane fast.
+        assert_eq!(concurrency_for(Lane::Hermetic, ResourceGroup::None), 8);
+        assert_eq!(concurrency_for(Lane::Hermetic, ResourceGroup::FsHeavy), 8);
+        // Every other pair is unchanged: the Docker numbers encode daemon contention, and
+        // the differential lane runs a second CLI process per case.
+        assert_eq!(concurrency_for(Lane::Differential, ResourceGroup::None), 1);
+        assert_eq!(
+            concurrency_for(Lane::Docker, ResourceGroup::DockerShared),
+            4
+        );
+        assert_eq!(
+            concurrency_for(Lane::Docker, ResourceGroup::DockerExclusive),
+            1
+        );
+    }
+
     fn timing(group: &str, started: u128, finished: u128, cases: &[(&str, u128)]) -> TierTiming {
         TierTiming {
-            binary: "parity_conformance_docker".to_string(),
+            binary: "parity_docker".to_string(),
             group: group.to_string(),
             started_ms: started,
             finished_ms: finished,

@@ -171,8 +171,7 @@ pub async fn exec_oracle(
 /// [`crate::report_root`]). `bound` and `report_root` are explicit so callers —
 /// unit tests and hermetic integration tests alike — can inject a short bound and
 /// a temp artifact root instead of mutating process env (matching the crate's
-/// other explicit-root seams, [`crate::report::ReportFragment::write_under`] and
-/// [`crate::aggregate::run`]).
+/// other explicit-root seam, [`crate::report::ReportFragment::write_under`]).
 #[allow(clippy::too_many_arguments)]
 pub async fn run_and_capture(
     side: Side,

@@ -42,10 +42,44 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Unit tests (no Docker-dependent tests)
         run: cargo test --workspace --lib -- --test-threads=1
-      # NOTE: the release gate is fmt/clippy/tests only while the parity suite is being
-      # rebuilt. The full pinned scenario suite (hermetic + Docker, no oracle) lands here
-      # once the three parity binaries exist; differential-vs-oracle status stays a manual
-      # pre-tag check by design.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      # The PINNED scenario suite: every parity case whose expectation lives in its own
+      # record. `parity_hermetic` needs nothing; `parity_docker` needs the daemon this
+      # runner already has. Neither needs `@devcontainers/cli`, which is what makes them
+      # a release gate rather than a nightly.
+      #
+      # Differential-vs-oracle status is deliberately NOT gated here. It compares against
+      # a third-party binary at a pin we do not control, so a republish upstream would
+      # block a release for a reason that says nothing about this release. It runs nightly
+      # (`parity.yml`) and is checked by hand before tagging.
+      # The same EXPLICIT engine precondition `ci.yml`'s MVP-integration lane carries, for
+      # the same reason: `parity_docker`'s case data pins exporter capabilities MEASURED on
+      # a modern engine (`--output type=docker,dest=…`, `--cache-to`), and the runner's
+      # preinstalled Docker is older than that. Without this, a release could be blocked by
+      # a "divergence" that is really the substrate. Pinned, never floating — `29.6.2` is
+      # the engine those pins were measured on.
+      - name: Pin a modern Docker engine (capability precondition)
+        uses: docker/setup-docker-action@v5
+        with:
+          version: v29.6.2
+          set-host: true
+      - name: Verify the pinned engine and its exporter capability
+        run: |
+          set -euo pipefail
+          docker version
+          probe="$(mktemp -d)"
+          printf 'FROM alpine:3.18\n' > "$probe/Dockerfile"
+          if ! docker buildx build --output "type=docker,dest=$probe/probe.tar" "$probe"; then
+            echo "::error::MACHINERY PRECONDITION FAILED (not a parity divergence): this engine cannot export \`type=docker,dest=…\`. The pinned parity cases assume it. Fix the engine pin above; do not weaken the case data."
+            exit 1
+          fi
+          test -s "$probe/probe.tar"
+          echo "engine exporter capability verified"
+      - name: Build + pre-pull declarative-fixture images
+        run: ./scripts/parity/prepull-fixture-images.sh
+      - name: Pinned parity scenarios (hermetic + Docker, no oracle)
+        run: cargo nextest run -E 'binary(=parity_hermetic) | binary(=parity_docker)'
 
   create-release:
     name: Create Release

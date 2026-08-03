@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::model::OracleType;
-use crate::snapshot::Provenance;
+use crate::provenance::Provenance;
 
 use crate::HarnessError;
 
@@ -326,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_snapshot_is_atomic_and_leaves_no_trailing_bytes() {
-        use crate::snapshot::Provenance;
+        use crate::provenance::Provenance;
         let dir = tempfile::tempdir().expect("tempdir");
         let mut prov = Provenance {
             oracle_version: "0.87.0".to_string(),

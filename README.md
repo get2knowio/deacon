@@ -272,12 +272,17 @@ match the pinned [containers.dev spec](https://containers.dev), and does it matc
 pinned reference CLI (`@devcontainers/cli` v0.87.0)? Those can disagree — and
 sometimes deacon differs from both on purpose.
 
-**[docs/PARITY_AND_CONFORMANCE.md](docs/PARITY_AND_CONFORMANCE.md)** explains the
-machinery that keeps those questions separate and answerable: the parity harness
-(which *finds* differences) versus the conformance registry (which *explains*
-them), what **divergence**, **gap**, **waiver**, and **out of scope** each mean,
-which of the two CI gates actually blocks a release, and what to do when you find a
-difference.
+The instrument is one sentence: run both CLIs over the same scenarios, normalize
+the outputs, and diff them. A difference is either a bug (an issue) or a
+documented choice (one allowlist entry), and every wild bug becomes a scenario
+before it is fixed.
+
+- **[parity/SPEC_STATUS.md](parity/SPEC_STATUS.md)** — the behavior-by-behavior
+  answer, each row stating its evidence. Five plain statuses, including one for
+  the case that trips people up: deacon following the spec where the reference
+  deviates is the *reference's* deviation, not work deacon owes.
+- **[docs/PARITY_AND_CONFORMANCE.md](docs/PARITY_AND_CONFORMANCE.md)** — how it
+  works and what **divergence**, **waiver** and **out of scope** each mean.
 
 Start there if you've seen those words in a PR and weren't sure whether they meant
 the same thing.
@@ -656,7 +661,9 @@ When adding new tests, classify them into the appropriate group:
 
 4. **Is it an end-to-end integration test?**
    - Yes (validates complete workflow) → `smoke`
-   - Yes (compares with upstream CLI) → `parity`
+   - Yes (compares with the upstream CLI) → **not a test function at all.** Add a
+     scenario record to `parity/cases/<area>.json`; the two
+     `--profile parity` runners pick it up from its `resourceGroup`.
 
 **Audit test assignments:**
 ```bash

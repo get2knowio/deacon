@@ -1,0 +1,7 @@
+{
+	"name": "ConformanceStateComposeSidecarVolume",
+	"dockerComposeFile": "../docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"containerEnv": { "CV_ENV": "yes" }
+}

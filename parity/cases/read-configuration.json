@@ -1,0 +1,3684 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-errors-decl-bad-config-path",
+      "behaviors": [
+        "bhv-readconfig-bad-config-path"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/nope.json"
+          ],
+          "fixtures": [
+            "fx-errors-bad-config-path"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Both CLIs reject an explicit --config that does not exist (a both-reject agreement; the migrated waiver wvr-bad-config-path was retired 2026-08-01 as tolerating no difference). Migrated as a live differential: the two CLIs agree on the rejection, so the exit-code channel compares clean. Paired with `case-errors-decl-bad-config-path-decision`, which pins deacon's own rejection: this case alone would assert only that the two CLIs agree, which is not the same as asserting that they reject (023 T072)."
+    },
+    {
+      "id": "case-errors-decl-bad-config-path-decision",
+      "behaviors": [
+        "bhv-readconfig-bad-config-path"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/nope.json"
+          ],
+          "fixtures": [
+            "fx-errors-bad-config-path"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "nonZero": true
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "Configuration file not found"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Decision half of the migrated `parity_corpus_errors::bad-config-path` unit (023 T036/T072). The unit's `both-reject` waiver asserts TWO things — that deacon rejects an explicit --config that does not exist, AND that the reference agrees — and one oracleType cannot express both. The sibling live-differential case `case-errors-decl-bad-config-path` keeps the cross-CLI agreement; this case PINS deacon's own rejection and its diagnostic, so the rejection cannot quietly evaporate if both CLIs ever start accepting the input. The two are variants of one behavior, distinguished by oracle type."
+    },
+    {
+      "id": "case-errors-decl-duplicate-keys",
+      "behaviors": [
+        "bhv-readconfig-duplicate-keys"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-duplicate-keys"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Both CLIs accept duplicate top-level JSON keys with last-wins semantics and must resolve to the same document (a both-accept agreement; the migrated waiver wvr-duplicate-keys was retired 2026-08-01 as tolerating no difference). The structured-output channel is compared under the declarative normalizer, which — unlike the legacy `prune` path — does NOT drop null/empty values (research D3); differences it surfaces are characterized in US4/T064, never re-hidden."
+    },
+    {
+      "id": "case-errors-decl-extends-cycle",
+      "behaviors": [
+        "bhv-readconfig-extends-cycle-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-extends-cycle"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "nonZero": true
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "Cycle detected in extends chain"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "deacon rejects a cyclic extends chain where the reference leniently accepts it — an ahead-of-spec capability characterized by ext-extends-resolution (the duplicate waiver wvr-extends-cycle was retired 2026-08-01). Expressed as a spec-expectation on deacon's own decision: the exit-code channel is scalar, so a live-differential divergence there would need a bare-channel tolerance, which is rejected as a global ignore (FR-032)."
+    },
+    {
+      "id": "case-errors-decl-extends-missing",
+      "behaviors": [
+        "bhv-readconfig-extends-missing-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-extends-missing"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "nonZero": true
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "Configuration file not found"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "deacon rejects an extends target that does not exist where the reference leniently accepts it — characterized by ext-extends-resolution (the duplicate waiver wvr-extends-missing was retired 2026-08-01). See case-errors-decl-extends-cycle for why this is a spec-expectation."
+    },
+    {
+      "id": "case-errors-decl-malformed-json",
+      "behaviors": [
+        "bhv-readconfig-malformed-jsonc-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-malformed-json"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "nonZero": true
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "matches": "JSONC parsing error[^\\n]*\\n?$"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "deacon rejects a hard JSONC syntax error where the reference leniently recovers — waiver wvr-malformed-json (deacon-stricter). See case-errors-decl-extends-cycle for why this is a spec-expectation. The stderr assertion is ANCHORED at end-of-text rather than a bare `contains`: the parse diagnostic must be the LAST thing deacon writes, so trailing bytes after it — a stray print, a partially written second error, an un-flushed buffer landing late — are a difference this case notices. A `contains` cannot see appended output at all, which made chan-stderr inert by construction (024 US6, reg-stderr-diagnostic-truncated)."
+    },
+    {
+      "id": "case-errors-decl-missing-config",
+      "behaviors": [
+        "bhv-readconfig-missing-config"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Both CLIs reject a workspace with no devcontainer configuration (a both-reject agreement; the migrated waiver wvr-missing-config was retired 2026-08-01 as tolerating no difference). Paired with `case-errors-decl-missing-config-decision`, which pins deacon's own rejection: this case alone would assert only that the two CLIs agree, which is not the same as asserting that they reject (023 T072)."
+    },
+    {
+      "id": "case-errors-decl-missing-config-decision",
+      "behaviors": [
+        "bhv-readconfig-missing-config"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "nonZero": true
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "Configuration file not found"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Decision half of the migrated `parity_corpus_errors::missing-config` unit (023 T036/T072). The unit's `both-reject` waiver asserts TWO things — that deacon rejects a workspace with no devcontainer configuration, AND that the reference agrees — and one oracleType cannot express both. The sibling live-differential case `case-errors-decl-missing-config` keeps the cross-CLI agreement; this case PINS deacon's own rejection and its diagnostic, so the rejection cannot quietly evaporate if both CLIs ever start accepting the input. The two are variants of one behavior, distinguished by oracle type."
+    },
+    {
+      "id": "case-errors-decl-unknown-field-preserved",
+      "behaviors": [
+        "bhv-readconfig-unknown-field-preserved"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-unknown-field-preserved"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Both CLIs accept an unknown top-level field and preserve it verbatim (a both-accept agreement; the migrated waiver wvr-unknown-field-preserved was retired 2026-08-01 as tolerating no difference). See the D3 note on case-errors-decl-duplicate-keys for the structured-output channel."
+    },
+    {
+      "id": "case-errors-decl-wrong-type-features",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-features-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-wrong-type-features"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "nonZero": true
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "expected an object"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "deacon rejects a `features` value that is a bare string where the reference accepts it — waiver wvr-wrong-type-features (deacon-stricter)."
+    },
+    {
+      "id": "case-errors-decl-wrong-type-forwardports",
+      "behaviors": [
+        "bhv-readconfig-wrong-type-forwardports-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-wrong-type-forwardports"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "nonZero": true
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "invalid type: string"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "deacon rejects a `forwardPorts` value that is a bare string where the reference accepts it — waiver wvr-wrong-type-forwardports (deacon-stricter)."
+    },
+    {
+      "id": "case-merged-decl-bare-base-node-feature",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-bare-base-node-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `bare-base-node-feature`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-build-args-subst",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-build-args-subst"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `build-args-subst`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-compose-array",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-compose-array"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `compose-array`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-compose-postgres",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-compose-postgres"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `compose-postgres`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-containerenv-subst",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-containerenv-subst"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `containerenv-subst`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-dependson-autoinstall",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-dependson-autoinstall"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `dependson-autoinstall`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-dockerfile-build",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-dockerfile-build"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `dockerfile-build`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-dotnet-mounts",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-dotnet-mounts"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `dotnet-mounts`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-extends-child",
+      "behaviors": [
+        "bhv-readconfig-extends-merged"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-extends-child"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "image": "mcr.microsoft.com/devcontainers/base:bookworm"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `extends-child`, and the one unit whose recorded expectation is a REFERENCE rejection: deacon resolves the full `extends` chain eagerly under --include-merged-configuration where the reference errors — the ahead-of-spec capability recorded as ext-extends-resolution and characterized by that record alone (the duplicate waiver wvr-extends-child-merged was retired 2026-08-01). Expressed as a spec-expectation, NOT a live-differential: a differential asserts the two sides are EQUAL, which both inverts this expectation into a guaranteed failure and pins nothing about deacon's own side. It pins deacon succeeding and resolving the base image from the extends chain — the recorded `image` signal — so the ahead-of-spec resolution cannot silently regress (023 T072). The reference-side rejection stays characterized by ext-extends-resolution."
+    },
+    {
+      "id": "case-merged-decl-feature-order",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-feature-order"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `feature-order`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-go-minimal",
+      "behaviors": [
+        "bhv-readconfig-config-file-path",
+        "bhv-readconfig-merged-configuration",
+        "bhv-readconfig-workspace-folder-subpath",
+        "bhv-readconfig-workspace-section-shape"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-go-minimal"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `go-minimal`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-init-privileged",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-init-privileged"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `init-privileged`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-lifecycle-arrays",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration",
+        "bhv-readconfig-merged-lifecycle-slots"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-lifecycle-arrays"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `lifecycle-arrays`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-lifecycle-mixed",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration",
+        "bhv-readconfig-merged-lifecycle-slots"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-lifecycle-mixed"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `lifecycle-mixed`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-mounts-bind-localenv",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-mounts-bind-localenv"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `mounts-bind-localenv`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-name-subst",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-name-subst"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `name-subst`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-node-ts",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-node-ts"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `node-ts`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-object-form-metadata",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-object-form-metadata"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `object-form-metadata`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-ports-mixed",
+      "behaviors": [
+        "bhv-readconfig-features-configuration-omitted-when-none",
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-ports-mixed"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `ports-mixed`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-python-features",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-python-features"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `python-features`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-ruby-node-feature",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-ruby-node-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `ruby-node-feature`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-universal-jsonc",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-universal-jsonc"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `universal-jsonc`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-user-mapping",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-user-mapping"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `user-mapping`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-merged-decl-workspacefolder-custom",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-tier1-workspacefolder-custom"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `workspacefolder-custom`: the same workspace and the same behavior, distinguished only by the `--include-merged-configuration` input shape. A variant adds a case, never a behavior (T039/SC-005). The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-readconfig-boundary-empty-collections",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-boundary-empty-collections"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 boundary class: every collection-valued field is present and EMPTY — `features`, `forwardPorts`, `containerEnv`, `remoteEnv`, `mounts`, `runArgs`, `customizations`. An empty collection is the edge of the accepted domain and is distinct from an omitted field, which is exactly the distinction the `null_preserving` rule exists to keep visible. STRENGTHENED BY #398, which is what made the strengthening possible: until deacon wrapped the eleven bare-collection properties in `Option`, it emitted these keys whether or not the author wrote them, `drop_absent_optional` elided them from deacon's side, and observing `chan-structured-output` here would have compared a document with the fields removed — the case would have been green while proving nothing about the very boundary it names. deacon now emits exactly the authored eight and the rule no longer touches this block, so the channel is added and the boundary is actually compared. Measured at oracle 0.87.0: both CLIs emit the same ten keys, with no tolerance."
+    },
+    {
+      "id": "case-readconfig-compose-depends-overlay",
+      "behaviors": [
+        "bhv-readconfig-feature-resolution-order"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration",
+            "--additional-features",
+            "{\"./features/base-tool\":{}}"
+          ],
+          "fixtures": [
+            "fx-readconfig-compose-depends-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "featuresConfiguration": {
+                "featureSets": [
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/base-tool"
+                    }
+                  },
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/needs-base-tool"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes `config-source=compose` x `features=multiple-dependency-order`. The Compose counterpart of `case-readconfig-overlay-dockerfile-depends`: the configuration declares only `needs-base-tool`, and `base-tool` — which it `installsAfter` — arrives ONLY through `--additional-features`, so dependency order has to be decided across the configuration and the overlay together. Positional for the same reason as its Dockerfile sibling. Its existence is the pairwise question stated plainly: the Dockerfile case proves nothing about whether a Compose-shaped configuration resolves the same way, which is why the pair was counted as a hole rather than assumed covered."
+    },
+    {
+      "id": "case-readconfig-compose-lockfile-merged",
+      "behaviors": [
+        "bhv-readconfig-merged-configuration"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-compose-lockfile-merged"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "name": "compose-lockfile-merged",
+                "service": "app",
+                "workspaceFolder": "/workspace",
+                "remoteUser": "root",
+                "features": {
+                  "ghcr.io/devcontainers/features/git:1.3.2": {}
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes `features=lockfile` x `layering=image-metadata`, the last pair reachable only through the merged document. The merged configuration for a Compose project layers the pinned Feature's own metadata onto the authored configuration, and the assertion names the Compose identity (`service`, `workspaceFolder`) beside the Feature pin so a merge that resolved the Feature while losing the service binding could not pass. The Feature's contributed `customizations` are deliberately NOT asserted: they are the FEATURE's published content, they change when the pinned version's metadata changes upstream, and a case whose verdict moved with that would be measuring the Feature rather than the merge. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
+    },
+    {
+      "id": "case-readconfig-compose-lockfile-overlay",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--merge-config",
+            "${WORKSPACE}/overlay.json"
+          ],
+          "fixtures": [
+            "fx-readconfig-compose-lockfile-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "name": "compose-lockfile-overlaid",
+                "service": "app",
+                "features": {
+                  "ghcr.io/devcontainers/features/git:1.3.2": {}
+                },
+                "containerEnv": {
+                  "FROM_OVERLAY": "1"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes three pairs at once — `config-source=compose` x `features=lockfile`, `config-source=compose` x `layering=cli-overlay`, and `features=lockfile` x `layering=cli-overlay`. A Compose project whose Feature is pinned by a committed `devcontainer-lock.json`, read through a merge-fragment overlay. The assertion keeps the pinned Feature id alongside the overlaid `name`: an overlay that silently dropped the Feature set while applying its own keys would pass an assertion naming only the overlaid value, and dropping Features is exactly the failure a Compose-plus-lockfile read invites. Reading reports the DECLARED Feature set — consuming the lockfile belongs to `upgrade` and `up` — so the case makes the combination reachable without claiming the read resolves the pin. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
+    },
+    {
+      "id": "case-readconfig-compose-single-overlay",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration",
+            "--merge-config",
+            "${WORKSPACE}/overlay.json"
+          ],
+          "fixtures": [
+            "fx-readconfig-compose-single-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "name": "compose-single-overlaid",
+                "service": "app"
+              },
+              "featuresConfiguration": {
+                "featureSets": [
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/solo-tool"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes `features=single` x `layering=cli-overlay`. One Feature, one merge fragment: the fragment renames the configuration and the single declared Feature survives untouched. The pairing matters because a merge fragment and a Feature set are the two things an overlay can most easily get wrong together — replacing the base wholesale would drop the Feature, and deep-merging the `features` map wrongly would duplicate it — so the assertion names both the overlaid `name` and the surviving Feature id rather than either alone."
+    },
+    {
+      "id": "case-readconfig-decl-basic",
+      "behaviors": [
+        "bhv-readconfig-basic-parse",
+        "bhv-readconfig-config-file-path"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/basic/devcontainer.jsonc"
+          ],
+          "fixtures": [
+            "fx-readconfig-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "deacon and the pinned reference resolve the same configuration document for the `basic` fixture (migrated from parity_read_configuration). The workspace folder is the PARENT of the config directory, matching both CLIs' --workspace-folder/--config expectations in the legacy runner."
+    },
+    {
+      "id": "case-readconfig-decl-with-variables",
+      "behaviors": [
+        "bhv-readconfig-basic-parse",
+        "bhv-readconfig-config-file-path"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/with-variables/devcontainer.jsonc"
+          ],
+          "fixtures": [
+            "fx-readconfig-with-variables"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "deacon and the pinned reference resolve the same configuration document for the `with-variables` fixture (migrated from parity_read_configuration). The workspace folder is the PARENT of the config directory, matching both CLIs' --workspace-folder/--config expectations in the legacy runner."
+    },
+    {
+      "id": "case-readconfig-discovery-named-subfolder",
+      "behaviors": [
+        "bhv-readconfig-discovery-locations"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-discovery-subfolder"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "name": "discovery-named-subfolder"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-027 discovery, direction half: the spec lists `.devcontainer/<folder>/devcontainer.json` (one level deep) as a discovery location, and deacon finds it with no `--config`. Pinning deacon's own side matters because the sibling differential only shows that the two CLIs DISAGREE — not which of them searched the location the spec names (the 023 T072 lesson)."
+    },
+    {
+      "id": "case-readconfig-discovery-named-subfolder-differential",
+      "behaviors": [
+        "bhv-readconfig-discovery-locations"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-discovery-subfolder"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-discovery-locations",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "The reference requires an explicit --config for a one-level-deep `.devcontainer/<folder>/devcontainer.json`, so it exits non-zero where deacon resolves the spec-named location and exits 0.",
+          "waiverId": "wvr-discovery-named-subfolder"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-027 discovery, differential half: the pinned reference does NOT search `.devcontainer/<folder>/devcontainer.json` without an explicit `--config` and exits non-zero where deacon resolves the configuration. The direction is pinned by the spec-expectation twin; the tolerance here records that the difference is the reference being blind to a location the spec names, not deacon inventing one."
+    },
+    {
+      "id": "case-readconfig-discovery-non-location",
+      "behaviors": [
+        "bhv-readconfig-discovery-locations"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-discovery-nonlocation"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "nonZero": true
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "Configuration file not found"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-027, the negative half that makes the positive ones mean something: a plain `devcontainer.json` at the workspace ROOT is NOT one of the three discovery locations, so a workspace carrying only that file has no discoverable configuration. Without this case 'discovery works' would be satisfied by an implementation that searched everywhere."
+    },
+    {
+      "id": "case-readconfig-discovery-root-dotfile",
+      "behaviors": [
+        "bhv-readconfig-discovery-locations"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-discovery-dotfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-027 discovery: `.devcontainer.json` at the workspace ROOT is one of the three locations the spec names, and both CLIs find it. The differential is on the exit code alone, which is what 'the location was searched' actually shows; the resolved document is pinned by the sibling spec-expectation cases."
+    },
+    {
+      "id": "case-readconfig-dockerfile-declared-order-overlay",
+      "behaviors": [
+        "bhv-readconfig-feature-resolution-order"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration",
+            "--merge-config",
+            "${WORKSPACE}/overlay.json"
+          ],
+          "fixtures": [
+            "fx-readconfig-dockerfile-declared-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "featuresConfiguration": {
+                "featureSets": [
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/beta-tool"
+                    }
+                  },
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/alpha-tool"
+                    }
+                  }
+                ]
+              },
+              "configuration": {
+                "containerEnv": {
+                  "FROM_OVERLAY": "1"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes `config-source=dockerfile` x `features=multiple-declared-order` and `features=multiple-declared-order` x `layering=cli-overlay`. Two local Features with no dependency between them, so the order is DECLARED rather than derived: `overrideFeatureInstallOrder` names `beta-tool` first while the `features` map lists `alpha-tool` first, and the resolved order must follow the override. The array assertion is positional for the reason `case-readconfig-overlay-dockerfile-depends` records — a `jsonSubset` over an array matches without regard to order, so a non-positional assertion would pass for an implementation that ignored the override entirely. The overlay is a merge fragment rather than `--additional-features` so the declared order stays two Features long and the case measures ordering, not arrival."
+    },
+    {
+      "id": "case-readconfig-dockerfile-lockfile-extends",
+      "behaviors": [
+        "bhv-readconfig-extends-merged"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-dockerfile-lockfile-extends"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "name": "dockerfile-lockfile-child",
+                "build": {
+                  "dockerfile": "Dockerfile"
+                },
+                "features": {
+                  "ghcr.io/devcontainers/features/git:1.3.2": {}
+                },
+                "remoteUser": "root"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes `config-source=dockerfile` x `features=lockfile` and `features=lockfile` x `layering=extends-chain`. The child document carries nothing but `extends` and a `name`; the Dockerfile build, the version-pinned Feature and `remoteUser` all reach the merged result through the base. Asserting all four together is the point — a chain that resolved the child's own keys but dropped the base's `features` would satisfy an assertion naming only `name`, and that is the failure mode an extends chain carrying a pinned Feature actually has. `--include-merged-configuration` is required because a plain read ECHOES `extends` rather than resolving it, which is deacon's characterized behavior, not an accident of this fixture. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
+    },
+    {
+      "id": "case-readconfig-duplicate-feature-one-document-rejected",
+      "behaviors": [
+        "bhv-features-duplicate-in-one-document-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-duplicate-feature-one-document"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "declares the same Feature twice"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Characterizes what deacon does TODAY, which the spec says is wrong. `feature-dependencies.md` defines the two entries as distinct Features (§Definition: Feature Equality), supplies an oldest-tag-first tie-break for exactly this collision (§Definition: Round Stable Sort), and states that a single Feature may be installed more than once (§Feature authorship); oracle 0.87.0 accepts the document and resolves both digests. So this case is no longer evidence of a deliberate strictness choice — it is the regression guard on a known nonconformance, backed by gap-features-duplicate-in-one-document and tracked at https://github.com/get2knowio/deacon/issues/430. It is EXPECTED to fail when the fix lands; that failure is how the fix announces itself, at which point the assertions become the spec's (both entries accepted, installed oldest tag first) and the gap record is deleted in the same change. Both the exit code and the diagnostic stay asserted meanwhile: while deacon does reject, a rejection that does not say WHICH two keys collided leaves the author hunting through a Feature map. The retired wvr-features-duplicate-in-one-document is deliberately not replaced — it waived a divergence deacon is on the wrong side of."
+    },
+    {
+      "id": "case-readconfig-extends-compose-features",
+      "behaviors": [
+        "bhv-readconfig-extends-merged"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-extends-compose-features"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "dockerComposeFile": "docker-compose.yml",
+                "service": "app",
+                "workspaceFolder": "/workspace",
+                "features": {
+                  "./features/first": {},
+                  "./features/second": {}
+                },
+                "overrideFeatureInstallOrder": [
+                  "./features/second",
+                  "./features/first"
+                ],
+                "containerEnv": {
+                  "LAYER": "child",
+                  "FROM_BASE": "yes"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-readconfig-extends-chain-compose-declared-order`: a chain whose BASE link declares the Compose project and whose CHILD adds a declared-order Feature set. The assertion pins all three interacting facts at once — the Compose fields survive the merge from the base, the Feature map and its explicit install order survive from the child, and the child's `containerEnv` wins key-wise without discarding the base's keys."
+    },
+    {
+      "id": "case-readconfig-extends-dockerfile-depends",
+      "behaviors": [
+        "bhv-readconfig-extends-merged"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-extends-dockerfile-depends"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "build": {
+                  "dockerfile": "Dockerfile",
+                  "args": {
+                    "VARIANT": "3.19"
+                  }
+                },
+                "features": {
+                  "./features/base-tool": {},
+                  "./features/needs-base-tool": {}
+                },
+                "containerEnv": {
+                  "LAYER": "child",
+                  "FROM_BASE": "yes"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-readconfig-extends-chain-dockerfile-dependency-order`. The parent link declares the Dockerfile build AND one Feature; the child declares a second Feature that `installsAfter` the parent's. The assertion pins that the merged Feature map is assembled across the WHOLE chain before any ordering question is asked — an implementation that sorted the child's map alone would produce a set missing the parent's contribution and still look ordered."
+    },
+    {
+      "id": "case-readconfig-extends-feature-version-override",
+      "behaviors": [
+        "bhv-extends-feature-version-override"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-extends-feature-version-override"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "features": {
+                  "ghcr.io/devcontainers/features/git:1.3.8": {
+                    "ppa": true
+                  },
+                  "ghcr.io/devcontainers/features/node:1.6.1": {}
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Regression evidence for #411, and it pins three things one assertion at a time. The child's `git:1.3.8` is present, so the version bump took effect. The base's `ppa: true` is still on it, so a bare version bump does not discard the options the base configured. The base's unrelated `node:1.6.1` survives, so overriding is not confused with replacing the whole map. What CANNOT be asserted by a subset is the absence of the base's `git:1.3.2` — a jsonSubset match ignores extra keys — which is exactly the failure this case exists to catch, so the unit tests in `config.rs` assert the key SET and the ordering; this case pins the end-to-end shape those tests cannot reach."
+    },
+    {
+      "id": "case-readconfig-extends-merge-precedence",
+      "behaviors": [
+        "bhv-readconfig-extends-merged"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-extends-precedence"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "image": "alpine:3.19",
+                "remoteUser": "child-user",
+                "containerEnv": {
+                  "LAYER": "child",
+                  "FROM_BASE": "yes",
+                  "FROM_MIDDLE": "yes",
+                  "FROM_CHILD": "yes"
+                },
+                "postCreateCommands": [
+                  "echo from-middle"
+                ],
+                "onCreateCommands": [
+                  "echo base-on-create"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-031 merge precedence over a THREE-link chain, where two links is not enough to distinguish 'the child wins' from 'the last file read wins'. `LAYER` is set at every link and the child's value survives; keys unique to a link all survive; `postCreateCommand` comes from the middle link because the child does not declare one, and `onCreateCommand` from the base because neither of the other two does. The union of `forwardPorts` is checked by its own assertion path rather than asserted as an ordered array, which a subset match cannot pin."
+    },
+    {
+      "id": "case-readconfig-lockfile-present",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upgrade-overlay-lockfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "features": {
+                  "ghcr.io/devcontainers/features/git:1.3.2": {}
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "A workspace whose Features are already pinned by a committed `devcontainer-lock.json`. Reading the configuration reports the DECLARED Feature set — resolution against the lockfile belongs to `upgrade` and `up`, not to a configuration read — so this case is what makes the `lockfile` value reachable under `read-configuration` without claiming the read consumes it. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
+    },
+    {
+      "id": "case-readconfig-malformed-json-differential",
+      "behaviors": [
+        "bhv-readconfig-malformed-jsonc-rejected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-errors-malformed-json"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-malformed-jsonc-rejected",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon rejects a hard JSONC syntax error at parse time; the reference tolerates it.",
+          "waiverId": "wvr-malformed-json"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The differential half of the migrated `malformed-json` unit. Its spec-expectation twin (`case-errors-decl-malformed-json`) pins that deacon rejects a hard JSONC syntax error; this half records that the reference does not, so the pair states BOTH the direction and the difference rather than either alone."
+    },
+    {
+      "id": "case-readconfig-null-empty-omitted",
+      "behaviors": [
+        "bhv-readconfig-authored-null-omitted-collapsed"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-null-empty-omitted"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "nullEmptyOmitted": {
+                "name": "omitted",
+                "forwardPorts": "empty",
+                "containerEnv": "empty",
+                "image": "present",
+                "mounts": "omitted"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-055, deacon's side pinned outright. Four states in one document: an authored `null`, two authored empty collections, a populated property, and `mounts`, which the configuration does NOT author — named in the fixture's `.conformance-observed-properties` sidecar, because nothing inside a document can name a property that is not in it. UPDATED BY #398: the three collection states now match the reference — `forwardPorts` and `containerEnv` are emitted because the author wrote them, and the unauthored `mounts` reports `omitted` where it previously reported `empty`, which WAS the defect. `name: \"omitted\"` is what remains: the author wrote `null` and deacon cannot tell that from an omission. Pinning deacon's side means the differential below cannot lose the direction if the difference ever stops reproducing."
+    },
+    {
+      "id": "case-readconfig-null-empty-omitted-differential",
+      "behaviors": [
+        "bhv-readconfig-authored-null-omitted-collapsed"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-us5-null-empty-omitted"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-authored-null-omitted-collapsed",
+          "context": [],
+          "observablePath": "chan-structured-output.configuration.name",
+          "rationale": "The author wrote `\"name\": null`. The reference echoes it; deacon now omits it, because #398 made unset optionals skip serialization and deacon holds an authored null and an omission in the same `None`. This is the null-vs-omitted half of the defect, which that fix deliberately left open — the boundary moved rather than closed: before the fix both CLIs emitted `null` here and agreed.",
+          "waiverId": "wvr-readconfig-authored-empty-omitted"
+        },
+        {
+          "behavior": "bhv-readconfig-authored-null-omitted-collapsed",
+          "context": [],
+          "observablePath": "chan-structured-output.nullEmptyOmitted.name",
+          "rationale": "The same difference stated over the derived FR-055 field: the reference reports `null` for the authored null, deacon reports `omitted`. Named separately from `configuration.name` because the derived field is what makes the three-state distinction legible, and a tolerance on the raw key alone would leave the classification uncompared.",
+          "waiverId": "wvr-readconfig-authored-empty-omitted"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The cross-CLI half of FR-055, and the case the 024 US5 normalizer narrowing exists to make possible: while `drop_absent_optional` ran on both sides, all three states normalized to 'absent on both sides' and this comparison was green while proving nothing. UPDATED BY #398, which retired that rule on the `configuration` block entirely — nothing is compensated here now, so every tolerance below names a difference the two CLIs really produce. THREE TOLERANCES WERE DELETED, not narrowed: `configuration.forwardPorts`, `configuration.containerEnv` and `nullEmptyOmitted.mounts` stopped reproducing once deacon began emitting only what the author wrote, and a tolerance whose difference no longer reproduces is reported STALE by design. The two that remain both concern the authored `\"name\": null`, stated on the raw key and on the derived FR-055 classification, because a tolerance on the raw key alone would leave the classification uncompared."
+    },
+    {
+      "id": "case-readconfig-overlay-dockerfile-depends",
+      "behaviors": [
+        "bhv-readconfig-feature-resolution-order"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration",
+            "--additional-features",
+            "{\"./features/base-tool\":{}}"
+          ],
+          "fixtures": [
+            "fx-readconfig-dockerfile-depends-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "featuresConfiguration": {
+                "featureSets": [
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/base-tool"
+                    }
+                  },
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/needs-base-tool"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Covers the high-risk triple `hrt-readconfig-cli-overlay-dockerfile-dependency-order`. The configuration declares only `needs-base-tool`; `base-tool`, which it `installsAfter`, arrives ONLY through `--additional-features`. The stdout assertion pins the resolved order positionally — a `jsonSubset` over an array matches without regard to order, so it alone would pass for an implementation that appended the overlay after the declared set instead of resolving both together."
+    },
+    {
+      "id": "case-readconfig-overlay-dockerfile-depends-order",
+      "behaviors": [
+        "bhv-readconfig-feature-resolution-order"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read-order",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration",
+            "--additional-features",
+            "{\"./features/base-tool\":{}}"
+          ],
+          "fixtures": [
+            "fx-readconfig-dockerfile-depends-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read-order",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-read-order",
+          "assertion": {
+            "matches": "\"userFeatureId\"\\s*:\\s*\"\\./features/base-tool\"[\\s\\S]*\"userFeatureId\"\\s*:\\s*\"\\./features/needs-base-tool\""
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The ORDER half of the triple case above, kept separate because it needs a different channel: `jsonSubset` over an array is an order-insensitive containment check by design, so pinning that the dependency arrives BEFORE its dependant has to be done on the raw document. A regex over stdout is the narrowest assertion that expresses 'this identifier precedes that one'."
+    },
+    {
+      "id": "case-readconfig-overlay-image-merge",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--merge-config",
+            "${WORKSPACE}/overlay.json"
+          ],
+          "fixtures": [
+            "fx-readconfig-overlay-image-merge"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "name": "overlay-name",
+                "image": "alpine:3.19",
+                "remoteUser": "root",
+                "containerEnv": {
+                  "FROM_OVERLAY": "1"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes the `config-source=image` x `layering=cli-overlay` and `features=none` x `layering=cli-overlay` pairs. Every command-line overlay the registry carried until now arrived as `--additional-features`, which cannot express either pair: adding a Feature moves the scenario out of `features=none` by construction. `--merge-config` is the overlay that layers a fragment WITHOUT touching the Feature set, so it is the only way these two combinations are reachable at all. The assertion pins all three merge outcomes in one match — `name` overridden by the fragment, `containerEnv` contributed by it, `remoteUser` surviving from the base — because an assertion on the overridden key alone would also pass for an implementation that REPLACED the base rather than merging onto it, which is what `--override-config` does and what this flag must not."
+    },
+    {
+      "id": "case-readconfig-parity-exit",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-config-with-unknown-field"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Declarative live-differential case (022-conformance-runner MVP): deacon and the pinned reference both exit 0 for a well-formed configuration. Runs in the parity lane only; the exit-code channel is compared without US3 normalization."
+    },
+    {
+      "id": "case-readconfig-substitution-object-fields",
+      "behaviors": [
+        "bhv-readconfig-substitution-object-fields"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-subst-object-fields"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "build": {
+                  "args": {
+                    "WS": "<WORKSPACE>"
+                  }
+                },
+                "containerEnv": {
+                  "WS_ENV": "<WORKSPACE>",
+                  "MISSING": ""
+                },
+                "customizations": {
+                  "vscode": {
+                    "settings": {
+                      "conformance.workspacePath": "<WORKSPACE>"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-029: substitution has to reach the OBJECT-shaped fields, not only the scalar ones. `build.args`, `containerEnv`, `mounts` and `customizations.vscode.settings` each carry `${localWorkspaceFolder}`, and `customizations` is the one that was actually missed once (#312). `${localEnv:...}` naming an unset variable resolves to the empty string rather than being left as a literal — the distinction `null_preserving` keeps observable."
+    },
+    {
+      "id": "case-readconfig-unknown-field-echo",
+      "behaviors": [
+        "bhv-readconfig-unknown-field-preserved"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-config-with-unknown-field"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "customUnknownKey": "preserved"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Declarative spec-expectation case (022-conformance-runner MVP): unknown top-level keys round-trip through read-configuration (Constitution IV faithful-on-unmodeled). No new Rust function — the shared runner verdicts it from this data."
+    },
+    {
+      "id": "case-readconfig-unknown-field-preserved-basic",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-config-with-unknown-field"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "name": "conformance-unknown-field-echo",
+                "customUnknownKey": "preserved"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Was the ONE case using the `snapshot` oracle, and it asserted a single exit code against a committed, provenance-checked artifact — three files and a whole staleness model (caseHash/fixtureHash/oracleVersion/sourceRevision/node|docker|compose|imageDigests/normalizerVersion) to say `0`. Re-pointed to `spec-expectation`, which states the same claim directly, and strengthened while re-pointing: the fixture exists to carry an unknown top-level key, so the case now asserts that `customUnknownKey` SURVIVES into the emitted configuration. Silently dropping it would be a fidelity loss against the reference (bhv-readconfig-unknown-field-preserved) and an exit-code assertion could not see it."
+    },
+    {
+      "id": "case-readconfig-unsupported-enum-differential",
+      "behaviors": [
+        "bhv-readconfig-unsupported-enum-rejected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-unsupported-values"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-unsupported-enum-rejected",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "deacon rejects a value outside a closed schema enum; the reference echoes the document unvalidated and exits 0.",
+          "waiverId": "wvr-unsupported-enum-values"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The reference's `read-configuration` is a lenient parse-and-echo: it accepts `userEnvProbe: telepathy` and prints it back unchanged, where deacon rejects it against the schema's closed value set. Characterized, not repaired — constitution IV is explicit that deacon validates modelled fields eagerly. The direction is pinned by the spec-expectation twin."
+    },
+    {
+      "id": "case-readconfig-unsupported-enum-rejected",
+      "behaviors": [
+        "bhv-readconfig-unsupported-enum-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-unsupported-values"
+          ],
+          "expectFailurePhase": "config-resolution"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "nonZero": true
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "unknown variant"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "FR-040 unsupported class: `userEnvProbe` is a CLOSED enum in the pinned schema and `telepathy` is not one of its four values. The document is well-formed JSON and every field name is real — it names a value the format does not define — so this is not the malformed class, and deacon rejects it at configuration resolution with a diagnostic that names the offending variant and the permitted ones."
+    },
+    {
+      "id": "case-readconfig-workspace-file-present",
+      "behaviors": [
+        "bhv-readconfig-basic-parse"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-config-with-unknown-field"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-read",
+          "assertion": {
+            "exists": ".devcontainer/devcontainer.json"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        ".devcontainer/devcontainer.json"
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Declarative spec-expectation case (022-conformance-runner US3): exercises the allowlist-scoped filesystem observer — the workspace's .devcontainer/devcontainer.json is present after read-configuration. path_token normalization applies; no full-tree diff (clarify Q1)."
+    },
+    {
+      "id": "case-tier1-decl-bare-base-node-feature",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-bare-base-node-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `bare-base-node-feature`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-build-args-subst",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-build-args-subst"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `build-args-subst`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-compose-array",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus",
+        "bhv-readconfig-workspace-section-shape"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-compose-array"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `compose-array`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-compose-postgres",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-compose-postgres"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `compose-postgres`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-containerenv-subst",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-containerenv-subst"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `containerenv-subst`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-dependson-autoinstall",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-dependson-autoinstall"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `dependson-autoinstall`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-dockerfile-build",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-dockerfile-build"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `dockerfile-build`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-dotnet-mounts",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-dotnet-mounts"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `dotnet-mounts`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-extends-child",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-extends-child"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `extends-child`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-feature-order",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-feature-order"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `feature-order`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-go-minimal",
+      "behaviors": [
+        "bhv-readconfig-config-file-path",
+        "bhv-readconfig-tier1-corpus",
+        "bhv-readconfig-workspace-folder-subpath",
+        "bhv-readconfig-workspace-section-shape"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-go-minimal"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `go-minimal`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-init-privileged",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-init-privileged"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `init-privileged`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-lifecycle-arrays",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-lifecycle-arrays"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `lifecycle-arrays`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-lifecycle-mixed",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-lifecycle-mixed"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `lifecycle-mixed`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-mounts-bind-localenv",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-mounts-bind-localenv"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `mounts-bind-localenv`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-name-subst",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-name-subst"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `name-subst`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-node-ts",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-node-ts"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `node-ts`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-object-form-metadata",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-object-form-metadata"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `object-form-metadata`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-ports-mixed",
+      "behaviors": [
+        "bhv-readconfig-features-configuration-omitted-when-none",
+        "bhv-readconfig-port-attributes-authored-keys",
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-ports-mixed"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `ports-mixed`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-python-features",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-python-features"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `python-features`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-ruby-node-feature",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-ruby-node-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `ruby-node-feature`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-universal-jsonc",
+      "behaviors": [
+        "bhv-readconfig-port-attributes-authored-keys",
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-universal-jsonc"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `universal-jsonc`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-user-mapping",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-user-mapping"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `user-mapping`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-tier1-decl-workspacefolder-custom",
+      "behaviors": [
+        "bhv-readconfig-tier1-corpus"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-tier1-workspacefolder-custom"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Tier-1 corpus case `workspacefolder-custom`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    }
+  ]
+}

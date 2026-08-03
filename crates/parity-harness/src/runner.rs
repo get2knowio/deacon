@@ -33,6 +33,34 @@ pub const RUNNER_BINARY: &str = "conformance_runner";
 /// workspace path (contract case-schema.md).
 const WORKSPACE_TOKEN: &str = "${WORKSPACE}";
 
+/// The `${IMAGE_TAG}` token substituted in an operation's argv with a collision-resistant
+/// image name unique to this case run AND this side.
+///
+/// A `build` produces an image and no container, so the only handle the harness has on
+/// what was produced is the tag the operation was told to write. Rather than parse it back
+/// out of each CLI's stdout — two different JSON shapes, and absent entirely in text mode —
+/// the case declares `--image-name ${IMAGE_TAG}` and the runner both resolves the token and
+/// tracks the resulting tag for reclamation.
+///
+/// Per-side uniqueness is the point, not an accident: deacon and the reference build
+/// SEPARATELY, so a shared tag would have the second build overwrite the first and the
+/// comparison would silently be an image against itself.
+const IMAGE_TAG_TOKEN: &str = "${IMAGE_TAG}";
+
+/// The `${CONTAINER_ID}` token substituted with the id of the container an earlier `up`
+/// operation in the same case created.
+///
+/// Exists for one shape of claim the declarative model could not otherwise make: a
+/// subcommand addressed by CONTAINER rather than by workspace (`exec --container-id …`
+/// with no `--workspace-folder` and no `--config`). Such an operation must recover what it
+/// needs from the container itself — from the `devcontainer.metadata` label `up` stamped —
+/// and there is no way to write that case without naming a container the case did not know
+/// about when it was authored.
+///
+/// Resolved from the ids observed so far, so the token only works in an operation that
+/// FOLLOWS the `up`; using it earlier fails loud rather than expanding to nothing.
+const CONTAINER_ID_TOKEN: &str = "${CONTAINER_ID}";
+
 /// The per-case wall-clock bound every declarative case runs under (024 FR-077b).
 ///
 /// This is deliberately NOT nextest's `slow-timeout`, which is per TEST FUNCTION. A driver
@@ -63,10 +91,6 @@ pub struct RunConfig<'a> {
     pub fixtures_root: &'a Path,
     /// Root the raw stdout/stderr artifacts are written under (atomic temp+rename).
     pub report_root: &'a Path,
-    /// Committed-snapshots root (`conformance/snapshots`) — the `snapshot` oracle type
-    /// resolves `<snapshots_root>/<os-arch>/<case-id>/` here. Unused by
-    /// spec-expectation / live-differential.
-    pub snapshots_root: &'a Path,
 }
 
 /// Run one declarative case end to end and produce its [`CaseVerdict`], bounded by
@@ -136,7 +160,7 @@ pub(crate) async fn execute_ops(
     //
     // An `fs-heavy` case gets the same isolation for a different reason: its group means
     // "significant filesystem operations", and those must not land in
-    // `conformance/fixtures/`, which is version-controlled input every other case reads.
+    // `parity/fixtures/`, which is version-controlled input every other case reads.
     // Its workspace reclaims the temp dir ONLY — the config-only lane is defined to need
     // no daemon, so its cleanup must not shell out to one.
     //
@@ -185,6 +209,18 @@ pub(crate) async fn execute_ops(
         None
     };
 
+    // The tag a `build` operation writes to, when the case asks for one. Registered for
+    // reclamation up front so an image survives no longer than its case even if the run
+    // panics between the build and the inspect.
+    let image_tag: Option<String> = match (docker_case, docker_ws.as_mut()) {
+        (true, Some(ws)) => {
+            let tag = format!("{}:latest", ws.resource_name("img"));
+            ws.track_image(tag.clone());
+            Some(tag)
+        }
+        _ => None,
+    };
+
     let mut context_workspace: Option<PathBuf> = None;
     let mut outcomes: Vec<(String, ProcessOutcome)> = Vec::new();
     let mut op_snapshots: Vec<(String, crate::observe::OpSnapshot)> = Vec::new();
@@ -192,6 +228,8 @@ pub(crate) async fn execute_ops(
     // The final `up` container's full `docker inspect`, captured ONCE (off the executor)
     // and handed to every Docker channel observer via `RunContext` (finding #4).
     let mut container_inspect: Option<serde_json::Value> = None;
+    // The final successful `build`'s image inspect, captured the same way.
+    let mut image_inspect: Option<serde_json::Value> = None;
 
     for op in &case.operations {
         // Docker cases: one isolated workspace for every op. Config-only: per-op fixture.
@@ -204,7 +242,14 @@ pub(crate) async fn execute_ops(
         }
         // For a Docker case every op shares the ISOLATED workspace (materialized once), so
         // `${WORKSPACE}` always resolves even for a later op that declares no fixture.
-        let argv = substitute_argv(case, op, &workspace, isolated_workspace.is_some())?;
+        let argv = substitute_argv(
+            case,
+            op,
+            &workspace,
+            isolated_workspace.is_some(),
+            image_tag.as_deref(),
+            container_id.as_deref(),
+        )?;
         let mut full: Vec<String> = subcommand_tokens(&op.subcommand);
         full.extend(argv);
         let args: Vec<&str> = full.iter().map(String::as_str).collect();
@@ -266,6 +311,39 @@ pub(crate) async fn execute_ops(
             }
         }
 
+        // A `build` leaves an IMAGE and no container, so the container probe above sees
+        // nothing. Inspect the tag the operation was told to write instead — the only
+        // handle on what a build produced. A missing image after a SUCCESSFUL build is a
+        // broken observation, not an empty one (D-2), so it fails loud rather than
+        // recording `present:false`.
+        //
+        // Gated on the operation actually ASKING for the tag. A `build` case that declares
+        // no `chan-image` expectation writes wherever its configuration says and has no
+        // reason to name a tag; inspecting one it never wrote would fail every such case on
+        // an image that was never supposed to exist.
+        let asked_for_tag = op.argv.iter().any(|a| a.contains(IMAGE_TAG_TOKEN));
+        if docker_case && op.subcommand == "build" && inv.success && asked_for_tag {
+            if let Some(tag) = image_tag.clone() {
+                let inspected =
+                    tokio::task::spawn_blocking(move || crate::observe::docker_inspect(&tag))
+                        .await
+                        .map_err(blocking_join_err)??;
+                let Some(inspected) = inspected else {
+                    return Err(shape_error(
+                        case,
+                        &format!(
+                            "operation {:?} built successfully but no image exists at {:?} — \
+                             the case must pass `--image-name {IMAGE_TAG_TOKEN}` for the built \
+                             image to be observable",
+                            op.id,
+                            image_tag.as_deref().unwrap_or("<none>")
+                        ),
+                    ));
+                };
+                image_inspect = Some(inspected);
+            }
+        }
+
         let failure_phase = if inv.success {
             None
         } else {
@@ -289,6 +367,8 @@ pub(crate) async fn execute_ops(
     ctx.fs_allowlist = case.fs_allowlist.clone();
     ctx.container_id = container_id;
     ctx.container_inspect = container_inspect;
+    ctx.image_inspect = image_inspect;
+    ctx.image_tag = image_tag;
     for (op_id, outcome) in outcomes {
         ctx.record_outcome(op_id, outcome);
     }
@@ -549,7 +629,11 @@ pub(crate) fn capture_channel(
     // The token policy is per-channel and lives in the normalizer, not here (Constitution
     // VIII): `chan-container-state` also tokenizes the workspace BASENAME, since each side
     // runs in its own temp workspace and the container-side paths carry only that name.
-    let tokens = crate::normalize::tokens_for_channel(&exp.channel, &ctx.workspace);
+    let tokens = crate::normalize::tokens_for_channel(
+        &exp.channel,
+        &ctx.workspace,
+        ctx.image_tag.as_deref(),
+    );
     let normalized = crate::normalize::normalize_channel(&exp.channel, &raw, &tokens, ctx.side);
     Ok((raw, normalized))
 }
@@ -606,7 +690,7 @@ pub async fn collect_evidence_on(
 /// Build the 13-field [`Provenance`] for a snapshot recording (T035, data-model §7):
 /// recompute the case/fixture hashes, take the oracle version from the verified oracle,
 /// probe Node/Docker/Compose versions (via the shared
-/// [`crate::snapshot::probe_environment`]), and stamp the source revision +
+/// [`crate::provenance::probe_environment`]), and stamp the source revision +
 /// normalizer version. `imageDigests` records the digest of each image a Docker case's
 /// fixtures pin ([`image_digests_for_case`]) so the snapshot goes stale if a pinned image's
 /// content changes; it is empty for config-only cases (they pull no images).
@@ -619,13 +703,13 @@ pub fn capture_provenance(
     case: &TestCase,
     cfg: &RunConfig<'_>,
     oracle_version: &str,
-) -> Result<crate::snapshot::Provenance, HarnessError> {
-    use crate::snapshot;
+) -> Result<crate::provenance::Provenance, HarnessError> {
+    use crate::provenance;
 
     let (case_hash, fixture_hash) = snapshot_hashes(case, cfg)?;
-    let env = snapshot::probe_environment();
+    let env = provenance::probe_environment();
 
-    Ok(crate::snapshot::Provenance {
+    Ok(crate::provenance::Provenance {
         oracle_version: oracle_version.to_string(),
         source_revision: crate::CURRENT_SPEC_PIN.to_string(),
         case_hash,
@@ -668,7 +752,11 @@ fn tokenized_argv(case: &TestCase) -> Vec<String> {
     };
     let mut argv = subcommand_tokens(&op.subcommand);
     for a in &op.argv {
-        argv.push(a.replace(WORKSPACE_TOKEN, "<WORKSPACE>"));
+        argv.push(
+            a.replace(WORKSPACE_TOKEN, "<WORKSPACE>")
+                .replace(IMAGE_TAG_TOKEN, "<IMAGE_TAG>")
+                .replace(CONTAINER_ID_TOKEN, "<CONTAINER_ID>"),
+        );
     }
     argv
 }
@@ -825,6 +913,8 @@ fn substitute_argv(
     op: &Operation,
     workspace: &Path,
     workspace_is_rooted: bool,
+    image_tag: Option<&str>,
+    container_id: Option<&str>,
 ) -> Result<Vec<String>, HarnessError> {
     let ws = workspace.to_string_lossy();
     let mut out = Vec::with_capacity(op.argv.len());
@@ -840,7 +930,41 @@ fn substitute_argv(
                 ),
             ));
         }
-        out.push(arg.replace(WORKSPACE_TOKEN, &ws));
+        // `${IMAGE_TAG}` is only resolvable for a Docker-grouped case, which is what owns
+        // the workspace that names and later reclaims the tag. Passing the literal token
+        // through to the CLI would create an image nothing reclaims, so this fails loud.
+        if arg.contains(IMAGE_TAG_TOKEN) && image_tag.is_none() {
+            return Err(shape_error(
+                case,
+                &format!(
+                    "operation {:?} uses {IMAGE_TAG_TOKEN}, which only a Docker-grouped case \
+                     can resolve — set `resourceGroup` to a docker group",
+                    op.id
+                ),
+            ));
+        }
+        // `${CONTAINER_ID}` names a container an EARLIER operation created, so it is only
+        // resolvable after one has been observed. Expanding it to nothing would turn a
+        // container-addressed invocation into a workspace-addressed one and quietly test
+        // the opposite of what the case declares.
+        if arg.contains(CONTAINER_ID_TOKEN) && container_id.is_none() {
+            return Err(shape_error(
+                case,
+                &format!(
+                    "operation {:?} uses {CONTAINER_ID_TOKEN}, but no earlier operation in this \
+                     case has created a container to name",
+                    op.id
+                ),
+            ));
+        }
+        let mut arg = arg.replace(WORKSPACE_TOKEN, &ws);
+        if let Some(tag) = image_tag {
+            arg = arg.replace(IMAGE_TAG_TOKEN, tag);
+        }
+        if let Some(id) = container_id {
+            arg = arg.replace(CONTAINER_ID_TOKEN, id);
+        }
+        out.push(arg);
     }
     Ok(out)
 }
@@ -878,20 +1002,80 @@ mod tests {
     fn substitute_argv_requires_a_fixture_for_the_token() {
         let case = case_with_op(&["--workspace-folder", "${WORKSPACE}"], &[]);
         // Config-only (not rooted) + no fixture → fail loud.
-        let err = substitute_argv(&case, &case.operations[0], Path::new("/tmp/ws"), false)
-            .expect_err("token with no fixture must fail loud");
+        let err = substitute_argv(
+            &case,
+            &case.operations[0],
+            Path::new("/tmp/ws"),
+            false,
+            None,
+            None,
+        )
+        .expect_err("token with no fixture must fail loud");
         assert!(matches!(err, HarnessError::NormalizationFailed { .. }));
         // But a rooted (isolated Docker) workspace resolves the token even with no fixture.
-        let ok = substitute_argv(&case, &case.operations[0], Path::new("/tmp/ws"), true)
-            .expect("rooted workspace resolves the token");
+        let ok = substitute_argv(
+            &case,
+            &case.operations[0],
+            Path::new("/tmp/ws"),
+            true,
+            None,
+            None,
+        )
+        .expect("rooted workspace resolves the token");
         assert_eq!(ok, vec!["--workspace-folder", "/tmp/ws"]);
+    }
+
+    #[test]
+    fn substitute_argv_resolves_the_container_id_only_after_one_exists() {
+        let case = case_with_op(&["--container-id", "${CONTAINER_ID}"], &["fx-x"]);
+        let op = &case.operations[0];
+        // No container observed yet → fail loud. Expanding the token to nothing would turn
+        // a container-addressed invocation into a workspace-addressed one, which is the
+        // opposite of what such a case asserts.
+        let err = substitute_argv(&case, op, Path::new("/tmp/ws"), false, None, None)
+            .expect_err("an unresolvable ${CONTAINER_ID} must fail loud");
+        assert!(err.to_string().contains("no earlier operation"), "{err}");
+
+        let ok = substitute_argv(&case, op, Path::new("/tmp/ws"), false, None, Some("abc123"))
+            .expect("a container observed by an earlier op resolves the token");
+        assert_eq!(ok, vec!["--container-id", "abc123"]);
     }
 
     #[test]
     fn substitute_argv_replaces_token() {
         let case = case_with_op(&["--workspace-folder", "${WORKSPACE}"], &["fx-x"]);
-        let out = substitute_argv(&case, &case.operations[0], Path::new("/tmp/ws"), false).unwrap();
+        let out = substitute_argv(
+            &case,
+            &case.operations[0],
+            Path::new("/tmp/ws"),
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(out, vec!["--workspace-folder", "/tmp/ws"]);
+    }
+
+    #[test]
+    fn substitute_argv_resolves_the_image_tag_only_for_a_docker_case() {
+        let case = case_with_op(&["--image-name", "${IMAGE_TAG}"], &["fx-x"]);
+        let op = &case.operations[0];
+        // No tag available (a non-Docker case) → fail loud rather than pass the literal
+        // token through and create an image nothing reclaims.
+        let err = substitute_argv(&case, op, Path::new("/tmp/ws"), false, None, None)
+            .expect_err("an unresolvable ${IMAGE_TAG} must fail loud");
+        assert!(err.to_string().contains("docker group"), "{err}");
+
+        let ok = substitute_argv(
+            &case,
+            op,
+            Path::new("/tmp/ws"),
+            false,
+            Some("dcr-1-0-img:latest"),
+            None,
+        )
+        .expect("a docker case resolves the tag");
+        assert_eq!(ok, vec!["--image-name", "dcr-1-0-img:latest"]);
     }
 
     #[test]
