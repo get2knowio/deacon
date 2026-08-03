@@ -57,6 +57,12 @@ run as **stale**. Not politeness — a stale tolerance is strictly worse than no
 it keeps excusing a path where the difference is already fixed, and will silently excuse a
 *new* difference that appears there later.
 
+**A tolerance is consumed by the MOST SPECIFIC covering path, not the first match.**
+Diverging paths join object keys with `.`, and Docker label keys contain dots, so
+`labels.com.docker.compose.project` and `labels.com.docker.compose.project.config_files`
+are two separate flat keys a prefix rule cannot tell apart as parent and child. First-match
+let the shorter swallow the longer, and the longer then reported stale.
+
 Which records are backed and which are orphans is no longer a question anyone answers by
 hand — `Registry::load` fails on both. What is still worth querying ad hoc is the SHAPE of
 the tolerance surface: how many observable paths each record excuses, across how many
@@ -105,6 +111,10 @@ A scenario is **ordered `operations[]`** (a consumer subcommand plus argv, with
 `${WORKSPACE}`, `${IMAGE_TAG}` and `${CONTAINER_ID}` tokens), an `oracleType`, and
 per-channel `expected[]` assertions. Adding one is a pure data edit — no new Rust.
 
+`case.cleanup` is declared on every case and consumed by **nothing**: reclamation is the
+`DockerWorkspace` RAII guard, unconditionally. Do not reach for a fixed global resource
+name (a named volume, a fixed host port) on the assumption that field will clean it up.
+
 ## Three oracle types
 
 | Type | Compares against |
@@ -149,11 +159,12 @@ two are now failures. **After writing any assertion, perturb it once and confirm
 
 ## The lanes
 
-| Lane | Runs | Gates |
-|---|---|---|
-| `.github/workflows/parity.yml` | nightly: installs the pinned oracle, prepulls fixture images, runs `--profile parity` | nothing |
-| `parity_harness_faults` | `default`, `dev-fast` — hermetic | yes, as an ordinary test |
-| `release.yml` | fmt / clippy / tests | yes |
+Three lane binaries, split by what a case NEEDS rather than by what it is about, which is
+what lets most of the suite gate every pull request. `driver::lane_of` derives a case's lane
+from its `oracleType` and `resourceGroup`, so a lane never *skips* a case it cannot run — a
+case it cannot run is in another lane. A skip and a pass look identical in a report; a
+non-selection does not. The table of binaries and how to run them is in
+[`CLAUDE.md`](../CLAUDE.md) § Differential Parity Suite.
 
 **Selection is profile-based. There is no env-var opt-in and no silent skip.** Live parity
 runs ONLY under `cargo nextest run --profile parity`; every other profile excludes it, so
@@ -161,33 +172,15 @@ those lanes are truthful by non-selection — a green fast run never *implies* p
 missing oracle, absent Docker, or a normalization failure FAILS with a cause-specific error
 rather than skipping to green.
 
-**The nightly's queue is EMPTY** (pending its next scheduled run for confirmation). The
-14-case queue measured 2026-08-02 is fully burned down — the 11 `case-merged-decl-*` by
-#439, the 2 build-image differentials by #436, `case-state-compose-feature-mounts` by #437
-— every one closed by making deacon correct, none by a new tolerance. From here the lane's
-red-means-a-real-problem contract holds for real.
+`.github/workflows/parity.yml` runs the profile nightly and **gates nothing** — it is not in
+the release path, which runs the two no-oracle lanes instead. It runs `--no-fail-fast`
+deliberately: its job is to enumerate a work queue, and cancel-on-first-failure once
+truncated a nightly to 7 of 26 tests, hiding every Docker group behind one config-only
+failure.
 
-The 11 `case-merged-decl-*` cases that used to head this queue are **closed** (#439). They
-are worth remembering for how the issue was scoped rather than for the fix: it named three
-omitted fields, and measuring the divergence found the whole `featuresConfiguration`
-document differed — seventeen fields, plus an `options`/`value` semantic inversion. Since
-the comparator diffs arrays wholesale, filling the three named fields would have turned
-*zero* cases green. The measurement also overturned this behavior's recorded status: the
-pinned spec never mentions `featuresConfiguration`, so "deacon follows the spec, the CLI
-deviates" had no spec to appeal to, and on a spec-silent output surface the reference is
-the authority. The one genuinely incomparable value — each side's per-run staging directory
-— is normalized by `feature_staging_dir_token`, which reads the prefix out of the document
-rather than pattern-matching either vendor's path shape.
-
-**#376's headline is stale.** Its 127-occurrence table over `configFilePath`,
-`rootFolderPath`, `configFolderPath` and friends was measured when the suite was one
-monolithic test; those paths are now at zero in a full run. The `path_token` defect it
-hypothesizes does not exist — don't go looking for it.
-
-The lane runs with `--no-fail-fast` deliberately: its job is to enumerate a work queue, and
-the default cancel-on-first-failure once truncated a nightly to 7 of 26 tests, hiding every
-Docker group behind one config-only failure. Before assuming a change made things worse,
-diff your run's diverging case ids against a recent `main` nightly.
+**Where the current state lives.** Behavior-by-behavior, `parity/SPEC_STATUS.md`; the
+current verdict, the latest nightly run (`gh run list --workflow=parity.yml --branch=main`).
+Neither belongs in this file — status snapshots in prose go stale within the day.
 
 ## What to do when you find a difference
 
@@ -214,27 +207,22 @@ up individually; do not batch rulings. A ruling is recorded by folding an `ADJUD
 
 ## Verifying locally
 
-Docker works in the dev container and the pinned oracle installs cleanly:
+Docker works in the dev container and the pinned oracle installs cleanly, so verify parity
+changes for real rather than reasoning about them:
 
 ```bash
 npm install -g @devcontainers/cli@0.87.0
 cargo nextest run --profile parity
 ```
 
-Verify parity changes for real rather than reasoning about them. Docker-backed cases run in
-isolated temp workspaces behind an RAII cleanup guard; a run cancelled partway leaves
-orphaned containers and Compose networks that trip the next run's resource guard (`all
-predefined address pools have been fully subnetted`). Reclaim them by removing containers
-whose `devcontainer.local_folder` label names a directory that no longer exists, and
-networks whose names carry a `deacon-conf-` workspace basename. A label-only sweep is NOT
-enough: Compose **sidecar** containers (`deacon-conf-*-db-1`) carry no
-`devcontainer.local_folder` label, keep their network referenced so `docker network prune`
-skips it, and the leaked network then trips the reclamation guard — sweep containers by
-the `deacon-conf-` name prefix too.
+Docker-backed cases run in isolated temp workspaces behind an RAII cleanup guard, and a
+cancelled run leaves orphans that trip the next run's resource guard. The reclamation recipe
+is in [`CLAUDE.md`](../CLAUDE.md) § Differential Parity Suite.
 
 ## Further reading
 
-- [`CLAUDE.md`](../CLAUDE.md) § Differential Parity Suite — the working reference
+- [`CLAUDE.md`](../CLAUDE.md) § Differential Parity Suite — how the lanes run, how to verify
+  a change locally, and the rules that have cost time
 - [`parity/SPEC_STATUS.md`](../parity/SPEC_STATUS.md) — the behavior-by-behavior record
 - [`.specify/memory/constitution.md`](../.specify/memory/constitution.md) — the principles
   the strictness choices appeal to

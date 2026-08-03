@@ -281,7 +281,7 @@ before it is fixed.
   answer, each row stating its evidence. Five plain statuses, including one for
   the case that trips people up: deacon following the spec where the reference
   deviates is the *reference's* deviation, not work deacon owes.
-- **[docs/PARITY_AND_CONFORMANCE.md](docs/PARITY_AND_CONFORMANCE.md)** — how it
+- **[docs/PARITY.md](docs/PARITY.md)** — how it
   works and what **divergence**, **waiver** and **out of scope** each mean.
 
 Start there if you've seen those words in a PR and weren't sure whether they meant

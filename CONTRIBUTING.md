@@ -88,7 +88,7 @@ override to all profiles in that file so the suite stays parallel-safe.
 The `parity` / `parity-cli` groups are not somewhere you add a test function:
 they bound the two declarative runners, which are driven by DATA. A parity
 scenario is a record in `parity/cases/<area>.json` — see
-`docs/PARITY_AND_CONFORMANCE.md`.
+`docs/PARITY.md`.
 
 ## Adding Dependencies
 Add to workspace root for shared dependencies:
