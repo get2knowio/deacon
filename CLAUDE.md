@@ -392,8 +392,8 @@ idempotence, first-create-vs-restart — rather than a fixed output).
 `chan-image`, `chan-process-graph`, `chan-injected-process`, `chan-temporal`,
 `chan-container-state`. Evidence is captured RAW then normalized by the single
 `normalize.rs` using named, field-specific rules (`path_token`, `label_semantic`,
-`mount_source_canonical`, `path_env_segmented`, `null_preserving`) — nothing is blanket
-removed.
+`mount_source_canonical`, `path_env_segmented`, `feature_staging_dir_token`,
+`null_preserving`) — nothing is blanket removed.
 
 **An assertion that cannot fail is worse than no assertion.** Four real instances, every
 one committed, every one found only by injecting a difference: a `jsonSubset: {}` matches
@@ -470,14 +470,38 @@ profile carries a filter.
 pinned oracle, prepulls fixture images, and runs the profile. It is **not** in the release
 path. `release.yml` runs fmt/clippy/tests only.
 
-**The nightly is RED, and the queue is 14 cases in three root causes** (measured
-2026-08-02, full lane, `--no-fail-fast`):
+**The nightly's queue is EMPTY** (pending its next scheduled run for confirmation). The
+14-case queue measured 2026-08-02 is fully burned down: the 11 `case-merged-decl-*` by
+#439, the 2 `case-build-image-{args,labels}-differential` by #436, and
+`case-state-compose-feature-mounts` by #437 — every one closed by making deacon correct,
+none by a new tolerance. From here the lane's contract holds for real: a red nightly means
+a new, uncharacterized difference.
 
-| Cases | Diverging path | Verdict |
-|---|---|---|
-| 11 × `case-merged-decl-*` | `featuresConfiguration.{dstFolder,featureSets}` | **deacon's fidelity gap** — #439. deacon models `dstFolder`/`internalVersion`/`computedDigest` with reference-matching serde names and hardcodes them to `None` (`read_configuration.rs:598-616`); the digest is already in hand (`sourceInformation.manifestDigest` is byte-identical), `internalVersion` is the constant `"2"`, and deacon has a deterministic staging-dir analog (`features_build.rs:849`). The reference's timestamped `dstFolder` path is a *normalization* concern (tokenize like `${IMAGE_TAG}`), NOT grounds for a tolerance — an earlier read proposed allowlisting this and was wrong. |
-| 2 × `case-build-image-{args,labels}-differential` | `chan-image.labels.devcontainer.metadata` | #436 |
-| 1 × `case-state-compose-feature-mounts` | `chan-container-state.labels.devcontainer.metadata` | #437 |
+**#439 (the 11 `case-merged-decl-*`) is closed, and how it was scoped is the durable
+lesson.** The issue named three omitted fields (`dstFolder`, `internalVersion`,
+`computedDigest`). Measuring the divergence against the pin found the *whole*
+`featuresConfiguration` document differed — seventeen fields plus an `options`/`value`
+semantic inversion (deacon put the user's resolved option values in `options`; the
+reference puts the option SCHEMA there and the values in `value`) plus a local Feature's
+`id` reported as `local:<absolute path>`. Because `compare.rs::diff_paths` diffs **arrays
+wholesale**, `featureSets` had to agree in full: filling the three named fields would have
+turned **zero** cases green. Two rules worth keeping:
+
+- **Measure the divergence before sizing the fix.** A diverging path that names an array
+  names one opaque blob, not one field.
+- **A "deacon follows the spec, the CLI deviates" row is only as good as the spec text
+  behind it.** This one had none — `parity/spec/113500f4/` never mentions
+  `featuresConfiguration` — so on a spec-silent output surface the reference is the
+  authority and the difference was deacon's. Re-adjudicated at #439; check for the clause
+  before trusting such a row.
+
+Deacon's Feature staging directory naming was converged with the reference's in the same
+change (`DockerfileGenerator::feature_staging_dir_name` — `<metadata id>_<install-order
+index>`, previously `<canonical id>_<parallel level>`), so `read-configuration` can report
+a `cachePath` that names the directory a build actually creates rather than a plausible
+fiction. The one genuinely incomparable value — each side's per-run staging root — is
+handled by `feature_staging_dir_token`, which reads the prefix out of the document instead
+of pattern-matching either vendor's path shape.
 
 **#376's headline is stale — do not go looking for the `path_token` defect it
 hypothesizes.** Its table (127 occurrences over `configFilePath`, `rootFolderPath`,
@@ -502,7 +526,10 @@ cleanly (`npm install -g @devcontainers/cli@0.87.0`) — verify parity changes f
 rather than reasoning about them. Docker-backed cases run in isolated temp workspaces with
 an RAII cleanup guard; if a run is cancelled partway, orphaned containers accumulate and
 will trip the resource-reclamation guard on the next run. Reclaim them by removing
-containers whose `devcontainer.local_folder` label names a directory that no longer exists.
+containers whose `devcontainer.local_folder` label names a directory that no longer exists
+— AND containers named with the `deacon-conf-` prefix: Compose sidecars
+(`deacon-conf-*-db-1`) carry no label, keep their network referenced so `docker network
+prune` skips it, and the leaked network trips the guard even after a label-only sweep.
 
 **Recording what we learn.** `parity/SPEC_STATUS.md` is the hand-maintained answer to "does
 deacon behave like the CLI?" — five plain statuses, each row stating its evidence. When a

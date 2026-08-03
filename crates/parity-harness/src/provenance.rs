@@ -49,8 +49,12 @@ use serde_json::Value;
 /// write, so the compensation had nothing left to compensate — and worse, once both CLIs
 /// emit an authored `"capAdd": []`, a deacon-side-only drop reports that agreement as a
 /// divergence. The rule survives only on `mergedConfiguration`, where the reference still
-/// synthesizes computed empties deacon omits.
-pub const NORMALIZER_VERSION: &str = "7";
+/// synthesizes computed empties deacon omits. #439 set it to `"8"`: the new
+/// `feature_staging_dir_token` rewrites each side's Feature staging directory — the
+/// per-run path that appears as `featuresConfiguration.dstFolder` and as the prefix of
+/// every `cachePath` — to one token, so the two sides' staging locations stop being
+/// compared while their PRESENCE still is.
+pub const NORMALIZER_VERSION: &str = "8";
 
 /// The `provenance.json` record — the FR-017 identity/environment elements (data-model
 /// §7, contract snapshot-provenance.md). Thirteen fields: twelve identity/environment

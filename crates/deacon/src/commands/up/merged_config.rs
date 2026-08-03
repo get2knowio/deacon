@@ -569,33 +569,28 @@ pub(crate) fn feature_metadata_entry(feature: &ResolvedFeature) -> serde_json::V
     serde_json::Value::Object(entry)
 }
 
-/// Build the `devcontainer.metadata` JSON to stamp on the created container
-/// (#322): the image's own metadata entries (from its `devcontainer.metadata`
-/// LABEL, which the feature-extended image inherits from the base), then one
-/// entry per installed Feature ([`feature_metadata_entry`], #373), then the
-/// config entry from [`config_metadata_entry`]. That is upstream's
+/// The `devcontainer.metadata` entries for an image plus the config and Features
+/// deacon is about to apply to it (#322): the image's own metadata entries (from
+/// its `devcontainer.metadata` LABEL, which the feature-extended image inherits
+/// from the base), then one entry per installed Feature
+/// ([`feature_metadata_entry`], #373), then the config entry from
+/// [`config_metadata_entry`]. That is upstream's
 /// `[...baseImageMetadata.raw, ...featureEntries, pickConfigProperties(config.raw)]`,
 /// lowest precedence first.
 ///
 /// `config` MUST be the configuration as authored — before variable
 /// substitution — for the reason spelled out on [`config_metadata_entry`].
 ///
-/// Always returns a JSON array, matching the reference CLI, which stamps
-/// `devcontainer.metadata` on every container it creates and uses `[]` when there is
-/// nothing to record.
-///
-/// This used to return `None` in that case, on the reasoning that the container "just
-/// keeps the base image's inherited label". That reasoning does not apply to the branch it
-/// guarded: `entries` is populated FROM the image's label, so the empty-and-empty case is
-/// exactly the one where no inherited label exists — the container ended up with no
-/// `devcontainer.metadata` label at all where the reference has `[]`. Measured against the
-/// pinned oracle 0.87.0 by the declarative `chan-container-state` differential (024).
-pub(crate) async fn build_container_metadata_label(
+/// The two consumers differ in what an EMPTY list means, which is why they share
+/// the entries rather than the serialized label: `up` stamps `[]` on the container
+/// regardless (see [`build_container_metadata_label`]), while `build` writes no
+/// label at all — both measured against the pinned oracle 0.87.0.
+pub(crate) async fn container_metadata_entries(
     docker: &impl Docker,
     image_ref: &str,
     config: &DevContainerConfig,
     features: &[ResolvedFeature],
-) -> Option<String> {
+) -> Vec<serde_json::Value> {
     let mut entries: Vec<serde_json::Value> = match docker.inspect_image(image_ref).await {
         Ok(Some(info)) => match info.labels.get("devcontainer.metadata") {
             Some(label) => match serde_json::from_str::<serde_json::Value>(label) {
@@ -621,6 +616,29 @@ pub(crate) async fn build_container_metadata_label(
     if cfg_nonempty {
         entries.push(cfg_entry);
     }
+    entries
+}
+
+/// Build the `devcontainer.metadata` JSON to stamp on the created container
+/// (#322), from [`container_metadata_entries`].
+///
+/// Always returns a JSON array, matching the reference CLI, which stamps
+/// `devcontainer.metadata` on every container it creates and uses `[]` when there is
+/// nothing to record.
+///
+/// This used to return `None` in that case, on the reasoning that the container "just
+/// keeps the base image's inherited label". That reasoning does not apply to the branch it
+/// guarded: `entries` is populated FROM the image's label, so the empty-and-empty case is
+/// exactly the one where no inherited label exists — the container ended up with no
+/// `devcontainer.metadata` label at all where the reference has `[]`. Measured against the
+/// pinned oracle 0.87.0 by the declarative `chan-container-state` differential (024).
+pub(crate) async fn build_container_metadata_label(
+    docker: &impl Docker,
+    image_ref: &str,
+    config: &DevContainerConfig,
+    features: &[ResolvedFeature],
+) -> Option<String> {
+    let entries = container_metadata_entries(docker, image_ref, config, features).await;
     serde_json::to_string(&serde_json::Value::Array(entries)).ok()
 }
 

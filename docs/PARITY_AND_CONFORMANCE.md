@@ -102,9 +102,9 @@ cannot fail when both sides are equally wrong.
 
 Evidence is captured RAW, then normalized by the single `normalize.rs` using named,
 field-specific rules — `path_token`, `image_tag_token`, `label_semantic`,
-`mount_source_canonical`, `path_env_segmented`, `null_preserving`. **Nothing is blanket
-removed.** A rule that dropped a field wholesale would hide the very differences it was
-written to make comparable.
+`mount_source_canonical`, `path_env_segmented`, `feature_staging_dir_token`,
+`null_preserving`. **Nothing is blanket removed.** A rule that dropped a field wholesale
+would hide the very differences it was written to make comparable.
 
 Two channels capture things that *cannot* agree and deliberately omit them: a built image's
 identity (id, digests, tags) and a Compose service's image digest when Features force a
@@ -138,14 +138,23 @@ those lanes are truthful by non-selection — a green fast run never *implies* p
 missing oracle, absent Docker, or a normalization failure FAILS with a cause-specific error
 rather than skipping to green.
 
-**The nightly is RED, and the queue is 14 cases in three root causes** (measured
-2026-08-02): 11 `case-merged-decl-*` on `featuresConfiguration.{dstFolder,featureSets}` —
-deacon's own fidelity gap (#439): it models `dstFolder`, `internalVersion` and
-`computedDigest` and hardcodes all three to `None`, while the digest it would need is
-already computed. The reference's per-run timestamped `dstFolder` value is a normalization
-concern (tokenize it, like `${IMAGE_TAG}`), not grounds for a tolerance. Then 2 on
-`chan-image.labels.devcontainer.metadata` (#436) and 1 on
-`chan-container-state.labels.devcontainer.metadata` (#437).
+**The nightly's queue is EMPTY** (pending its next scheduled run for confirmation). The
+14-case queue measured 2026-08-02 is fully burned down — the 11 `case-merged-decl-*` by
+#439, the 2 build-image differentials by #436, `case-state-compose-feature-mounts` by #437
+— every one closed by making deacon correct, none by a new tolerance. From here the lane's
+red-means-a-real-problem contract holds for real.
+
+The 11 `case-merged-decl-*` cases that used to head this queue are **closed** (#439). They
+are worth remembering for how the issue was scoped rather than for the fix: it named three
+omitted fields, and measuring the divergence found the whole `featuresConfiguration`
+document differed — seventeen fields, plus an `options`/`value` semantic inversion. Since
+the comparator diffs arrays wholesale, filling the three named fields would have turned
+*zero* cases green. The measurement also overturned this behavior's recorded status: the
+pinned spec never mentions `featuresConfiguration`, so "deacon follows the spec, the CLI
+deviates" had no spec to appeal to, and on a spec-silent output surface the reference is
+the authority. The one genuinely incomparable value — each side's per-run staging directory
+— is normalized by `feature_staging_dir_token`, which reads the prefix out of the document
+rather than pattern-matching either vendor's path shape.
 
 **#376's headline is stale.** Its 127-occurrence table over `configFilePath`,
 `rootFolderPath`, `configFolderPath` and friends was measured when the suite was one
@@ -182,7 +191,11 @@ isolated temp workspaces behind an RAII cleanup guard; a run cancelled partway l
 orphaned containers and Compose networks that trip the next run's resource guard (`all
 predefined address pools have been fully subnetted`). Reclaim them by removing containers
 whose `devcontainer.local_folder` label names a directory that no longer exists, and
-networks whose names carry a `deacon-conf-` workspace basename.
+networks whose names carry a `deacon-conf-` workspace basename. A label-only sweep is NOT
+enough: Compose **sidecar** containers (`deacon-conf-*-db-1`) carry no
+`devcontainer.local_folder` label, keep their network referenced so `docker network prune`
+skips it, and the leaked network then trips the reclamation guard — sweep containers by
+the `deacon-conf-` name prefix too.
 
 ## Further reading
 

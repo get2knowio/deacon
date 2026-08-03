@@ -100,6 +100,7 @@
         "bhv-container-identity-labels",
         "bhv-container-keepalive-command",
         "bhv-container-metadata-label-content",
+        "bhv-container-metadata-label-serialization",
         "bhv-state-diff-parity"
       ],
       "context": [],
@@ -222,6 +223,13 @@
           "observablePath": "chan-container-state.cmd",
           "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (`docker stop` in ~200 ms, exit 0, on both). Scoped to `cmd`; every other field stays compared.",
           "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-container-metadata-label-serialization",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.metadata",
+          "rationale": "Only the BYTE FORM of this label differs now that #437 is fixed: at oracle 0.87.0 the reference emits `[ {…}, {…} ]` (the Feature layer forces it to build the service image, and a value that reaches the container through a build is written into a generated `LABEL` line spaced) and deacon, which writes the container label directly, emits compact `[{…}]`. Verified whitespace-only on this fixture: the two values parse to the same two entries with the same key order, `id`+`mounts` then `mounts`+`containerEnv`, and are byte-identical once spaces are removed. Same difference and same reasoning as `case-state-dockerfile-nonroot` and `case-up-env-merge-differential`.",
+          "waiverId": "wvr-container-metadata-label-serialization"
         }
       ],
       "cleanup": {
@@ -231,7 +239,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Ports `parity_state_diff::compose-parity-with-feature-mount-gap` (res-cross-cli-state-snapshot). A Compose service plus a local Feature that contributes BOTH a `containerEnv` value and a bind mount — the combination behind #272, where deacon's compose path dropped Feature-contributed mounts that its single-container path applied. The legacy unit asserted the two facts by hand (`FEATURE_ENV_CONTROL` present as a positive control, `/feat-mnt` present on both sides) and then diffed the snapshots; this compares the whole normalized container state between the CLIs, so the mount graph, the env, the user and the network are all compared rather than two hand-picked keys. The legacy fixture's Feature mount was a NAMED VOLUME (`feat-probe-vol`) that the unit removed by hand; this fixture uses a workspace-relative bind instead — the claim is that a Feature-contributed mount reaches the service, not which type it is, and a fixed global volume name would collide between concurrent docker-shared cases and outlive whichever ran last. `labels.devcontainer.metadata` is deliberately NOT tolerated: deacon records mount sources with `${localWorkspaceFolder}` substituted away to the empty string on the compose path (`/sib` where the reference records `${localWorkspaceFolder}/sib`), which is a regression of #373 filed as #437, so this case reports it until the fix lands. Images pinned to debian:bookworm-slim (V18)."
+      "notes": "Ports `parity_state_diff::compose-parity-with-feature-mount-gap` (res-cross-cli-state-snapshot). A Compose service plus a local Feature that contributes BOTH a `containerEnv` value and a bind mount — the combination behind #272, where deacon's compose path dropped Feature-contributed mounts that its single-container path applied. The legacy unit asserted the two facts by hand (`FEATURE_ENV_CONTROL` present as a positive control, `/feat-mnt` present on both sides) and then diffed the snapshots; this compares the whole normalized container state between the CLIs, so the mount graph, the env, the user and the network are all compared rather than two hand-picked keys. The legacy fixture's Feature mount was a NAMED VOLUME (`feat-probe-vol`) that the unit removed by hand; this fixture uses a workspace-relative bind instead — the claim is that a Feature-contributed mount reaches the service, not which type it is, and a fixed global volume name would collide between concurrent docker-shared cases and outlive whichever ran last. The CONTENT of `labels.devcontainer.metadata` is deliberately NOT tolerated, and this case is what caught #437: deacon recorded `source=/sib` where the reference records `source=${localWorkspaceFolder}/sib`, because Docker Compose interpolated the `${…}` in deacon's generated override away to the empty string — a compose-path-only regression of #373 that the six single-container fixtures could not see. Fixed by escaping `$` as `$$` in the override; this case is the guard, and it is the byte form alone that carries a tolerance now. Images pinned to debian:bookworm-slim (V18)."
     },
     {
       "id": "case-state-compose-sidecar-volume",

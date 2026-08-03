@@ -242,6 +242,57 @@ pub fn null_preserving(value: &Value) -> Value {
     value.clone()
 }
 
+/// The token every side's Feature staging directory is rewritten to.
+const DST_FOLDER_TOKEN: &str = "<DST_FOLDER>";
+
+/// The document key carrying the resolved Feature sets.
+const FEATURES_CONFIGURATION: &str = "featuresConfiguration";
+
+/// **Rule `feature_staging_dir_token`** (#439, action `rewrite`, scope
+/// `channel:chan-structured-output` `field:/featuresConfiguration`): the directory a CLI
+/// stages Feature content into is rewritten to [`DST_FOLDER_TOKEN`] wherever it appears
+/// inside `featuresConfiguration`.
+///
+/// The two sides' staging directories differ BY CONSTRUCTION and neither is a property of
+/// the configuration being read: the reference derives
+/// `/tmp/devcontainercli-vscode/container-features/<cli version>-<epoch ms>`, which differs
+/// from ITSELF run to run, while deacon derives a path from the workspace hash. Comparing
+/// the values reports a difference every run and says nothing about behavior.
+///
+/// The prefix is read from the document rather than pattern-matched, which is what keeps
+/// the rule vendor-neutral: whatever a side put in `dstFolder` is what gets rewritten,
+/// including its appearance as the prefix of every `features[].cachePath`
+/// (`<dstFolder>/<consecutiveId>`). The per-feature suffix is untouched, so a `cachePath`
+/// naming the wrong feature still diverges.
+///
+/// Rewrite, NEVER delete. The key's PRESENCE is still compared on both sides — which is
+/// the whole point: deacon omitted `dstFolder`, `cachePath` and eleven sibling fields
+/// entirely (#439), and a rule that dropped them would have hidden exactly the defect this
+/// one exists to let through.
+pub fn feature_staging_dir_token(value: &Value) -> Value {
+    let Value::Object(map) = value else {
+        return value.clone();
+    };
+    let Some(features_configuration) = map.get(FEATURES_CONFIGURATION) else {
+        return value.clone();
+    };
+    let dst_folder = features_configuration
+        .get("dstFolder")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let Some(dst_folder) = dst_folder else {
+        return value.clone();
+    };
+    let mut tokens = TokenMap::new();
+    tokens.insert(dst_folder, DST_FOLDER_TOKEN);
+    let mut out = map.clone();
+    out.insert(
+        FEATURES_CONFIGURATION.to_string(),
+        path_token(features_configuration, &tokens),
+    );
+    Value::Object(out)
+}
+
 /// **Rule `label_semantic`** (FR-026): parse container labels into a canonical
 /// key/value object so labels compare SEMANTICALLY, not as opaque strings. Accepts an
 /// object (`{k: v}`) or a Docker-style array of `"k=v"` strings and yields an object.
@@ -418,9 +469,13 @@ fn apply_channel_rules(channel: &str, value: &Value, tokens: &TokenMap, side: Si
         // The resolved-configuration document: the SAME named rule chain the legacy
         // `config`/`merged_config` entry points apply, so the two comparison paths
         // share ONE definition of equivalence (constitution VIII, 023 T062).
-        CHAN_STRUCTURED_OUTPUT => {
-            config_document_rules(&path_token(value, tokens), side, DocumentBlock::Wrapper)
-        }
+        // `feature_staging_dir_token` runs on the path-tokenized document so both sides'
+        // `dstFolder` is already workspace-normalized before it becomes the token source.
+        CHAN_STRUCTURED_OUTPUT => config_document_rules(
+            &feature_staging_dir_token(&path_token(value, tokens)),
+            side,
+            DocumentBlock::Wrapper,
+        ),
         CHAN_FILE_CONTENT => null_preserving(&path_token(value, tokens)),
         CHAN_FILESYSTEM => path_token(value, tokens),
         CHAN_IMAGE => normalize_image(value, tokens),
@@ -1399,13 +1454,97 @@ mod tests {
     #[test]
     fn normalizer_version_is_bumped_for_named_rules() {
         assert_eq!(
-            NORMALIZER_VERSION, "7",
-            "#398 retired `drop_absent_optional` on the `configuration` block entirely — \
-             deacon now omits the properties the author did not write, so the \
-             compensation had nothing left to compensate, and keeping it would report an \
-             authored `\"capAdd\": []` that both CLIs emit as a divergence. A change to \
+            NORMALIZER_VERSION, "8",
+            "#439 added `feature_staging_dir_token`: each side's Feature staging \
+             directory — `featuresConfiguration.dstFolder` and the prefix of every \
+             `cachePath` — is rewritten to one token, so two paths that differ by \
+             construction stop being compared while their presence still is. A change to \
              what \"equal\" means, so every recorded snapshot must go stale and be \
              re-reviewed"
+        );
+    }
+
+    /// The rule REWRITES the two sides' incomparable staging paths onto one token while
+    /// leaving the per-feature suffix — and the KEYS — intact. Perturbing the suffix must
+    /// still diverge, or the rule would be excusing more than it was written for.
+    #[test]
+    fn feature_staging_dir_token_makes_two_sides_staging_paths_comparable() {
+        let doc = |root: &str, leaf: &str| {
+            json!({
+                "configuration": { "image": "alpine" },
+                "featuresConfiguration": {
+                    "dstFolder": root,
+                    "featureSets": [{
+                        "features": [{ "id": "go", "cachePath": format!("{root}/{leaf}"),
+                                       "consecutiveId": leaf }]
+                    }]
+                }
+            })
+        };
+        let out = |v: &Value| {
+            normalize_channel(
+                CHAN_STRUCTURED_OUTPUT,
+                &raw(CHAN_STRUCTURED_OUTPUT, v.clone()),
+                &TokenMap::new(),
+                Side::Deacon,
+            )
+            .value
+        };
+
+        let deacon = out(&doc("/tmp/deacon-features-abc12345/features", "go_0"));
+        let reference = out(&doc(
+            "/tmp/devcontainercli-vscode/container-features/0.87.0-1785708951326",
+            "go_0",
+        ));
+        assert_eq!(deacon, reference, "only the staging root differed");
+        assert_eq!(
+            deacon["featuresConfiguration"]["dstFolder"],
+            json!("<DST_FOLDER>"),
+            "rewritten, not deleted — the key must still be there to compare"
+        );
+        assert_eq!(
+            deacon["featuresConfiguration"]["featureSets"][0]["features"][0]["cachePath"],
+            json!("<DST_FOLDER>/go_0"),
+            "the per-feature suffix survives the prefix rewrite"
+        );
+
+        // Break it: a different staged directory name is a real difference.
+        let other = out(&doc(
+            "/tmp/devcontainercli-vscode/container-features/0.87.0-1785708951326",
+            "go_1",
+        ));
+        assert_ne!(deacon, other, "the rule must not excuse a differing suffix");
+    }
+
+    /// A document with no `featuresConfiguration` (or one whose `dstFolder` is absent —
+    /// exactly the pre-#439 deacon output) is left untouched, so the omission itself is
+    /// still reported rather than normalized away.
+    #[test]
+    fn feature_staging_dir_token_is_identity_without_a_dst_folder() {
+        let without_block = json!({ "configuration": { "image": "alpine" } });
+        assert_eq!(
+            feature_staging_dir_token(&without_block),
+            without_block,
+            "no featuresConfiguration: nothing to tokenize"
+        );
+
+        let without_dst = json!({
+            "featuresConfiguration": { "featureSets": [{ "features": [{ "id": "go" }] }] }
+        });
+        assert_eq!(
+            feature_staging_dir_token(&without_dst),
+            without_dst,
+            "an omitted dstFolder must stay omitted, not become the token"
+        );
+        assert_ne!(
+            feature_staging_dir_token(&without_dst),
+            feature_staging_dir_token(&json!({
+                "featuresConfiguration": {
+                    "dstFolder": "/tmp/x",
+                    "featureSets": [{ "features": [{ "id": "go" }] }]
+                }
+            })),
+            "present-vs-absent is exactly the difference #439 closed; it must still show"
         );
     }
 
