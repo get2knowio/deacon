@@ -15,12 +15,15 @@ Bring each one up individually; do not batch rulings.
 ## State
 
 `main` at `192db7d`. **14 waivers. `certify`: 49 blocking / 14 waived.** The 49 breaks down
-as 7 gaps — 6 `gap-pairwise-*` (as 024 left them) plus the new
-`gap-features-duplicate-in-one-document`, which blocks until #430 lands — and 42
-execution-evidence conditions (41 `unknown-runner-omission`, 1
-`missing-required-execution`). The latter are the normal state anywhere but the release
-lane: they mean the container-backed lane has not run on this revision, not that anything
-is broken.
+as 7 gaps — 6 `gap-pairwise-*` (as 024 left them) plus the then-new
+`gap-features-duplicate-in-one-document` — and 42 execution-evidence conditions (41
+`unknown-runner-omission`, 1 `missing-required-execution`). The latter are the normal state
+anywhere but the release lane: they mean the container-backed lane has not run on this
+revision, not that anything is broken.
+
+Two things have since overtaken this paragraph: `certify` and the gap records were deleted
+with the conformance meta-layer (#434), and the duplicate-Features gap was closed by #430
+on 2026-08-03 (§B).
 
 Every waiver whose behavior reads `spec: conformant` is settled — those are `follow-spec`
 now, meaning deacon follows the spec and the CLI deviates. **The open queue is exactly the
@@ -109,29 +112,38 @@ wrong, not different — that is why they were ruled that way:
   `Math.max()` over an empty set serialized, and reproducing that is adopting a quirk
   rather than achieving parity.
 
-### B. #430 — duplicate Features (gap is open, blocks certification)
+### B. #430 — duplicate Features — **CLOSED 2026-08-03**
 
-deacon rejects a `features` map whose keys resolve to one canonical Feature id.
+deacon rejected a `features` map whose keys resolve to one canonical Feature id.
 `feature-dependencies.md` defines both entries as distinct Features (§Feature Equality),
 supplies an oldest-tag-first tie-break for exactly this collision (§Round Stable Sort), and
 says a single Feature may be installed more than once (§Feature authorship). Oracle 0.87.0
 returns both digests in `installOrder`.
 
-**The one-line parse fix must NOT land alone.** Deleting the rejection in
-`deserialize_features_value` (`crates/core/src/config.rs`) makes `read-configuration` match
-byte-for-byte and then **silently drops** the second Feature — verified with a real `up`:
-only `git:1.3.1` fetched, one staged directory, one feature RUN stage, exit 0. Feature
-identity is version-independent (`feature_resolver.rs:74` sets `id` from the Feature
-metadata id; `features_build.rs:518-523` keys three maps on it).
+The warning that mattered, kept because it generalises: **the one-line parse fix must NOT
+land alone.** Deleting the rejection in `deserialize_features_value` makes
+`read-configuration` match byte-for-byte and then **silently drops** the second Feature —
+one fetch, one staged directory, one feature RUN stage, exit 0 — because Feature identity
+was version-independent (`feature_resolver.rs` set `id` from the Feature metadata id;
+`features_build.rs` keyed three maps on a tag-less `registry/namespace/name`).
 
-Suggested approach: key staging and dependency-graph nodes by the **user-provided form**,
-which is unique by construction — the lockfile already does this, with a comment saying it
-must match upstream `generateLockfile`. Keep `FeatureIdResolver` translating aliases so
-`dependsOn` / `installsAfter` / `overrideFeatureInstallOrder` still match.
+Fixed by making the install key TAG-BEARING (`FeatureRef::reference()`, or `local:<abs
+path>`) in all three resolution paths, and by implementing §Round Stable Sort as a
+structural `(resource name, tag age, id)` key rather than a string sort — a string sort
+puts `1.10.0` before `1.9.0` and `go:1` after `go-lang:1`. `dependsOn` auto-install still
+dedups on the tag-LESS resource name, so an unpinned hard dependency is satisfied by the
+user's pinned declaration; only the user's own two-version declaration double-installs.
+Evidence: `case-readconfig-duplicate-feature-one-document-{accepted,differential}`,
+`case-readconfig-duplicate-feature-install-order-differential`, and
+`integration_up_duplicate_features` (a real `build`, asserting both Features' users and
+their UID order inside the produced image).
 
-Not yet measured: whether `bhv-extends-feature-version-override` (#411, child's version
-wins across `extends`) is also non-spec. `extends` is a deacon extension with no reference
-equivalent, so it needs its own argument.
+Still not measured: whether `bhv-extends-feature-version-override` (#411, child's version
+wins across `extends`) is also non-spec. That rule is untouched by #430 — it only fires
+when one layer overlays another, and it now sits on top of a document that may legally
+declare one Feature twice, so a base with two versions and an overlay with a third
+replaces the FIRST match. `extends` is a deacon extension with no reference equivalent, so
+it needs its own argument.
 
 ### C. #394 is roughly 20 sites, not 366 across 52 files — LANDED
 

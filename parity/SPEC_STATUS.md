@@ -24,11 +24,17 @@ alone. Where a row has no scenario yet, it says so.
 
 Of **84 recorded behaviors**:
 
-- **1** — open nonconformance — [#430](https://github.com/get2knowio/deacon/issues/430)
+- **0** — open nonconformance
 - **8** — deacon follows the spec where the CLI does not
 - **11** — documented choice
 - **19** — deacon extension
 - **45** — conformant and matching
+
+**No row is an open nonconformance** as of 2026-08-03. That is a claim with a short
+shelf life and no special weight: it means every difference we have MEASURED is either
+one deacon is on the right side of or one written down in `parity/ALLOWLIST.json`, not
+that none is left to find. The last row to leave the column was duplicate Features
+([#430](https://github.com/get2knowio/deacon/issues/430)).
 
 Two rows moved from "deacon follows the spec where the CLI does not" to "conformant and
 matching" at [#439](https://github.com/get2knowio/deacon/issues/439) — not because deacon
@@ -159,7 +165,7 @@ oversight nobody noticed.
 | Behavior | Status | Evidence | Notes |
 |---|---|---|---|
 | When a link of an `extends` chain declares a Feature its base already declared at a different version, the later link's version REPLACES the base's entry rather than… | deacon extension | 1 scenario | Fixes #411. A Feature's map key carries its version, so a child bumping an inherited version writes a DIFFERENT key; under the previous key-wise merge both survived and… |
-| A single configuration document whose `features` map contains two keys resolving to the same canonical Feature id is rejected with a diagnostic naming both keys and the… | **open nonconformance** | 1 scenario | Recorded until 2026-08-02 as `spec: unspecified` + `intentional-divergence`, on the reasoning that one Feature at two versions has no coherent meaning, that within one… |
+| A single configuration document whose `features` map declares one Feature at two versions installs BOTH, in oldest-tag-first order. | matches the reference | 3 scenarios + 1 Docker-backed install test | Closed #430 on 2026-08-03. Recorded until 2026-08-02 as `spec: unspecified` + `intentional-divergence` — deacon REJECTED the document — on the reasoning that one Feature at two versions has no coherent meaning and that nothing broke the tie. `feature-dependencies.md` breaks it in three passages: §Definition: Feature Equality makes OCI equality depend on the manifest DIGEST (two tags are two Features, not one declared twice), §Feature authorship states that "a single Feature may be installed more than once", and §Definition: Round Stable Sort supplies the tie-break, "Compare and sort each Feature from oldest to newest tag". MEASURED against oracle 0.87.0 on `fx-readconfig-duplicate-feature-one-document` (`git:1.3.2` declared before `git:1.3.1`): `read-configuration` output is now byte-identical, and both sides' `--include-features-configuration` resolve `git:1.3.1` then `git:1.3.2` with `consecutiveId` `git_0`/`git_1` — oldest first, against the document's order. The reference's `features resolve-dependencies` agrees, returning `git@sha256:6d953e8c…` (`:1.3.1`) before `git@sha256:63c96e8a…` (`:1.3.2`). Removing the parse-time rejection alone would have replaced a loud error with a SILENT DROP — Feature identity was version-independent, so the second entry overwrote the first and one `install.sh` ran with exit 0 — which is why the row's evidence includes `integration_up_duplicate_features`, a real `build` asserting both Features' users inside the produced image and their UID order. The retired `wvr-features-duplicate-in-one-document` is deliberately not replaced. |
 | deacon's resolved-configuration output omits a property the author wrote as `null`, reporting it identically to one the author left out, while the reference echoes the… | documented choice | 2 scenarios | Surfaced by the 024 US5 de-suppression as a THREE-state collapse (authored null, authored empty, omitted); #398 closed the empty half and this record was renamed from… |
 | An explicit --config pointing at a file that does not exist is rejected (no silent discovery fallback). | matches the reference | 2 scenarios | both-reject agreement case: both CLIs reject an explicit --config that does not exist. Asserted directly by case-errors-decl-bad-config-path. The migrated… |
 | Reading a well-formed devcontainer.json exits 0 and emits the resolved configuration as a single JSON document. | matches the reference | 10 scenarios |  |

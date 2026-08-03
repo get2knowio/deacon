@@ -1924,9 +1924,9 @@
       "notes": "Closes `config-source=dockerfile` x `features=lockfile` and `features=lockfile` x `layering=extends-chain`. The child document carries nothing but `extends` and a `name`; the Dockerfile build, the version-pinned Feature and `remoteUser` all reach the merged result through the base. Asserting all four together is the point — a chain that resolved the child's own keys but dropped the base's `features` would satisfy an assertion naming only `name`, and that is the failure mode an extends chain carrying a pinned Feature actually has. `--include-merged-configuration` is required because a plain read ECHOES `extends` rather than resolving it, which is deacon's characterized behavior, not an accident of this fixture. Relabelled from `features=lockfile` to `single`: this case asserts Feature keys that come from `devcontainer.json`, and `read-configuration` never consults a lockfile at all, so nothing here could distinguish one being present from one being absent. The fixture declares exactly one Feature, which is what `single` names. See `rule-no-lockfile-for-configuration-reporting`."
     },
     {
-      "id": "case-readconfig-duplicate-feature-one-document-rejected",
+      "id": "case-readconfig-duplicate-feature-one-document-accepted",
       "behaviors": [
-        "bhv-features-duplicate-in-one-document-rejected"
+        "bhv-features-duplicate-in-one-document-installed"
       ],
       "context": [],
       "oracleType": "spec-expectation",
@@ -1948,21 +1948,103 @@
           "channel": "chan-exit-code",
           "operation": "op-read",
           "assertion": {
-            "equals": 1
+            "equals": 0
           }
         },
         {
-          "channel": "chan-stderr",
+          "channel": "chan-structured-output",
           "operation": "op-read",
           "assertion": {
-            "contains": "declares the same Feature twice"
+            "jsonSubset": {
+              "configuration": {
+                "features": {
+                  "ghcr.io/devcontainers/features/git:1.3.1": {
+                    "version": "os-provided"
+                  },
+                  "ghcr.io/devcontainers/features/git:1.3.2": {
+                    "version": "os-provided"
+                  }
+                }
+              }
+            }
           }
         }
       ],
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Characterizes what deacon does TODAY, which the spec says is wrong. `feature-dependencies.md` defines the two entries as distinct Features (§Definition: Feature Equality), supplies an oldest-tag-first tie-break for exactly this collision (§Definition: Round Stable Sort), and states that a single Feature may be installed more than once (§Feature authorship); oracle 0.87.0 accepts the document and resolves both digests. So this case is no longer evidence of a deliberate strictness choice — it is the regression guard on a known nonconformance, backed by gap-features-duplicate-in-one-document and tracked at https://github.com/get2knowio/deacon/issues/430. It is EXPECTED to fail when the fix lands; that failure is how the fix announces itself, at which point the assertions become the spec's (both entries accepted, installed oldest tag first) and the gap record is deleted in the same change. Both the exit code and the diagnostic stay asserted meanwhile: while deacon does reject, a rejection that does not say WHICH two keys collided leaves the author hunting through a Feature map. The retired wvr-features-duplicate-in-one-document is deliberately not replaced — it waived a divergence deacon is on the wrong side of."
+      "notes": "The hermetic half of #430. deacon rejected this document until 2026-08-03 — `features` declaring one Feature at two versions — and the spec says all three of the things that made the rejection wrong: `feature-dependencies.md` §Definition: Feature Equality makes OCI equality depend on the manifest DIGEST (so two tags are two Features, not one declared twice), §Feature authorship states that \"a single Feature may be installed more than once\", and §Definition: Round Stable Sort supplies the tie-break — \"Compare and sort each Feature from oldest to newest tag\" — that the rejection's rationale claimed did not exist. Oracle 0.87.0 accepts the document and `features resolve-dependencies` returns BOTH digests, oldest tag first. Each entry carries a real option value rather than `{}` so the assertion can actually fail: a subset naming two keys whose expected value is `{}` matches any object at those keys, and one that named only the keys would still pass for a deacon that echoed the document and then installed one Feature. What that latter failure looks like is why this case is not the whole guard — see `case-readconfig-duplicate-feature-install-order-differential` for the resolved order and the Docker-backed install test in `crates/deacon/tests/integration_up_duplicate_features.rs` for both `install.sh` runs landing in the image. The retired wvr-features-duplicate-in-one-document is deliberately not replaced: it waived a divergence deacon was on the wrong side of."
+    },
+    {
+      "id": "case-readconfig-duplicate-feature-one-document-differential",
+      "behaviors": [
+        "bhv-features-duplicate-in-one-document-installed"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-readconfig-duplicate-feature-one-document"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The agreement half of #430, and the reason the fix is not just \"deacon stopped erroring\": before it, deacon exited 1 on a document the reference reads without comment, so this comparison could not have been written. It now compares deacon's resolved configuration to the reference's over the whole structured document — which includes the `features` map's KEY ORDER, since `preserve_order` keeps both sides' object order — so a deacon that silently dropped, reordered or de-duplicated one of the two entries diverges here rather than passing a subset assertion that only looked for their presence. #423's point applies: a record whose only evidence never runs the reference proves nothing about parity, and until this case existed the duplicate-Features behavior had exactly that."
+    },
+    {
+      "id": "case-readconfig-duplicate-feature-install-order-differential",
+      "behaviors": [
+        "bhv-features-duplicate-in-one-document-installed"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-readconfig-duplicate-feature-one-document"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The ORDER half of #430. `feature-dependencies.md` §Definition: Round Stable Sort sorts a round by resource name and then, \"if the comparison is equal\", from \"oldest to newest tag\" — the one rule in the document written for a `features` map that names one Feature twice. The fixture declares `:1.3.2` BEFORE `:1.3.1` for that reason: declaration order and tag order disagree, so an implementation that emitted the map's order would resolve them backwards and be caught. Measured against oracle 0.87.0 on 2026-08-03, `devcontainer features resolve-dependencies` returns `git@sha256:6d953e8c…` (which is `:1.3.1`) then `git@sha256:63c96e8a…` (`:1.3.2`) — oldest first, against the document's order. The comparison is the assertion here rather than a `jsonSubset` naming the two ids in sequence, because `compare.rs::is_json_subset` matches array elements ORDER-INSENSITIVELY: a subset listing them in the right order also passes for output listing them in the wrong one, which is the vacuous-assertion trap. `diff_paths` compares `featureSets` wholesale, so a reordering IS a divergence."
     },
     {
       "id": "case-readconfig-extends-compose-features",
