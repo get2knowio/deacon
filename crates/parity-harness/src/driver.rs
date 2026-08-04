@@ -414,7 +414,12 @@ async fn drive_group_with_concurrency(
                         "{}: no committed snapshot for this platform (no-reference-for-platform)",
                         verdict.case_id
                     )),
-                    _ => failures.push(format!("{}: {}", verdict.case_id, summarize(&verdict))),
+                    _ => failures.push(format!(
+                        "{}: {}{}",
+                        verdict.case_id,
+                        summarize(&verdict),
+                        stderr_excerpts(&verdict)
+                    )),
                 }
                 // A tolerance whose difference no longer reproduces FAILS, on the same
                 // footing as an un-allowlisted divergence.
@@ -749,6 +754,27 @@ fn summarize(verdict: &CaseVerdict) -> String {
         })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+/// The failing side(s)' stderr, appended to a case's FAILURE line (#474).
+///
+/// Empty for every case except one whose `chan-exit-code` diverged — that is where
+/// [`crate::runner::attach_stderr_excerpt`] attaches an excerpt, and nowhere else. So this
+/// needs no channel filter of its own: the presence of the excerpt IS the filter.
+///
+/// Deliberately absent from [`summarize`], which also feeds the persisted report fragment.
+/// The fragment already carries `RawPaths` pointing at the complete streams on disk; what it
+/// must not carry is unbounded, path-bearing process output in a `detail` string. The panic
+/// text is the surface that cannot be gone back to, which is why the excerpt lands here.
+fn stderr_excerpts(verdict: &CaseVerdict) -> String {
+    let mut out = String::new();
+    for channel in &verdict.channels {
+        if let Some(excerpt) = &channel.stderr_excerpt {
+            out.push('\n');
+            out.push_str(excerpt);
+        }
+    }
+    out
 }
 
 /// How many diverging paths a channel's summary names before it says `+N more`.

@@ -19,7 +19,9 @@ use crate::model::{
 };
 
 use crate::HarnessError;
-use crate::evidence::{CaseVerdict, ChannelVerdict, NormalizedChannelEvidence, RawChannelEvidence};
+use crate::evidence::{
+    CaseVerdict, ChannelVerdict, NormalizedChannelEvidence, Outcome, RawChannelEvidence,
+};
 use crate::exec::{ExecKind, Side, run_and_capture};
 use crate::observe::{ProcessOutcome, RunContext, cli_process, observer_for};
 use crate::oracle::VerifiedOracle;
@@ -850,6 +852,112 @@ pub(crate) fn attach_failure_phase(
     }
 }
 
+/// How many trailing stderr lines one side's excerpt carries (#474).
+const STDERR_EXCERPT_LINES: usize = 20;
+
+/// The byte ceiling on one side's excerpt. Whichever bound bites first wins, so a run that
+/// logs one enormous line cannot flood the panic text any more than one that logs a thousand.
+const STDERR_EXCERPT_BYTES: usize = 2048;
+
+/// Attach the failing side(s)' captured stderr — tail-bounded — to a DIVERGING
+/// `chan-exit-code` verdict (#474).
+///
+/// An exit-code divergence is the one channel whose verdict names nothing actionable on its
+/// own: "the codes disagreed" is the entire message, and the reason the process exited that
+/// way is on its stderr. This is formatting over evidence the harness ALREADY captured
+/// ([`ProcessOutcome::stderr`], also persisted verbatim under `raw/…`), not new capture.
+///
+/// Deliberately scoped three ways, because an excerpt everywhere is noise:
+///
+/// - **`chan-exit-code` only.** A structured-output or container-state divergence already
+///   names the diverging path; stderr adds nothing there.
+/// - **Diverging verdicts only.** An agreeing exit code — including an agreeing *failure*,
+///   which the error-path cases assert — has nothing to explain.
+/// - **Non-zero sides only.** A side that succeeded emits progress logs, not a cause.
+pub(crate) fn attach_stderr_excerpt(
+    verdict: &mut ChannelVerdict,
+    case: &TestCase,
+    exp: &ExpectedObservable,
+    ctx: &RunContext,
+    reference: Option<&RunContext>,
+) {
+    if verdict.channel != CHAN_EXIT_CODE || !matches!(verdict.outcome, Outcome::Diverge) {
+        return;
+    }
+    let Ok(op) = resolve_expected_op(case, exp) else {
+        return;
+    };
+    let mut blocks: Vec<String> = Vec::new();
+    if let Some(block) = side_stderr("deacon", ctx.outcome(&op.id)) {
+        blocks.push(block);
+    }
+    if let Some(block) = reference.and_then(|r| side_stderr("reference", r.outcome(&op.id))) {
+        blocks.push(block);
+    }
+    if !blocks.is_empty() {
+        verdict.stderr_excerpt = Some(blocks.join("\n"));
+    }
+}
+
+/// One side's labeled stderr excerpt, or `None` when the side did not run, succeeded, or
+/// wrote nothing.
+fn side_stderr(label: &str, outcome: Option<&ProcessOutcome>) -> Option<String> {
+    let outcome = outcome?;
+    if outcome.success {
+        return None;
+    }
+    let excerpt = tail_excerpt(&outcome.stderr)?;
+    let code = outcome
+        .exit_code
+        .map_or_else(|| "signal".to_string(), |c| c.to_string());
+    Some(format!("  {label} stderr (exit {code}):\n{excerpt}"))
+}
+
+/// The last [`STDERR_EXCERPT_LINES`] lines of `stderr`, further clipped to
+/// [`STDERR_EXCERPT_BYTES`], each line prefixed so the excerpt is visibly quoted inside the
+/// failure text. `None` when there is nothing to show.
+///
+/// Bounded from the TAIL because that is where a CLI puts the error it died on. Truncation is
+/// announced rather than silent, and the announcement carries only counts derived from the
+/// input, so the excerpt's SHAPE is a deterministic function of the stderr it quotes.
+fn tail_excerpt(stderr: &[u8]) -> Option<String> {
+    // Lossy: a CLI that emitted invalid UTF-8 still has a diagnosable tail, and the raw
+    // bytes are preserved on disk regardless.
+    let stderr = String::from_utf8_lossy(stderr);
+    let trimmed = stderr.trim_end();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lines: Vec<&str> = trimmed.lines().collect();
+    let dropped = lines.len().saturating_sub(STDERR_EXCERPT_LINES);
+    let mut tail = lines[dropped..].join("\n");
+    let clipped = tail.len() > STDERR_EXCERPT_BYTES;
+    if clipped {
+        // Walk forward to a char boundary so a multi-byte character is never split.
+        let mut start = tail.len() - STDERR_EXCERPT_BYTES;
+        while start < tail.len() && !tail.is_char_boundary(start) {
+            start += 1;
+        }
+        tail = tail[start..].to_string();
+    }
+    let mut out = String::new();
+    if dropped > 0 || clipped {
+        out.push_str(&format!(
+            "    […truncated: showing the last {} line(s), {} byte(s)]\n",
+            tail.lines().count(),
+            tail.len()
+        ));
+    }
+    for line in tail.lines() {
+        out.push_str("    | ");
+        out.push_str(line);
+        out.push('\n');
+    }
+    // Trailing newline removed: the caller joins blocks and the driver appends this to a
+    // failure line, both of which own their own separators.
+    Some(out.trim_end_matches('\n').to_string())
+}
+
 /// One side's observable outcome for the exit-code channel: the exit code (`null` for a
 /// signal-terminated process, which stays distinct from `0`) and whether it failed.
 /// `null` throughout when the operation did not run on that side at all — which is a
@@ -1115,6 +1223,39 @@ mod tests {
         std::fs::create_dir_all(&dc2).unwrap();
         std::fs::write(dc2.join("devcontainer.json"), r#"{ "name": "x" }"#).unwrap();
         assert_eq!(fixture_image(&dir.path().join("fx2")), None);
+    }
+
+    /// #474: the excerpt is bounded by BOTH rules, and empty stderr produces nothing at all.
+    /// The byte ceiling is what keeps one enormous line from flooding the panic text that the
+    /// line ceiling alone would wave through.
+    #[test]
+    fn tail_excerpt_is_bounded_by_lines_and_by_bytes() {
+        assert_eq!(tail_excerpt(b""), None, "no stderr, nothing to quote");
+        assert_eq!(tail_excerpt(b"   \n\n"), None, "whitespace-only is nothing");
+
+        let short = tail_excerpt(b"boom").expect("non-empty stderr yields an excerpt");
+        assert_eq!(
+            short, "    | boom",
+            "an unbounded excerpt is quoted verbatim"
+        );
+
+        // 30 lines → the last 20 survive, and the truncation says so.
+        let many: String = (1..=30).map(|i| format!("line-{i:02}\n")).collect();
+        let excerpt = tail_excerpt(many.as_bytes()).expect("excerpt");
+        assert_eq!(excerpt.lines().count(), 21, "20 quoted lines + the marker");
+        assert!(excerpt.contains("line-30") && excerpt.contains("line-11"));
+        assert!(!excerpt.contains("line-10"));
+
+        // One line, far over the byte ceiling → clipped to the tail, marker present.
+        let huge = "x".repeat(STDERR_EXCERPT_BYTES * 3) + "TAIL";
+        let excerpt = tail_excerpt(huge.as_bytes()).expect("excerpt");
+        assert!(
+            excerpt.len() < STDERR_EXCERPT_BYTES + 200,
+            "the byte ceiling must bite even when the line ceiling does not: {} bytes",
+            excerpt.len()
+        );
+        assert!(excerpt.ends_with("TAIL"), "the TAIL is what is kept");
+        assert!(excerpt.contains("truncated"));
     }
 
     #[test]

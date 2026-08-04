@@ -182,6 +182,15 @@ failure.
 current verdict, the latest nightly run (`gh run list --workflow=parity.yml --branch=main`).
 Neither belongs in this file — status snapshots in prose go stale within the day.
 
+**What a failing run leaves behind.** Every lane writes its raw capture and report fragments
+under `target/parity/`, and every job that runs a parity binary uploads that tree as a
+`parity-evidence-*` artifact — the nightly on any outcome, the gating lanes (`ci.yml`'s fast,
+MVP-integration and Podman jobs; `release.yml`'s verify job) on failure only. Download it
+before re-running: a re-run that goes green destroys the only copy of what happened (#474).
+The failure text itself carries the diverging observable paths, and — for a `chan-exit-code`
+divergence specifically — a tail-bounded excerpt of the stderr of whichever side exited
+non-zero, because that channel's verdict otherwise names nothing to fix.
+
 ## What to do when you find a difference
 
 1. **Measure it.** Run both CLIs over the same fixture and record both values verbatim. A

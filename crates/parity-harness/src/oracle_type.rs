@@ -77,6 +77,7 @@ async fn spec_expectation(
                 })?;
         let mut verdict = verdict_spec_expectation(&exp.channel, normalized, assertion)?;
         runner::attach_failure_phase(&mut verdict, case, exp, &ctx, None);
+        runner::attach_stderr_excerpt(&mut verdict, case, exp, &ctx, None);
         channels.push(verdict);
     }
     // Allowed differences do not apply to spec-expectation (no reference to diverge from);
@@ -181,6 +182,7 @@ async fn live_differential(
             }
         }
         runner::attach_failure_phase(&mut verdict, case, exp, &deacon_ctx, Some(&oracle_ctx));
+        runner::attach_stderr_excerpt(&mut verdict, case, exp, &deacon_ctx, Some(&oracle_ctx));
         channels.push(verdict);
     }
     Ok((channels, tolerances.stale(&consumed)))
@@ -330,6 +332,7 @@ fn evaluate_relationship(
                     "reason": "missing container snapshot for the operation or its sibling \
                                (a metamorphic case must be Docker-backed)",
                 })),
+                stderr_excerpt: None,
             };
         }
     };
@@ -380,6 +383,7 @@ fn evaluate_relationship(
             "containerCount": this_count,
             "running": running,
         })),
+        stderr_excerpt: None,
     }
 }
 

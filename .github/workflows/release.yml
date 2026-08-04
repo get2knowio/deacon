@@ -81,6 +81,19 @@ jobs:
       - name: Pinned parity scenarios (hermetic + Docker, no oracle)
         run: cargo nextest run -E 'binary(=parity_hermetic) | binary(=parity_docker)'
 
+      # The evidence for the step above (#474). This is the RELEASE gate: a parity failure
+      # here blocks a tag, and the raw capture behind it must outlive the runner rather than
+      # force a re-run to be understood. `if: failure()` keeps green releases unencumbered;
+      # `if-no-files-found: ignore` because a failure before the harness runs (the engine
+      # precondition, the pre-pull) leaves no tree to upload.
+      - name: Upload parity evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: parity-evidence-release-verify
+          path: target/parity/
+          if-no-files-found: ignore
+
   create-release:
     name: Create Release
     needs: verify

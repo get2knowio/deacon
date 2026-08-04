@@ -120,6 +120,22 @@ pub struct ChannelVerdict {
     /// serialized (even when `null`) so the report body is byte-deterministic
     /// (contract runner-cli.md).
     pub detail: Option<Value>,
+    /// The failing side(s)' captured stderr, tail-bounded and pre-labeled — attached ONLY
+    /// when `chan-exit-code` itself diverges (#474), by
+    /// [`crate::runner::attach_stderr_excerpt`].
+    ///
+    /// An exit-code `Diverge` names a channel and nothing else, so the failure that reaches
+    /// the nextest panic says only *that* the codes disagreed; the stderr of the side that
+    /// exited non-zero is what names the fix. Both prior occurrences of the #470 flake were
+    /// undiagnosable from CI for exactly this reason.
+    ///
+    /// **Never serialized.** The verdict report is contractually path-free and byte-stable
+    /// (contract runner-cli.md), and raw stderr is neither — the full streams are already
+    /// persisted verbatim under `raw/<binary>/<case>__<op>/{deacon,oracle}.stderr`, which is
+    /// where a reader goes for more than the tail. This field exists solely to carry the tail
+    /// into the panic text, in memory.
+    #[serde(skip)]
+    pub stderr_excerpt: Option<String>,
 }
 
 /// The whole-case verdict (data-model §9, report shape contract runner-cli.md).
@@ -273,6 +289,7 @@ mod tests {
             channel: "chan-exit-code".to_string(),
             outcome,
             detail: None,
+            stderr_excerpt: None,
         };
         assert_eq!(
             CaseVerdict::compute_overall(&[mk(Outcome::Agree), mk(Outcome::Diverge)]),
@@ -404,6 +421,7 @@ mod tests {
             channel: "chan-exit-code".to_string(),
             outcome: Outcome::Agree,
             detail: None,
+            stderr_excerpt: None,
         };
         let json = serde_json::to_string(&v).unwrap();
         assert!(

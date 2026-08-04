@@ -733,6 +733,7 @@ fn p_no_reference_for_platform_is_its_own_outcome() {
         channel: "chan-exit-code".to_string(),
         outcome: DeclOutcome::NoReferenceForPlatform,
         detail: Some(serde_json::json!({ "platform": "linux-aarch64" })),
+        stderr_excerpt: None,
     };
     assert_ne!(
         verdict.outcome,
