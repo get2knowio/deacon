@@ -1189,3 +1189,146 @@ fn test_feature_command_timeout_behavior() {
     // The command should either timeout or be handled gracefully
     // Exact behavior depends on implementation details
 }
+
+/// Image cleanup guard for tests that build a throwaway image.
+struct ImageGuard(String);
+
+impl Drop for ImageGuard {
+    fn drop(&mut self) {
+        let _ = StdCommand::new("docker")
+            .args(["rmi", "-f", &self.0])
+            .output();
+    }
+}
+
+/// #467 (single-container path): when the image's `devcontainer.metadata` and
+/// the devcontainer.json declare the SAME lifecycle phase, BOTH hooks run —
+/// the image's first — rather than the config's replacing the image's.
+///
+/// The spec's image-metadata Merge Logic table gives each lifecycle hook a
+/// "Collected list of all `<phase>Command`s", with "the devcontainer.json is
+/// considered last". Every OTHER row of that table is last-wins, and deacon
+/// folded the label in through `ConfigMerger`, where a hook is an ordinary
+/// scalar — so the image's hook was silently dropped on a collision.
+///
+/// The marker file is the whole observation: both CLIs exit 0 either way, so no
+/// status assertion can see this. Measured against the pinned reference CLI
+/// 0.87.0 on this shape, whose log reads exactly the five lines asserted below.
+///
+/// Three phases are exercised deliberately, because the fix has to leave the
+/// non-colliding cases alone:
+///   - `onCreate`   — declared by BOTH (string vs string): collects
+///   - `postCreate` — declared by BOTH (string vs ARRAY form): collects
+///   - `postStart`  — declared by the IMAGE only: must run exactly ONCE. That
+///     is the regression the first draft of this fix introduced — it recorded
+///     the hook as a layer while the merge ALSO left it in the singular field,
+///     so it ran twice — and the reason this asserts the whole log rather than
+///     mere presence.
+///
+/// `remoteUser` is the control: it is 'Last value wins', so the config's `root`
+/// must beat the image metadata's `metauser` outright. The hook records
+/// `whoami` itself, because the hook's own user is the thing being measured.
+#[test]
+fn test_up_collects_image_metadata_and_config_hooks_for_the_same_phase() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_up_collects_image_metadata_and_config_hooks_for_the_same_phase: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let guard = ContainerGuard::new();
+
+    // Unique tag so parallel runs in the docker-shared group never collide.
+    let image_tag = format!(
+        "deacon-test-same-phase-hooks-{}-{}:local",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+    let _image = ImageGuard(image_tag.clone());
+
+    // Every hook appends to ONE log inside the container, so the file records
+    // both which hooks ran and the order in which they ran.
+    let image_dir = temp_dir.path().join("image");
+    fs::create_dir_all(&image_dir).unwrap();
+    fs::write(
+        image_dir.join("Dockerfile"),
+        concat!(
+            "FROM alpine:3.19\n",
+            "RUN adduser -D -u 1234 metauser\n",
+            "LABEL devcontainer.metadata='[{\"remoteUser\":\"metauser\",",
+            "\"onCreateCommand\":\"echo img-onCreate >> /tmp/lifecycle.log\",",
+            "\"postCreateCommand\":\"echo img-postCreate >> /tmp/lifecycle.log\",",
+            "\"postStartCommand\":\"echo img-postStart >> /tmp/lifecycle.log\"}]'\n",
+        ),
+    )
+    .unwrap();
+
+    let build = StdCommand::new("docker")
+        .args(["build", "-q", "-t", &image_tag])
+        .arg(&image_dir)
+        .output()
+        .expect("docker build should run");
+    assert!(
+        build.status.success(),
+        "docker build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let devcontainer_config = json!({
+        "name": "Same-phase hooks",
+        "image": image_tag,
+        "remoteUser": "root",
+        "onCreateCommand": "echo ws-onCreate >> /tmp/lifecycle.log",
+        "postCreateCommand": [
+            "/bin/sh",
+            "-c",
+            "echo ws-postCreate >> /tmp/lifecycle.log; whoami > /tmp/hook-user.txt"
+        ],
+    });
+
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        serde_json::to_string_pretty(&devcontainer_config).unwrap(),
+    )
+    .unwrap();
+
+    let container_id = run_deacon_up(&temp_dir, &guard, &[]).expect("deacon up should succeed");
+
+    let log = read_container_file(&container_id, "/tmp/lifecycle.log")
+        .expect("the lifecycle hooks should have written /tmp/lifecycle.log");
+    let lines: Vec<&str> = log
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    assert_eq!(
+        lines,
+        vec![
+            "img-onCreate",
+            "ws-onCreate",
+            "img-postCreate",
+            "ws-postCreate",
+            "img-postStart",
+        ],
+        "image-metadata and config hooks for the SAME phase must both run, image \
+         first, and an image-only phase must run exactly ONCE (#467). Got: {:?}",
+        lines
+    );
+
+    let hook_user = read_container_file(&container_id, "/tmp/hook-user.txt")
+        .expect("the postCreate hook should have recorded its user");
+    assert_eq!(
+        hook_user.trim(),
+        "root",
+        "remoteUser is 'Last value wins': the config's `root` must beat the image \
+         metadata's `metauser`. Collecting the lifecycle hooks must not turn the \
+         last-wins rows of the Merge Logic table into collections."
+    );
+}

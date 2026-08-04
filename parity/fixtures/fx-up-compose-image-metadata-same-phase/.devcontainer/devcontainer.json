@@ -1,0 +1,13 @@
+{
+	"name": "ConformanceUpComposeImageMetadataSamePhase",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"shutdownAction": "stopCompose",
+	"onCreateCommand": "echo ws-onCreate >> /workspace/lifecycle.log",
+	"postCreateCommand": [
+		"sh",
+		"-c",
+		"echo ws-postCreate >> /workspace/lifecycle.log"
+	]
+}

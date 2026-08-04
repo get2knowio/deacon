@@ -586,6 +586,7 @@ mod tests {
             cap_add: Some(Vec::new()),
             security_opt: Some(Vec::new()),
             secrets: None,
+            metadata_lifecycle_layers: Vec::new(),
             extra: Default::default(),
         };
 
@@ -665,6 +666,7 @@ mod tests {
             cap_add: Some(Vec::new()),
             security_opt: Some(Vec::new()),
             secrets: None,
+            metadata_lifecycle_layers: Vec::new(),
             extra: Default::default(),
         };
 
