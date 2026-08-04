@@ -1470,3 +1470,184 @@ fn test_image_metadata_layers_features_and_config_run_in_spec_order() {
         lines
     );
 }
+
+/// #477 (`set-up` surface): every lifecycle hook the CONTAINER's stamped
+/// `devcontainer.metadata` label declares for a phase runs, in label order,
+/// ahead of the one `--config` declares — instead of only the last survivor of
+/// a last-wins fold.
+///
+/// Same defect CLASS as #467, different SOURCE. #467 was the IMAGE's label
+/// collapsed by `ConfigMerger` on the `up` path; this is the CONTAINER's
+/// stamped label collapsed the same way on a path #467's fix did not reach.
+/// There were two collapse points and they compose, so both shapes are
+/// measured here:
+///   - **no `--config`** isolates `config_from_metadata_label`, which folded the
+///     label's own fragments last-wins. `deacon up` stamps
+///     `[...image entries, ...feature entries, config entry]`, so a phase two of
+///     those sources declare arrives as two fragments and used to leave as one.
+///   - **with `--config`** adds the second point, where `set_up.rs` folded that
+///     result again and read the five SINGULAR fields off it.
+///
+/// The label below is that stamped shape: an image entry, a FEATURE entry, and a
+/// config entry. The feature entry is deliberate — `set-up` never called
+/// `aggregate_lifecycle_commands` at all, so Feature-contributed hooks were not
+/// merely mis-ordered, they never ran unless no other entry declared the phase.
+///
+/// `postStart` is declared by the feature entry ALONE and must appear exactly
+/// ONCE. That is the trap #467's fix documented: a hook lifted onto a layer that
+/// also stays in the singular field runs twice. It is why every assertion here
+/// spans the WHOLE log — a `contains` assertion cannot see an appended
+/// duplicate.
+///
+/// Both CLIs exit 0 on every one of these shapes, so the marker file is the
+/// entire observation. Measured against the pinned reference CLI 0.87.0: its
+/// logs are exactly the two vectors asserted below.
+#[test]
+fn test_set_up_collects_container_label_hooks_alongside_the_config_hook() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_set_up_collects_container_label_hooks_alongside_the_config_hook: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let guard = ContainerGuard::new();
+
+    // Unique tag/names so parallel runs in the docker-shared group never collide.
+    let unique = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+    let image_tag = format!("deacon-test-setup-label-hooks-{}:local", unique);
+    let _image = ImageGuard(image_tag.clone());
+
+    // A PLAIN container is the point: one a prior `up` has already set up
+    // carries in-container phase markers that suppress every hook and make the
+    // surface unmeasurable. This container merely inherits the image's label.
+    let image_dir = temp_dir.path().join("image");
+    fs::create_dir_all(&image_dir).unwrap();
+    fs::write(
+        image_dir.join("Dockerfile"),
+        concat!(
+            "FROM alpine:3.19\n",
+            "LABEL devcontainer.metadata='[",
+            "{\"onCreateCommand\":\"echo e0-onCreate >> /tmp/setup.log\",",
+            "\"postCreateCommand\":\"echo e0-postCreate >> /tmp/setup.log\"},",
+            "{\"id\":\"ghcr.io/example/feat:1\",",
+            "\"onCreateCommand\":\"echo feat-onCreate >> /tmp/setup.log\",",
+            "\"postStartCommand\":\"echo feat-postStart >> /tmp/setup.log\"},",
+            "{\"onCreateCommand\":\"echo e2-onCreate >> /tmp/setup.log\",",
+            "\"postCreateCommand\":\"echo e2-postCreate >> /tmp/setup.log\"}",
+            "]'\n",
+            "CMD [\"sleep\", \"infinity\"]\n",
+        ),
+    )
+    .unwrap();
+
+    let build = StdCommand::new("docker")
+        .args(["build", "-q", "-t", &image_tag])
+        .arg(&image_dir)
+        .output()
+        .expect("docker build should run");
+    assert!(
+        build.status.success(),
+        "docker build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    // `set-up`'s `--config` shape. The config declares the same two phases the
+    // image entry does, which is the collision the reference collects.
+    let config_path = temp_dir.path().join("set-up-config.json");
+    fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&json!({
+            "image": image_tag,
+            "onCreateCommand": "echo ws-onCreate >> /tmp/setup.log",
+            "postCreateCommand": "echo ws-postCreate >> /tmp/setup.log",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let start_container = |name: &str| -> String {
+        let out = StdCommand::new("docker")
+            .args(["run", "-d", "--name", name, &image_tag])
+            .output()
+            .expect("docker run should execute");
+        assert!(
+            out.status.success(),
+            "docker run failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        guard.register(id.clone());
+        id
+    };
+
+    let run_set_up = |container_id: &str, extra: &[&str]| {
+        let mut cmd = Command::cargo_bin("deacon").expect("deacon binary");
+        let mut args = vec!["set-up", "--container-id", container_id];
+        args.extend_from_slice(extra);
+        let assert = cmd.env("DEACON_LOG", "warn").args(&args).assert();
+        let output = assert.get_output();
+        assert!(
+            output.status.success(),
+            "deacon set-up failed:\nSTDOUT:\n{}\nSTDERR:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+
+    let log_lines = |container_id: &str| -> Vec<String> {
+        read_container_file(container_id, "/tmp/setup.log")
+            .expect("the lifecycle hooks should have written /tmp/setup.log")
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+
+    // --- Collapse point 1, isolated: no `--config` at all. ---
+    let bare = start_container(&format!("deacon-test-setup-477-bare-{}", unique));
+    run_set_up(&bare, &[]);
+    assert_eq!(
+        log_lines(&bare),
+        vec![
+            "e0-onCreate",
+            "feat-onCreate",
+            "e2-onCreate",
+            "e0-postCreate",
+            "e2-postCreate",
+            "feat-postStart",
+        ],
+        "with no --config, every entry of the container's devcontainer.metadata \
+         label must contribute its hook in label order — including the FEATURE \
+         entry's, which set-up never aggregated — and the feature-only postStart \
+         exactly once (#477)"
+    );
+
+    // --- Both collapse points: the same label plus a `--config`. ---
+    let with_config = start_container(&format!("deacon-test-setup-477-cfg-{}", unique));
+    run_set_up(&with_config, &["--config", config_path.to_str().unwrap()]);
+    assert_eq!(
+        log_lines(&with_config),
+        vec![
+            "e0-onCreate",
+            "feat-onCreate",
+            "e2-onCreate",
+            "ws-onCreate",
+            "e0-postCreate",
+            "e2-postCreate",
+            "ws-postCreate",
+            "feat-postStart",
+        ],
+        "the devcontainer.json's hook is collected LAST for each phase, never \
+         instead of the label's (#477)"
+    );
+}
