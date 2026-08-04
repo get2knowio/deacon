@@ -213,10 +213,25 @@ fn test_compose_override_command_lifecycle_runs() {
 
     // Without our override, `echo init` would exit before postCreateCommand
     // could run. With override active, the marker file proves the lifecycle ran.
+    //
+    // The service MOUNTS the declared `workspaceFolder` (#460). It used not to,
+    // and the test passed anyway because the compose path ran its hook through a
+    // `cd '<dir>' 2>/dev/null; …` wrapper that shrugged off a missing directory.
+    // Now that the compose path uses the shared lifecycle engine, the hook runs
+    // under `docker exec -w <workspaceFolder>` — and an unmounted one is fatal.
+    // That is the REFERENCE's behavior, measured at oracle 0.87.0 on exactly this
+    // shape: `chdir to cwd ("/workspace") set in config.json failed: no such file
+    // or directory`, the hook exits 127 and `up` exits 1, character for character
+    // what deacon now emits. So the leniency was the divergence, not the strictness,
+    // and the fixture is corrected rather than the behavior. What this test is
+    // for — that lifecycle runs at all once the override keeps the container
+    // alive — is unchanged by the mount.
     let compose_yml = r#"services:
   app:
     image: alpine:3.18
     command: ["echo", "init"]
+    volumes:
+      - .:/workspace
 "#;
     let devcontainer_json = r#"{
   "name": "Compose Lifecycle Marker",

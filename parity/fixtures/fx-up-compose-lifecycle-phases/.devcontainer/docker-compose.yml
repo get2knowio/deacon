@@ -1,0 +1,12 @@
+# Compose project for the full-lifecycle-phase-set case (#460).
+#
+# A stock `alpine:3.19` deliberately — nothing about this case depends on image
+# metadata, so it needs no locally-built `:local` fixture image and no prepull
+# step beyond the ordinary one. What it measures is which lifecycle phases the
+# compose path runs, in what order, and in which command forms.
+services:
+  app:
+    image: alpine:3.19
+    volumes:
+      - ..:/workspace
+    command: sleep infinity

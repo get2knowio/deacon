@@ -573,6 +573,7 @@ pub(crate) async fn execute_up_with_runtime(
             &cli_remote_env,
             config_path.as_path(),
             &runtime,
+            &cache_folder,
             host_ca_set.as_ref(),
         )
         .await?

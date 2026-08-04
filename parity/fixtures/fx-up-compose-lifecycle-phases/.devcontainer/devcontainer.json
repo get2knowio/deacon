@@ -1,0 +1,27 @@
+{
+	"name": "ConformanceUpComposeLifecyclePhases",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"shutdownAction": "stopCompose",
+	"onCreateCommand": "echo onCreate-string >> /workspace/lifecycle-phases.txt",
+	"updateContentCommand": [
+		"sh",
+		"-c",
+		"echo updateContent-array >> /workspace/lifecycle-phases.txt"
+	],
+	"postCreateCommand": [
+		"sh",
+		"-c",
+		"echo postCreate-array >> /workspace/lifecycle-phases.txt"
+	],
+	"postStartCommand": {
+		"alpha": "echo postStart-object-alpha > /workspace/lifecycle-poststart-alpha.txt",
+		"beta": [
+			"sh",
+			"-c",
+			"echo postStart-object-beta > /workspace/lifecycle-poststart-beta.txt"
+		]
+	},
+	"postAttachCommand": "echo postAttach-string >> /workspace/lifecycle-phases.txt"
+}

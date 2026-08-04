@@ -800,6 +800,9 @@ pub(crate) async fn execute_container_up(
         prior_markers,
         Some(&identity.config_hash),
         runtime,
+        // Host-side derivation is correct here: `up` created this container and
+        // injected its workspace mount, so the derived path is the mounted one.
+        None,
     )
     .await?;
 

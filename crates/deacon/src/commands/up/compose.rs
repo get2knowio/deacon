@@ -2,7 +2,8 @@
 //!
 //! This module contains:
 //! - `execute_compose_up` - Main compose up execution
-//! - `execute_compose_post_create` - Post-create lifecycle for compose
+//! - `execute_compose_lifecycle` - Full lifecycle phase set for compose, through
+//!   the same engine the single-container path uses
 //! - `handle_compose_shutdown` - Shutdown handling for compose
 
 use super::args::{MountType, NormalizedMount, UpArgs};
@@ -10,7 +11,7 @@ use super::features_build::{
     FeatureBuildOutput, build_image_with_features, build_image_with_features_from_dockerfile,
 };
 use super::helpers::{apply_user_mapping, handle_lockfile_post_build};
-use super::lifecycle::{HostTrustArgs, execute_initialize_command, resolve_force_pty};
+use super::lifecycle::{HostTrustArgs, execute_initialize_command};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
 };
@@ -22,13 +23,12 @@ use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject, Servi
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
 use deacon_core::docker::Docker;
-use deacon_core::docker::ExecConfig;
 use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::host_ca::{CA_ENV_VARS, CorporateCaSet, HOST_CA_BUNDLE_PATH, inject_runtime};
 use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::state::{ComposeState, StateManager};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{debug, info, instrument, warn};
 
@@ -81,6 +81,7 @@ pub(crate) async fn execute_compose_up(
     effective_env: &IndexMap<String, String>,
     config_path: &Path,
     runtime: &ContainerRuntimeImpl,
+    cache_folder: &Option<PathBuf>,
     host_ca_set: Option<&CorporateCaSet>,
 ) -> Result<UpContainerInfo> {
     debug!("Starting Docker Compose project");
@@ -635,21 +636,37 @@ pub(crate) async fn execute_compose_up(
     state_manager.save_compose_state(workspace_hash, compose_state)?;
     debug!("Saved compose state for workspace hash: {}", workspace_hash);
 
-    // Execute post-create lifecycle if not skipped
-    if !args.skip_post_create {
-        // Resolve PTY preference for compose post-create (same logic as lifecycle commands).
-        // json_mode is threaded from the clap-resolved --log-format/DEACON_LOG_FORMAT (#180).
-        let force_pty = resolve_force_pty(args.force_tty_if_json, args.json_log_format);
-        execute_compose_post_create(
-            &project,
-            config,
-            workspace_folder,
-            args,
-            effective_env,
-            force_pty,
-        )
-        .await?;
-    }
+    // Run the FULL lifecycle phase set through the same machinery the
+    // single-container path uses (#460). This replaced a compose-local exec that
+    // ran `postCreateCommand` only in its STRING form and queued no other phase,
+    // so an array/object hook, an `onCreate`/`updateContent`/`postStart`/
+    // `postAttach` hook, a Feature-contributed hook, and the phase markers were
+    // all silently dropped on compose while `up`'s single-container path ran
+    // them. There is one lifecycle engine (`up::lifecycle::execute_lifecycle_commands`
+    // → `deacon_core::container_lifecycle`); the compose path is now a caller of
+    // it, not a second implementation.
+    //
+    // The `--skip-post-create` guard that used to wrap this call is deliberately
+    // gone: that flag skips postCreate ONWARD, not onCreate/updateContent, and
+    // `InvocationContext::should_skip_phase` is what encodes that — gating the
+    // whole call on it skipped the base setup the flag is specified to perform.
+    let primary_container_id =
+        resolve_primary_container_id_with_retry(&compose_manager, &project).await?;
+    execute_compose_lifecycle(
+        &primary_container_id,
+        config,
+        identity,
+        workspace_folder,
+        args,
+        effective_env,
+        cache_folder,
+        feature_build
+            .as_ref()
+            .map(|fb| fb.resolved_features.as_slice())
+            .unwrap_or(&[]),
+        runtime,
+    )
+    .await?;
 
     // Handle port forwarding and events
     if args.ports_events {
@@ -677,9 +694,9 @@ pub(crate) async fn execute_compose_up(
         .await?;
     }
 
-    // Collect container information for JSON output
-    // Retry getting container ID with exponential backoff to handle race conditions
-    let container_id = resolve_primary_container_id_with_retry(&compose_manager, &project).await?;
+    // Collect container information for JSON output. Already resolved (with
+    // backoff) for the lifecycle run above.
+    let container_id = primary_container_id;
 
     // Start the detached port forwarder for the primary service container if
     // requested. Declared `"service:port"` specs relay over the compose network
@@ -805,121 +822,113 @@ pub(crate) async fn execute_compose_up(
     })
 }
 
-/// Execute post-create lifecycle for compose projects.
+/// Run the full lifecycle phase set against a compose project's primary service
+/// container, through the ONE lifecycle implementation
+/// (`up::lifecycle::execute_lifecycle_commands`).
+///
+/// This is a caller of the shared engine, not a second engine: phase set and
+/// ordering, every command form (string / array / object), Feature-contributed
+/// commands, `--skip-post-create` / `--skip-non-blocking-commands` /
+/// `--prebuild` / `waitFor` semantics, dotfiles and the `.devcontainer-state`
+/// phase markers all come from there and are identical to the single-container
+/// path. Everything this function owns is the two inputs that path resolves
+/// differently: the lifecycle **user/env**, and the lifecycle **cwd**.
 ///
 /// `config` is the configuration AFTER the service image's `devcontainer.metadata`
-/// has been folded in (#448), so a `remoteUser`, `remoteEnv` or `postCreateCommand`
-/// contributed only by the image reaches this hook exactly as it does on the
+/// has been folded in (#448), so a `remoteUser`, `remoteEnv` or lifecycle hook
+/// contributed only by the image reaches these phases exactly as it does on the
 /// single-container path.
-#[instrument(skip(project, config, args, cli_remote_env))]
-pub(crate) async fn execute_compose_post_create(
-    project: &ComposeProject,
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip(config, identity, args, cli_remote_env, resolved_features, runtime))]
+async fn execute_compose_lifecycle(
+    container_id: &str,
     config: &DevContainerConfig,
+    identity: &ContainerIdentity,
     workspace_folder: &Path,
     args: &UpArgs,
     cli_remote_env: &IndexMap<String, String>,
-    force_pty: bool,
+    cache_folder: &Option<PathBuf>,
+    resolved_features: &[deacon_core::features::ResolvedFeature],
+    runtime: &ContainerRuntimeImpl,
 ) -> Result<()> {
-    debug!("Executing post-create lifecycle for compose project");
-
-    // Run lifecycle commands from the container's workspace folder, matching the
-    // single-container path. Without this the exec inherits the image's default
-    // WORKDIR (often `/`), so a workspace-relative command like
-    // `.devcontainer/setup.sh` fails with "No such file or directory".
-    //
-    // We do NOT set `docker exec -w <dir>` (ExecConfig.working_dir): deacon does
-    // not inject a workspace bind mount for compose (the user's compose file
-    // provides it), so `<workspaceFolder>` may not exist in the container — and
-    // `-w` to a missing dir makes the exec hard-fail
-    // ("chdir to cwd … no such file or directory"). Instead we `cd` into it from
-    // inside the shell and fall through to the default dir if it is absent. This
-    // matches the reference CLI (run lifecycle from workspaceFolder) when the
-    // workspace is mounted, and stays graceful when it is not.
-    let container_workspace_folder = crate::commands::shared::derive_container_workspace_folder(
-        config,
-        workspace_folder,
-        args.mount_workspace_git_root,
-    );
-
-    // Get the primary container ID
-    let compose_manager = ComposeManager::with_docker_path(args.docker_path.clone());
-    let container_id = match compose_manager.get_primary_container_id(project).await? {
-        Some(id) => id,
-        None => {
-            warn!("Primary service container not found, skipping post-create");
-            return Ok(());
-        }
-    };
-
     debug!(
-        "Running post-create commands in container: {}",
+        "Executing lifecycle phases in compose container: {}",
         container_id
     );
 
-    // Execute postCreateCommand if specified
-    if let Some(post_create_cmd) = &config.post_create_command {
-        if let Some(cmd_str) = post_create_cmd.as_str() {
-            debug!("Executing postCreateCommand: {}", cmd_str);
+    // Resolve the hook's user and environment through the SAME shared helper the
+    // single-container `up`, `exec` and `run-user-commands` use (CLAUDE.md
+    // principle 6): probe → config `remoteEnv` → CLI `--remote-env`, with
+    // `remoteUser` (else `containerUser`) as the exec user (#448).
+    let env_user = crate::commands::shared::resolve_env_and_user(
+        runtime,
+        container_id,
+        None,
+        config
+            .remote_user
+            .clone()
+            .or_else(|| config.container_user.clone()),
+        config.user_env_probe.unwrap_or(args.default_user_env_probe),
+        Some(config.remote_env()),
+        cli_remote_env,
+        cache_folder.as_deref(),
+    )
+    .await;
 
-            // Resolve the hook's user and environment through the SAME shared
-            // helper the single-container `up`, `exec` and `run-user-commands`
-            // use (CLAUDE.md principle 6): probe → config `remoteEnv` → CLI
-            // `--remote-env`, with `remoteUser` (else `containerUser`) as the
-            // exec user. This path passed `user: None` and an EMPTY env map, so
-            // the hook ran as the image's own user with none of the configured
-            // environment — which is what made the #448 image-metadata merge
-            // above unobservable, and dropped the workspace's own `remoteEnv`
-            // too. The same three-way miss `run-user-commands` had at #405.
-            let docker = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
-            let env_user = crate::commands::shared::resolve_env_and_user(
-                &docker,
-                &container_id,
-                None,
-                config
-                    .remote_user
-                    .clone()
-                    .or_else(|| config.container_user.clone()),
-                config.user_env_probe.unwrap_or(args.default_user_env_probe),
-                Some(config.remote_env()),
-                cli_remote_env,
-                args.container_data_folder.as_deref(),
-            )
-            .await;
-
-            // Run from the container workspace folder if it exists, else fall
-            // through (see the note above). Single-quote the path defensively;
-            // container workspace paths do not contain single quotes in practice.
-            let wrapped_cmd = format!(
-                "cd '{}' 2>/dev/null; {}",
-                container_workspace_folder, cmd_str
-            );
-
-            let result = docker
-                .exec(
-                    &container_id,
-                    &["sh".to_string(), "-c".to_string(), wrapped_cmd],
-                    ExecConfig {
-                        user: env_user.effective_user,
-                        working_dir: None,
-                        env: env_user.effective_env,
-                        tty: force_pty,
-                        interactive: false,
-                        detach: false,
-                        silent: false,
-                        stdout_to_stderr: true,
-                        terminal_size: None,
-                    },
-                )
-                .await;
-
-            match result {
-                Ok(_) => debug!("postCreateCommand completed successfully"),
-                Err(e) => warn!("postCreateCommand failed: {}", e),
-            }
+    // The lifecycle cwd, resolved against the RUNNING container rather than
+    // derived host-side. deacon injects no workspace bind mount for compose (the
+    // user's compose file provides it, or does not), so the single-container
+    // derivation `/workspaces/<basename>` can name a directory the service never
+    // mounts — and the core executor's `docker exec -w` hard-fails on a missing
+    // cwd. `resolve_container_cwd` reads the container's actual mounts and falls
+    // back to `/` for a compose config with no explicit `workspaceFolder`, which
+    // is the reference's effective compose workspace (#294/#295).
+    let mounts = match runtime.inspect_container(container_id).await {
+        Ok(Some(info)) => info.mounts,
+        Ok(None) => Vec::new(),
+        Err(e) => {
+            debug!("Could not inspect compose container for its mounts: {}", e);
+            Vec::new()
         }
-    }
+    };
+    let container_workspace_folder = crate::commands::shared::resolve_container_cwd(
+        config,
+        workspace_folder,
+        &mounts,
+        args.mount_workspace_git_root,
+    );
 
-    Ok(())
+    // Prior phase markers for the resume decision, filtered by the current
+    // config hash — the same read the single-container path performs (#93/#117).
+    // `--remove-existing-container` already cleared them further up, symmetrically
+    // with `up/container.rs`.
+    let prior_markers = deacon_core::state::read_all_markers_for_config(
+        workspace_folder,
+        args.prebuild,
+        Some(&identity.config_hash),
+        args.user_data_folder.as_deref(),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        debug!("Failed to read prior lifecycle markers: {}", e);
+        Vec::new()
+    });
+
+    super::lifecycle::execute_lifecycle_commands(
+        container_id,
+        config,
+        workspace_folder,
+        args,
+        env_user.effective_env,
+        env_user.effective_user,
+        cache_folder,
+        resolved_features,
+        prior_markers,
+        Some(&identity.config_hash),
+        runtime,
+        Some(container_workspace_folder),
+    )
+    .await
 }
 
 /// Bead 14a + 14b: install features into a compose-based devcontainer.
