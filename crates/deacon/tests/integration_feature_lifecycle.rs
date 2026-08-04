@@ -1332,3 +1332,141 @@ fn test_up_collects_image_metadata_and_config_hooks_for_the_same_phase() {
          last-wins rows of the Merge Logic table into collections."
     );
 }
+
+/// #467 follow-up: the FULL layer order, end to end, in one file —
+/// image-metadata entries in label order, then Features in install order, then
+/// the devcontainer.json.
+///
+/// The sibling test above pins the same-phase COLLISION, which is what #467 was
+/// filed about, but it uses a single-entry label and no Feature, so two things it
+/// cannot see:
+///
+/// 1. **Order between metadata entries.** The merge rule is a "Collected list",
+///    so the label is an ordered array of partial configurations and the order
+///    between its entries is part of the claim. Both entries here declare
+///    `onCreateCommand`, so `img1-onCreate` preceding `img2-onCreate` is that
+///    assertion. A collection that used a set, reversed the entries, or read only
+///    the first or the last would satisfy a single-entry fixture.
+///
+/// 2. **Where the image layers sit relative to Features.** Feature-contributed
+///    hooks were ALREADY aggregated ahead of the configuration's before #467;
+///    the image layers had to be inserted ahead of BOTH, not beside either. The
+///    Feature's line between the image's and the config's is what proves it, and
+///    it is also what proves neither layer runs twice — each appears once in a
+///    log asserted whole.
+///
+/// Upstream's `getDevcontainerMetadata` builds exactly this order —
+/// `[...baseImageMetadata.raw, ...featureRaw, pickConfigProperties(config.raw)]`
+/// — and it is the order the reference CLI 0.87.0 was measured running on this
+/// shape. Both CLIs exit 0 whatever the order, so the file is the whole
+/// observation.
+///
+/// Cross-entry ordering is also pinned end-to-end against the live oracle by
+/// `case-up-image-metadata-same-phase-differential` and its compose twin, but
+/// those are differential-only (their bases are `:local` images only the nightly
+/// and release lanes build). This test is what carries the property on the
+/// PR-gating Docker lane. The compose path needs no twin of it: the layers reach
+/// both paths through the one shared merge, and that they reach COMPOSE at all is
+/// what `integration_compose_config_mounts::
+/// test_compose_up_collects_image_metadata_and_config_hooks_for_the_same_phase`
+/// already pins.
+#[test]
+fn test_image_metadata_layers_features_and_config_run_in_spec_order() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_image_metadata_layers_features_and_config_run_in_spec_order: \
+             Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let guard = ContainerGuard::new();
+
+    let image_tag = format!(
+        "deacon-test-layer-order-{}-{}:local",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+    let _image = ImageGuard(image_tag.clone());
+
+    // TWO entries. Both declare onCreate (cross-entry order); postCreate is split
+    // one per entry so the collection is shown to read every entry, not just one.
+    let image_dir = temp_dir.path().join("image");
+    fs::create_dir_all(&image_dir).unwrap();
+    fs::write(
+        image_dir.join("Dockerfile"),
+        concat!(
+            "FROM alpine:3.19\n",
+            "LABEL devcontainer.metadata='[",
+            "{\"onCreateCommand\":\"echo img1-onCreate >> /tmp/order.log\"},",
+            "{\"onCreateCommand\":\"echo img2-onCreate >> /tmp/order.log\",",
+            "\"postCreateCommand\":\"echo img2-postCreate >> /tmp/order.log\"}",
+            "]'\n",
+        ),
+    )
+    .unwrap();
+
+    let build = StdCommand::new("docker")
+        .args(["build", "-q", "-t", &image_tag])
+        .arg(&image_dir)
+        .output()
+        .expect("docker build should run");
+    assert!(
+        build.status.success(),
+        "docker build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    create_local_feature(
+        &temp_dir,
+        "order-feature",
+        json!({ "onCreateCommand": "echo feat-onCreate >> /tmp/order.log" }),
+    );
+
+    let devcontainer_config = json!({
+        "name": "Layer order",
+        "image": image_tag,
+        "features": { "./order-feature": {} },
+        "onCreateCommand": "echo ws-onCreate >> /tmp/order.log",
+        "postCreateCommand": ["/bin/sh", "-c", "echo ws-postCreate >> /tmp/order.log"],
+    });
+
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        serde_json::to_string_pretty(&devcontainer_config).unwrap(),
+    )
+    .unwrap();
+
+    let container_id = run_deacon_up(&temp_dir, &guard, &[]).expect("deacon up should succeed");
+
+    let log = read_container_file(&container_id, "/tmp/order.log")
+        .expect("the lifecycle hooks should have written /tmp/order.log");
+    let lines: Vec<&str> = log
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    assert_eq!(
+        lines,
+        vec![
+            // onCreate: metadata entry 0, metadata entry 1, Feature, config
+            "img1-onCreate",
+            "img2-onCreate",
+            "feat-onCreate",
+            "ws-onCreate",
+            // postCreate: metadata entry 1, config
+            "img2-postCreate",
+            "ws-postCreate",
+        ],
+        "every layer must run exactly once, in spec order: image-metadata entries \
+         in LABEL order, then Features in install order, then devcontainer.json \
+         (#467). Got: {:?}",
+        lines
+    );
+}

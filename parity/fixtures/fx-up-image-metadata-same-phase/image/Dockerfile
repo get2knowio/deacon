@@ -22,6 +22,16 @@
 #     the merge ALSO leaves it in the singular field runs it twice, and only an
 #     assertion over the WHOLE log can see that; a `contains` check cannot.
 #
+# TWO label entries rather than one, spanning those three phases. The merge rule
+# is "Collected list", so the label is an ordered ARRAY of partial configurations
+# and the order BETWEEN its entries is part of what has to hold — a single entry
+# cannot express it, and pins only the collision. `onCreateCommand` is declared
+# by BOTH entries, so `img1-onCreate` preceding `img2-onCreate` in the log is the
+# cross-entry ordering assertion; an implementation that collected the entries
+# into a set, reversed them, or kept only one would still satisfy a single-entry
+# fixture. The remaining two phases sit one per entry, which also proves the
+# collection reads every entry rather than the first or the last.
+#
 # Every hook appends to one file, so the file records both WHICH hooks ran and
 # the ORDER they ran in. Relative `./lifecycle.log` resolves against the
 # container workspace folder, which both CLIs set for lifecycle hooks.
@@ -35,4 +45,4 @@
 # devcontainer.json names. Both CLIs resolve the label by local `docker inspect`,
 # so no registry is involved.
 FROM alpine:3.19
-LABEL devcontainer.metadata='[{"onCreateCommand":"echo img-onCreate >> ./lifecycle.log","postCreateCommand":"echo img-postCreate >> ./lifecycle.log","postStartCommand":"echo img-postStart >> ./lifecycle.log"}]'
+LABEL devcontainer.metadata='[{"onCreateCommand":"echo img1-onCreate >> ./lifecycle.log","postCreateCommand":"echo img-postCreate >> ./lifecycle.log"},{"onCreateCommand":"echo img2-onCreate >> ./lifecycle.log","postStartCommand":"echo img-postStart >> ./lifecycle.log"}]'
