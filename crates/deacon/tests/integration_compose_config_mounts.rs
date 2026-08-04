@@ -229,13 +229,16 @@ impl Drop for ImageGuard {
 /// Measured against the pinned reference CLI 0.87.0, which writes exactly this
 /// line on this fixture.
 ///
-/// The workspace is made world-writable below, and that is load-bearing: the
-/// hook runs as the image's non-root `metauser`, and deacon does NOT apply
-/// `updateRemoteUserUID` on the compose path (the reference does — #462), so
-/// `metauser` keeps the image's uid inside the container. Without the `chmod`
-/// this test would pass only on a host whose uid happens to equal that uid and
-/// fail everywhere else with `Permission denied` — a verdict about the host, not
-/// about #448. Permissions are therefore removed from what this test measures.
+/// The write itself is load-bearing for #462. The hook runs as the image's
+/// non-root `metauser`, pinned below to uid 1234, and the workspace is a
+/// `TempDir` owned by the test process's own uid — so the hook can write only
+/// once `updateRemoteUserUID` has remapped `metauser` to the HOST's uid.
+/// deacon applied that mapping on the single-container path only until #462;
+/// this test used to `chmod 0777` the workspace to take permissions out of what
+/// it measured, and that workaround is gone. With the uid pinned to 1234 the
+/// mismatch is the norm rather than an accident, so a regression in the remap
+/// fails here on every host — `Permission denied` and no marker — instead of
+/// only on hosts whose uid happens to disagree with the image's.
 #[test]
 fn test_compose_up_merges_service_image_metadata() {
     if !is_docker_available() {
@@ -246,14 +249,6 @@ fn test_compose_up_merges_service_image_metadata() {
     let temp_dir = TempDir::new().unwrap();
     let workspace = temp_dir.path();
     let _down = DeaconDownGuard(workspace);
-
-    // See the note above: the hook writes into this directory as a non-root
-    // container user whose uid is the IMAGE's, not the host's.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(workspace, fs::Permissions::from_mode(0o777)).unwrap();
-    }
 
     // Unique tag so parallel runs in the docker-shared group never collide.
     let image_tag = format!(
@@ -272,10 +267,9 @@ fn test_compose_up_merges_service_image_metadata() {
     // (#460), and using the string form keeps this test measuring the merge.
     //
     // `metauser` is pinned to uid 1234 rather than letting `adduser` pick the
-    // first free uid (1000, the commonest host uid there is). Together with the
-    // `chmod` above that makes the uid MISmatch the norm here instead of an
-    // accident, so a regression in the world-writable setup surfaces as a
-    // failure everywhere rather than only on hosts that happen to disagree.
+    // first free uid (1000, the commonest host uid there is), which makes the
+    // uid MISmatch the norm here instead of an accident: the hook's write can
+    // only succeed through the #462 remap, on every host.
     let image_dir = workspace.join("image");
     fs::create_dir_all(&image_dir).unwrap();
     fs::write(
@@ -356,5 +350,126 @@ fn test_compose_up_merges_service_image_metadata() {
         "metauser from-image-metadata from-workspace-config",
         "the hook must run as the image's remoteUser with both the image's and the \
          workspace's remoteEnv applied"
+    );
+}
+
+/// #462, the opt-out half: `"updateRemoteUserUID": false` in devcontainer.json
+/// suppresses the uid remap on the COMPOSE path, exactly as it does on the
+/// single-container one.
+///
+/// The sibling test above proves the remap happens by default; this one proves
+/// the knob still turns it off. `metauser` is pinned to uid 1234 again, so the
+/// two tests differ in exactly one input and the marker's uid is the verdict:
+/// 1234 means the image's uid survived, the host's uid means it did not.
+///
+/// The workspace IS made world-writable here, and unlike the pre-#462 workaround
+/// that is not papering over a gap — it is what the opt-out asks for. Declining
+/// the remap is declining the thing that makes a non-root user able to write a
+/// host-owned bind mount, so without the `chmod` the hook could not write the
+/// marker this test reads and there would be nothing to measure.
+#[test]
+fn test_compose_up_update_remote_user_uid_false_keeps_image_uid() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_compose_up_update_remote_user_uid_false_keeps_image_uid: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let workspace = temp_dir.path();
+    let _down = DeaconDownGuard(workspace);
+
+    // See the note above: the opt-out leaves `metauser` at uid 1234, which is
+    // not the owner of this host-side directory.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(workspace, fs::Permissions::from_mode(0o777)).unwrap();
+    }
+
+    let image_tag = format!(
+        "deacon-test-compose-no-uid-remap-{}-{}:local",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+    let _image = ImageGuard(image_tag.clone());
+
+    let image_dir = workspace.join("image");
+    fs::create_dir_all(&image_dir).unwrap();
+    fs::write(
+        image_dir.join("Dockerfile"),
+        concat!(
+            "FROM alpine:3.19\n",
+            "RUN adduser -D -u 1234 -s /bin/sh metauser\n",
+            "LABEL devcontainer.metadata='[{\"remoteUser\":\"metauser\",",
+            "\"postCreateCommand\":\"echo uid=$(id -u) > /workspace/no-uid-remap.txt\"}]'\n",
+        ),
+    )
+    .unwrap();
+
+    let build = std::process::Command::new("docker")
+        .args(["build", "-q", "-t", &image_tag])
+        .arg(&image_dir)
+        .output()
+        .expect("docker build should run");
+    assert!(
+        build.status.success(),
+        "docker build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let compose_yml = format!(
+        "services:\n  app:\n    image: {}\n    volumes:\n      - .:/workspace\n    command: sleep infinity\n",
+        image_tag
+    );
+    let devcontainer_json = r#"{
+  "name": "Compose No UID Remap",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "updateRemoteUserUID": false
+}"#;
+
+    fs::write(workspace.join("docker-compose.yml"), compose_yml).unwrap();
+    fs::create_dir(workspace.join(".devcontainer")).unwrap();
+    fs::write(
+        workspace.join(".devcontainer/devcontainer.json"),
+        devcontainer_json,
+    )
+    .unwrap();
+
+    let up_output = support::deacon_command()
+        .current_dir(workspace)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(workspace)
+        .output()
+        .unwrap();
+
+    if !up_output.status.success() {
+        panic!(
+            "deacon up failed: {}",
+            String::from_utf8_lossy(&up_output.stderr)
+        );
+    }
+
+    let marker = workspace.join("no-uid-remap.txt");
+    let contents = fs::read_to_string(&marker).unwrap_or_else(|e| {
+        panic!(
+            "the image-metadata postCreateCommand should have written {}: {} (up stderr: {})",
+            marker.display(),
+            e,
+            String::from_utf8_lossy(&up_output.stderr)
+        )
+    });
+
+    assert_eq!(
+        contents.trim(),
+        "uid=1234",
+        "updateRemoteUserUID: false must leave the image's uid alone on the compose path"
     );
 }
