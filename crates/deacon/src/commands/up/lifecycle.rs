@@ -117,6 +117,13 @@ pub(crate) fn build_invocation_context(
 /// - `args`: runtime flags that influence execution (e.g., skipping post-create, non-blocking behavior) and an optional progress tracker.
 /// - `resolved_features`: Features resolved during image build, containing lifecycle commands to execute before config commands.
 /// - `prior_markers`: Previously executed phase markers for resume detection.
+/// - `container_workspace_folder_override`: the lifecycle working directory, when the caller
+///   has already resolved it against the RUNNING container. The single-container path passes
+///   `None` and lets it be derived host-side, because `up` created that container's workspace
+///   mount itself. The COMPOSE path passes `Some`: deacon injects no workspace mount there
+///   (the user's compose file provides it, or does not), so the host-side derivation can name
+///   a directory the service never mounts and `docker exec -w` hard-fails on a missing cwd.
+///   See `shared::resolve_container_cwd` (#294/#295).
 ///
 /// Behavior notes:
 /// - Commands may be provided as a single string, array, object, or null in the config.
@@ -136,6 +143,7 @@ pub(crate) async fn execute_lifecycle_commands(
     prior_markers: Vec<LifecyclePhaseState>,
     config_hash: Option<&str>,
     runtime: &deacon_core::runtime::ContainerRuntimeImpl,
+    container_workspace_folder_override: Option<String>,
 ) -> Result<()> {
     use deacon_core::container_lifecycle::{
         ContainerLifecycleCommands, ContainerLifecycleConfig,
@@ -187,12 +195,16 @@ pub(crate) async fn execute_lifecycle_commands(
     let substitution_context = SubstitutionContext::new(workspace_folder)?;
 
     // Determine container workspace folder (matches the mount / read-configuration
-    // for git-subdir workspaces, #309).
-    let container_workspace_folder = crate::commands::shared::derive_container_workspace_folder(
-        config,
-        workspace_folder,
-        args.mount_workspace_git_root,
-    );
+    // for git-subdir workspaces, #309), unless the caller already resolved it
+    // against the running container (compose — see the parameter's doc comment).
+    let container_workspace_folder = match container_workspace_folder_override {
+        Some(folder) => folder,
+        None => crate::commands::shared::derive_container_workspace_folder(
+            config,
+            workspace_folder,
+            args.mount_workspace_git_root,
+        ),
+    };
 
     // Whether JSON log mode is active — resolved by clap from
     // `--log-format`/`DEACON_LOG_FORMAT` at the CLI tier and threaded via

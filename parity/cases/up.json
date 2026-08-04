@@ -348,6 +348,113 @@
       "notes": "#448 and #462 together. The single marker line pins all FOUR cells of #448's matrix at once: the hook ran, it ran as the image-metadata `remoteUser`, the image's `remoteEnv` reached it, and the workspace's did too. `remoteUser`, the hook and `META_ENV` live ONLY in the service image's `devcontainer.metadata` label; `WS_ENV` only in the workspace's `remoteEnv`.\n\nMeasured against the pinned 0.87.0 before either fix was written: the reference's compose `up` wrote `metauser from-image-metadata from-workspace-config`; deacon wrote no file at all. `up`'s compose path never called `merge_image_metadata_after_image_ready`, and its post-create exec passed no user and an empty env, which is why the workspace's own `remoteEnv` had been missing too.\n\nThe observation is the FILE, not the exit code: before the fix nothing was written and the status still said 0.\n\nThe fourth cell — the hook's USER — is measured HERE, and its history is why this case is worth reading. The fixture image pins `metauser` to uid 1234 while the workspace is a bind mount of a host directory the runner owns, so the hook can only write once its uid has been remapped to the HOST's. That is `updateRemoteUserUID`, and deacon applied it on the single-container path only until #462 — the reference builds a derived `<image>-uid` image and points the service at it through its generated override; deacon now remaps in the running container through the same `apply_user_mapping` its single-container path has always used, an identical observable by a different mechanism. This case's FIRST revision declared `remoteUser` and passed locally purely because the dev container's uid and `adduser`'s first free uid were both 1000; on GitHub's runners it failed with `Permission denied`, which is how #462 was found. Its second revision dropped `remoteUser` to keep a #448 regression distinguishable from a uid coincidence. With #462 fixed the coincidence is gone from the verdict entirely — 1234 never matches a plausible host uid — so the cell is back, and a regression in EITHER fix fails this case on every host.\n\nThe marker records `whoami`, not `id -u`: the remapped uid is the HOST's and so differs between a dev box and a CI runner, which would make a fixed assertion a statement about the host. The remap is measured by the file existing at all; the user, by its name.\n\nThe hook is the STRING form, deliberately: deacon's compose post-create runs `postCreateCommand` only when it is a string, and the array/object forms and every other phase are a separate pre-existing gap on this path (#460). Keeping the string form leaves this case measuring the metadata merge and the uid remap and nothing else.\n\nNo spec-expectation twin: the fixture's base is a `:local` image built from its sibling Dockerfile by `scripts/parity/prepull-fixture-images.sh`, which only the nightly and release lanes run — so a Docker-lane twin would fail on the PR lane for a missing image rather than for a divergence (the same reason `case-run-user-commands-image-metadata-differential` is differential-only). The direction is pinned instead by the `assertion` carried HERE, evaluated against deacon's side on top of the comparison.\n\nOnly `chan-exit-code` and `chan-file-content` are observed. `chan-container-state` would drag in the whole compose project-name / label tolerance set that `case-up-compose-project-resources-differential` already carries, none of which is what this case is about."
     },
     {
+      "id": "case-up-compose-lifecycle-phases",
+      "behaviors": [
+        "bhv-up-compose-lifecycle-phases"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-lifecycle-phases"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-phases.txt": "onCreate-string\nupdateContent-array\npostCreate-array\npostAttach-string\n",
+              "lifecycle-poststart-alpha.txt": "postStart-object-alpha\n",
+              "lifecycle-poststart-beta.txt": "postStart-object-beta\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt",
+        "lifecycle-poststart-alpha.txt",
+        "lifecycle-poststart-beta.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "#460. A compose `up` ran `postCreateCommand` only in its STRING form and queued no other phase, because `up`'s compose path carried its own post-create exec instead of calling the lifecycle engine the single-container path uses. Measured against oracle 0.87.0 on this fixture before the fix: the reference ran all six commands and deacon ran NONE of them — `postCreateCommand` here is the array form, so the old `as_str()` yielded None and nothing was queued at all. Both sides exited 0 either way, so the marker files are the entire observation.\n\nOne fixture pins four things at once: WHICH phases run (onCreate, updateContent, postCreate, postStart, postAttach — five, where the old path had one), in WHAT order (the four sequential phases append to one file, so the line order is the phase order), in WHICH command form (string, array and object all appear), and that the object form runs EVERY named command.\n\nThe two `postStart` named commands write their OWN files rather than appending to the shared log, for the reason `case-up-lifecycle-object-form` gives: the spec does not order named commands, so asserting them inside one file would pin an order neither CLI promises. The sequential phases can share a file precisely because their order IS promised.\n\nStock `alpine:3.19` and no image metadata deliberately — the image-metadata dimension of this path is `case-up-compose-image-metadata-differential`'s, and keeping it out here means this case needs no locally-built `:local` fixture image and can therefore ALSO exist as a spec-expectation twin that runs on the Docker lane.\n\nThis is the spec-expectation half: it needs no oracle, so it runs on the Docker lane (`parity_docker`) that gates pull requests and the release, which is where a regression in the compose phase set should be caught. Its differential twin adds the comparison."
+    },
+    {
+      "id": "case-up-compose-lifecycle-phases-differential",
+      "behaviors": [
+        "bhv-up-compose-lifecycle-phases"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-lifecycle-phases"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-phases.txt": "onCreate-string\nupdateContent-array\npostCreate-array\npostAttach-string\n",
+              "lifecycle-poststart-alpha.txt": "postStart-object-alpha\n",
+              "lifecycle-poststart-beta.txt": "postStart-object-beta\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt",
+        "lifecycle-poststart-alpha.txt",
+        "lifecycle-poststart-beta.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "#460. A compose `up` ran `postCreateCommand` only in its STRING form and queued no other phase, because `up`'s compose path carried its own post-create exec instead of calling the lifecycle engine the single-container path uses. Measured against oracle 0.87.0 on this fixture before the fix: the reference ran all six commands and deacon ran NONE of them — `postCreateCommand` here is the array form, so the old `as_str()` yielded None and nothing was queued at all. Both sides exited 0 either way, so the marker files are the entire observation.\n\nOne fixture pins four things at once: WHICH phases run (onCreate, updateContent, postCreate, postStart, postAttach — five, where the old path had one), in WHAT order (the four sequential phases append to one file, so the line order is the phase order), in WHICH command form (string, array and object all appear), and that the object form runs EVERY named command.\n\nThe two `postStart` named commands write their OWN files rather than appending to the shared log, for the reason `case-up-lifecycle-object-form` gives: the spec does not order named commands, so asserting them inside one file would pin an order neither CLI promises. The sequential phases can share a file precisely because their order IS promised.\n\nStock `alpine:3.19` and no image metadata deliberately — the image-metadata dimension of this path is `case-up-compose-image-metadata-differential`'s, and keeping it out here means this case needs no locally-built `:local` fixture image and can therefore ALSO exist as a spec-expectation twin that runs on the Docker lane.\n\nThis is the live-differential half: it compares the two sides' marker files directly, so it fails if deacon's phase set or phase order drifts from the reference's in either direction. It also carries the `assertion`, evaluated against deacon's side on top of the comparison — a differential alone cannot fail when both sides are equally wrong, and here 'both sides wrote nothing' would be exactly that shape."
+    },
+    {
       "id": "case-up-compose-project-resources",
       "behaviors": [
         "bhv-compose-project-name-robust"

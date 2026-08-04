@@ -10,6 +10,9 @@
 //!   service volume is untouched, and a CLI `--mount` is applied alongside it.
 //! - #448: the SERVICE IMAGE's `devcontainer.metadata` label folded into the
 //!   configuration the compose post-create hook runs with.
+//! - #460: the compose path runs the FULL lifecycle phase set, in every command
+//!   form, and honors `--skip-post-create` / `--skip-non-blocking-commands` the
+//!   way the single-container path does.
 
 mod support;
 
@@ -471,5 +474,261 @@ fn test_compose_up_update_remote_user_uid_false_keeps_image_uid() {
         contents.trim(),
         "uid=1234",
         "updateRemoteUserUID: false must leave the image's uid alone on the compose path"
+    );
+}
+
+/// Write a compose workspace whose lifecycle hooks span every command form.
+///
+/// Four sequential phases APPEND to one marker file, so its line order is the
+/// phase order. The two `postStartCommand` named commands write their OWN files:
+/// the spec does not order named commands, so asserting them inside the shared
+/// file would pin an order neither CLI promises.
+///
+/// `image_tag` is the compose service image — a stock alpine when the test does
+/// not need image metadata, a locally built one when it does. `onCreateCommand`
+/// is declared in the devcontainer.json only when the caller asks for it; the
+/// full-phase-set test contributes that phase from the image label instead.
+fn write_lifecycle_matrix_workspace(workspace: &Path, image_tag: &str, on_create_in_config: bool) {
+    let compose_yml = format!(
+        "services:\n  app:\n    image: {}\n    volumes:\n      - .:/workspace\n    command: sleep infinity\n",
+        image_tag
+    );
+    fs::write(workspace.join("docker-compose.yml"), compose_yml).unwrap();
+
+    let on_create = if on_create_in_config {
+        "  \"onCreateCommand\": \"echo onCreate-string >> /workspace/lifecycle-phases.txt\",\n"
+    } else {
+        ""
+    };
+    let devcontainer_json = format!(
+        r#"{{
+  "name": "Compose Lifecycle Phases",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+{on_create}  "updateContentCommand": ["sh", "-c", "echo updateContent-array >> /workspace/lifecycle-phases.txt"],
+  "postCreateCommand": ["sh", "-c", "echo postCreate-array >> /workspace/lifecycle-phases.txt"],
+  "postStartCommand": {{
+    "alpha": "echo postStart-object-alpha > /workspace/lifecycle-poststart-alpha.txt",
+    "beta": ["sh", "-c", "echo postStart-object-beta > /workspace/lifecycle-poststart-beta.txt"]
+  }},
+  "postAttachCommand": "echo postAttach-string >> /workspace/lifecycle-phases.txt"
+}}"#
+    );
+
+    fs::create_dir_all(workspace.join(".devcontainer")).unwrap();
+    fs::write(
+        workspace.join(".devcontainer/devcontainer.json"),
+        devcontainer_json,
+    )
+    .unwrap();
+}
+
+/// The ordered phase log written by [`write_lifecycle_matrix_workspace`]'s
+/// sequential hooks, or `None` when no hook wrote anything at all.
+fn phase_log(workspace: &Path) -> Option<String> {
+    fs::read_to_string(workspace.join("lifecycle-phases.txt")).ok()
+}
+
+/// #460: a compose `up` runs the FULL lifecycle phase set, in every command form.
+///
+/// Before the fix, `up`'s compose path carried its own post-create exec whose
+/// body was `if let Some(cmd_str) = post_create_cmd.as_str()`, so it ran
+/// `postCreateCommand` only in its STRING form and queued no other phase.
+/// Measured against the pinned reference CLI 0.87.0 on this shape: the reference
+/// ran all six commands and deacon ran NONE of them — the `postCreateCommand`
+/// here is the array form, so `as_str()` yielded `None` and nothing was queued.
+/// Both sides exited 0, which is why the markers are the entire observation.
+///
+/// One run pins four things: WHICH phases run (five, where the old path had
+/// one), in WHAT order (the shared file's line order), in WHICH command form
+/// (string, array and object all appear), and that the object form runs EVERY
+/// named command. `onCreateCommand` is contributed by the IMAGE's
+/// `devcontainer.metadata` and by nothing else, so its line also proves an
+/// image-contributed hook reaches the compose lifecycle (#448's merge) in a
+/// phase the old path never ran at all.
+#[test]
+fn test_compose_up_runs_full_lifecycle_phase_set() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_compose_up_runs_full_lifecycle_phase_set: Docker not available");
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let workspace = temp_dir.path();
+    let _down = DeaconDownGuard(workspace);
+
+    // Unique tag so parallel runs in the docker-shared group never collide.
+    let image_tag = format!(
+        "deacon-test-compose-lifecycle-phases-{}-{}:local",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+    let _image = ImageGuard(image_tag.clone());
+
+    let image_dir = workspace.join("image");
+    fs::create_dir_all(&image_dir).unwrap();
+    fs::write(
+        image_dir.join("Dockerfile"),
+        concat!(
+            "FROM alpine:3.19\n",
+            "LABEL devcontainer.metadata='[{\"onCreateCommand\":",
+            "\"echo onCreate-string >> /workspace/lifecycle-phases.txt\"}]'\n",
+        ),
+    )
+    .unwrap();
+
+    let build = std::process::Command::new("docker")
+        .args(["build", "-q", "-t", &image_tag])
+        .arg(&image_dir)
+        .output()
+        .expect("docker build should run");
+    assert!(
+        build.status.success(),
+        "docker build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    write_lifecycle_matrix_workspace(workspace, &image_tag, false);
+
+    let up_output = support::deacon_command()
+        .current_dir(workspace)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(workspace)
+        .output()
+        .unwrap();
+    assert!(
+        up_output.status.success(),
+        "deacon up failed: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
+
+    let log = phase_log(workspace).unwrap_or_else(|| {
+        panic!(
+            "no lifecycle phase ran at all (up stderr: {})",
+            String::from_utf8_lossy(&up_output.stderr)
+        )
+    });
+    assert_eq!(
+        log,
+        "onCreate-string\nupdateContent-array\npostCreate-array\npostAttach-string\n",
+        "every sequential phase must run, in phase order; onCreate comes from the \
+         image label, the rest from the workspace config (up stderr: {})",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
+
+    // The object form runs EVERY named command. Separate files, because the spec
+    // does not order named commands against each other.
+    for (file, expected) in [
+        ("lifecycle-poststart-alpha.txt", "postStart-object-alpha\n"),
+        ("lifecycle-poststart-beta.txt", "postStart-object-beta\n"),
+    ] {
+        let got = fs::read_to_string(workspace.join(file)).unwrap_or_else(|e| {
+            panic!("the object-form postStartCommand should have written {file}: {e}")
+        });
+        assert_eq!(got, expected, "{file}");
+    }
+}
+
+/// #460: `--skip-post-create` means the same thing on compose as on a single
+/// container — postCreate ONWARD is skipped, the base setup is not.
+///
+/// The old compose path gated its whole post-create block on
+/// `if !args.skip_post_create`, which is a different rule: with no other phase
+/// implemented it was indistinguishable, but once the full set runs, gating the
+/// call would also skip `onCreate` and `updateContent`, which the flag is
+/// specified to keep. That decision belongs to `InvocationContext`, which both
+/// paths now share.
+#[test]
+fn test_compose_up_skip_post_create_runs_only_base_setup() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_compose_up_skip_post_create_runs_only_base_setup: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let workspace = temp_dir.path();
+    let _down = DeaconDownGuard(workspace);
+
+    write_lifecycle_matrix_workspace(workspace, "alpine:3.19", true);
+
+    let up_output = support::deacon_command()
+        .current_dir(workspace)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(workspace)
+        .arg("--skip-post-create")
+        .output()
+        .unwrap();
+    assert!(
+        up_output.status.success(),
+        "deacon up --skip-post-create failed: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
+
+    assert_eq!(
+        phase_log(workspace).as_deref(),
+        Some("onCreate-string\nupdateContent-array\n"),
+        "--skip-post-create must still run the base setup (onCreate, updateContent) \
+         and must run nothing after it (up stderr: {})",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
+    assert!(
+        !workspace.join("lifecycle-poststart-alpha.txt").exists(),
+        "postStart is a non-blocking phase after postCreate; --skip-post-create must skip it"
+    );
+}
+
+/// #460: `--skip-non-blocking-commands` stops the compose lifecycle at the
+/// configured `waitFor` phase, which defaults to `updateContentCommand`.
+///
+/// Same rule as the single-container path, and it reaches compose for the same
+/// reason: the phase queue is built once, in `up::lifecycle`, by
+/// `should_queue_phase_for_wait_for`.
+#[test]
+fn test_compose_up_skip_non_blocking_commands_stops_at_wait_for() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_compose_up_skip_non_blocking_commands_stops_at_wait_for: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let workspace = temp_dir.path();
+    let _down = DeaconDownGuard(workspace);
+
+    write_lifecycle_matrix_workspace(workspace, "alpine:3.19", true);
+
+    let up_output = support::deacon_command()
+        .current_dir(workspace)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(workspace)
+        .arg("--skip-non-blocking-commands")
+        .output()
+        .unwrap();
+    assert!(
+        up_output.status.success(),
+        "deacon up --skip-non-blocking-commands failed: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
+
+    assert_eq!(
+        phase_log(workspace).as_deref(),
+        Some("onCreate-string\nupdateContent-array\n"),
+        "the default waitFor is updateContentCommand, so everything after it is \
+         non-blocking and must not run (up stderr: {})",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
+    assert!(
+        !workspace.join("lifecycle-poststart-beta.txt").exists(),
+        "postStart runs after the waitFor cutoff and must be skipped"
     );
 }
