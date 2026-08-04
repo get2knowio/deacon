@@ -666,7 +666,6 @@ pub(crate) async fn execute_compose_up(
             .as_ref()
             .map(|fb| fb.resolved_features.as_slice())
             .unwrap_or(&[]),
-        runtime,
     )
     .await?;
 
@@ -841,7 +840,7 @@ pub(crate) async fn execute_compose_up(
 /// contributed only by the image reaches these phases exactly as it does on the
 /// single-container path.
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(config, identity, args, cli_remote_env, resolved_features, runtime))]
+#[instrument(skip(config, identity, args, cli_remote_env, resolved_features))]
 async fn execute_compose_lifecycle(
     container_id: &str,
     config: &DevContainerConfig,
@@ -851,12 +850,28 @@ async fn execute_compose_lifecycle(
     cli_remote_env: &IndexMap<String, String>,
     cache_folder: &Option<PathBuf>,
     resolved_features: &[deacon_core::features::ResolvedFeature],
-    runtime: &ContainerRuntimeImpl,
 ) -> Result<()> {
     debug!(
         "Executing lifecycle phases in compose container: {}",
         container_id
     );
+
+    // Exec against the SAME CLI that created this compose project, which is
+    // `--docker-path` (what `ComposeManager` is built with above) and NOT the
+    // `--runtime`-selected `ContainerRuntimeImpl`. The two can differ: the
+    // Podman CI lane sets `DEACON_CONTAINER_RUNTIME=podman` while
+    // `--docker-path` keeps its `docker` default, so `docker compose` creates
+    // the project in the DOCKER daemon and a `podman exec` against that
+    // container fails with `no container with name or ID … found` — measured on
+    // that lane. `CliRuntime::with_runtime_path` derives the flavor from the
+    // binary name, so this client is Podman-shaped when `--docker-path` names a
+    // podman binary and Docker-shaped otherwise; it follows the containers
+    // rather than a flag that did not create them. Whether the compose path
+    // should honor `--runtime` at all is a separate question, and pre-existing.
+    let compose_runtime = ContainerRuntimeImpl::Docker(
+        deacon_core::runtime::DockerRuntime::with_path(args.docker_path.clone()),
+    );
+    let runtime = &compose_runtime;
 
     // Resolve the hook's user and environment through the SAME shared helper the
     // single-container `up`, `exec` and `run-user-commands` use (CLAUDE.md
