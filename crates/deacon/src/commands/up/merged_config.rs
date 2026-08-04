@@ -400,7 +400,7 @@ fn apply_image_metadata_label(
     label_value: Option<&String>,
     user_config: DevContainerConfig,
 ) -> DevContainerConfig {
-    use deacon_core::config::ConfigMerger;
+    use deacon_core::config::{ConfigMerger, LifecycleHookLayer};
 
     let Some(label_json) = label_value else {
         debug!(
@@ -437,12 +437,47 @@ fn apply_image_metadata_label(
         image_ref
     );
 
+    // The five lifecycle hooks do NOT last-win: the spec's image-metadata Merge
+    // Logic table gives each one a "Collected list of all <phase>Commands", with
+    // "the devcontainer.json is considered last" — so an image hook and a
+    // devcontainer.json hook for the SAME phase both run, image first (#467).
+    // The fold below is last-wins by construction (correct for `remoteUser`,
+    // `containerEnv`, `waitFor` and every other row of that table), so record
+    // the entries' hooks as ordered layers first and let
+    // `aggregate_lifecycle_commands` replay them ahead of the config's own.
+    //
+    // Collected BEFORE the fold, because after it the entries' hooks are gone.
+    let hook_layers: Vec<LifecycleHookLayer> = entries
+        .iter()
+        .filter_map(LifecycleHookLayer::from_config)
+        .collect();
+    // The config's OWN hooks, which the fold must not blend the entries' into.
+    let config_own_hooks = LifecycleHookLayer::of(&user_config);
+
     // Spec ordering: image metadata is lower precedence, user config is
     // higher. ConfigMerger::merge_configs folds left-to-right with later
     // entries winning, so push image entries first then the user config.
     let mut chain: Vec<DevContainerConfig> = entries;
     chain.push(user_config);
-    ConfigMerger::merge_configs(&chain)
+    let mut merged = ConfigMerger::merge_configs(&chain);
+
+    // Each hook now has exactly one home. The five singular fields carry only
+    // what the devcontainer.json itself declared — restored here because the
+    // fold's last-wins would otherwise leave an ENTRY's hook in a field the
+    // config left unset, and `aggregate_lifecycle_commands` reads both the
+    // layers and the singular fields, so that hook would run TWICE.
+    config_own_hooks.apply_to(&mut merged);
+
+    // Prepend: these layers sit below anything the config already carried.
+    // (`merge_configs` concatenates the chain's own layers, which are empty here
+    // — the entries are freshly parsed from the label — so this is the only
+    // place the image's layers enter.)
+    if !hook_layers.is_empty() {
+        let mut layers = hook_layers;
+        layers.append(&mut merged.metadata_lifecycle_layers);
+        merged.metadata_lifecycle_layers = layers;
+    }
+    merged
 }
 
 /// The properties upstream picks from the **configuration** for a
@@ -1088,6 +1123,135 @@ mod image_metadata_merge_tests {
 
     use super::apply_image_metadata_label;
     use deacon_core::config::DevContainerConfig;
+
+    /// #467: a hook the image declares for a phase the config ALSO declares
+    /// must survive as a layer instead of being overwritten — the spec collects
+    /// lifecycle commands across layers rather than last-winning them.
+    #[test]
+    fn image_metadata_same_phase_hook_is_kept_as_a_layer() {
+        let label = r#"[{
+            "onCreateCommand":  "img-onCreate",
+            "postCreateCommand": "img-postCreate"
+        }]"#
+        .to_string();
+
+        let user = DevContainerConfig {
+            on_create_command: Some(serde_json::json!("ws-onCreate")),
+            post_create_command: Some(serde_json::json!(["/bin/sh", "-c", "ws-postCreate"])),
+            ..DevContainerConfig::default()
+        };
+
+        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+
+        assert_eq!(
+            merged.metadata_lifecycle_layers.len(),
+            1,
+            "the label's single entry must contribute exactly one hook layer"
+        );
+        let layer = &merged.metadata_lifecycle_layers[0];
+        assert_eq!(
+            layer.on_create_command,
+            Some(serde_json::json!("img-onCreate"))
+        );
+        assert_eq!(
+            layer.post_create_command,
+            Some(serde_json::json!("img-postCreate"))
+        );
+
+        // The singular fields keep the CONFIG's own hooks, unblended.
+        assert_eq!(
+            merged.on_create_command,
+            Some(serde_json::json!("ws-onCreate")),
+            "the config's own hook must remain the singular value"
+        );
+        assert_eq!(
+            merged.post_create_command,
+            Some(serde_json::json!(["/bin/sh", "-c", "ws-postCreate"])),
+            "the array command form must survive unchanged"
+        );
+    }
+
+    /// The other half of #467, and the one that regressed first: a hook the
+    /// image declares for a phase the config does NOT declare must land in the
+    /// layer ONLY. Left in the singular field as well it would run twice.
+    #[test]
+    fn image_metadata_only_hook_lands_in_the_layer_and_not_the_singular_field() {
+        let label = r#"[{ "postStartCommand": "img-postStart" }]"#.to_string();
+
+        let merged =
+            apply_image_metadata_label("alpine:3.18", Some(&label), DevContainerConfig::default());
+
+        assert_eq!(
+            merged.metadata_lifecycle_layers.len(),
+            1,
+            "the image's hook must be recorded as a layer"
+        );
+        assert_eq!(
+            merged.metadata_lifecycle_layers[0].post_start_command,
+            Some(serde_json::json!("img-postStart"))
+        );
+        assert_eq!(
+            merged.post_start_command, None,
+            "the image's hook must NOT also remain in the singular field, or \
+             aggregation would queue it twice"
+        );
+    }
+
+    /// Last-wins properties are untouched by the collection rule: only the five
+    /// lifecycle hooks are collected, everything else in the Merge Logic table
+    /// still resolves to a single winner.
+    #[test]
+    fn collecting_hooks_does_not_make_remote_user_collect() {
+        let label = r#"[{
+            "remoteUser": "metauser",
+            "onCreateCommand": "img-onCreate"
+        }]"#
+        .to_string();
+
+        let user = DevContainerConfig {
+            remote_user: Some("root".to_string()),
+            on_create_command: Some(serde_json::json!("ws-onCreate")),
+            ..DevContainerConfig::default()
+        };
+
+        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+
+        assert_eq!(
+            merged.remote_user.as_deref(),
+            Some("root"),
+            "remoteUser is 'Last value wins' — the config's value must win outright"
+        );
+        assert_eq!(merged.metadata_lifecycle_layers.len(), 1);
+    }
+
+    /// Multiple label entries each contribute a layer, in label order, and an
+    /// entry carrying no hook at all contributes none.
+    #[test]
+    fn image_metadata_layers_preserve_label_order_and_skip_hookless_entries() {
+        let label = r#"[
+            { "onCreateCommand": "first" },
+            { "remoteUser": "someone" },
+            { "onCreateCommand": "second" }
+        ]"#
+        .to_string();
+
+        let merged =
+            apply_image_metadata_label("alpine:3.18", Some(&label), DevContainerConfig::default());
+
+        assert_eq!(
+            merged.metadata_lifecycle_layers.len(),
+            2,
+            "the hookless middle entry must not contribute a layer"
+        );
+        assert_eq!(
+            merged.metadata_lifecycle_layers[0].on_create_command,
+            Some(serde_json::json!("first"))
+        );
+        assert_eq!(
+            merged.metadata_lifecycle_layers[1].on_create_command,
+            Some(serde_json::json!("second"))
+        );
+    }
 
     fn user_config_with_env(pairs: &[(&str, &str)]) -> DevContainerConfig {
         let mut container_env = deacon_core::IndexMap::new();

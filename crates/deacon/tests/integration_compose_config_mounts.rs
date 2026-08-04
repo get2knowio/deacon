@@ -732,3 +732,146 @@ fn test_compose_up_skip_non_blocking_commands_stops_at_wait_for() {
         "postStart runs after the waitFor cutoff and must be skipped"
     );
 }
+
+/// #467 (compose path): the same-phase collection, measured where the service
+/// image carries the metadata.
+///
+/// The defect is path-INDEPENDENT — it lives in the merge that folds the image's
+/// `devcontainer.metadata` into the config, and `up`'s single-container path,
+/// `up`'s compose path (since #448) and `container_metadata::
+/// resolve_config_against_container` (`exec` / `run-user-commands`, since #405)
+/// all share it. A single-path test would misattribute it to whichever path it
+/// happened to cover, so both paths are pinned; the sibling lives in
+/// `integration_feature_lifecycle`.
+///
+/// Same shape as that sibling and for the same reasons: `onCreate` and
+/// `postCreate` are declared on BOTH sides (and `postCreate` in the two
+/// different command forms, so the collection is not quietly form-sensitive),
+/// `postStart` by the image ONLY so a double-run is visible, and the whole log
+/// is asserted rather than the presence of any one line.
+#[test]
+fn test_compose_up_collects_image_metadata_and_config_hooks_for_the_same_phase() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_compose_up_collects_image_metadata_and_config_hooks_for_the_same_phase: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let workspace = temp_dir.path();
+    let _down = DeaconDownGuard(workspace);
+
+    let image_tag = format!(
+        "deacon-test-compose-same-phase-hooks-{}-{}:local",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+    let _image = ImageGuard(image_tag.clone());
+
+    // The hooks run as root here (the config's `remoteUser`, which must win over
+    // the image metadata's `metauser`), so the bind-mounted workspace is
+    // writable without any uid remap standing between the fix and the marker.
+    let image_dir = workspace.join("image");
+    fs::create_dir_all(&image_dir).unwrap();
+    fs::write(
+        image_dir.join("Dockerfile"),
+        concat!(
+            "FROM alpine:3.19\n",
+            "RUN adduser -D -u 1234 metauser\n",
+            "LABEL devcontainer.metadata='[{\"remoteUser\":\"metauser\",",
+            "\"onCreateCommand\":\"echo img-onCreate >> /workspace/lifecycle.log\",",
+            "\"postCreateCommand\":\"echo img-postCreate >> /workspace/lifecycle.log\",",
+            "\"postStartCommand\":\"echo img-postStart >> /workspace/lifecycle.log\"}]'\n",
+        ),
+    )
+    .unwrap();
+
+    let build = std::process::Command::new("docker")
+        .args(["build", "-q", "-t", &image_tag])
+        .arg(&image_dir)
+        .output()
+        .expect("docker build should run");
+    assert!(
+        build.status.success(),
+        "docker build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let compose_yml = format!(
+        "services:\n  app:\n    image: {}\n    volumes:\n      - .:/workspace\n    command: sleep infinity\n",
+        image_tag
+    );
+    let devcontainer_json = r#"{
+  "name": "Compose Same-Phase Hooks",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "root",
+  "onCreateCommand": "echo ws-onCreate >> /workspace/lifecycle.log",
+  "postCreateCommand": ["/bin/sh", "-c", "echo ws-postCreate >> /workspace/lifecycle.log; whoami > /workspace/hook-user.txt"]
+}"#;
+
+    fs::write(workspace.join("docker-compose.yml"), compose_yml).unwrap();
+    fs::create_dir(workspace.join(".devcontainer")).unwrap();
+    fs::write(
+        workspace.join(".devcontainer/devcontainer.json"),
+        devcontainer_json,
+    )
+    .unwrap();
+
+    let up_output = support::deacon_command()
+        .current_dir(workspace)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(workspace)
+        .output()
+        .unwrap();
+
+    if !up_output.status.success() {
+        panic!(
+            "deacon up failed: {}",
+            String::from_utf8_lossy(&up_output.stderr)
+        );
+    }
+
+    let log = fs::read_to_string(workspace.join("lifecycle.log")).unwrap_or_else(|e| {
+        panic!(
+            "the lifecycle hooks should have written lifecycle.log: {} (up stderr: {})",
+            e,
+            String::from_utf8_lossy(&up_output.stderr)
+        )
+    });
+    let lines: Vec<&str> = log
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    assert_eq!(
+        lines,
+        vec![
+            "img-onCreate",
+            "ws-onCreate",
+            "img-postCreate",
+            "ws-postCreate",
+            "img-postStart",
+        ],
+        "on the COMPOSE path too, image-metadata and config hooks for the same \
+         phase must both run, image first, and an image-only phase exactly ONCE \
+         (#467). Got: {:?}",
+        lines
+    );
+
+    let hook_user = fs::read_to_string(workspace.join("hook-user.txt"))
+        .expect("the postCreate hook should have recorded its user");
+    assert_eq!(
+        hook_user.trim(),
+        "root",
+        "remoteUser stays 'Last value wins' on the compose path: the config's \
+         `root` must beat the image metadata's `metauser`"
+    );
+}

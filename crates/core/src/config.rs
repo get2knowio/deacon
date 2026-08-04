@@ -579,6 +579,69 @@ fn parse_resource_string(s: &str) -> Result<u64> {
     Ok((number * multiplier as f64) as u64)
 }
 
+/// The five container lifecycle hooks a single metadata layer can contribute.
+///
+/// Carried by [`DevContainerConfig::metadata_lifecycle_layers`] so that a
+/// lower-precedence layer's hooks survive the merge that last-wins every other
+/// property. Deliberately holds ONLY the hooks: it is not a partial
+/// configuration, and nesting a `DevContainerConfig` here would invite a layer
+/// stack inside a layer stack.
+///
+/// `initializeCommand` is absent on purpose — it is a HOST-side hook that runs
+/// before the container exists, so an image label cannot contribute one, and the
+/// spec's Merge Logic table does not list it among the collected properties.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LifecycleHookLayer {
+    /// `onCreateCommand` contributed by this layer.
+    pub on_create_command: Option<serde_json::Value>,
+    /// `updateContentCommand` contributed by this layer.
+    pub update_content_command: Option<serde_json::Value>,
+    /// `postCreateCommand` contributed by this layer.
+    pub post_create_command: Option<serde_json::Value>,
+    /// `postStartCommand` contributed by this layer.
+    pub post_start_command: Option<serde_json::Value>,
+    /// `postAttachCommand` contributed by this layer.
+    pub post_attach_command: Option<serde_json::Value>,
+}
+
+impl LifecycleHookLayer {
+    /// Snapshot the lifecycle hooks a configuration declares, empty ones included.
+    pub fn of(config: &DevContainerConfig) -> Self {
+        Self {
+            on_create_command: config.on_create_command.clone(),
+            update_content_command: config.update_content_command.clone(),
+            post_create_command: config.post_create_command.clone(),
+            post_start_command: config.post_start_command.clone(),
+            post_attach_command: config.post_attach_command.clone(),
+        }
+    }
+
+    /// Lift the lifecycle hooks a partial configuration declares into a layer.
+    ///
+    /// Returns `None` when the configuration declares no hook at all, so a
+    /// metadata entry that only carries `remoteUser` (the common
+    /// `mcr.microsoft.com/devcontainers/*` base-image shape) contributes no
+    /// layer rather than an empty one.
+    pub fn from_config(config: &DevContainerConfig) -> Option<Self> {
+        let layer = Self::of(config);
+        (layer != Self::default()).then_some(layer)
+    }
+
+    /// Write these hooks back over a configuration's five singular hook fields.
+    ///
+    /// Used to restore a config's OWN hooks after a merge that folded
+    /// lower-precedence layers in: those layers' hooks belong in
+    /// [`DevContainerConfig::metadata_lifecycle_layers`], and leaving a copy in
+    /// the singular fields as well would run them twice.
+    pub fn apply_to(self, config: &mut DevContainerConfig) {
+        config.on_create_command = self.on_create_command;
+        config.update_content_command = self.update_content_command;
+        config.post_create_command = self.post_create_command;
+        config.post_start_command = self.post_start_command;
+        config.post_attach_command = self.post_attach_command;
+    }
+}
+
 /// DevContainer configuration structure following the Development Containers Specification.
 ///
 /// This struct represents the subset of fields needed for early implementation, mirroring
@@ -939,6 +1002,32 @@ pub struct DevContainerConfig {
     /// expect, and `read-configuration` must surface it intact (#72).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secrets: Option<std::collections::HashMap<String, SecretMetadata>>,
+
+    /// Lifecycle hooks contributed by metadata layers that sit BELOW this
+    /// configuration in precedence — today, the image's `devcontainer.metadata`
+    /// label — kept in layer order rather than collapsed away.
+    ///
+    /// Why this exists (#467): the spec's image-metadata Merge Logic table gives
+    /// the five lifecycle hooks "Collected list of all `<phase>Command`s", with
+    /// "the devcontainer.json is considered last" — every layer's hook RUNS, in
+    /// layer order. Every *other* mergeable property in that table is last-wins
+    /// (`remoteUser`, `containerEnv`, `waitFor`, …), which is exactly what the
+    /// singular `on_create_command` / `post_create_command` / … fields on this
+    /// struct model. Folding a lower-precedence layer in through [`ConfigMerger`]
+    /// therefore gets every other property right and silently DROPS the layer's
+    /// hook whenever the workspace config declares the same phase.
+    ///
+    /// So a lower layer's hooks are recorded here instead of being overwritten,
+    /// and `container_lifecycle::aggregate_lifecycle_commands` replays them ahead
+    /// of the Feature-contributed and configuration hooks it already aggregates —
+    /// one aggregation, given one more source, rather than a second mechanism.
+    ///
+    /// Not serialized: this is merge provenance, not an authored property. It must
+    /// never reach `read-configuration` output (which reports the collected hooks
+    /// as the plural `onCreateCommands` arrays, built separately) nor a stamped
+    /// `devcontainer.metadata` label (where each layer is already its own entry).
+    #[serde(skip)]
+    pub metadata_lifecycle_layers: Vec<LifecycleHookLayer>,
 
     /// Unknown / unmodeled fields, preserved verbatim for forward-compatibility.
     ///
@@ -1694,6 +1783,7 @@ impl Default for DevContainerConfig {
             cap_add: None,
             security_opt: None,
             secrets: None,
+            metadata_lifecycle_layers: Vec::new(),
             extra: serde_json::Map::new(),
         }
     }
@@ -1910,6 +2000,21 @@ impl ConfigMerger {
             // containerEnv semantics; #72). Parent keys not redeclared in
             // the overlay are preserved.
             secrets: Self::merge_secrets(base.secrets.as_ref(), overlay.secrets.as_ref()),
+
+            // Lower-precedence lifecycle layers: CONCATENATED in precedence
+            // order, never overwritten (#467). This is not a config property —
+            // it is the carried record of hooks that layers below this merge
+            // contributed, and the merge's own last-wins on the singular
+            // `*_command` fields is exactly what would otherwise lose them.
+            // For a config-vs-config merge (an `extends` chain) both sides are
+            // empty and this is a no-op, so overlay-wins semantics there are
+            // untouched.
+            metadata_lifecycle_layers: base
+                .metadata_lifecycle_layers
+                .iter()
+                .chain(overlay.metadata_lifecycle_layers.iter())
+                .cloned()
+                .collect(),
 
             // Unmodeled fields: deep-merge, overlay wins (preserved for
             // forward-compat rather than dropped). Mirrors customizations/features.

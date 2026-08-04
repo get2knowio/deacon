@@ -1,0 +1,12 @@
+# Compose project for the same-phase lifecycle-hook collection case (#467).
+#
+# The service image is the locally-built `:local` fixture image whose
+# `devcontainer.metadata` label carries the image half of the collision. A
+# compose fixture names its base HERE, not in devcontainer.json, which is why
+# `prepull-fixture-images.sh` reads compose files as well as configs.
+services:
+  app:
+    image: deacon-parity-compose-image-metadata-same-phase:local
+    volumes:
+      - ..:/workspace
+    command: sleep infinity

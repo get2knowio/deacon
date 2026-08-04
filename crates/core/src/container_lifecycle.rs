@@ -23,6 +23,10 @@ use tracing::{debug, error, info, instrument, warn};
 /// ordering when aggregating lifecycle commands during the up command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LifecycleCommandSource {
+    /// Command from a lower-precedence metadata layer — the image's
+    /// `devcontainer.metadata` label — carrying the layer's index within that
+    /// label for attribution (#467).
+    ImageMetadata { index: usize },
     /// Command from a feature (includes feature ID for attribution)
     Feature { id: String },
     /// Command from devcontainer.json config
@@ -32,6 +36,7 @@ pub enum LifecycleCommandSource {
 impl std::fmt::Display for LifecycleCommandSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ImageMetadata { index } => write!(f, "image-metadata[{}]", index),
             Self::Feature { id } => write!(f, "feature:{}", id),
             Self::Config => write!(f, "config"),
         }
@@ -316,11 +321,17 @@ pub struct ParallelCommandResult {
 ///
 /// # Ordering
 ///
-/// Per the feature lifecycle contract:
-/// 1. Feature commands execute first, in installation order
-/// 2. Config command executes last
+/// Per the feature lifecycle contract and the image-metadata Merge Logic table
+/// ("Collected list of all `<phase>Command`s … the devcontainer.json is
+/// considered last"):
+/// 1. Lower-precedence metadata layers first, in layer order — the hooks the
+///    image's `devcontainer.metadata` label contributed (#467)
+/// 2. Feature commands next, in installation order
+/// 3. Config command executes last
 ///
-/// This ensures features set up prerequisites (environment, tools) before config commands run.
+/// This ensures the image's baked-in setup and then the features' prerequisites
+/// (environment, tools) run before config commands do. Nothing is overwritten:
+/// when two sources declare the SAME phase, both run.
 ///
 /// # Arguments
 ///
@@ -362,7 +373,35 @@ pub fn aggregate_lifecycle_commands(
 ) -> Result<LifecycleCommandList> {
     let mut commands = Vec::new();
 
-    // Feature commands first, in installation order
+    // Lower-precedence metadata layers first, in layer order (#467). These are
+    // the hooks the image's `devcontainer.metadata` label contributed; the merge
+    // that folded that label in recorded them here rather than letting the
+    // config's same-phase hook overwrite them, because the spec collects
+    // lifecycle commands across layers instead of last-winning them.
+    for (index, layer) in config.metadata_lifecycle_layers.iter().enumerate() {
+        let cmd_opt = match phase {
+            LifecyclePhase::Initialize => None, // Host-side; an image cannot contribute one
+            LifecyclePhase::OnCreate => layer.on_create_command.as_ref(),
+            LifecyclePhase::UpdateContent => layer.update_content_command.as_ref(),
+            LifecyclePhase::PostCreate => layer.post_create_command.as_ref(),
+            LifecyclePhase::Dotfiles => None, // Dotfiles phase has no corresponding command field
+            LifecyclePhase::PostStart => layer.post_start_command.as_ref(),
+            LifecyclePhase::PostAttach => layer.post_attach_command.as_ref(),
+        };
+
+        if let Some(cmd) = cmd_opt {
+            if let Some(parsed) = LifecycleCommandValue::from_json_value(cmd)? {
+                if !parsed.is_empty() {
+                    commands.push(AggregatedLifecycleCommand {
+                        command: parsed,
+                        source: LifecycleCommandSource::ImageMetadata { index },
+                    });
+                }
+            }
+        }
+    }
+
+    // Feature commands next, in installation order
     for feature in features {
         let cmd_opt = match phase {
             LifecyclePhase::Initialize => None, // Features don't have initialize commands
@@ -4401,6 +4440,87 @@ mod tests {
         assert_eq!(post_attach_commands.len(), 2);
         assert_eq!(post_attach_commands[0].command, json!("postAttach-feature"));
         assert_eq!(post_attach_commands[1].command, json!("postAttach-config"));
+    }
+
+    /// #467: image-metadata layers join the SAME aggregation as Feature and
+    /// configuration hooks, ordered ahead of both — the spec's "Collected list
+    /// of all `<phase>Command`s … the devcontainer.json is considered last".
+    #[test]
+    fn test_aggregate_lifecycle_commands_image_metadata_layers_run_first() {
+        use crate::config::{DevContainerConfig, LifecycleHookLayer};
+        use crate::features::{FeatureMetadata, ResolvedFeature};
+        use crate::lifecycle::LifecyclePhase;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        let feature = ResolvedFeature {
+            id: "node".to_string(),
+            source: "ghcr.io/devcontainers/features/node".to_string(),
+            options: HashMap::new(),
+            metadata: FeatureMetadata {
+                id: "node".to_string(),
+                on_create_command: Some(json!("onCreate-feature")),
+                ..Default::default()
+            },
+        };
+
+        let config = DevContainerConfig {
+            on_create_command: Some(json!("onCreate-config")),
+            metadata_lifecycle_layers: vec![
+                LifecycleHookLayer {
+                    on_create_command: Some(json!("onCreate-image-0")),
+                    ..Default::default()
+                },
+                LifecycleHookLayer {
+                    on_create_command: Some(json!("onCreate-image-1")),
+                    post_start_command: Some(json!("postStart-image-1")),
+                    ..Default::default()
+                },
+            ],
+            ..DevContainerConfig::default()
+        };
+
+        let features = vec![feature];
+
+        let on_create =
+            super::aggregate_lifecycle_commands(LifecyclePhase::OnCreate, &features, &config)
+                .unwrap()
+                .commands;
+        assert_eq!(
+            on_create.len(),
+            4,
+            "every layer's hook must run alongside the feature's and the config's"
+        );
+        assert_eq!(on_create[0].command, json!("onCreate-image-0"));
+        assert_eq!(on_create[1].command, json!("onCreate-image-1"));
+        assert_eq!(on_create[2].command, json!("onCreate-feature"));
+        assert_eq!(on_create[3].command, json!("onCreate-config"));
+
+        // Source attribution carries the layer index.
+        assert_eq!(
+            on_create[0].source,
+            super::LifecycleCommandSource::ImageMetadata { index: 0 }
+        );
+        assert_eq!(
+            on_create[1].source,
+            super::LifecycleCommandSource::ImageMetadata { index: 1 }
+        );
+
+        // A phase only a layer declares still runs, exactly once.
+        let post_start =
+            super::aggregate_lifecycle_commands(LifecyclePhase::PostStart, &features, &config)
+                .unwrap()
+                .commands;
+        assert_eq!(post_start.len(), 1);
+        assert_eq!(post_start[0].command, json!("postStart-image-1"));
+
+        // A phase nobody declares stays empty.
+        assert!(
+            super::aggregate_lifecycle_commands(LifecyclePhase::PostAttach, &features, &config)
+                .unwrap()
+                .commands
+                .is_empty()
+        );
     }
 
     #[test]

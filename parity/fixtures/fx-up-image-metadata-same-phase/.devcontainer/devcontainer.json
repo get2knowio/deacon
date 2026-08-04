@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceUpImageMetadataSamePhase",
+	"image": "deacon-parity-image-metadata-same-phase:local",
+	"onCreateCommand": "echo ws-onCreate >> ./lifecycle.log",
+	"postCreateCommand": [
+		"sh",
+		"-c",
+		"echo ws-postCreate >> ./lifecycle.log"
+	]
+}
