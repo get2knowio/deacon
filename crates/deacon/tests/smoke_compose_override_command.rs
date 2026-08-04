@@ -214,30 +214,34 @@ fn test_compose_override_command_lifecycle_runs() {
     // Without our override, `echo init` would exit before postCreateCommand
     // could run. With override active, the marker file proves the lifecycle ran.
     //
-    // The service MOUNTS the declared `workspaceFolder` (#460). It used not to,
-    // and the test passed anyway because the compose path ran its hook through a
-    // `cd '<dir>' 2>/dev/null; …` wrapper that shrugged off a missing directory.
-    // Now that the compose path uses the shared lifecycle engine, the hook runs
-    // under `docker exec -w <workspaceFolder>` — and an unmounted one is fatal.
-    // That is the REFERENCE's behavior, measured at oracle 0.87.0 on exactly this
-    // shape: `chdir to cwd ("/workspace") set in config.json failed: no such file
-    // or directory`, the hook exits 127 and `up` exits 1, character for character
-    // what deacon now emits. So the leniency was the divergence, not the strictness,
-    // and the fixture is corrected rather than the behavior. What this test is
-    // for — that lifecycle runs at all once the override keeps the container
-    // alive — is unchanged by the mount.
+    // This config declares NO `workspaceFolder` (#460). It used to declare
+    // `/workspace` while the service mounted nothing there, and the test passed
+    // anyway because the compose path ran its hook through a `cd '<dir>'
+    // 2>/dev/null; …` wrapper that shrugged off a missing directory. Now that the
+    // compose path uses the shared lifecycle engine, the hook runs under
+    // `docker exec -w <workspaceFolder>` and an unmounted one is fatal — which is
+    // the REFERENCE's behavior, measured at oracle 0.87.0 on exactly that shape:
+    // `chdir to cwd ("/workspace") set in config.json failed: no such file or
+    // directory`, the hook exits 127 and `up` exits 1, character for character
+    // what deacon now emits. The leniency was the divergence, so the incoherent
+    // fixture is corrected rather than the behavior.
+    //
+    // It is corrected by DROPPING the declaration rather than by mounting it: a
+    // compose config with no explicit `workspaceFolder` resolves to `/`
+    // (#294/#295), which always exists, and the service keeps the exact shape it
+    // has on every runtime today. Adding a `.:/workspace` bind here instead made
+    // the container exit before the hook under rootless Podman, which is a
+    // property of the added mount and has nothing to do with what this test is
+    // for — that lifecycle runs at all once the override keeps the container alive.
     let compose_yml = r#"services:
   app:
     image: alpine:3.18
     command: ["echo", "init"]
-    volumes:
-      - .:/workspace
 "#;
     let devcontainer_json = r#"{
   "name": "Compose Lifecycle Marker",
   "dockerComposeFile": "../docker-compose.yml",
   "service": "app",
-  "workspaceFolder": "/workspace",
   "postCreateCommand": "touch /tmp/deacon-lifecycle-marker"
 }"#;
 
