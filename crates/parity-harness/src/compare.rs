@@ -93,6 +93,7 @@ pub fn verdict_differential(
             channel: channel.to_string(),
             outcome: Outcome::AllowedDifference,
             detail: Some(json!({ "allowed": covered })),
+            stderr_excerpt: None,
         }
     } else {
         diverge(
@@ -246,6 +247,7 @@ fn agree(channel: &str) -> ChannelVerdict {
         channel: channel.to_string(),
         outcome: Outcome::Agree,
         detail: None,
+        stderr_excerpt: None,
     }
 }
 
@@ -255,6 +257,9 @@ fn diverge(channel: &str, detail: Value) -> ChannelVerdict {
         channel: channel.to_string(),
         outcome: Outcome::Diverge,
         detail: Some(detail),
+        // Attached later, by the runner, and only for the exit-code channel (#474): the
+        // comparison sees normalized evidence, never the process that produced it.
+        stderr_excerpt: None,
     }
 }
 

@@ -60,11 +60,13 @@ fn verdict_report_is_byte_stable_and_path_free() {
                 channel: CHAN_EXIT_CODE.to_string(),
                 outcome: Outcome::Agree,
                 detail: None,
+                stderr_excerpt: None,
             },
             ChannelVerdict {
                 channel: CHAN_STRUCTURED_OUTPUT.to_string(),
                 outcome: Outcome::Agree,
                 detail: None,
+                stderr_excerpt: None,
             },
         ],
         overall: Outcome::Agree,
@@ -111,6 +113,34 @@ mod spec_expectation {
         let p = dir.join(name);
         // `printf '%s'` avoids a trailing newline mattering; the runner trims for JSON.
         let body = format!("#!/bin/sh\nprintf '%s' '{stdout}'\nexit {code}\n");
+        std::fs::write(&p, body).expect("write stub");
+        let mut perms = std::fs::metadata(&p).expect("stat").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&p, perms).expect("chmod");
+        p
+    }
+
+    /// Write a stub that prints `stdout`, then writes `stderr_lines` numbered lines to
+    /// STDERR, and exits with `code`.
+    ///
+    /// The stderr is the point: an exit-code divergence's verdict names the channel and
+    /// nothing else, and #474 makes the failing side's stderr tail travel with it. A stub
+    /// that writes nothing to stderr cannot tell an attached excerpt from an absent one.
+    fn write_noisy_stub(
+        dir: &Path,
+        name: &str,
+        stdout: &str,
+        stderr_lines: usize,
+        code: i32,
+    ) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join(name);
+        // Zero-padded so `line-10` is not a substring of `line-100` (and so an assertion
+        // about which lines survived the tail bound cannot pass by accident).
+        let body = format!(
+            "#!/bin/sh\nprintf '%s' '{stdout}'\ni=1\nwhile [ $i -le {stderr_lines} ]; do \
+             printf 'line-%02d\\n' \"$i\" >&2; i=$((i+1)); done\nexit {code}\n"
+        );
         std::fs::write(&p, body).expect("write stub");
         let mut perms = std::fs::metadata(&p).expect("stat").permissions();
         perms.set_mode(0o755);
@@ -226,6 +256,102 @@ mod spec_expectation {
             .find(|c| c.channel == CHAN_EXIT_CODE)
             .expect("exit-code channel");
         assert_eq!(exit.outcome, Outcome::Diverge);
+    }
+
+    /// #474: a DIVERGING exit code carries the failing side's stderr tail, labeled and
+    /// bounded. Without it the verdict reads `chan-exit-code: Diverge` and names nothing to
+    /// fix — which is precisely how both CI occurrences of the #470 flake became
+    /// expeditions.
+    #[tokio::test]
+    async fn diverging_exit_code_carries_the_failing_side_stderr_tail() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Right JSON, 30 lines of stderr, exit 1 → the `{equals:0}` assertion diverges.
+        let stub = write_noisy_stub(dir.path(), "deacon-noisy", GOOD_STDOUT, 30, 1);
+        let fixtures = make_fixtures(dir.path());
+        let cfg = RunConfig {
+            deacon_path: &stub,
+            oracle: None,
+            fixtures_root: &fixtures,
+            report_root: &dir.path().join("report"),
+        };
+        let verdict = run_case(&spec_case(), &cfg).await.expect("run");
+        let exit = verdict
+            .channels
+            .iter()
+            .find(|c| c.channel == CHAN_EXIT_CODE)
+            .expect("exit-code channel");
+        assert_eq!(exit.outcome, Outcome::Diverge);
+
+        let excerpt = exit
+            .stderr_excerpt
+            .as_deref()
+            .expect("a diverging exit code must carry the failing side's stderr (#474)");
+        assert!(
+            excerpt.contains("deacon stderr (exit 1)"),
+            "the excerpt must name its side and that side's exit code: {excerpt}"
+        );
+        // Tail-bounded to the last 20 of 30 lines: 11..=30 survive, 01..=10 do not, and the
+        // truncation is announced rather than silent.
+        assert!(
+            excerpt.contains("line-30"),
+            "the tail must survive: {excerpt}"
+        );
+        assert!(excerpt.contains("line-11"), "20 lines are kept: {excerpt}");
+        assert!(
+            !excerpt.contains("line-10"),
+            "only the last 20 lines are kept: {excerpt}"
+        );
+        assert!(
+            excerpt.contains("truncated"),
+            "truncation must be announced, never silent: {excerpt}"
+        );
+        // No reference ran (spec-expectation), so no reference block may be fabricated.
+        assert!(
+            !excerpt.contains("reference stderr"),
+            "a spec-expectation case has no reference side: {excerpt}"
+        );
+    }
+
+    /// #474, the other half: the excerpt is scoped to a DIVERGING EXIT CODE and appears
+    /// nowhere else. Same noisy stub, but here the exit code AGREES (`nonZero` matched the
+    /// failure) while structured-output diverges — so stderr is present and plentiful, and
+    /// neither channel may carry it. An excerpt on every divergence would bury the one place
+    /// stderr names the fix.
+    #[tokio::test]
+    async fn a_non_exit_code_divergence_carries_no_stderr_excerpt() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let stub = write_noisy_stub(dir.path(), "deacon-noisy-fail", "error: bad config", 30, 1);
+        let fixtures = make_fixtures(dir.path());
+        let cfg = RunConfig {
+            deacon_path: &stub,
+            oracle: None,
+            fixtures_root: &fixtures,
+            report_root: &dir.path().join("report"),
+        };
+        let verdict = run_case(&failure_case(), &cfg).await.expect("run");
+
+        let exit = verdict
+            .channels
+            .iter()
+            .find(|c| c.channel == CHAN_EXIT_CODE)
+            .expect("exit-code channel");
+        assert_eq!(exit.outcome, Outcome::Agree, "nonZero matched the failure");
+        assert!(
+            exit.stderr_excerpt.is_none(),
+            "an AGREEING exit code has nothing to explain: {exit:?}"
+        );
+
+        let structured = verdict
+            .channels
+            .iter()
+            .find(|c| c.channel == CHAN_STRUCTURED_OUTPUT)
+            .expect("structured channel");
+        assert_eq!(structured.outcome, Outcome::Diverge);
+        assert!(
+            structured.stderr_excerpt.is_none(),
+            "a non-exit-code divergence already names its diverging path; stderr there is \
+             noise: {structured:?}"
+        );
     }
 
     /// A negative case: read-configuration fails (exit 1, non-JSON stdout). The runner
