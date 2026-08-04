@@ -158,6 +158,19 @@ jobs:
       # cross-platform failure set, not just the earliest).
       run: cargo nextest run --profile dev-fast --no-fail-fast
 
+    # `parity_hermetic` is selected by `dev-fast` too, so this lane also owes its evidence
+    # on failure (#474). The name carries the matrix leg because one run's artifacts share a
+    # namespace; `if-no-files-found: ignore` is doing real work here rather than guarding a
+    # hypothetical — the macOS and Windows legs run no parity binary at all (#441), so they
+    # have no `target/parity/` to upload even when they fail.
+    - name: Upload parity evidence
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: parity-evidence-fast-${{ matrix.os }}
+        path: target/parity/
+        if-no-files-found: ignore
+
   test-integration:
     name: Test (MVP integration)
     if: github.event_name != 'schedule'
@@ -254,6 +267,25 @@ jobs:
     - name: Run MVP integration tests
       run: make test-nextest-mvp-integration
 
+    # The evidence for the parity binaries this job runs (#474). `parity.yml` has always
+    # uploaded `target/parity/`, but that lane GATES NOTHING — the two lanes that gate a pull
+    # request run here, and until now they retained nothing but a 267-byte timing file. Both
+    # CI occurrences of the #470 export-tar flake were therefore undiagnosable after the fact,
+    # and #470's own "download the evidence before rerunning" instruction was unfollowable.
+    #
+    # `if: failure()` rather than `always()`: this lane runs on every pull request, and a
+    # green run's raw capture is not worth the storage. `if-no-files-found: ignore`, because a
+    # failure BEFORE the harness runs (a cache miss, a compile error, the engine precondition
+    # above) leaves no tree, and a missing artifact must not become a second failure obscuring
+    # the first.
+    - name: Upload parity evidence
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: parity-evidence-mvp-integration
+        path: target/parity/
+        if-no-files-found: ignore
+
     - name: Upload timing artifacts
       if: always()
       uses: actions/upload-artifact@v7
@@ -342,3 +374,14 @@ jobs:
     # pass here. `parity_hermetic` is unaffected: it is runtime-agnostic.
     - name: Run integration suite against Podman (full failure set)
       run: cargo nextest run --profile mvp-integration --no-fail-fast -E 'not binary(=parity_docker)'
+
+    # `parity_hermetic` runs in this job (it is runtime-agnostic and NOT excluded above), so
+    # this job owes the same evidence as the Docker one (#474). Same conditions, same reasons;
+    # a distinct artifact name because two jobs of one run cannot share one.
+    - name: Upload parity evidence
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: parity-evidence-podman
+        path: target/parity/
+        if-no-files-found: ignore
