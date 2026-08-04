@@ -386,6 +386,15 @@ pub struct BuildResult {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub injected_ca_subjects: Vec<String>,
+    /// A tag private to THIS invocation, naming exactly the image this build
+    /// produced (#470). See [`run_private_tag`] for why the deterministic
+    /// `deacon-build:<hash>` tag is not a safe handle on it.
+    ///
+    /// Ephemeral: never serialized (a cached run's tag no longer exists) and
+    /// never reported — it is dropped by [`drop_run_private_tag`] once the
+    /// post-build passes that need the image are done.
+    #[serde(skip)]
+    pub private_ref: Option<String>,
 }
 
 /// Build metadata stored in cache
@@ -834,103 +843,130 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     // (`execute_compose_build_with_features` already built, tagged, and wrote the
     // lockfile), so only the Dockerfile / image-reference shapes need this
     // generic post-build layering pass.
-    let (image_id, feature_lockfile, resolved_features) =
-        if features_present && !config.uses_compose() {
-            // Layer features on top of the just-built image. We pass a real tag
-            // (the deterministic `deacon-build:<hash>` tag, always applied by
-            // `execute_docker_build`) rather than the bare `sha256:...` image ID:
-            // the feature-install Dockerfile uses `FROM ${_DEV_CONTAINERS_BASE_IMAGE}`,
-            // and BuildKit interprets a bare `sha256:<digest>` as the remote repo
-            // `docker.io/library/sha256:<digest>` (pull-access-denied), whereas a
-            // local tag resolves to the just-built image.
-            let base_ref = result
-                .tags
-                .first()
-                .cloned()
-                .unwrap_or_else(|| result.image_id.clone());
-            let (feature_image, lockfile, resolved_features) = apply_features_and_lockfile(
-                &config,
-                &base_ref,
-                &workspace_folder,
-                &config_path,
-                host_ca_set.as_ref(),
-                args.build_output_mode,
+    // The reference every post-build pass FROMs. It must be a real TAG, not the
+    // bare `sha256:...` image ID: the feature-install Dockerfile uses
+    // `FROM ${_DEV_CONTAINERS_BASE_IMAGE}`, and BuildKit interprets a bare
+    // `sha256:<digest>` as the remote repo `docker.io/library/sha256:<digest>`
+    // (pull-access-denied), whereas a local tag resolves to the just-built image.
+    //
+    // Prefer the run-private tag over the deterministic `deacon-build:<hash>`
+    // one: the latter is content-derived and therefore shared with any
+    // concurrent build of the same content, which can re-point it at ITS image
+    // between our build and these passes (#470).
+    let build_ref = result
+        .private_ref
+        .clone()
+        .or_else(|| result.tags.first().cloned())
+        .unwrap_or_else(|| result.image_id.clone());
+
+    let deferred_publish = defers_publish(&args);
+
+    // The passes below are the ones that need a stable handle on the just-built
+    // image, so they run inside a block whose outcome is held rather than
+    // propagated: the run-private tag must be dropped on the failure path too,
+    // or every build that errors after the primary pass (the `--push` to an
+    // unreachable registry, say) leaves a `deacon-build-run:*` tag behind (#470).
+    let post_build = async {
+        let (image_id, feature_lockfile, resolved_features) =
+            if features_present && !config.uses_compose() {
+                // Layer features on top of the just-built image.
+                let base_ref = build_ref.clone();
+                let (feature_image, lockfile, resolved_features) = apply_features_and_lockfile(
+                    &config,
+                    &base_ref,
+                    &workspace_folder,
+                    &config_path,
+                    host_ca_set.as_ref(),
+                    args.build_output_mode,
+                )
+                .await?;
+
+                // Re-point the base build's tags (the deterministic `deacon-build:<hash>`
+                // tag plus any `--image-name`s) at the feature-extended image. Without
+                // this, `--image-name` would still resolve to the pre-feature base image
+                // and the installed features would be invisible to consumers that pull
+                // the named tag. The run-private tag moves with them so the stamp pass
+                // below still FROMs a reference nobody else can re-point (#470).
+                for tag in result.tags.iter().chain(result.private_ref.iter()) {
+                    retag_image(&feature_image, tag).await?;
+                }
+
+                (feature_image, lockfile, resolved_features)
+            } else {
+                (result.image_id.clone(), None, Vec::new())
+            };
+
+        // #436/#440: record `devcontainer.metadata` on the image this build produced —
+        // the entries a later `up` from that image, or VS Code / Zed / envbuilder,
+        // read to learn what the image carries. Compose builds produce their image
+        // through the compose path above and stamp it there (they have the resolved
+        // Features on hand), so they are not covered here.
+        //
+        // `--push`/`--output` builds are stamped too: their publish step is deferred
+        // until after this pass so the image is local when it runs (#440). The single
+        // exception is a multi-platform export, which BuildKit will not `--load`.
+        let stampable = !config.uses_compose() && !exports_directly(&args);
+        let mut metadata = result.metadata.clone();
+        let image_id = if !stampable {
+            if !config.uses_compose() && exports_directly(&args) {
+                warn!(
+                    "A multi-platform --push/--output build leaves no local image to record \
+                     `devcontainer.metadata` on; the published image carries no metadata label"
+                );
+            }
+            image_id
+        } else {
+            let (reported, label) = stamp_devcontainer_metadata_label(
+                &image_id,
+                result.private_ref.as_deref(),
+                &result.tags,
+                &load_result.raw_config,
+                &resolved_features,
+                // When the export is deferred, this pass is also the exporter.
+                if deferred_publish {
+                    args.output.as_deref()
+                } else {
+                    None
+                },
             )
             .await?;
-
-            // Re-point the base build's tags (the deterministic `deacon-build:<hash>`
-            // tag plus any `--image-name`s) at the feature-extended image. Without
-            // this, `--image-name` would still resolve to the pre-feature base image
-            // and the installed features would be invisible to consumers that pull
-            // the named tag.
-            for tag in &result.tags {
-                retag_image(&feature_image, tag).await?;
+            // Keep the reported labels describing the image that was actually produced;
+            // `metadata` was captured from the base build, before this label existed.
+            if let Some(label) = label {
+                metadata.insert("devcontainer.metadata".to_string(), label);
             }
-
-            (feature_image, lockfile, resolved_features)
-        } else {
-            (result.image_id, None, Vec::new())
+            reported
         };
 
-    // #436/#440: record `devcontainer.metadata` on the image this build produced —
-    // the entries a later `up` from that image, or VS Code / Zed / envbuilder,
-    // read to learn what the image carries. Compose builds produce their image
-    // through the compose path above and stamp it there (they have the resolved
-    // Features on hand), so they are not covered here.
-    //
-    // `--push`/`--output` builds are stamped too: their publish step is deferred
-    // until after this pass so the image is local when it runs (#440). The single
-    // exception is a multi-platform export, which BuildKit will not `--load`.
-    let deferred_publish = defers_publish(&args);
-    let stampable = !config.uses_compose() && !exports_directly(&args);
-    let mut metadata = result.metadata;
-    let image_id = if !stampable {
-        if !config.uses_compose() && exports_directly(&args) {
-            warn!(
-                "A multi-platform --push/--output build leaves no local image to record \
-                 `devcontainer.metadata` on; the published image carries no metadata label"
-            );
-        }
-        image_id
-    } else {
-        let (reported, label) = stamp_devcontainer_metadata_label(
-            &image_id,
-            &result.tags,
-            &load_result.raw_config,
-            &resolved_features,
-            // When the export is deferred, this pass is also the exporter.
-            if deferred_publish {
-                args.output.as_deref()
+        // #440: a deferred push happens here, after the image carries its label.
+        if deferred_publish && args.push {
+            // Push what the user named. deacon's own `deacon-build:<hash>` bookkeeping
+            // tag has no registry component, so pushing it targets Docker Hub (#438);
+            // it is only reached when `--image-name` named nothing else to push, which
+            // is what handing the push to BuildKit did.
+            let targets: &[String] = if args.image_names.is_empty() {
+                &result.tags
             } else {
-                None
-            },
-        )
-        .await?;
-        // Keep the reported labels describing the image that was actually produced;
-        // `metadata` was captured from the base build, before this label existed.
-        if let Some(label) = label {
-            metadata.insert("devcontainer.metadata".to_string(), label);
+                &args.image_names
+            };
+            push_built_image(targets).await?;
         }
-        reported
-    };
 
-    // #440: a deferred push happens here, after the image carries its label.
-    if deferred_publish && args.push {
-        // Push what the user named. deacon's own `deacon-build:<hash>` bookkeeping
-        // tag has no registry component, so pushing it targets Docker Hub (#438);
-        // it is only reached when `--image-name` named nothing else to push, which
-        // is what handing the push to BuildKit did.
-        let targets: &[String] = if args.image_names.is_empty() {
-            &result.tags
-        } else {
-            &args.image_names
-        };
-        push_built_image(targets).await?;
+        Ok::<_, anyhow::Error>((image_id, feature_lockfile, metadata))
     }
+    .await;
+
+    // Unconditional: the tag has done its job whether those passes succeeded or not.
+    if let Some(private) = &result.private_ref {
+        drop_run_private_tag(private).await;
+    }
+    let (image_id, feature_lockfile, metadata) = post_build?;
 
     let final_result = BuildResult {
         image_id,
         tags: result.tags,
+        // Ephemeral and just dropped: never reported, never cached.
+        private_ref: None,
         build_duration: build_duration.as_secs_f64(),
         metadata,
         config_hash: config_hash.clone(),
@@ -1479,6 +1515,9 @@ async fn execute_compose_build(
     Ok(BuildResult {
         image_id: format!("{}-{}", project.name, service),
         tags: image_names,
+        // Compose owns its own image naming (workspace-namespaced, so never
+        // shared with a concurrent build); no run-private tag is minted (#470).
+        private_ref: None,
         build_duration,
         metadata,
         // Non-features compose build generates no feature-layering Dockerfile,
@@ -1601,8 +1640,12 @@ async fn execute_compose_build_with_features(
     // metadata entry each — are on hand. `--push`/`--output` are rejected for
     // Compose configurations upstream of this call, so the label is always
     // stamped onto a local image.
+    // FROM the compose feature image's own tag rather than the deterministic
+    // `deacon-build:<hash>` one: it is namespaced by workspace hash, so unlike the
+    // content-derived tag it cannot be re-pointed by a concurrent build (#470).
     let (image_id, label) = stamp_devcontainer_metadata_label(
         &feature_build.image_tag,
+        Some(feature_build.image_tag.as_str()),
         &all_tags,
         raw_config,
         &feature_build.resolved_features,
@@ -1616,6 +1659,8 @@ async fn execute_compose_build_with_features(
     Ok(BuildResult {
         image_id,
         tags: all_tags,
+        // See the sibling compose result above: no run-private tag here (#470).
+        private_ref: None,
         build_duration: 0.0,
         metadata,
         config_hash: config_hash.to_string(),
@@ -1726,6 +1771,61 @@ async fn execute_image_reference_build(
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 
     result
+}
+
+/// Monotonic counter making [`run_private_tag`] unique across concurrent builds
+/// inside ONE process, where the pid alone does not separate them.
+static RUN_PRIVATE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Mint a tag private to this build invocation.
+///
+/// The deterministic `deacon-build:<hash>` tag is derived from the build's
+/// CONTENT — the Dockerfile bytes plus each context file's relative path, size
+/// and mtime — and deliberately not from the workspace path, so two builds of
+/// identical content in different workspaces name the SAME tag. deacon then
+/// resolved its own just-built image through references it did not own: the raw
+/// `--iidfile` digest, and that shared tag.
+///
+/// Measured (#470): with concurrent builds of identical content, each
+/// invocation's image carries a DISTINCT digest (BuildKit emits a per-build
+/// attestation manifest, hence a distinct index digest) while all of them name
+/// the one shared tag. Whichever build names it last leaves the others' images
+/// unreferenced, and the containerd image store drops them — after which
+/// `docker inspect <our-own-digest>` fails with `no such object` and the build
+/// dies AFTER BuildKit reported success. The parity case
+/// `case-build-output-export-tar` was the reliable victim precisely because it
+/// passes no `--image-name`: its three concurrent fixture-sharing siblings each
+/// hold a unique second tag that keeps their image alive, and it does not.
+///
+/// Adding this tag to the build invocation itself (not afterwards) closes the
+/// window completely: BuildKit applies every `-t` in the same naming step, so
+/// the image is referenced by a name no other process can take from the instant
+/// it exists.
+fn run_private_tag() -> String {
+    let seq = RUN_PRIVATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("deacon-build-run:{}-{}", std::process::id(), seq)
+}
+
+/// Drop a [`run_private_tag`] once the post-build passes that needed a stable
+/// handle on the image are done.
+///
+/// Best-effort by design: the tag is bookkeeping, and failing a build that has
+/// already produced (and possibly exported or pushed) its image because an
+/// untag failed would be a worse outcome than leaving one dangling tag behind.
+async fn drop_run_private_tag(tag: &str) {
+    let removed = tokio::process::Command::new("docker")
+        .args(["image", "rm", tag])
+        .output()
+        .await;
+    match removed {
+        Ok(out) if out.status.success() => debug!(tag = %tag, "Dropped the run-private build tag"),
+        Ok(out) => debug!(
+            tag = %tag,
+            stderr = %String::from_utf8_lossy(&out.stderr).trim(),
+            "Could not drop the run-private build tag; continuing"
+        ),
+        Err(e) => debug!(tag = %tag, error = %e, "Could not run 'docker image rm'; continuing"),
+    }
 }
 
 /// Apply `target` as an additional tag on the local image `source`
@@ -1889,16 +1989,21 @@ async fn apply_features_and_lockfile(
 /// of loading the result into the local daemon.
 async fn stamp_devcontainer_metadata_label(
     reported_image: &str,
+    build_ref: Option<&str>,
     tags: &[String],
     raw_config: &DevContainerConfig,
     features: &[ResolvedFeature],
     export: Option<&str>,
 ) -> Result<(String, Option<String>)> {
     // `FROM` must name a tag: a bare `sha256:` digest makes BuildKit resolve it as
-    // the remote repository `docker.io/library/sha256` (#391). `tags` always holds
-    // the deterministic `deacon-build:<hash>` tag, already re-pointed at the
-    // feature-extended image when there was one.
-    let Some(from_ref) = tags.first() else {
+    // the remote repository `docker.io/library/sha256` (#391).
+    //
+    // `build_ref` is the caller's run-private tag when it has one — a name no
+    // concurrent build can re-point (#470). Falling back to `tags.first()` (the
+    // deterministic `deacon-build:<hash>` tag, already re-pointed at the
+    // feature-extended image when there was one) keeps the Compose path, which
+    // owns its own tagging, working unchanged.
+    let Some(from_ref) = build_ref.or_else(|| tags.first().map(String::as_str)) else {
         return Ok((reported_image.to_string(), None));
     };
 
@@ -2385,6 +2490,20 @@ async fn execute_docker_build(
         let defer_publish = defers_publish(args);
         let produces_local_image = defer_publish || (!args.push && args.output.is_none());
 
+        // #470: name this build's image with a tag no concurrent build can take,
+        // so every post-build pass has a handle that survives a sibling
+        // re-pointing the content-derived `deacon-build:<hash>` tag. It rides the
+        // build invocation itself, not a later `docker tag`, so there is no window
+        // in which our image is unreferenced. See `run_private_tag`.
+        let private_ref = if produces_local_image {
+            let private = run_private_tag();
+            build_args.push("-t".to_string());
+            build_args.push(private.clone());
+            Some(private)
+        } else {
+            None
+        };
+
         // Add --push flag if requested
         if args.push && !defer_publish {
             build_args.push("--push".to_string());
@@ -2496,11 +2615,15 @@ async fn execute_docker_build(
         };
 
         // Extract image metadata (skip when this invocation pushed/exported
-        // directly, as the image may not be local)
-        let metadata = if produces_local_image {
-            extract_image_metadata(&image_id).await?
-        } else {
-            HashMap::new()
+        // directly, as the image may not be local).
+        //
+        // Read through the run-private tag, never the raw digest: the digest is
+        // unique per invocation, so a concurrent build of identical content
+        // orphans it the moment it re-points the shared `deacon-build:<hash>`
+        // tag, and the store then drops it (#470).
+        let metadata = match &private_ref {
+            Some(private) => extract_image_metadata(private).await?,
+            None => HashMap::new(),
         };
 
         // Collect all tags: deterministic tag plus user-specified tags
@@ -2510,6 +2633,7 @@ async fn execute_docker_build(
         let result = BuildResult {
             image_id,
             tags: all_tags,
+            private_ref,
             build_duration: 0.0, // Will be set by caller
             metadata,
             config_hash: config_hash.to_string(),
@@ -2884,6 +3008,47 @@ mod tests {
     }
 
     #[test]
+    fn test_run_private_tag_is_unique_per_invocation() {
+        // #470: the whole point of this tag is that no other build — in another
+        // process or another task of this one — can be holding the same name.
+        let a = run_private_tag();
+        let b = run_private_tag();
+        assert_ne!(a, b, "two mints must not collide within one process");
+        for tag in [&a, &b] {
+            assert!(
+                tag.starts_with("deacon-build-run:"),
+                "the private tag must be namespaced away from `deacon-build:<hash>`, got {tag}"
+            );
+            assert!(
+                tag.contains(&std::process::id().to_string()),
+                "the private tag must carry this pid so concurrent processes differ, got {tag}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_run_private_tag_is_never_serialized_into_the_build_cache() {
+        // #470: a cached result replays a tag that was dropped when its build
+        // ended, so the field must not round-trip through the cache file.
+        let result = BuildResult {
+            image_id: "sha256:abc".to_string(),
+            tags: vec!["deacon-build:abc123456789".to_string()],
+            private_ref: Some("deacon-build-run:1-0".to_string()),
+            build_duration: 1.0,
+            metadata: HashMap::new(),
+            config_hash: "abc123456789".to_string(),
+            injected_ca_subjects: Vec::new(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(
+            !json.contains("deacon-build-run"),
+            "the run-private tag must not be serialized; got {json}"
+        );
+        let round_tripped: BuildResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(round_tripped.private_ref, None);
+    }
+
+    #[test]
     fn test_temp_dir_guard_removes_dir_on_drop() {
         // Regression for #280: an image-reference build that fails partway (early
         // `?` / panic) must not leave `.deacon-temp-build/` behind. The RAII guard
@@ -3196,6 +3361,7 @@ mod tests {
         let result = BuildResult {
             image_id: "sha256:secret123abc".to_string(),
             tags: vec!["myapp:latest".to_string()],
+            private_ref: None,
             metadata,
             config_hash: "hash123secret".to_string(),
             injected_ca_subjects: Vec::new(),
@@ -3647,6 +3813,7 @@ mod tests {
         let build_result = BuildResult {
             image_id: "sha256:abcd1234".to_string(),
             tags: vec!["myapp:latest".to_string()],
+            private_ref: None,
             build_duration: 123.45,
             metadata: {
                 let mut map = HashMap::new();
