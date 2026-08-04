@@ -9,7 +9,7 @@ use super::args::{MountType, NormalizedMount, UpArgs};
 use super::features_build::{
     FeatureBuildOutput, build_image_with_features, build_image_with_features_from_dockerfile,
 };
-use super::helpers::handle_lockfile_post_build;
+use super::helpers::{apply_user_mapping, handle_lockfile_post_build};
 use super::lifecycle::{HostTrustArgs, execute_initialize_command, resolve_force_pty};
 use super::merged_config::{
     build_merged_configuration_with_options, inspect_for_merged_configuration,
@@ -572,12 +572,51 @@ pub(crate) async fn execute_compose_up(
 
     info!("Compose project {} started successfully", project.name);
 
-    // Host-CA runtime injection (016, T027): install the corporate CA into the
-    // primary service container BEFORE the compose post-create lifecycle hook.
-    if let Some(set) = host_ca_set {
+    // Two things must happen against the primary service container after the
+    // project is up and BEFORE the compose post-create lifecycle hook runs. Both
+    // need its id, so it is resolved once here rather than probed twice.
+    //
+    // 1. Host-CA runtime injection (016, T027): install the corporate CA.
+    //
+    // 2. Spec parity (#462): apply the `updateRemoteUserUID` user mapping —
+    //    create the remote user if absent, remap its uid/gid to the host user's,
+    //    and adjust workspace ownership. `up`'s single-container path
+    //    (`up/container.rs`) has always done this; the compose path never did, so
+    //    a non-root `remoteUser` kept the IMAGE's uid and any hook writing into
+    //    the bind-mounted workspace died with `Permission denied` unless the
+    //    host's uid happened to match. Measured against the pinned reference CLI
+    //    0.87.0 on a compose service whose image pins its user to uid 1234 and a
+    //    host at uid 1000: the reference's hook reported `uid=1000` and wrote;
+    //    deacon's wrote nothing.
+    //
+    //    The reference reaches the same observable a different way — it builds a
+    //    derived `<image>-uid` image whose final `RUN` layer rewrites
+    //    `/etc/passwd`/`/etc/group`, then points the service at it through its
+    //    generated `docker-compose.devcontainer.containerFeatures-*.yml`
+    //    override. deacon instead remaps in the running container, which is the
+    //    mechanism `apply_user_mapping` already implements and the
+    //    single-container path already ships; reusing it keeps ONE uid-remap
+    //    implementation, and the observable — the remote user's uid inside the
+    //    container, and its ability to write the bind mount — is identical.
+    //
+    //    The condition, the helper and therefore every spec rule it encodes
+    //    (`updateRemoteUserUID` defaults true on Linux, is a no-op for a root
+    //    `remoteUser` (#90) or a root host user, and honors an explicit
+    //    `false`) are the single-container path's, not a compose-specific copy.
+    //
+    //    Order matches `up/container.rs`: CA first, then the user mapping.
+    let needs_user_mapping = config.remote_user.is_some() || config.container_user.is_some();
+    if host_ca_set.is_some() || needs_user_mapping {
         let container_id =
             resolve_primary_container_id_with_retry(&compose_manager, &project).await?;
-        let _ = inject_runtime(runtime, &container_id, set).await?;
+
+        if let Some(set) = host_ca_set {
+            let _ = inject_runtime(runtime, &container_id, set).await?;
+        }
+
+        if needs_user_mapping {
+            apply_user_mapping(runtime, &container_id, config, workspace_folder).await?;
+        }
     }
 
     // Save compose state for shutdown tracking
