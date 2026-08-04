@@ -24,11 +24,11 @@ alone. Where a row has no scenario yet, it says so.
 
 Of **90 recorded behaviors**:
 
-- **1** — open nonconformance — [#477](https://github.com/get2knowio/deacon/issues/477)
+- **0** — open nonconformance
 - **9** — deacon follows the spec where the CLI does not
 - **11** — documented choice
 - **19** — deacon extension
-- **50** — conformant and matching
+- **51** — conformant and matching
 
 The open-nonconformance column emptied on 2026-08-03 when duplicate Features
 ([#430](https://github.com/get2knowio/deacon/issues/430)) left it, refilled the same day
@@ -54,10 +54,19 @@ link.
 It had a shelf life of hours. Closing #467 prompted an audit for other callers of the merge
 it fixed, and [#477](https://github.com/get2knowio/deacon/issues/477) is what that audit
 measured: the same collapse on the CONTAINER's stamped label, which `set-up` reads and #467's
-fix did not reach. It refilled the column the day #467 emptied it. That is the fourth link in
-the same chain and it was found the same way as the other three — by measuring a surface
-against the pinned oracle rather than by reasoning about the code — so the column reads one,
-and reading zero here would have meant nobody looked.
+fix did not reach. It refilled the column the day #467 emptied it, and left again the same
+day when the fix was measured against the oracle on all three of its shapes. That is the
+fourth link in the same chain and it was found the same way as the other three — by
+measuring a surface against the pinned oracle rather than by reasoning about the code.
+
+So the column reads zero again, with the same caveat it carried the last time it did: an
+empty column is a statement about what has been MEASURED, and its shelf life is however
+long it takes someone to look somewhere new. #477 is the standing evidence for that — it
+existed the whole time #467 was open and became visible only when someone audited the other
+callers of the merge #467 fixed. The audit that closed it went one step further and found
+`exec`, the only other caller, clean for a reason rather than by luck: it reads the
+last-wins scalars off that helper and runs no lifecycle phase at all. The next link, if
+there is one, will come from measuring a surface nobody has measured yet.
 
 Two rows moved from "deacon follows the spec where the CLI does not" to "conformant and
 matching" at [#439](https://github.com/get2knowio/deacon/issues/439) — not because deacon
@@ -234,7 +243,7 @@ oversight nobody noticed.
 
 | Behavior | Status | Evidence | Notes |
 |---|---|---|---|
-| A lifecycle hook contributed by the CONTAINER's `devcontainer.metadata` label runs ALONGSIDE the ones other entries of that label — and a `--config` — declare for the same phase, rather than only the last one running. | **open nonconformance** | no scenario yet — measured repro on the issue | OPEN — filed as [#477](https://github.com/get2knowio/deacon/issues/477), found by auditing for more instances of [#467](https://github.com/get2knowio/deacon/issues/467)'s pattern after fixing it. Same defect CLASS, different SOURCE: #467 was the IMAGE's label collapsed by `ConfigMerger`; this is the CONTAINER's stamped label collapsed the same way, on the `set-up` surface, which #467's fix did not reach. Two collapse points, both measured separately: `container_metadata::config_from_metadata_label` folds the label's own fragments last-wins (and deacon's `up` stamps `[...image entries, ...feature entries, config entry]`, so a collision arrives as two entries and leaves as one), then `set_up.rs` folds that under `--config` and reads the five SINGULAR fields off the result. Measured at oracle 0.87.0 on an already-running plain container inheriting an image label with `onCreateCommand` + `postCreateCommand`, plus a `--config` declaring both: the reference's log reads `img-onCreate` / `ws-onCreate` / `img-postCreate` / `ws-postCreate` and deacon's reads only the two `ws-` lines, both exit 0 — so the marker file is the whole observation, and the reference's own output confirms it collects (it prints "Running the onCreateCommand from devcontainer.json..." twice per phase). The second collapse point is visible with NO `--config` at all: against a container `deacon up` created, whose stamped label carries an image entry and a config entry for the same phase, `deacon set-up --container-id` writes only the `ws-` lines, which isolates `config_from_metadata_label`. The container is a PLAIN one deliberately — a container a prior `up` has already set up carries the reference's in-container phase markers, which suppress every hook and make the surface unmeasurable. Measured and found CLEAN in the same session, so nobody re-checks it: `read-configuration --container-id --include-merged-configuration` against the same stamped container matches the reference byte for byte, emitting the collected `onCreateCommands` / `postCreateCommands` — that surface collects the label's entries through `apply_upstream_merge_shape` rather than through `ConfigMerger`, so it never had the defect. That is #467's asymmetry again, and the reason this is worth its own row: deacon REPORTS the collected list correctly here and EXECUTES only the last one. #467's machinery is the fix to reuse — `aggregate_lifecycle_commands_with_image_metadata` and `LifecycleCommandSource::ImageMetadata { index }` already exist — with the same trap it documented: lift the hooks OFF the merged config, or an entry that is both merged and collected runs twice. `set-up` also does not aggregate FEATURE-contributed hooks at all, which the same change closes. |
+| A lifecycle hook contributed by the CONTAINER's `devcontainer.metadata` label runs ALONGSIDE the ones other entries of that label — and a `--config` — declare for the same phase, rather than only the last one running. | matches the reference | 1 Docker-gated test — no parity case, see notes | Was an open nonconformance ([#477](https://github.com/get2knowio/deacon/issues/477)), closed 2026-08-04. Both collapse points are gone and all three shapes are byte-identical to oracle 0.87.0, re-measured live on the issue's own repro: with `--config` over a single-entry label, `img-onCreate` / `ws-onCreate` / `img-postCreate` / `ws-postCreate` (deacon previously wrote only the two `ws-` lines); against a three-entry `[image, feature, config]` label with NO `--config`, `e0-onCreate` / `feat-onCreate` / `e2-onCreate` / `e0-postCreate` / `e2-postCreate` / `feat-postStart` (deacon previously wrote only `e2-onCreate` / `e2-postCreate` / `feat-postStart`); and the same label plus a `--config`, which interleaves `ws-onCreate` / `ws-postCreate` last in their phases. The FEATURE entry's hook running at all is new: `set-up` never called `aggregate_lifecycle_commands`, so a Feature-contributed hook ran only when no other entry declared that phase. The fix reuses #467's machinery rather than adding a parallel one — `config_from_metadata_label` lifts each fragment's hooks onto `DevContainerConfig::metadata_lifecycle_layers` and leaves the five singular fields EMPTY, so `aggregate_lifecycle_commands` replays them in label order ahead of the `--config`'s. Leaving a hook in both homes is the double-run trap #467 documented, and it is observed rather than argued: with the clearing removed the Docker-gated test reports `e2-onCreate` / `e2-postCreate` / `feat-postStart` each appearing twice. **No parity case:** `set-up` is not in the harness's `CONSUMER_SUBCOMMANDS` vocabulary, and this fix is not a reason to grow the case model — the evidence is `test_set_up_collects_container_label_hooks_alongside_the_config_hook` (docker-shared, gates every PR), which asserts the WHOLE marker log on both shapes because a `contains` assertion cannot see an appended duplicate. Two neighbours were re-measured and are clean, so nobody re-checks them: `read-configuration --container-id --include-merged-configuration` is byte-identical before and after the change (it collects through `apply_upstream_merge_shape`, never through this helper), and `exec --container-id` — the other caller of `config_from_metadata_label` — reads only the LAST-WINS `remoteUser` / `remoteEnv` off it and runs no lifecycle phase at all, so it was never exposed and still recovers both across a multi-entry label. One divergence remains on this surface and is NOT #477: `set-up --include-merged-configuration` emits deacon's flat config under a `merged_configuration` key, where the reference emits `mergedConfiguration` carrying the collected `onCreateCommands` / `postCreateCommands` plural arrays. That block was already the wrong shape before this change and is untouched by it. |
 
 ### `templates-apply`
 

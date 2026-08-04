@@ -36,11 +36,11 @@ use crate::commands::shared::resolve_runtime;
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
-    AggregatedLifecycleCommand, ContainerLifecycleCommands, ContainerLifecycleConfig,
-    DotfilesConfig, LifecycleCommandList, LifecycleCommandSource, LifecycleCommandValue,
-    execute_container_lifecycle_with_progress_callback_and_docker,
+    ContainerLifecycleCommands, ContainerLifecycleConfig, DotfilesConfig, LifecycleCommandList,
+    aggregate_lifecycle_commands, execute_container_lifecycle_with_progress_callback_and_docker,
 };
 use deacon_core::docker::{CliRuntime, ContainerInfo, Docker, ExecConfig};
+use deacon_core::lifecycle::LifecyclePhase;
 use deacon_core::runtime::RuntimeKind;
 use deacon_core::variable::SubstitutionContext;
 use std::collections::HashMap;
@@ -366,46 +366,39 @@ async fn execute_lifecycle_hooks(
 
     let mut commands = ContainerLifecycleCommands::new();
 
-    let parse_phase_command =
-        |json_val: &serde_json::Value, phase: &str| -> Result<Option<LifecycleCommandList>> {
-            let parsed = LifecycleCommandValue::from_json_value(json_val)
-                .with_context(|| format!("Failed to parse {} command", phase))?;
-            Ok(match parsed {
-                Some(cmd) if !cmd.is_empty() => Some(LifecycleCommandList {
-                    commands: vec![AggregatedLifecycleCommand {
-                        command: cmd,
-                        source: LifecycleCommandSource::Config,
-                    }],
-                }),
-                _ => None,
-            })
-        };
+    // Every hook the container's `devcontainer.metadata` label declares for a
+    // phase runs, in label order, ahead of the one `--config` declares — the
+    // spec's "Collected list of all `<phase>Command`s … the devcontainer.json is
+    // considered last" (#477). Reading the five SINGULAR fields ran only the
+    // last survivor of the fold; `aggregate_lifecycle_commands` is the
+    // collection `up` and `run-user-commands` already use, so set-up joins it
+    // rather than growing a second one.
+    //
+    // No separately-resolved features: a stamped label already carries each
+    // Feature's contribution as its own entry, so those arrive as layers too —
+    // which is how set-up gains Feature-hook execution it never had.
+    const NO_FEATURES: &[deacon_core::features::ResolvedFeature] = &[];
+    let collect = |phase: LifecyclePhase| -> Result<Option<LifecycleCommandList>> {
+        let list = aggregate_lifecycle_commands(phase, NO_FEATURES, merged_config)
+            .with_context(|| format!("Failed to parse {:?} commands", phase))?;
+        Ok((!list.commands.is_empty()).then_some(list))
+    };
 
-    if let Some(ref on_create) = merged_config.on_create_command {
-        if let Some(cmd) = parse_phase_command(on_create, "onCreateCommand")? {
-            commands = commands.with_on_create(cmd);
-        }
+    if let Some(list) = collect(LifecyclePhase::OnCreate)? {
+        commands = commands.with_on_create(list);
     }
-    if let Some(ref update_content) = merged_config.update_content_command {
-        if let Some(cmd) = parse_phase_command(update_content, "updateContentCommand")? {
-            commands = commands.with_update_content(cmd);
-        }
+    if let Some(list) = collect(LifecyclePhase::UpdateContent)? {
+        commands = commands.with_update_content(list);
     }
-    if let Some(ref post_create) = merged_config.post_create_command {
-        if let Some(cmd) = parse_phase_command(post_create, "postCreateCommand")? {
-            commands = commands.with_post_create(cmd);
-        }
+    if let Some(list) = collect(LifecyclePhase::PostCreate)? {
+        commands = commands.with_post_create(list);
     }
     if !args.skip_non_blocking_commands {
-        if let Some(ref post_start) = merged_config.post_start_command {
-            if let Some(cmd) = parse_phase_command(post_start, "postStartCommand")? {
-                commands = commands.with_post_start(cmd);
-            }
+        if let Some(list) = collect(LifecyclePhase::PostStart)? {
+            commands = commands.with_post_start(list);
         }
-        if let Some(ref post_attach) = merged_config.post_attach_command {
-            if let Some(cmd) = parse_phase_command(post_attach, "postAttachCommand")? {
-                commands = commands.with_post_attach(cmd);
-            }
+        if let Some(list) = collect(LifecyclePhase::PostAttach)? {
+            commands = commands.with_post_attach(list);
         }
     }
 
@@ -856,6 +849,85 @@ mod tests {
         };
         let merged = merge_configs(&file_cfg, None);
         assert_eq!(merged.name.as_deref(), Some("only-file"));
+    }
+
+    /// #477, hermetically: the whole set-up path from the container's stamped
+    /// label through `merge_configs` to the aggregation that feeds
+    /// `ContainerLifecycleCommands`.
+    ///
+    /// Both collapse points are covered at once, because they compose. The
+    /// label's own fragments used to fold last-wins (so `e0-onCreate` and
+    /// `feat-onCreate` vanished), and then reading the five SINGULAR fields off
+    /// the `--config` merge dropped whatever had survived (so only `ws-onCreate`
+    /// ran). The reference runs all four, devcontainer.json last — measured at
+    /// oracle 0.87.0, whose log on this exact shape reads the lines asserted
+    /// below.
+    ///
+    /// `postStart` is the control the fix must not break twice over: only the
+    /// FEATURE entry declares it, so it must appear exactly ONCE. A hook
+    /// recorded as a layer while the merge also left it in the singular field
+    /// would run twice, and an equality assertion over the whole list is the
+    /// only kind that can see that.
+    #[test]
+    fn set_up_collects_every_label_entry_hook_ahead_of_the_config_hook() {
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            r#"[
+                {"onCreateCommand": "e0-onCreate", "postCreateCommand": "e0-postCreate"},
+                {"id": "ghcr.io/example/feat:1", "onCreateCommand": "feat-onCreate",
+                 "postStartCommand": "feat-postStart"},
+                {"onCreateCommand": "e2-onCreate", "postCreateCommand": "e2-postCreate"}
+            ]"#
+            .to_string(),
+        );
+        let container = make_container("abc", "alpine:3.18", labels);
+        let metadata = extract_image_metadata_config(&container).unwrap();
+
+        let file_cfg = DevContainerConfig {
+            on_create_command: Some(serde_json::json!("ws-onCreate")),
+            post_create_command: Some(serde_json::json!("ws-postCreate")),
+            ..DevContainerConfig::default()
+        };
+        let merged = merge_configs(&file_cfg, metadata.as_ref());
+
+        let phase_commands = |phase: LifecyclePhase| {
+            aggregate_lifecycle_commands(phase, &[], &merged)
+                .unwrap()
+                .commands
+                .into_iter()
+                .map(|c| c.command)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            phase_commands(LifecyclePhase::OnCreate),
+            vec![
+                serde_json::json!("e0-onCreate"),
+                serde_json::json!("feat-onCreate"),
+                serde_json::json!("e2-onCreate"),
+                serde_json::json!("ws-onCreate"),
+            ],
+            "every label entry's onCreateCommand runs in label order, the \
+             devcontainer.json's last"
+        );
+        assert_eq!(
+            phase_commands(LifecyclePhase::PostCreate),
+            vec![
+                serde_json::json!("e0-postCreate"),
+                serde_json::json!("e2-postCreate"),
+                serde_json::json!("ws-postCreate"),
+            ],
+            "the hookless-for-this-phase feature entry contributes nothing"
+        );
+        assert_eq!(
+            phase_commands(LifecyclePhase::PostStart),
+            vec![serde_json::json!("feat-postStart")],
+            "a phase only ONE entry declares must run exactly once — a layer that \
+             also stayed in the singular field would run twice"
+        );
+        assert!(phase_commands(LifecyclePhase::UpdateContent).is_empty());
+        assert!(phase_commands(LifecyclePhase::PostAttach).is_empty());
     }
 
     #[test]
