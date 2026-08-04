@@ -22,9 +22,9 @@ alone. Where a row has no scenario yet, it says so.
 
 ## Summary
 
-Of **89 recorded behaviors**:
+Of **90 recorded behaviors**:
 
-- **0** — open nonconformance
+- **1** — open nonconformance — [#477](https://github.com/get2knowio/deacon/issues/477)
 - **9** — deacon follows the spec where the CLI does not
 - **11** — documented choice
 - **19** — deacon extension
@@ -50,6 +50,14 @@ An empty column is a statement about what has been MEASURED, not a claim of corr
 and it has a short shelf life: the honest claim is that every difference we have measured is
 either fixed, deacon-conformant, allowlisted with a ruling, or in this column with an issue
 link.
+
+It had a shelf life of hours. Closing #467 prompted an audit for other callers of the merge
+it fixed, and [#477](https://github.com/get2knowio/deacon/issues/477) is what that audit
+measured: the same collapse on the CONTAINER's stamped label, which `set-up` reads and #467's
+fix did not reach. It refilled the column the day #467 emptied it. That is the fourth link in
+the same chain and it was found the same way as the other three — by measuring a surface
+against the pinned oracle rather than by reasoning about the code — so the column reads one,
+and reading zero here would have meant nobody looked.
 
 Two rows moved from "deacon follows the spec where the CLI does not" to "conformant and
 matching" at [#439](https://github.com/get2knowio/deacon/issues/439) — not because deacon
@@ -221,6 +229,12 @@ oversight nobody noticed.
 | Behavior | Status | Evidence | Notes |
 |---|---|---|---|
 | The --secrets-file flag auto-detects and accepts both a flat JSON object and a .env-format KEY=VALUE file; the reference CLI models only JSON and rejects the .env form. | deacon extension | 1 scenario | Intentional Deacon extension (a strict superset). Recorded by ext-secrets-file-env-format; backed by case-secrets-dotenv. See docs/DIFFERENTIATORS.md and… |
+
+### `set-up`
+
+| Behavior | Status | Evidence | Notes |
+|---|---|---|---|
+| A lifecycle hook contributed by the CONTAINER's `devcontainer.metadata` label runs ALONGSIDE the ones other entries of that label — and a `--config` — declare for the same phase, rather than only the last one running. | **open nonconformance** | no scenario yet — measured repro on the issue | OPEN — filed as [#477](https://github.com/get2knowio/deacon/issues/477), found by auditing for more instances of [#467](https://github.com/get2knowio/deacon/issues/467)'s pattern after fixing it. Same defect CLASS, different SOURCE: #467 was the IMAGE's label collapsed by `ConfigMerger`; this is the CONTAINER's stamped label collapsed the same way, on the `set-up` surface, which #467's fix did not reach. Two collapse points, both measured separately: `container_metadata::config_from_metadata_label` folds the label's own fragments last-wins (and deacon's `up` stamps `[...image entries, ...feature entries, config entry]`, so a collision arrives as two entries and leaves as one), then `set_up.rs` folds that under `--config` and reads the five SINGULAR fields off the result. Measured at oracle 0.87.0 on an already-running plain container inheriting an image label with `onCreateCommand` + `postCreateCommand`, plus a `--config` declaring both: the reference's log reads `img-onCreate` / `ws-onCreate` / `img-postCreate` / `ws-postCreate` and deacon's reads only the two `ws-` lines, both exit 0 — so the marker file is the whole observation, and the reference's own output confirms it collects (it prints "Running the onCreateCommand from devcontainer.json..." twice per phase). The second collapse point is visible with NO `--config` at all: against a container `deacon up` created, whose stamped label carries an image entry and a config entry for the same phase, `deacon set-up --container-id` writes only the `ws-` lines, which isolates `config_from_metadata_label`. The container is a PLAIN one deliberately — a container a prior `up` has already set up carries the reference's in-container phase markers, which suppress every hook and make the surface unmeasurable. Measured and found CLEAN in the same session, so nobody re-checks it: `read-configuration --container-id --include-merged-configuration` against the same stamped container matches the reference byte for byte, emitting the collected `onCreateCommands` / `postCreateCommands` — that surface collects the label's entries through `apply_upstream_merge_shape` rather than through `ConfigMerger`, so it never had the defect. That is #467's asymmetry again, and the reason this is worth its own row: deacon REPORTS the collected list correctly here and EXECUTES only the last one. #467's machinery is the fix to reuse — `aggregate_lifecycle_commands_with_image_metadata` and `LifecycleCommandSource::ImageMetadata { index }` already exist — with the same trap it documented: lift the hooks OFF the merged config, or an entry that is both merged and collected runs twice. `set-up` also does not aggregate FEATURE-contributed hooks at all, which the same change closes. |
 
 ### `templates-apply`
 
