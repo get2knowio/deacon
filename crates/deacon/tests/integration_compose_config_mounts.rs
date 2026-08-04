@@ -732,3 +732,114 @@ fn test_compose_up_skip_non_blocking_commands_stops_at_wait_for() {
         "postStart runs after the waitFor cutoff and must be skipped"
     );
 }
+
+/// #467: on compose too, an image-metadata lifecycle hook runs ALONGSIDE a
+/// same-phase hook in devcontainer.json — the image's first — instead of being
+/// replaced by it.
+///
+/// The defect was path-independent: it lived in `ConfigMerger`, where a lifecycle
+/// command was an ordinary last-value-wins scalar, and the spec's image-metadata
+/// merge table instead gives every hook the merge logic "Collected list of all
+/// `<phase>Command`s" with "the devcontainer.json is considered last". This test
+/// is the compose half of the pair; the single-container half lives in
+/// `integration_feature_lifecycle`. Both exist because a one-path test would let
+/// a merge defect look like a path defect.
+///
+/// Measured at oracle 0.87.0 on this shape: the reference wrote all four lines
+/// below, deacon only the two `ws-` ones, both exiting 0 — the marker file is the
+/// entire observation. The label's TWO entries also pin the order across
+/// metadata entries, which a single entry could not.
+#[test]
+fn test_compose_up_collects_image_metadata_and_config_hooks_for_same_phase() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_compose_up_collects_image_metadata_and_config_hooks_for_same_phase: \
+             Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let workspace = temp_dir.path();
+    let _down = DeaconDownGuard(workspace);
+
+    let image_tag = format!(
+        "deacon-test-compose-467-collected-{}-{}:local",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+    let _image = ImageGuard(image_tag.clone());
+
+    let image_dir = workspace.join("image");
+    fs::create_dir_all(&image_dir).unwrap();
+    fs::write(
+        image_dir.join("Dockerfile"),
+        concat!(
+            "FROM alpine:3.19\n",
+            "LABEL devcontainer.metadata='[",
+            "{\"onCreateCommand\":",
+            "\"echo img1-onCreate >> /workspace/lifecycle-phases.txt\"},",
+            "{\"onCreateCommand\":",
+            "\"echo img2-onCreate >> /workspace/lifecycle-phases.txt\",",
+            "\"postCreateCommand\":",
+            "\"echo img2-postCreate >> /workspace/lifecycle-phases.txt\"}",
+            "]'\n",
+        ),
+    )
+    .unwrap();
+
+    let build = std::process::Command::new("docker")
+        .args(["build", "-q", "-t", &image_tag])
+        .arg(&image_dir)
+        .output()
+        .expect("docker build should run");
+    assert!(
+        build.status.success(),
+        "docker build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let compose_yml = format!(
+        "services:\n  app:\n    image: {}\n    volumes:\n      - .:/workspace\n    command: sleep infinity\n",
+        image_tag
+    );
+    fs::write(workspace.join("docker-compose.yml"), compose_yml).unwrap();
+
+    fs::create_dir_all(workspace.join(".devcontainer")).unwrap();
+    fs::write(
+        workspace.join(".devcontainer/devcontainer.json"),
+        r#"{
+  "name": "Compose Image Metadata Lifecycle Collection",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "onCreateCommand": "echo ws-onCreate >> /workspace/lifecycle-phases.txt",
+  "postCreateCommand": ["sh", "-c", "echo ws-postCreate-array >> /workspace/lifecycle-phases.txt"]
+}"#,
+    )
+    .unwrap();
+
+    let up_output = support::deacon_command()
+        .current_dir(workspace)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(workspace)
+        .output()
+        .unwrap();
+    assert!(
+        up_output.status.success(),
+        "deacon up failed: {}",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
+
+    assert_eq!(
+        phase_log(workspace).as_deref(),
+        Some("img1-onCreate\nimg2-onCreate\nws-onCreate\nimg2-postCreate\nws-postCreate-array\n"),
+        "each metadata entry's hook must run in label order, ahead of the \
+         devcontainer.json's hook for the same phase (up stderr: {})",
+        String::from_utf8_lossy(&up_output.stderr)
+    );
+}

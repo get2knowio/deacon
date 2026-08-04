@@ -336,8 +336,14 @@ pub(crate) async fn execute_container_up(
     // may not be local yet — the helper falls through cleanly in that case
     // and Docker will still apply the image's own ENV/USER instructions at
     // container run time.
+    // The label's lifecycle hooks are COLLECTED, not merged (#467) — they ride
+    // separately to `execute_lifecycle_commands` so a same-phase hook in
+    // devcontainer.json cannot replace the image's.
+    let mut image_lifecycle_layers: Vec<deacon_core::config::DevContainerConfig> = Vec::new();
     if let Some(image_ref) = config.image.clone() {
-        config = merge_image_metadata_after_image_ready(docker, &image_ref, config).await;
+        let split = merge_image_metadata_after_image_ready(docker, &image_ref, config).await;
+        config = split.config;
+        image_lifecycle_layers = split.lifecycle_layers;
     }
 
     // Merge security options from config and features
@@ -803,6 +809,7 @@ pub(crate) async fn execute_container_up(
         // Host-side derivation is correct here: `up` created this container and
         // injected its workspace mount, so the derived path is the mounted one.
         None,
+        &image_lifecycle_layers,
     )
     .await?;
 

@@ -1189,3 +1189,128 @@ fn test_feature_command_timeout_behavior() {
     // The command should either timeout or be handled gracefully
     // Exact behavior depends on implementation details
 }
+
+// ============================================================================
+// #467: image-metadata lifecycle hooks are COLLECTED, not overridden
+// ============================================================================
+
+/// Remove a locally built fixture image when the test ends.
+struct ImageGuard(String);
+
+impl Drop for ImageGuard {
+    fn drop(&mut self) {
+        let _ = StdCommand::new("docker")
+            .args(["rmi", "-f", &self.0])
+            .output();
+    }
+}
+
+/// #467: when the image's `devcontainer.metadata` and the workspace's
+/// devcontainer.json declare the SAME lifecycle phase, BOTH run — the image's
+/// first — instead of the workspace's replacing the image's.
+///
+/// The spec's image-metadata merge table gives every lifecycle hook the merge
+/// logic "Collected list of all `<phase>Command`s", and adds "when the order
+/// matters, the devcontainer.json is considered last". deacon folded the label
+/// through `ConfigMerger`, where a lifecycle command was an ordinary
+/// last-value-wins scalar, so only the workspace's hook survived. Measured at
+/// oracle 0.87.0 on this exact shape: the reference ran every hook below and
+/// deacon ran only the `ws-` ones, both exiting 0 — which is why the marker file
+/// is the entire observation.
+///
+/// One run pins the whole spec order in one file, because every hook appends to
+/// it: the two METADATA ENTRIES in label order, then the FEATURE, then the
+/// configuration. The feature layer is here deliberately — it was already
+/// aggregated correctly, and its line is what proves the image layers were
+/// inserted AHEAD of it rather than beside it, and that no layer now runs twice.
+///
+/// The log lives inside the container rather than in a bind mount, so the
+/// assertion depends on neither the host's uid nor a workspace mount.
+#[test]
+fn test_image_metadata_lifecycle_hooks_collected_with_config_hooks() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_image_metadata_lifecycle_hooks_collected_with_config_hooks: \
+             Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let guard = ContainerGuard::new();
+
+    // Unique tag so parallel runs in the docker-shared group never collide.
+    let image_tag = format!(
+        "deacon-test-467-metadata-lifecycle-{}-{}:local",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+    let _image = ImageGuard(image_tag.clone());
+
+    // Two label entries: the first collides with the config on `postCreate`,
+    // both collide with it on `onCreate`.
+    let image_dir = temp_dir.path().join("image");
+    fs::create_dir_all(&image_dir).unwrap();
+    fs::write(
+        image_dir.join("Dockerfile"),
+        concat!(
+            "FROM alpine:3.19\n",
+            "LABEL devcontainer.metadata='[",
+            "{\"onCreateCommand\":\"echo img1-onCreate >> /tmp/collected.log\",",
+            "\"postCreateCommand\":\"echo img1-postCreate >> /tmp/collected.log\"},",
+            "{\"onCreateCommand\":\"echo img2-onCreate >> /tmp/collected.log\"}",
+            "]'\n",
+        ),
+    )
+    .unwrap();
+
+    let build = StdCommand::new("docker")
+        .args(["build", "-q", "-t", &image_tag])
+        .arg(&image_dir)
+        .output()
+        .expect("docker build should run");
+    assert!(
+        build.status.success(),
+        "docker build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    create_local_feature(
+        &temp_dir,
+        "collect-feature",
+        json!({ "onCreateCommand": "echo feat-onCreate >> /tmp/collected.log" }),
+    );
+
+    let devcontainer_config = json!({
+        "name": "Image Metadata Lifecycle Collection",
+        "image": image_tag,
+        "workspaceFolder": "/workspace",
+        "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+        "features": { "./collect-feature": {} },
+        "onCreateCommand": "echo ws-onCreate >> /tmp/collected.log",
+        "postCreateCommand": ["/bin/sh", "-c", "echo ws-postCreate-array >> /tmp/collected.log"],
+    });
+
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        serde_json::to_string_pretty(&devcontainer_config).unwrap(),
+    )
+    .unwrap();
+
+    let container_id = run_deacon_up(&temp_dir, &guard, &[]).expect("deacon up should succeed");
+
+    let log = read_container_file(&container_id, "/tmp/collected.log")
+        .expect("the lifecycle hooks should have written /tmp/collected.log");
+
+    assert_eq!(
+        log,
+        "img1-onCreate\nimg2-onCreate\nfeat-onCreate\nws-onCreate\n\
+         img1-postCreate\nws-postCreate-array\n",
+        "every layer's hook must run, in spec order (image-metadata entries in \
+         label order, then Features, then devcontainer.json) — and each exactly once"
+    );
+}

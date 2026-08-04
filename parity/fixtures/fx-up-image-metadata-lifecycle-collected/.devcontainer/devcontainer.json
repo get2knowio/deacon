@@ -1,0 +1,11 @@
+{
+	"name": "ConformanceUpImageMetadataLifecycleCollected",
+	"image": "deacon-parity-up-image-metadata-lifecycle:local",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"onCreateCommand": "echo ws-onCreate >> /workspace/lifecycle-collected.txt",
+	"postCreateCommand": ["/bin/sh", "-c", "echo ws-postCreate-array >> /workspace/lifecycle-collected.txt"],
+	"postStartCommand": {
+		"alpha": "echo ws-postStart-alpha >> /workspace/lifecycle-collected.txt"
+	}
+}

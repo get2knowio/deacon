@@ -1,0 +1,6 @@
+services:
+  app:
+    image: deacon-parity-up-compose-image-metadata-lifecycle:local
+    volumes:
+      - ..:/workspace
+    command: sleep infinity

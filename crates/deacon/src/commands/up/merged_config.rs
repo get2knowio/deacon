@@ -250,12 +250,15 @@ pub(crate) async fn merge_image_metadata_into_config(
 ///   `up` flow on a bad image label — the spec says image metadata is the
 ///   *lower-precedence* layer, so a broken label simply contributes nothing.
 /// - On success, each entry is folded into the resolved config via the
-///   existing `ConfigMerger`, with the user's config winning on conflict.
+///   existing `ConfigMerger`, with the user's config winning on conflict —
+///   EXCEPT the five lifecycle hooks, which the spec collects rather than
+///   overrides and which therefore come back as [`ImageMetadataMerge::lifecycle_layers`]
+///   (#467).
 pub(crate) async fn merge_image_metadata_after_image_ready(
     docker: &impl Docker,
     image_ref: &str,
     user_config: DevContainerConfig,
-) -> DevContainerConfig {
+) -> ImageMetadataMerge {
     let info = match docker.inspect_image(image_ref).await {
         Ok(Some(info)) => info,
         Ok(None) => {
@@ -263,7 +266,7 @@ pub(crate) async fn merge_image_metadata_after_image_ready(
                 "Image '{}' not locally available; image-metadata merge skipped (#70)",
                 image_ref
             );
-            return user_config;
+            return ImageMetadataMerge::config_only(user_config);
         }
         Err(e) => {
             tracing::warn!(
@@ -272,11 +275,11 @@ pub(crate) async fn merge_image_metadata_after_image_ready(
                 image_ref,
                 e
             );
-            return user_config;
+            return ImageMetadataMerge::config_only(user_config);
         }
     };
 
-    apply_image_metadata_label(
+    split_image_metadata_label(
         image_ref,
         info.labels.get("devcontainer.metadata"),
         user_config,
@@ -308,7 +311,7 @@ pub(crate) async fn merge_image_metadata_after_image_ready(
 /// base's `devcontainer.metadata` LABEL verbatim (deacon emits no LABEL of its
 /// own), so merging here *and* post-build would fold the same entries twice and
 /// duplicate concatenated fields like `runArgs`. Sharing
-/// [`apply_image_metadata_label`] keeps this resolution byte-identical to the
+/// [`split_image_metadata_label`] keeps this resolution byte-identical to the
 /// post-build merge.
 ///
 /// Best-effort: if the image can't be inspected or pulled we warn and fall back
@@ -370,7 +373,7 @@ pub(crate) async fn resolve_feature_install_env(
 
 /// Pure helper behind [`resolve_feature_install_env`]. Extracted so the
 /// precedence rules can be unit-tested without a Docker mock (mirrors
-/// [`apply_image_metadata_label`]).
+/// [`split_image_metadata_label`]).
 ///
 /// `image_user` is `None` when the image could not be inspected at all — in
 /// which case there is no metadata label either and resolution degrades to the
@@ -382,8 +385,9 @@ fn resolve_feature_install_env_from_image(
     config: &DevContainerConfig,
 ) -> FeatureInstallEnv {
     // Fold the image's metadata in at lower precedence than the user config,
-    // then read the effective users back off the result.
-    let effective = apply_image_metadata_label(base_image, label, config.clone());
+    // then read the effective users back off the result. The collected lifecycle
+    // layers are irrelevant here — only `remoteUser` / `containerUser` are read.
+    let effective = split_image_metadata_label(base_image, label, config.clone()).config;
 
     FeatureInstallEnv::resolve(
         effective.remote_user.as_deref(),
@@ -392,14 +396,70 @@ fn resolve_feature_install_env_from_image(
     )
 }
 
-/// Pure helper: merge the given image-metadata label (raw JSON string) into
-/// `user_config`. Extracted from [`merge_image_metadata_after_image_ready`]
-/// so the parse + merge logic can be unit-tested without a Docker mock (#70).
-fn apply_image_metadata_label(
+/// The two halves an image's `devcontainer.metadata` label resolves into.
+///
+/// The spec's merge-logic table splits by property: almost everything is merged
+/// (last value wins, union, max, …) and lands in [`Self::config`], but the five
+/// lifecycle hooks are "Collected list of all `<phase>Command`s" and so survive
+/// as an ordered list of layers instead. Collapsing them into `config` is what
+/// made a same-phase hook in devcontainer.json silently REPLACE the image's
+/// (#467).
+#[derive(Debug)]
+pub(crate) struct ImageMetadataMerge {
+    /// The user config with the image's merged properties folded in beneath it.
+    /// Its lifecycle hooks are the user's alone.
+    pub config: DevContainerConfig,
+    /// The label's entries, in label order, carrying ONLY their lifecycle
+    /// hooks. Empty when the image contributes none.
+    pub lifecycle_layers: Vec<DevContainerConfig>,
+}
+
+impl ImageMetadataMerge {
+    /// The no-metadata outcome: the config unchanged, no layers.
+    fn config_only(config: DevContainerConfig) -> Self {
+        Self {
+            config,
+            lifecycle_layers: Vec::new(),
+        }
+    }
+}
+
+/// Move the five lifecycle hooks off `entry`, returning them as a layer of their
+/// own when it declared any.
+///
+/// Both halves matter: the returned layer is what
+/// [`deacon_core::container_lifecycle::aggregate_lifecycle_commands_with_image_metadata`]
+/// runs, and the hooks MUST be gone from `entry` before it reaches `ConfigMerger`
+/// — otherwise an image-only hook would be both merged into the config and
+/// collected as a layer, and would run twice.
+fn take_lifecycle_layer(entry: &mut DevContainerConfig) -> Option<DevContainerConfig> {
+    let layer = DevContainerConfig {
+        on_create_command: entry.on_create_command.take(),
+        update_content_command: entry.update_content_command.take(),
+        post_create_command: entry.post_create_command.take(),
+        post_start_command: entry.post_start_command.take(),
+        post_attach_command: entry.post_attach_command.take(),
+        ..Default::default()
+    };
+
+    let declares_any = layer.on_create_command.is_some()
+        || layer.update_content_command.is_some()
+        || layer.post_create_command.is_some()
+        || layer.post_start_command.is_some()
+        || layer.post_attach_command.is_some();
+
+    declares_any.then_some(layer)
+}
+
+/// Pure helper: split the given image-metadata label (raw JSON string) into the
+/// config merged beneath `user_config` and the collected lifecycle layers.
+/// Extracted from [`merge_image_metadata_after_image_ready`] so the parse +
+/// merge logic can be unit-tested without a Docker mock (#70, #467).
+fn split_image_metadata_label(
     image_ref: &str,
     label_value: Option<&String>,
     user_config: DevContainerConfig,
-) -> DevContainerConfig {
+) -> ImageMetadataMerge {
     use deacon_core::config::ConfigMerger;
 
     let Some(label_json) = label_value else {
@@ -407,7 +467,7 @@ fn apply_image_metadata_label(
             "Image '{}' has no devcontainer.metadata label; nothing to merge (#70)",
             image_ref
         );
-        return user_config;
+        return ImageMetadataMerge::config_only(user_config);
     };
 
     // The label may be a single object or an array of partial config entries;
@@ -422,12 +482,12 @@ fn apply_image_metadata_label(
                     image_ref,
                     e
                 );
-                return user_config;
+                return ImageMetadataMerge::config_only(user_config);
             }
         };
 
     if entries.is_empty() {
-        return user_config;
+        return ImageMetadataMerge::config_only(user_config);
     }
 
     debug!(
@@ -437,12 +497,33 @@ fn apply_image_metadata_label(
         image_ref
     );
 
+    // Lifecycle hooks are COLLECTED, not merged (#467) — lift them out of the
+    // entries before the fold so the merge cannot overwrite them.
+    let mut entries = entries;
+    let lifecycle_layers: Vec<DevContainerConfig> = entries
+        .iter_mut()
+        .filter_map(take_lifecycle_layer)
+        .collect();
+
+    if !lifecycle_layers.is_empty() {
+        debug!(
+            "Image '{}' contributes {} lifecycle layer(s), collected ahead of the \
+             configuration's own hooks (#467)",
+            image_ref,
+            lifecycle_layers.len()
+        );
+    }
+
     // Spec ordering: image metadata is lower precedence, user config is
     // higher. ConfigMerger::merge_configs folds left-to-right with later
     // entries winning, so push image entries first then the user config.
     let mut chain: Vec<DevContainerConfig> = entries;
     chain.push(user_config);
-    ConfigMerger::merge_configs(&chain)
+
+    ImageMetadataMerge {
+        config: ConfigMerger::merge_configs(&chain),
+        lifecycle_layers,
+    }
 }
 
 /// The properties upstream picks from the **configuration** for a
@@ -1086,8 +1167,19 @@ mod image_metadata_merge_tests {
     //! the user's devcontainer.json as the *lower-precedence* layer (user
     //! config wins on conflict).
 
-    use super::apply_image_metadata_label;
+    use super::split_image_metadata_label;
     use deacon_core::config::DevContainerConfig;
+
+    /// The merged-config half of [`split_image_metadata_label`]. The lifecycle
+    /// half has its own tests below; these assert the MERGED properties, which
+    /// is what every one of them was written for.
+    fn apply_image_metadata_label(
+        image_ref: &str,
+        label: Option<&String>,
+        user: DevContainerConfig,
+    ) -> DevContainerConfig {
+        split_image_metadata_label(image_ref, label, user).config
+    }
 
     fn user_config_with_env(pairs: &[(&str, &str)]) -> DevContainerConfig {
         let mut container_env = deacon_core::IndexMap::new();
@@ -1219,6 +1311,80 @@ mod image_metadata_merge_tests {
         let label = r#"[]"#.to_string();
         let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
         assert_eq!(merged.container_env, user_clone.container_env);
+    }
+
+    // -- #467: lifecycle hooks are COLLECTED, not merged ---------------------
+
+    #[test]
+    fn lifecycle_hooks_leave_the_merged_config_and_become_layers() {
+        // Two label entries, each declaring hooks; the user declares its own
+        // postCreateCommand for the SAME phase as the first entry.
+        let label = r#"[
+            {"onCreateCommand":"img1-onCreate","postCreateCommand":"img1-postCreate"},
+            {"onCreateCommand":"img2-onCreate","postStartCommand":"img2-postStart"}
+        ]"#
+        .to_string();
+        let user = DevContainerConfig {
+            post_create_command: Some(serde_json::json!("ws-postCreate")),
+            ..DevContainerConfig::default()
+        };
+
+        let split = split_image_metadata_label("alpine:3.18", Some(&label), user);
+
+        // The layers arrive in label order and carry the hooks verbatim.
+        assert_eq!(split.lifecycle_layers.len(), 2);
+        assert_eq!(
+            split.lifecycle_layers[0].on_create_command,
+            Some(serde_json::json!("img1-onCreate"))
+        );
+        assert_eq!(
+            split.lifecycle_layers[0].post_create_command,
+            Some(serde_json::json!("img1-postCreate"))
+        );
+        assert_eq!(
+            split.lifecycle_layers[1].post_start_command,
+            Some(serde_json::json!("img2-postStart"))
+        );
+
+        // The merged config keeps the USER's hooks and NONE of the image's:
+        // an image hook the merge also carried would run twice (#467).
+        assert_eq!(
+            split.config.post_create_command,
+            Some(serde_json::json!("ws-postCreate"))
+        );
+        assert_eq!(
+            split.config.on_create_command, None,
+            "an image-only hook must not survive into the merged config, or the \
+             collected layer would run it a second time"
+        );
+        assert_eq!(split.config.post_start_command, None);
+    }
+
+    #[test]
+    fn entries_without_lifecycle_hooks_contribute_no_layer() {
+        let label = r#"[{"remoteUser":"root"},{"postCreateCommand":"img-postCreate"}]"#.to_string();
+        let split =
+            split_image_metadata_label("alpine:3.18", Some(&label), DevContainerConfig::default());
+
+        assert_eq!(
+            split.lifecycle_layers.len(),
+            1,
+            "only the entry declaring a hook becomes a layer"
+        );
+        assert_eq!(
+            split.lifecycle_layers[0].post_create_command,
+            Some(serde_json::json!("img-postCreate"))
+        );
+        // The non-lifecycle properties still merge normally.
+        assert_eq!(split.config.remote_user.as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn label_without_hooks_yields_no_layers() {
+        let label = r#"[{"remoteUser":"root"}]"#.to_string();
+        let split =
+            split_image_metadata_label("alpine:3.18", Some(&label), DevContainerConfig::default());
+        assert!(split.lifecycle_layers.is_empty());
     }
 }
 

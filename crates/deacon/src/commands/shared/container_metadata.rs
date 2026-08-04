@@ -75,24 +75,37 @@ pub fn config_from_metadata_label(container: &ContainerInfo) -> Result<Option<De
 /// label, or a label that fails to parse all leave the caller's config
 /// unchanged (see `merge_image_metadata_after_image_ready`), and a failed
 /// effective-config resolution warns and returns the merged base.
+///
+/// Returns the resolved config AND the image's lifecycle layers, which are
+/// collected rather than merged (#467): the returned config carries the
+/// workspace's hooks alone, and a caller that RUNS hooks must aggregate the
+/// layers ahead of them (`run-user-commands` does; `exec` runs none and drops
+/// them).
 pub async fn resolve_config_against_container<D: Docker>(
     docker: &D,
     container: &ContainerInfo,
     config: DevContainerConfig,
     workspace_folder: &Path,
-) -> DevContainerConfig {
-    let base = crate::commands::up::merged_config::merge_image_metadata_after_image_ready(
+) -> (DevContainerConfig, Vec<DevContainerConfig>) {
+    let split = crate::commands::up::merged_config::merge_image_metadata_after_image_ready(
         docker,
         &container.image,
         config,
     )
     .await;
+    let base = split.config;
 
-    match ConfigMerger::resolve_effective_config(&base, Some(&container.labels), workspace_folder) {
+    let resolved = match ConfigMerger::resolve_effective_config(
+        &base,
+        Some(&container.labels),
+        workspace_folder,
+    ) {
         Ok((resolved, _report)) => resolved,
         Err(e) => {
             tracing::warn!("Failed to resolve effective config with labels: {}", e);
             base
         }
-    }
+    };
+
+    (resolved, split.lifecycle_layers)
 }

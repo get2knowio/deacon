@@ -492,16 +492,22 @@ pub(crate) async fn execute_compose_up(
     // `raw_config` — the pre-substitution config the stamped LABEL is built from
     // (#437) — is deliberately NOT merged into: the label records what the author
     // wrote, not what the image contributed.
-    let merged_config = match effective_image.as_deref() {
+    //
+    // The label's lifecycle hooks are the one property group that is COLLECTED
+    // rather than merged (#467): they come back as an ordered list of layers and
+    // ride separately to `execute_compose_lifecycle`, so a same-phase hook in
+    // devcontainer.json cannot replace the image's.
+    let (merged_config, image_lifecycle_layers) = match effective_image.as_deref() {
         Some(img) => {
-            super::merged_config::merge_image_metadata_after_image_ready(
+            let split = super::merged_config::merge_image_metadata_after_image_ready(
                 &runtime.cli_docker(),
                 img,
                 config.clone(),
             )
-            .await
+            .await;
+            (split.config, split.lifecycle_layers)
         }
-        None => config.clone(),
+        None => (config.clone(), Vec::new()),
     };
     let config = &merged_config;
 
@@ -666,6 +672,7 @@ pub(crate) async fn execute_compose_up(
             .as_ref()
             .map(|fb| fb.resolved_features.as_slice())
             .unwrap_or(&[]),
+        &image_lifecycle_layers,
     )
     .await?;
 
@@ -836,11 +843,19 @@ pub(crate) async fn execute_compose_up(
 /// differently: the lifecycle **user/env**, and the lifecycle **cwd**.
 ///
 /// `config` is the configuration AFTER the service image's `devcontainer.metadata`
-/// has been folded in (#448), so a `remoteUser`, `remoteEnv` or lifecycle hook
-/// contributed only by the image reaches these phases exactly as it does on the
-/// single-container path.
+/// has been folded in (#448), so a `remoteUser` or `remoteEnv` contributed only by
+/// the image reaches these phases exactly as it does on the single-container path.
+/// The image's lifecycle HOOKS are not in there — they are collected, not merged
+/// (#467), and arrive as `image_metadata_layers`.
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(config, identity, args, cli_remote_env, resolved_features))]
+#[instrument(skip(
+    config,
+    identity,
+    args,
+    cli_remote_env,
+    resolved_features,
+    image_metadata_layers
+))]
 async fn execute_compose_lifecycle(
     container_id: &str,
     config: &DevContainerConfig,
@@ -850,6 +865,7 @@ async fn execute_compose_lifecycle(
     cli_remote_env: &IndexMap<String, String>,
     cache_folder: &Option<PathBuf>,
     resolved_features: &[deacon_core::features::ResolvedFeature],
+    image_metadata_layers: &[DevContainerConfig],
 ) -> Result<()> {
     debug!(
         "Executing lifecycle phases in compose container: {}",
@@ -944,6 +960,7 @@ async fn execute_compose_lifecycle(
         Some(&identity.config_hash),
         runtime,
         Some(container_workspace_folder),
+        image_metadata_layers,
     )
     .await
 }

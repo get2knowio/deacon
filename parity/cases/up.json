@@ -348,6 +348,54 @@
       "notes": "#448 and #462 together. The single marker line pins all FOUR cells of #448's matrix at once: the hook ran, it ran as the image-metadata `remoteUser`, the image's `remoteEnv` reached it, and the workspace's did too. `remoteUser`, the hook and `META_ENV` live ONLY in the service image's `devcontainer.metadata` label; `WS_ENV` only in the workspace's `remoteEnv`.\n\nMeasured against the pinned 0.87.0 before either fix was written: the reference's compose `up` wrote `metauser from-image-metadata from-workspace-config`; deacon wrote no file at all. `up`'s compose path never called `merge_image_metadata_after_image_ready`, and its post-create exec passed no user and an empty env, which is why the workspace's own `remoteEnv` had been missing too.\n\nThe observation is the FILE, not the exit code: before the fix nothing was written and the status still said 0.\n\nThe fourth cell — the hook's USER — is measured HERE, and its history is why this case is worth reading. The fixture image pins `metauser` to uid 1234 while the workspace is a bind mount of a host directory the runner owns, so the hook can only write once its uid has been remapped to the HOST's. That is `updateRemoteUserUID`, and deacon applied it on the single-container path only until #462 — the reference builds a derived `<image>-uid` image and points the service at it through its generated override; deacon now remaps in the running container through the same `apply_user_mapping` its single-container path has always used, an identical observable by a different mechanism. This case's FIRST revision declared `remoteUser` and passed locally purely because the dev container's uid and `adduser`'s first free uid were both 1000; on GitHub's runners it failed with `Permission denied`, which is how #462 was found. Its second revision dropped `remoteUser` to keep a #448 regression distinguishable from a uid coincidence. With #462 fixed the coincidence is gone from the verdict entirely — 1234 never matches a plausible host uid — so the cell is back, and a regression in EITHER fix fails this case on every host.\n\nThe marker records `whoami`, not `id -u`: the remapped uid is the HOST's and so differs between a dev box and a CI runner, which would make a fixed assertion a statement about the host. The remap is measured by the file existing at all; the user, by its name.\n\nThe hook is the STRING form, deliberately: deacon's compose post-create runs `postCreateCommand` only when it is a string, and the array/object forms and every other phase are a separate pre-existing gap on this path (#460). Keeping the string form leaves this case measuring the metadata merge and the uid remap and nothing else.\n\nNo spec-expectation twin: the fixture's base is a `:local` image built from its sibling Dockerfile by `scripts/parity/prepull-fixture-images.sh`, which only the nightly and release lanes run — so a Docker-lane twin would fail on the PR lane for a missing image rather than for a divergence (the same reason `case-run-user-commands-image-metadata-differential` is differential-only). The direction is pinned instead by the `assertion` carried HERE, evaluated against deacon's side on top of the comparison.\n\nOnly `chan-exit-code` and `chan-file-content` are observed. `chan-container-state` would drag in the whole compose project-name / label tolerance set that `case-up-compose-project-resources-differential` already carries, none of which is what this case is about."
     },
     {
+      "id": "case-up-compose-image-metadata-lifecycle-collected-differential",
+      "behaviors": [
+        "bhv-up-image-metadata-lifecycle-collected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-image-metadata-lifecycle-collected"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "compose-lifecycle-collected.txt": "img1-onCreate\nimg2-onCreate\nws-onCreate\nimg1-postCreate\nws-postCreate-array\nimg2-postStart\nws-postStart-alpha\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "compose-lifecycle-collected.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "#467, COMPOSE path — the twin of `case-up-image-metadata-lifecycle-collected-differential`, the same fixture shape over a compose service image. Read that case's notes for what the single marker file pins.\n\nBoth halves exist because the defect was path-INDEPENDENT: the same-phase collision was resolved in `ConfigMerger`, which `up`'s single-container path, `up`'s compose path (#448) and `container_metadata::resolve_config_against_container` (#405) all share, so a single-path case would have attributed a merge defect to a path. The fix is one change at the merge/plumbing level and these two cases are what keep it honest in both directions.\n\nMeasured at oracle 0.87.0 before the fix, identically to the twin: the reference wrote all seven lines and deacon wrote only the three `ws-` ones, both exiting 0.\n\nOnly `chan-exit-code` and `chan-file-content` are observed, for the reason `case-up-compose-image-metadata-differential` gives: `chan-container-state` would drag in the whole compose project-name / label tolerance set that `case-up-compose-project-resources-differential` already carries, none of which is what this case is about."
+    },
+    {
       "id": "case-up-compose-lifecycle-phases",
       "behaviors": [
         "bhv-up-compose-lifecycle-phases"
@@ -1400,6 +1448,54 @@
         "tempdir": true
       },
       "notes": "Declarative invariant-metamorphic case (022-conformance-runner US6): a second `deacon up` on the same isolated workspace must be IDEMPOTENT — it reuses the running container created by the first up (same container id, still running) rather than recreating it. The oracle verdicts on the DECLARED RELATIONSHIP between op-up-2 and op-up-1's chan-temporal state, not a fixed output (FR-008). Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-up-image-metadata-lifecycle-collected-differential",
+      "behaviors": [
+        "bhv-up-image-metadata-lifecycle-collected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-image-metadata-lifecycle-collected"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-collected.txt": "img1-onCreate\nimg2-onCreate\nws-onCreate\nimg1-postCreate\nws-postCreate-array\nimg2-postStart\nws-postStart-alpha\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-collected.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "#467, single-container path. When the image's `devcontainer.metadata` and the workspace's devcontainer.json declare the SAME lifecycle phase, BOTH hooks run and the image's runs first — the spec's image-metadata merge table gives every lifecycle hook the merge logic \"Collected list of all <phase>Commands\", and adds \"when the order matters, the devcontainer.json is considered last\".\n\nOne file pins all three things the fix has to get right, because every hook appends to it and the line order IS the assertion: that both sources run at all (the bug ran only the workspace's), the order ACROSS metadata entries (img1 before img2, from the label's own array order), and the order across LAYERS within a phase (image entries, then devcontainer.json). All three command forms appear on the workspace side — string on `onCreate`, array on `postCreate`, object on `postStart` — so a collision is measured against each.\n\nThe object-form phase can share the file because its object declares a SINGLE named command: the spec orders the metadata entries but says nothing about the order of names WITHIN an object, so a second name would pin an order neither CLI promises (the reason `case-up-lifecycle-object-form` keeps its named commands in separate files).\n\nMeasured at oracle 0.87.0 before the fix: the reference's file read `img1-onCreate` / `img2-onCreate` / `ws-onCreate` / `img1-postCreate` / `ws-postCreate-array` / `img2-postStart` / `ws-postStart-alpha`, and deacon's read only the three `ws-` lines. Both sides exited 0 in every case, so the file is the entire observation — which is why the `assertion` rides here too: a differential alone cannot fail when both sides are equally wrong.\n\nA phase declared ONLY by the image already reached both CLIs identically (#448) and is NOT what this case measures; the loss was strictly the same-phase collision, which is exactly the `mcr.microsoft.com/devcontainers/*` base-image shape.\n\nNo spec-expectation twin: the fixture's base is a `:local` image built from its sibling Dockerfile by `scripts/parity/prepull-fixture-images.sh`, which only the nightly and release lanes run — a Docker-lane twin would fail on the PR lane for a missing image rather than for a divergence, the same reason `case-up-compose-image-metadata-differential` is differential-only. `case-up-compose-image-metadata-lifecycle-collected-differential` is the compose half; the defect lived in the shared config merge, so a single-path case would have misattributed it."
     },
     {
       "id": "case-up-label-namespaces-and-network",

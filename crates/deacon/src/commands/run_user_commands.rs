@@ -8,7 +8,8 @@ use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
     ContainerLifecycleCommands, ContainerLifecycleConfig, LifecycleCommandList,
-    aggregate_lifecycle_commands, execute_container_lifecycle_with_progress_callback_and_docker,
+    aggregate_lifecycle_commands_with_image_metadata,
+    execute_container_lifecycle_with_progress_callback_and_docker,
 };
 use deacon_core::docker::CliRuntime;
 use deacon_core::lifecycle::{LifecyclePhase, should_queue_phase_for_wait_for, wait_for_phase};
@@ -222,7 +223,11 @@ async fn execute_lifecycle_commands(
     // `remoteEnv` or lifecycle hook contributed only by image metadata is
     // silently ignored here while `up` and `exec` honor it. The reference CLI
     // 0.87.0 runs its user commands with all three applied (measured).
-    let merged_config = match container_info.as_ref() {
+    //
+    // The image's lifecycle hooks come back SEPARATELY, as the ordered layers the
+    // spec collects rather than merges (#467) — folding them into the config would
+    // let a same-phase hook in devcontainer.json replace the image's.
+    let (merged_config, image_lifecycle_layers) = match container_info.as_ref() {
         Some(info) => {
             crate::commands::shared::container_metadata::resolve_config_against_container(
                 cli,
@@ -232,7 +237,7 @@ async fn execute_lifecycle_commands(
             )
             .await
         }
-        None => config.clone(),
+        None => (config.clone(), Vec::new()),
     };
     let config = &merged_config;
 
@@ -316,9 +321,9 @@ async fn execute_lifecycle_commands(
         );
     }
 
-    // Build lifecycle commands: feature-contributed commands (in install order)
-    // first, then the config's command, per `aggregate_lifecycle_commands` —
-    // identical to the `up` flow.
+    // Build lifecycle commands: the image's metadata layers first (in label
+    // order), then feature-contributed commands (in install order), then the
+    // config's — identical to the `up` flow.
     let mut commands = ContainerLifecycleCommands::new();
 
     // initializeCommand is intentionally omitted: it is a host-side command that
@@ -327,7 +332,12 @@ async fn execute_lifecycle_commands(
 
     // Aggregate a phase's commands (features + config); `None` when empty.
     let aggregate = |phase: LifecyclePhase| -> Result<Option<LifecycleCommandList>> {
-        let list = aggregate_lifecycle_commands(phase, &resolved_features, config)?;
+        let list = aggregate_lifecycle_commands_with_image_metadata(
+            phase,
+            &image_lifecycle_layers,
+            &resolved_features,
+            config,
+        )?;
         Ok((!list.commands.is_empty()).then_some(list))
     };
 

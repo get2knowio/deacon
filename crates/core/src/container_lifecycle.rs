@@ -18,11 +18,15 @@ use tracing::{debug, error, info, instrument, warn};
 
 /// Source attribution for a lifecycle command.
 ///
-/// Tracks whether a lifecycle command originated from a feature or from the
-/// devcontainer.json configuration. This enables proper error attribution and
-/// ordering when aggregating lifecycle commands during the up command.
+/// Tracks whether a lifecycle command originated from the image's
+/// `devcontainer.metadata` label, from a feature, or from the devcontainer.json
+/// configuration. This enables proper error attribution and ordering when
+/// aggregating lifecycle commands during the up command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LifecycleCommandSource {
+    /// Command from an entry of the image's `devcontainer.metadata` label,
+    /// identified by its position in that array (the spec's merge order).
+    ImageMetadata { index: usize },
     /// Command from a feature (includes feature ID for attribution)
     Feature { id: String },
     /// Command from devcontainer.json config
@@ -32,6 +36,7 @@ pub enum LifecycleCommandSource {
 impl std::fmt::Display for LifecycleCommandSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ImageMetadata { index } => write!(f, "image-metadata[{}]", index),
             Self::Feature { id } => write!(f, "feature:{}", id),
             Self::Config => write!(f, "config"),
         }
@@ -360,9 +365,81 @@ pub fn aggregate_lifecycle_commands(
     features: &[crate::features::ResolvedFeature],
     config: &crate::config::DevContainerConfig,
 ) -> Result<LifecycleCommandList> {
+    aggregate_lifecycle_commands_with_image_metadata(phase, &[], features, config)
+}
+
+/// The `phase`'s lifecycle command on a [`crate::config::DevContainerConfig`], or
+/// `None` for the two phases no configuration field backs.
+///
+/// Extracted so the config layer and every image-metadata layer read the same
+/// field for a phase — the layers are partial configurations of the very same
+/// shape, and a second copy of this match would be the place they silently drift.
+fn config_phase_command(
+    phase: LifecyclePhase,
+    config: &crate::config::DevContainerConfig,
+) -> Option<&serde_json::Value> {
+    match phase {
+        LifecyclePhase::Initialize => config.initialize_command.as_ref(),
+        LifecyclePhase::OnCreate => config.on_create_command.as_ref(),
+        LifecyclePhase::UpdateContent => config.update_content_command.as_ref(),
+        LifecyclePhase::PostCreate => config.post_create_command.as_ref(),
+        LifecyclePhase::Dotfiles => None, // Dotfiles phase has no corresponding command field
+        LifecyclePhase::PostStart => config.post_start_command.as_ref(),
+        LifecyclePhase::PostAttach => config.post_attach_command.as_ref(),
+    }
+}
+
+/// [`aggregate_lifecycle_commands`], plus the layers contributed by the image's
+/// `devcontainer.metadata` label.
+///
+/// # Why the image layers are a list and not a merged config (#467)
+///
+/// The spec's image-metadata merge table gives every lifecycle hook the merge
+/// logic "Collected list of all `<phase>Command`s" — an accumulation, not a
+/// last-value-wins scalar — and adds "when the order matters, the
+/// devcontainer.json is considered last". Folding the label through
+/// `ConfigMerger` therefore loses a hook whenever the image and the
+/// devcontainer.json name the SAME phase: the higher-precedence layer simply
+/// overwrote it, and only the workspace's hook ran. The reference CLI 0.87.0
+/// runs both, image first (measured).
+///
+/// So the layers arrive here as the ordered list they are. Execution order is
+/// the label's own order, then the Features in installation order, then the
+/// configuration — the same sequence the reference materializes as
+/// `postCreateCommands: [...]` in its merged configuration, and the same one
+/// `read-configuration --include-merged-configuration` already reports.
+///
+/// The caller is responsible for handing over layers whose lifecycle fields were
+/// NOT also folded into `config`; otherwise an image-only hook would run twice.
+/// See `up::merged_config::split_image_metadata_label`.
+pub fn aggregate_lifecycle_commands_with_image_metadata(
+    phase: LifecyclePhase,
+    image_metadata: &[crate::config::DevContainerConfig],
+    features: &[crate::features::ResolvedFeature],
+    config: &crate::config::DevContainerConfig,
+) -> Result<LifecycleCommandList> {
     let mut commands = Vec::new();
 
-    // Feature commands first, in installation order
+    let mut push = |cmd: &serde_json::Value, source: LifecycleCommandSource| -> Result<()> {
+        if let Some(parsed) = LifecycleCommandValue::from_json_value(cmd)? {
+            if !parsed.is_empty() {
+                commands.push(AggregatedLifecycleCommand {
+                    command: parsed,
+                    source,
+                });
+            }
+        }
+        Ok(())
+    };
+
+    // Image-metadata layers first, in label order (lowest precedence layer).
+    for (index, layer) in image_metadata.iter().enumerate() {
+        if let Some(cmd) = config_phase_command(phase, layer) {
+            push(cmd, LifecycleCommandSource::ImageMetadata { index })?;
+        }
+    }
+
+    // Feature commands next, in installation order
     for feature in features {
         let cmd_opt = match phase {
             LifecyclePhase::Initialize => None, // Features don't have initialize commands
@@ -375,39 +452,18 @@ pub fn aggregate_lifecycle_commands(
         };
 
         if let Some(cmd) = cmd_opt {
-            if let Some(parsed) = LifecycleCommandValue::from_json_value(cmd)? {
-                if !parsed.is_empty() {
-                    commands.push(AggregatedLifecycleCommand {
-                        command: parsed,
-                        source: LifecycleCommandSource::Feature {
-                            id: feature.id.clone(),
-                        },
-                    });
-                }
-            }
+            push(
+                cmd,
+                LifecycleCommandSource::Feature {
+                    id: feature.id.clone(),
+                },
+            )?;
         }
     }
 
     // Config command last
-    let config_cmd_opt = match phase {
-        LifecyclePhase::Initialize => config.initialize_command.as_ref(),
-        LifecyclePhase::OnCreate => config.on_create_command.as_ref(),
-        LifecyclePhase::UpdateContent => config.update_content_command.as_ref(),
-        LifecyclePhase::PostCreate => config.post_create_command.as_ref(),
-        LifecyclePhase::Dotfiles => None, // Dotfiles phase has no corresponding command field
-        LifecyclePhase::PostStart => config.post_start_command.as_ref(),
-        LifecyclePhase::PostAttach => config.post_attach_command.as_ref(),
-    };
-
-    if let Some(cmd) = config_cmd_opt {
-        if let Some(parsed) = LifecycleCommandValue::from_json_value(cmd)? {
-            if !parsed.is_empty() {
-                commands.push(AggregatedLifecycleCommand {
-                    command: parsed,
-                    source: LifecycleCommandSource::Config,
-                });
-            }
-        }
+    if let Some(cmd) = config_phase_command(phase, config) {
+        push(cmd, LifecycleCommandSource::Config)?;
     }
 
     Ok(LifecycleCommandList { commands })

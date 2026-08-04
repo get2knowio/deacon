@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
     AggregatedLifecycleCommand, DotfilesConfig, LifecycleCommandList, LifecycleCommandSource,
-    LifecycleCommandValue, aggregate_lifecycle_commands,
+    LifecycleCommandValue, aggregate_lifecycle_commands_with_image_metadata,
 };
 use deacon_core::features::ResolvedFeature;
 use deacon_core::lifecycle::{
@@ -124,6 +124,13 @@ pub(crate) fn build_invocation_context(
 ///   (the user's compose file provides it, or does not), so the host-side derivation can name
 ///   a directory the service never mounts and `docker exec -w` hard-fails on a missing cwd.
 ///   See `shared::resolve_container_cwd` (#294/#295).
+/// - `image_metadata_layers`: the lifecycle hooks the image's `devcontainer.metadata`
+///   label contributes, in label order. They are COLLECTED ahead of the Features' and
+///   the configuration's hooks rather than merged into `config`, because the spec's
+///   image-metadata merge table gives every lifecycle hook the merge logic "Collected
+///   list of all `<phase>Command`s" — merging made a same-phase hook in
+///   devcontainer.json silently replace the image's (#467). Both `up` paths pass what
+///   `merge_image_metadata_after_image_ready` returned for the image they resolved.
 ///
 /// Behavior notes:
 /// - Commands may be provided as a single string, array, object, or null in the config.
@@ -144,6 +151,7 @@ pub(crate) async fn execute_lifecycle_commands(
     config_hash: Option<&str>,
     runtime: &deacon_core::runtime::ContainerRuntimeImpl,
     container_workspace_folder_override: Option<String>,
+    image_metadata_layers: &[DevContainerConfig],
 ) -> Result<()> {
     use deacon_core::container_lifecycle::{
         ContainerLifecycleCommands, ContainerLifecycleConfig,
@@ -302,8 +310,13 @@ pub(crate) async fn execute_lifecycle_commands(
             continue;
         }
 
-        let aggregated_commands = aggregate_lifecycle_commands(phase, resolved_features, config)
-            .with_context(|| format!("Failed to parse {} lifecycle commands", phase.as_str()))?;
+        let aggregated_commands = aggregate_lifecycle_commands_with_image_metadata(
+            phase,
+            image_metadata_layers,
+            resolved_features,
+            config,
+        )
+        .with_context(|| format!("Failed to parse {} lifecycle commands", phase.as_str()))?;
 
         if !aggregated_commands.is_empty() {
             let _span =

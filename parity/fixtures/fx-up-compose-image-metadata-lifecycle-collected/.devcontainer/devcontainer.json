@@ -1,0 +1,12 @@
+{
+	"name": "ConformanceUpComposeImageMetadataLifecycleCollected",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"shutdownAction": "stopCompose",
+	"onCreateCommand": "echo ws-onCreate >> /workspace/compose-lifecycle-collected.txt",
+	"postCreateCommand": ["/bin/sh", "-c", "echo ws-postCreate-array >> /workspace/compose-lifecycle-collected.txt"],
+	"postStartCommand": {
+		"alpha": "echo ws-postStart-alpha >> /workspace/compose-lifecycle-collected.txt"
+	}
+}

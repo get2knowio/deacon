@@ -639,6 +639,8 @@ where
                     // against the running container's image before resolving the
                     // effective config, so exec runs as the same user `up` reported.
                     // Shared with `run-user-commands` (#405).
+                    // `exec` runs no lifecycle hook, so the collected
+                    // image-metadata lifecycle layers (#467) are dropped here.
                     crate::commands::shared::container_metadata::resolve_config_against_container(
                         docker_client,
                         &container_info,
@@ -646,6 +648,7 @@ where
                         config_ctx.workspace_folder.as_path(),
                     )
                     .await
+                    .0
                 }
                 Ok(None) => config_ctx.config.clone(),
                 Err(e) => {

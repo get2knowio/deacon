@@ -6,6 +6,7 @@
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
     LifecycleCommandSource, LifecycleCommandValue, aggregate_lifecycle_commands,
+    aggregate_lifecycle_commands_with_image_metadata,
 };
 use deacon_core::features::{FeatureMetadata, ResolvedFeature};
 use deacon_core::lifecycle::LifecyclePhase;
@@ -360,5 +361,178 @@ fn test_aggregate_lifecycle_commands_complex_command_formats() {
     assert_eq!(
         result.commands[2].command,
         LifecycleCommandValue::Shell("echo ready".to_string())
+    );
+}
+
+// -- #467: the image-metadata layers -----------------------------------------
+
+/// The spec's image-metadata merge table gives every lifecycle hook the merge
+/// logic "Collected list of all `<phase>Command`s", and adds "when the order
+/// matters, the devcontainer.json is considered last". So a hook declared by the
+/// image AND by the configuration yields TWO commands, image first — not one.
+#[test]
+fn test_image_metadata_layers_run_before_features_and_config() {
+    let layers = vec![
+        DevContainerConfig {
+            on_create_command: Some(json!("img1-onCreate")),
+            ..Default::default()
+        },
+        DevContainerConfig {
+            on_create_command: Some(json!("img2-onCreate")),
+            ..Default::default()
+        },
+    ];
+
+    let feature = ResolvedFeature {
+        id: "node".to_string(),
+        source: "ghcr.io/devcontainers/features/node".to_string(),
+        options: HashMap::new(),
+        metadata: FeatureMetadata {
+            id: "node".to_string(),
+            on_create_command: Some(json!("feat-onCreate")),
+            ..Default::default()
+        },
+    };
+
+    let config = DevContainerConfig {
+        on_create_command: Some(json!("ws-onCreate")),
+        ..Default::default()
+    };
+
+    let result = aggregate_lifecycle_commands_with_image_metadata(
+        LifecyclePhase::OnCreate,
+        &layers,
+        std::slice::from_ref(&feature),
+        &config,
+    )
+    .unwrap();
+
+    let ordered: Vec<(String, String)> = result
+        .commands
+        .iter()
+        .map(|c| (c.source.to_string(), format!("{:?}", c.command)))
+        .collect();
+
+    assert_eq!(
+        result.commands.len(),
+        4,
+        "the configuration's hook must not replace the image's: {:?}",
+        ordered
+    );
+    assert_eq!(
+        result.commands[0].command,
+        LifecycleCommandValue::Shell("img1-onCreate".to_string())
+    );
+    assert_eq!(
+        result.commands[0].source,
+        LifecycleCommandSource::ImageMetadata { index: 0 }
+    );
+    assert_eq!(
+        result.commands[1].source,
+        LifecycleCommandSource::ImageMetadata { index: 1 },
+        "metadata entries keep the label's own order"
+    );
+    assert_eq!(
+        result.commands[2].source,
+        LifecycleCommandSource::Feature {
+            id: "node".to_string()
+        }
+    );
+    assert_eq!(result.commands[3].source, LifecycleCommandSource::Config);
+}
+
+/// A layer that declares nothing for the phase contributes nothing to it, and a
+/// phase only the image declares still yields exactly one command.
+#[test]
+fn test_image_metadata_layers_are_per_phase() {
+    let layers = vec![DevContainerConfig {
+        post_start_command: Some(json!("img-postStart")),
+        ..Default::default()
+    }];
+    let config = DevContainerConfig {
+        on_create_command: Some(json!("ws-onCreate")),
+        ..Default::default()
+    };
+
+    let on_create = aggregate_lifecycle_commands_with_image_metadata(
+        LifecyclePhase::OnCreate,
+        &layers,
+        &[],
+        &config,
+    )
+    .unwrap();
+    assert_eq!(on_create.commands.len(), 1);
+    assert_eq!(on_create.commands[0].source, LifecycleCommandSource::Config);
+
+    let post_start = aggregate_lifecycle_commands_with_image_metadata(
+        LifecyclePhase::PostStart,
+        &layers,
+        &[],
+        &config,
+    )
+    .unwrap();
+    assert_eq!(post_start.commands.len(), 1);
+    assert_eq!(
+        post_start.commands[0].source,
+        LifecycleCommandSource::ImageMetadata { index: 0 }
+    );
+}
+
+/// No layers means the old behavior, byte for byte — which is what lets
+/// `aggregate_lifecycle_commands` stay a thin delegate rather than a second
+/// implementation.
+#[test]
+fn test_no_image_metadata_layers_matches_the_plain_aggregate() {
+    let config = DevContainerConfig {
+        post_create_command: Some(json!("ws-postCreate")),
+        ..Default::default()
+    };
+
+    let with_none = aggregate_lifecycle_commands_with_image_metadata(
+        LifecyclePhase::PostCreate,
+        &[],
+        &[],
+        &config,
+    )
+    .unwrap();
+    let plain = aggregate_lifecycle_commands(LifecyclePhase::PostCreate, &[], &config).unwrap();
+
+    assert_eq!(with_none.commands.len(), plain.commands.len());
+    assert_eq!(with_none.commands[0].command, plain.commands[0].command);
+    assert_eq!(with_none.commands[0].source, plain.commands[0].source);
+}
+
+/// An empty or null hook in a layer is filtered exactly as one in a Feature or in
+/// the configuration is — the layer is a partial configuration, not a special case.
+#[test]
+fn test_image_metadata_layer_empty_commands_are_filtered() {
+    let layers = vec![
+        DevContainerConfig {
+            on_create_command: Some(json!("")),
+            ..Default::default()
+        },
+        DevContainerConfig {
+            on_create_command: Some(json!(null)),
+            ..Default::default()
+        },
+        DevContainerConfig {
+            on_create_command: Some(json!("img-onCreate")),
+            ..Default::default()
+        },
+    ];
+
+    let result = aggregate_lifecycle_commands_with_image_metadata(
+        LifecyclePhase::OnCreate,
+        &layers,
+        &[],
+        &DevContainerConfig::default(),
+    )
+    .unwrap();
+
+    assert_eq!(result.commands.len(), 1);
+    assert_eq!(
+        result.commands[0].source,
+        LifecycleCommandSource::ImageMetadata { index: 2 },
+        "the index names the LABEL position, so a filtered entry does not renumber the rest"
     );
 }
