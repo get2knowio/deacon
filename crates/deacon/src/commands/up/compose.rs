@@ -606,18 +606,22 @@ pub(crate) async fn execute_compose_up(
     //    `false`) are the single-container path's, not a compose-specific copy.
     //
     //    Order matches `up/container.rs`: CA first, then the user mapping.
-    let needs_user_mapping = config.remote_user.is_some() || config.container_user.is_some();
-    if host_ca_set.is_some() || needs_user_mapping {
-        let container_id =
-            resolve_primary_container_id_with_retry(&compose_manager, &project).await?;
+    //
+    //    Resolved ONCE here and reused by everything downstream that needs the
+    //    primary service container — the CA injection, the user mapping, the
+    //    lifecycle run below, and the result assembly. The retry absorbs the
+    //    window between `docker compose up` returning and the container appearing
+    //    in `docker compose ps`, so paying for it once rather than per consumer
+    //    also removes a `docker compose ps` round-trip from every compose `up`.
+    let primary_container_id =
+        resolve_primary_container_id_with_retry(&compose_manager, &project).await?;
 
-        if let Some(set) = host_ca_set {
-            let _ = inject_runtime(runtime, &container_id, set).await?;
-        }
+    if let Some(set) = host_ca_set {
+        let _ = inject_runtime(runtime, &primary_container_id, set).await?;
+    }
 
-        if needs_user_mapping {
-            apply_user_mapping(runtime, &container_id, config, workspace_folder).await?;
-        }
+    if config.remote_user.is_some() || config.container_user.is_some() {
+        apply_user_mapping(runtime, &primary_container_id, config, workspace_folder).await?;
     }
 
     // Save compose state for shutdown tracking
@@ -650,8 +654,6 @@ pub(crate) async fn execute_compose_up(
     // gone: that flag skips postCreate ONWARD, not onCreate/updateContent, and
     // `InvocationContext::should_skip_phase` is what encodes that — gating the
     // whole call on it skipped the base setup the flag is specified to perform.
-    let primary_container_id =
-        resolve_primary_container_id_with_retry(&compose_manager, &project).await?;
     execute_compose_lifecycle(
         &primary_container_id,
         config,
