@@ -159,6 +159,60 @@ pub fn canonicalize_user_feature_id(user_feature_id: &str) -> Result<std::borrow
     }
 }
 
+/// Strip the version component from a `features` map key, the way the reference
+/// CLI derives `sourceInformation.userFeatureIdWithoutVersion` from
+/// `userFeatureId`.
+///
+/// The reference's rule is one regular expression, `/[:@][^/]*$/`, applied to the
+/// id the CONFIGURATION wrote: everything from the last `:` (tag) or `@` (digest)
+/// that is not inside a path segment is dropped, and an id carrying no version at
+/// all is returned unchanged. It is deliberately NOT a re-derivation from the
+/// resolved reference — reporting `…/git:latest` for an author who wrote `…/git`
+/// puts a resolved value in a field whose contract is the declared one (#490,
+/// same class as #407 and #491).
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::feature_ref::strip_user_feature_id_version;
+///
+/// assert_eq!(
+///     strip_user_feature_id_version("ghcr.io/devcontainers/features/git:1"),
+///     "ghcr.io/devcontainers/features/git"
+/// );
+/// assert_eq!(
+///     strip_user_feature_id_version("ghcr.io/devcontainers/features/git@sha256:abc"),
+///     "ghcr.io/devcontainers/features/git"
+/// );
+/// // No version component: unchanged, tag NOT invented.
+/// assert_eq!(
+///     strip_user_feature_id_version("ghcr.io/devcontainers/features/git"),
+///     "ghcr.io/devcontainers/features/git"
+/// );
+/// // A `:` inside an earlier path segment (a registry port) is not a version.
+/// assert_eq!(
+///     strip_user_feature_id_version("localhost:5000/features/git"),
+///     "localhost:5000/features/git"
+/// );
+/// // Tag AND digest: the reference's match is LEFTMOST, so both go.
+/// assert_eq!(
+///     strip_user_feature_id_version("ghcr.io/devcontainers/features/git:1@sha256:abc"),
+///     "ghcr.io/devcontainers/features/git"
+/// );
+/// ```
+pub fn strip_user_feature_id_version(user_feature_id: &str) -> &str {
+    // The regex matches leftmost-first, so the cut is at the FIRST `:`/`@` of the
+    // final path segment — `git:1@sha256:abc` loses the tag and the digest alike.
+    let segment_start = user_feature_id
+        .rfind('/')
+        .map(|idx| idx + 1)
+        .unwrap_or_default();
+    match user_feature_id[segment_start..].find([':', '@']) {
+        Some(idx) => &user_feature_id[..segment_start + idx],
+        None => user_feature_id,
+    }
+}
+
 /// Result type for feature reference operations
 pub type Result<T> = std::result::Result<T, FeatureRefError>;
 
@@ -1033,6 +1087,48 @@ mod tests {
         let upper = parse_feature_reference("MyOrg/MyFeature:v1").unwrap();
         // They should both parse but be different
         assert_ne!(lower, upper);
+    }
+
+    /// #490: `userFeatureIdWithoutVersion` is derived from the id the
+    /// CONFIGURATION wrote by stripping its version component — the reference's
+    /// `/[:@][^/]*$/`, leftmost-first — and never re-derived from the resolved
+    /// reference, which would invent a `:latest` for an untagged id.
+    #[test]
+    fn test_strip_user_feature_id_version() {
+        for (authored, expected) in [
+            // Untagged: unchanged. The whole point of #490.
+            (
+                "ghcr.io/devcontainers/features/git",
+                "ghcr.io/devcontainers/features/git",
+            ),
+            (
+                "ghcr.io/devcontainers/features/git:1",
+                "ghcr.io/devcontainers/features/git",
+            ),
+            (
+                "ghcr.io/devcontainers/features/git@sha256:abc",
+                "ghcr.io/devcontainers/features/git",
+            ),
+            // Tag AND digest: the reference's match is leftmost, so both go.
+            (
+                "ghcr.io/devcontainers/features/git:1@sha256:abc",
+                "ghcr.io/devcontainers/features/git",
+            ),
+            // A registry port lives in an earlier segment and is not a version.
+            ("localhost:5000/features/git", "localhost:5000/features/git"),
+            (
+                "localhost:5000/features/git:2",
+                "localhost:5000/features/git",
+            ),
+            // A bare deprecated v1 id carries no version at all (#491).
+            ("terraform", "terraform"),
+        ] {
+            assert_eq!(
+                strip_user_feature_id_version(authored),
+                expected,
+                "stripping {authored}"
+            );
+        }
     }
 
     #[test]

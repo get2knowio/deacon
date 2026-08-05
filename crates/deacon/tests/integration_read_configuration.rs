@@ -314,6 +314,43 @@ fn test_acceptance_container_id_with_merged_config_errors_on_inspect_failure() -
     Ok(())
 }
 
+/// #486: the pre-`customizations` VS Code properties (`settings`, `extensions`,
+/// `devPort`) reach the OUTPUT migrated into `customizations.vscode`, with no
+/// top-level copy — byte-compared against oracle 0.87.0 on
+/// `parity/fixtures/fx-upstream-devport-userenvprobe`. Hermetic (no Features, no
+/// network).
+#[test]
+fn test_legacy_vscode_properties_migrated_in_output() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+        "image": "ubuntu:22.04",
+        "settings": { "search.followSymlinks": false },
+        "extensions": [ "dbaeumer.vscode-eslint" ],
+        "devPort": 1234
+    }"#,
+    )?;
+
+    let result = helper.run_with_workspace(&[])?;
+    let configuration = &result["configuration"];
+    assert_eq!(
+        configuration.pointer("/customizations/vscode"),
+        Some(&serde_json::json!({
+            "extensions": ["dbaeumer.vscode-eslint"],
+            "settings": { "search.followSymlinks": false },
+            "devPort": 1234
+        })),
+        "expected the reference's migrated block, got {configuration:#}"
+    );
+    for legacy in ["settings", "extensions", "devPort"] {
+        assert!(
+            configuration.get(legacy).is_none(),
+            "legacy `{legacy}` must not also be echoed at the top level: {configuration:#}"
+        );
+    }
+    Ok(())
+}
+
 /// Test acceptance: featuresConfiguration present when --include-features-configuration is set
 #[test]
 fn test_acceptance_features_configuration_present() -> Result<()> {

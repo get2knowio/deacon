@@ -2708,7 +2708,7 @@ impl ConfigLoader {
         })?;
 
         // Parse JSONC (JSON with comments and trailing commas).
-        let raw_value: serde_json::Value = crate::jsonc::parse(&content).map_err(|e| {
+        let mut raw_value: serde_json::Value = crate::jsonc::parse(&content).map_err(|e| {
             debug!("Failed to parse configuration file: {}", e);
             e
         })?;
@@ -2722,6 +2722,17 @@ impl ConfigLoader {
                 ),
             }));
         }
+
+        // Migrate the pre-`customizations` VS Code properties (`settings`,
+        // `extensions`, `devPort`) into `customizations.vscode` BEFORE typing, so
+        // every consumer — `read-configuration`'s output, the merged
+        // configuration, the `devcontainer.metadata` label, each document of an
+        // extends chain — sees the one shape the reference CLI produces (#486).
+        // Without this they reached the output through the unmodeled `extra`
+        // passthrough and were echoed where they were authored. This is the same
+        // single migration a Feature's document goes through (#487); the reference
+        // reads `devPort` only on a configuration.
+        crate::features::migrate_legacy_vscode_properties(&mut raw_value, true);
 
         // Log unknown top-level keys at DEBUG level
         if let serde_json::Value::Object(obj) = &raw_value {
@@ -4043,6 +4054,106 @@ mod tests {
         assert_eq!(config.name, Some("Test".to_string()));
         assert_eq!(config.image, Some("ubuntu:20.04".to_string()));
 
+        Ok(())
+    }
+
+    /// #486: the three pre-`customizations` VS Code properties a configuration
+    /// may still carry at its top level are MIGRATED into `customizations.vscode`
+    /// — measured against oracle 0.87.0 on
+    /// `parity/fixtures/fx-upstream-devport-userenvprobe`, where the reference
+    /// emits exactly this block and no top-level copy. They used to reach the
+    /// output verbatim through the unmodeled `extra` passthrough.
+    #[tokio::test]
+    async fn test_load_migrates_legacy_vscode_properties() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "image": "ubuntu:20.04",
+            "settings": { "search.followSymlinks": false },
+            "extensions": [ "dbaeumer.vscode-eslint" ],
+            "devPort": 1234
+        }"#;
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let customizations = config.customizations.expect("migrated customizations");
+        assert_eq!(
+            customizations.pointer("/vscode"),
+            Some(&serde_json::json!({
+                "extensions": ["dbaeumer.vscode-eslint"],
+                "settings": { "search.followSymlinks": false },
+                "devPort": 1234
+            }))
+        );
+        // Consumed by the migration, not duplicated into the passthrough.
+        for legacy in ["settings", "extensions", "devPort"] {
+            assert!(
+                !config.extra.contains_key(legacy),
+                "legacy `{legacy}` survived at the top level"
+            );
+        }
+        Ok(())
+    }
+
+    /// The merge rules are the reference's own, shared with the Feature-side
+    /// migration (#487): legacy `extensions` are APPENDED after already-authored
+    /// ones, legacy `settings` merge UNDER them, and an authored
+    /// `customizations.vscode.devPort` wins — in which case the reference does
+    /// NOT remove the top-level key either.
+    #[tokio::test]
+    async fn test_load_legacy_vscode_properties_merge_with_authored() -> anyhow::Result<()> {
+        let config_content = r#"{
+            "image": "ubuntu:20.04",
+            "extensions": ["legacy.ext"],
+            "settings": { "shared": "legacy", "only.legacy": 1 },
+            "devPort": 1234,
+            "customizations": {
+                "vscode": {
+                    "extensions": ["authored.ext"],
+                    "settings": { "shared": "authored" },
+                    "devPort": 4321
+                },
+                "codespaces": { "kept": true }
+            }
+        }"#;
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(config_content.as_bytes())?;
+
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let customizations = config.customizations.clone().expect("customizations");
+        assert_eq!(
+            customizations.pointer("/vscode/extensions"),
+            Some(&serde_json::json!(["authored.ext", "legacy.ext"]))
+        );
+        assert_eq!(
+            customizations.pointer("/vscode/settings"),
+            Some(&serde_json::json!({ "shared": "authored", "only.legacy": 1 }))
+        );
+        assert_eq!(
+            customizations.pointer("/vscode/devPort"),
+            Some(&serde_json::json!(4321))
+        );
+        assert_eq!(
+            customizations.pointer("/codespaces/kept"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            config.extra.get("devPort"),
+            Some(&serde_json::json!(1234)),
+            "an unmigrated `devPort` stays where it was authored"
+        );
+        Ok(())
+    }
+
+    /// A configuration authoring none of the legacy properties must not grow an
+    /// empty `customizations` block — the migration is a rewrite, not an
+    /// injection, and `None` vs `Some({})` is an observable distinction (#398).
+    #[tokio::test]
+    async fn test_load_without_legacy_properties_leaves_customizations_absent() -> anyhow::Result<()>
+    {
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(br#"{ "image": "ubuntu:20.04" }"#)?;
+        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        assert!(config.customizations.is_none());
         Ok(())
     }
 
