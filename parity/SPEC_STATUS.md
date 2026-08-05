@@ -22,13 +22,13 @@ alone. Where a row has no scenario yet, it says so.
 
 ## Summary
 
-Of **116 recorded behaviors**:
+Of **117 recorded behaviors**:
 
 - **0** — open nonconformance
 - **9** — deacon follows the spec where the CLI does not
 - **11** — documented choice
 - **19** — deacon extension
-- **77** — conformant and matching
+- **78** — conformant and matching
 
 **The batch-1 mining pass is fully dispositioned, and the differential lane's diverging set
 is empty.** The pass ([#480](https://github.com/get2knowio/deacon/issues/480)) ran 22 scenarios harvested from the reference CLI's own e2e

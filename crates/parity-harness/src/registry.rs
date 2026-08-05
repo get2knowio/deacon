@@ -436,6 +436,100 @@ fn glob_match(pattern: &str, text: &str) -> bool {
     pi == p.len()
 }
 
+/// The five status labels a `parity/SPEC_STATUS.md` table row may carry, paired with the
+/// phrase its Summary bullet uses for the same status. Row cells are matched by prefix so
+/// a cell may elaborate after the label; bullets are matched by containment.
+const SPEC_STATUS_LABELS: &[(&str, &str)] = &[
+    ("open nonconformance", "open nonconformance"),
+    ("matches the reference", "conformant and matching"),
+    ("deacon follows the spec", "deacon follows the spec"),
+    ("documented choice", "documented choice"),
+    ("deacon extension", "deacon extension"),
+];
+
+/// Cross-check `parity/SPEC_STATUS.md`'s Summary block against a row census of its own
+/// tables. Returns human-readable problems (empty = OK).
+///
+/// The Summary's counts are hand-maintained while rows land from independent PRs, and the
+/// same-file auto-merge is silent — two PRs each adding a row and bumping the header by
+/// one merge to a header short by one. That drift happened **five times** before this
+/// check existed. The table is the truth; the header is derived, so it is checked the way
+/// every other derived artifact here is: recomputed and compared.
+///
+/// Parsing is deliberately dumb — second `|`-delimited cell of each table row, matched by
+/// prefix against the five known labels after stripping emphasis — because the check must
+/// not invent a schema the hand-written document doesn't promise. A label this misses
+/// simply doesn't count, and the total-line mismatch then flags it.
+pub fn check_spec_status_census(markdown: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+
+    let mut row_counts = vec![0usize; SPEC_STATUS_LABELS.len()];
+    for line in markdown.lines() {
+        let Some(rest) = line.trim_start().strip_prefix('|') else {
+            continue;
+        };
+        let Some(cell) = rest.split('|').nth(1) else {
+            continue;
+        };
+        let cell = cell.trim().trim_matches('*').trim();
+        if let Some(idx) = SPEC_STATUS_LABELS
+            .iter()
+            .position(|(label, _)| cell.starts_with(label))
+        {
+            row_counts[idx] += 1;
+        }
+    }
+
+    // `Of **115 recorded behaviors**:` — the emphasis wraps the number AND the phrase,
+    // so take the leading digit run rather than splitting on the closing `**`.
+    let header_total = markdown.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("Of **")?;
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        (digits > 0
+            && rest[digits..]
+                .trim_start()
+                .starts_with("recorded behaviors"))
+        .then(|| rest[..digits].parse::<usize>().ok())?
+    });
+    match header_total {
+        None => problems.push(
+            "SPEC_STATUS.md: no `Of **N recorded behaviors**` line found in the Summary"
+                .to_string(),
+        ),
+        Some(total) => {
+            let census: usize = row_counts.iter().sum();
+            if total != census {
+                problems.push(format!(
+                    "SPEC_STATUS.md: Summary claims {total} recorded behaviors but the row \
+                     census counts {census} — recount by rows, never header arithmetic"
+                ));
+            }
+        }
+    }
+
+    for (idx, (label, bullet_phrase)) in SPEC_STATUS_LABELS.iter().enumerate() {
+        let bullet = markdown.lines().find_map(|line| {
+            let rest = line.trim().strip_prefix("- **")?;
+            let (n, tail) = rest.split_once("**")?;
+            tail.contains(bullet_phrase)
+                .then(|| n.trim().parse::<usize>().ok())?
+        });
+        match bullet {
+            None => problems.push(format!(
+                "SPEC_STATUS.md: no Summary bullet found for status `{bullet_phrase}`"
+            )),
+            Some(n) if n != row_counts[idx] => problems.push(format!(
+                "SPEC_STATUS.md: Summary claims {n} `{bullet_phrase}` but the row census \
+                 counts {} rows with status `{label}`",
+                row_counts[idx]
+            )),
+            Some(_) => {}
+        }
+    }
+
+    problems
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,6 +541,64 @@ mod tests {
             .map(|n| format!("binary(={n})"))
             .collect::<Vec<_>>()
             .join(" | ")
+    }
+
+    /// The real ledger's header must equal its own row census. This is the guard for a
+    /// drift that shipped five times: two PRs each add a row and bump the Summary by one,
+    /// the silent same-file auto-merge keeps only one bump, and the header undercounts.
+    #[test]
+    fn spec_status_summary_matches_row_census() {
+        let path = crate::workspace_root().join("parity/SPEC_STATUS.md");
+        let markdown = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+        let problems = check_spec_status_census(&markdown);
+        assert!(problems.is_empty(), "{problems:#?}");
+    }
+
+    /// The census check can actually fail — on the header total, on a per-status bullet,
+    /// and on a missing Summary line. A check that cannot fail proves nothing.
+    #[test]
+    fn spec_status_census_flags_drift() {
+        let ledger = "\
+Of **3 recorded behaviors**:
+
+- **0** — open nonconformance
+- **1** — deacon extension
+- **2** — conformant and matching
+- **0** — deacon follows the spec where the CLI does not
+- **0** — documented choice
+
+| behavior | status | scenarios | notes |
+|---|---|---|---|
+| a | matches the reference | 1 | x |
+| b | matches the reference | 1 | x |
+| c | deacon extension | 1 | x |
+";
+        assert!(check_spec_status_census(ledger).is_empty());
+
+        // One more matching row than the header knows — the five-times drift.
+        let drifted = ledger.replace("| c |", "| d | matches the reference | 1 | x |\n| c |");
+        let problems = check_spec_status_census(&drifted);
+        assert!(
+            problems.iter().any(|p| p.contains("4 recorded")
+                || p.contains("claims 3 recorded behaviors but the row census counts 4")),
+            "total drift must be flagged: {problems:#?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("conformant and matching")),
+            "per-status drift must be flagged: {problems:#?}"
+        );
+
+        // No Summary at all.
+        let headless = "| a | matches the reference | 1 | x |\n";
+        assert!(
+            check_spec_status_census(headless)
+                .iter()
+                .any(|p| p.contains("no `Of **N recorded behaviors**` line")),
+            "a missing Summary must be flagged"
+        );
     }
 
     #[test]
