@@ -17,13 +17,13 @@ use deacon_core::dockerfile_generator::{
 };
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{
-    FeatureDependencyResolver, InstallationPlan, OptionValue, ResolvedFeature,
+    FeatureDependencyResolver, InstallationPlan, OptionSetKey, OptionValue, ResolvedFeature,
 };
 use deacon_core::host_ca::{CorporateCaSet, build_install_script};
 use deacon_core::lockfile::{Lockfile, LockfileFeature};
 use deacon_core::oci::{DownloadedFeature, FeatureRef, default_fetcher};
 use deacon_core::registry_parser::parse_registry_reference;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
 
@@ -471,23 +471,43 @@ fn parse_feature_options(value: &serde_json::Value) -> HashMap<String, OptionVal
         .collect()
 }
 
-/// Is a `dependsOn` target already in the feature set?
+/// One requested Feature instance: the resource it names plus the options it was
+/// requested with. Both halves are the Feature's identity per
+/// `feature-dependencies.md` §Definition: Feature Equality, so the set is a `Vec` and not
+/// a map keyed by id — the same Feature appears once per distinct option set (#489) and
+/// once per declared version (#430).
+struct RequestedFeature {
+    /// Install key: the tag-bearing OCI reference or `local:<abs path>`.
+    canonical_id: String,
+    feature_ref: FeatureRef,
+    /// Options AS AUTHORED. Declared defaults are applied downstream, at the point they
+    /// are consumed, so they cannot blur two differently-authored instances together.
+    options: HashMap<String, OptionValue>,
+}
+
+/// Is this exact Feature — same resource AND same option set — already requested?
 ///
-/// Compared by RESOURCE NAME (the id without version or digest) rather than by install
-/// key, deliberately. A hard dependency is written without a pin more often than not
-/// (`ghcr.io/devcontainers/features/common-utils`), and a user who declared that Feature
-/// at a specific version has already satisfied it — installing a second copy at `:latest`
-/// would ignore their pin. This is the one place the tag-less name is still the right
-/// question: the user's own two-version declaration is a deliberate double install
-/// (#430), an auto-pulled hard dependency is not.
+/// The resource half is compared by NAME (the id without version or digest) rather than
+/// by install key, deliberately. A hard dependency is written without a pin more often
+/// than not (`ghcr.io/devcontainers/features/common-utils`), and a user who declared that
+/// Feature at a specific version has already satisfied it — installing a second copy at
+/// `:latest` would ignore their pin. The user's own two-version declaration is a
+/// deliberate double install (#430), an auto-pulled hard dependency is not.
+///
+/// The options half is what `feature-dependencies.md` §(B1) means by skipping only "the
+/// **exact** Feature": a `dependsOn` asking for different options than the one already in
+/// the set names a DIFFERENT Feature, and both install (#489).
 fn already_installed(
-    downloaded_features: &HashMap<String, DownloadedFeature>,
+    requested: &[RequestedFeature],
     dep_install_key: &str,
+    dep_options: &HashMap<String, OptionValue>,
 ) -> bool {
     let dep_resource = deacon_core::features::canonical_feature_id(dep_install_key);
-    downloaded_features
-        .keys()
-        .any(|k| deacon_core::features::canonical_feature_id(k) == dep_resource)
+    let dep_option_set = OptionSetKey::of(dep_options);
+    requested.iter().any(|r| {
+        deacon_core::features::canonical_feature_id(&r.canonical_id) == dep_resource
+            && OptionSetKey::of(&r.options) == dep_option_set
+    })
 }
 
 /// Shared core: parse features from `config`, download them, resolve the
@@ -553,8 +573,7 @@ async fn resolve_and_stage_features(
     // OCI equality depend on the manifest digest, and §Feature authorship states that
     // "a single Feature may be installed more than once" — and keying on the tag-less
     // resource name silently collapsed the two entries into one install (#430).
-    let mut feature_refs: Vec<(String, FeatureRef)> = Vec::new();
-    let mut feature_options_map: HashMap<String, HashMap<String, OptionValue>> = HashMap::new();
+    let mut requested: Vec<RequestedFeature> = Vec::new();
     // Install key → user-provided feature ID (the key as it appears in
     // `devcontainer.json`). The lockfile MUST be keyed by the user-provided form to
     // match upstream `generateLockfile`.
@@ -648,25 +667,26 @@ async fn resolve_and_stage_features(
 
         user_id_by_canonical.insert(canonical_id.clone(), feature_id.clone());
 
-        let options = parse_feature_options(feature_options);
-
-        feature_options_map.insert(canonical_id.clone(), options);
-        feature_refs.push((canonical_id, feature_ref));
+        requested.push(RequestedFeature {
+            canonical_id,
+            feature_ref,
+            options: parse_feature_options(feature_options),
+        });
     }
 
     // Download remaining (OCI) features; local features are already staged
     // in `downloaded_features` above.
     debug!(
         "Downloading {} OCI feature(s); {} local feature(s) already resolved",
-        feature_refs.len() - downloaded_features.len(),
+        requested.len() - downloaded_features.len(),
         downloaded_features.len()
     );
-    for (canonical_id, feature_ref) in &feature_refs {
-        if downloaded_features.contains_key(canonical_id) {
+    for entry in &requested {
+        if downloaded_features.contains_key(&entry.canonical_id) {
             continue; // local feature — nothing to fetch
         }
-        let downloaded = fetcher.fetch_feature(feature_ref).await?;
-        downloaded_features.insert(canonical_id.clone(), downloaded);
+        let downloaded = fetcher.fetch_feature(&entry.feature_ref).await?;
+        downloaded_features.insert(entry.canonical_id.clone(), downloaded);
     }
 
     // Auto-install transitive `dependsOn` (HARD) dependencies.
@@ -679,10 +699,18 @@ async fn resolve_and_stage_features(
     // install order. (`installsAfter` is a soft *ordering* hint and is NOT
     // auto-installed; that stays the resolver's job.)
     //
-    // The "already downloaded → skip" guard makes a user's own declaration of a
-    // dependency win (its options are kept) and terminates on dependency cycles.
-    let mut to_scan: Vec<String> = feature_refs.iter().map(|(c, _)| c.clone()).collect();
+    // The "same resource AND same options → skip" guard makes a user's own declaration of
+    // a dependency win when the options agree, and terminates on dependency cycles: the
+    // instance set is bounded by the option sets that appear in the metadata graph.
+    //
+    // Scanning is per RESOURCE, not per instance: `dependsOn` lives in the Feature's
+    // metadata, so every instance of one Feature declares the same dependencies.
+    let mut to_scan: Vec<String> = requested.iter().map(|r| r.canonical_id.clone()).collect();
+    let mut scanned: HashSet<String> = HashSet::new();
     while let Some(scan_id) = to_scan.pop() {
+        if !scanned.insert(scan_id.clone()) {
+            continue;
+        }
         let Some(downloaded) = downloaded_features.get(&scan_id) else {
             continue;
         };
@@ -696,6 +724,7 @@ async fn resolve_and_stage_features(
         deps.sort_by(|a, b| a.0.cmp(&b.0));
 
         for (dep_key, dep_options_value) in deps {
+            let dep_options = parse_feature_options(&dep_options_value);
             let is_local =
                 dep_key.starts_with("./") || dep_key.starts_with("../") || dep_key.starts_with('/');
 
@@ -712,28 +741,30 @@ async fn resolve_and_stage_features(
                     ))
                 })?;
                 let dep_canonical = format!("local:{}", canonical_path.display());
-                if already_installed(&downloaded_features, &dep_canonical) {
+                if already_installed(&requested, &dep_canonical, &dep_options) {
                     continue;
                 }
-                let metadata_path = canonical_path.join("devcontainer-feature.json");
-                let metadata = deacon_core::features::parse_feature_metadata(&metadata_path)
-                    .map_err(|e| {
-                        DeaconError::Runtime(format!(
-                            "Failed to parse dependsOn local feature metadata at '{}': {}",
-                            metadata_path.display(),
-                            e
-                        ))
-                    })?;
-                let digest = dep_canonical.clone();
-                downloaded_features.insert(
-                    dep_canonical.clone(),
-                    DownloadedFeature {
-                        path: canonical_path.clone(),
-                        metadata,
-                        digest: digest.clone(),
-                        manifest_digest: digest,
-                    },
-                );
+                if !downloaded_features.contains_key(&dep_canonical) {
+                    let metadata_path = canonical_path.join("devcontainer-feature.json");
+                    let metadata = deacon_core::features::parse_feature_metadata(&metadata_path)
+                        .map_err(|e| {
+                            DeaconError::Runtime(format!(
+                                "Failed to parse dependsOn local feature metadata at '{}': {}",
+                                metadata_path.display(),
+                                e
+                            ))
+                        })?;
+                    let digest = dep_canonical.clone();
+                    downloaded_features.insert(
+                        dep_canonical.clone(),
+                        DownloadedFeature {
+                            path: canonical_path.clone(),
+                            metadata,
+                            digest: digest.clone(),
+                            manifest_digest: digest,
+                        },
+                    );
+                }
                 let dep_ref = FeatureRef::new(
                     "local".to_string(),
                     "fs".to_string(),
@@ -754,7 +785,7 @@ async fn resolve_and_stage_features(
                     })?;
                 let dep_ref = FeatureRef::new(registry_url, namespace, name, tag);
                 let dep_canonical = dep_ref.reference();
-                if already_installed(&downloaded_features, &dep_canonical) {
+                if already_installed(&requested, &dep_canonical, &dep_options) {
                     continue;
                 }
                 info!(
@@ -762,45 +793,39 @@ async fn resolve_and_stage_features(
                     dependency = %dep_key,
                     "Auto-installing transitive dependsOn feature"
                 );
-                let downloaded = fetcher.fetch_feature(&dep_ref).await?;
-                downloaded_features.insert(dep_canonical.clone(), downloaded);
+                if !downloaded_features.contains_key(&dep_canonical) {
+                    let downloaded = fetcher.fetch_feature(&dep_ref).await?;
+                    downloaded_features.insert(dep_canonical.clone(), downloaded);
+                }
                 (dep_canonical, dep_ref)
             };
 
-            feature_options_map.insert(
-                dep_canonical.clone(),
-                parse_feature_options(&dep_options_value),
-            );
             user_id_by_canonical
                 .entry(dep_canonical.clone())
                 .or_insert_with(|| dep_key.clone());
-            feature_refs.push((dep_canonical.clone(), dep_ref));
-            to_scan.push(dep_canonical);
+            to_scan.push(dep_canonical.clone());
+            requested.push(RequestedFeature {
+                canonical_id: dep_canonical,
+                feature_ref: dep_ref,
+                options: dep_options,
+            });
         }
     }
 
     // Create resolved features
     let mut resolved_features = Vec::new();
-    for (canonical_id, feature_ref) in &feature_refs {
-        let reference = feature_ref.reference();
+    for entry in &requested {
+        let canonical_id = &entry.canonical_id;
+        let reference = entry.feature_ref.reference();
         let downloaded = downloaded_features.get(canonical_id).ok_or_else(|| {
             DeaconError::Runtime(format!("Downloaded feature not found for {}", reference))
         })?;
 
-        let mut options = feature_options_map
-            .get(canonical_id)
-            .cloned()
-            .unwrap_or_default();
-
-        for (opt_name, opt_def) in &downloaded.metadata.options {
-            if options.contains_key(opt_name) {
-                continue;
-            }
-
-            if let Some(default_val) = opt_def.default_value() {
-                options.insert(opt_name.clone(), default_val);
-            }
-        }
+        // Options AS AUTHORED — the Feature's declared defaults are applied where they
+        // are consumed (`DockerfileGenerator::build_environment_variables`), because this
+        // map is half the Feature's identity (#489) and the spec compares authored
+        // options.
+        let options = entry.options.clone();
 
         resolved_features.push(ResolvedFeature {
             id: canonical_id.clone(),
@@ -866,8 +891,8 @@ async fn resolve_and_stage_features(
     let mut substitution_report = deacon_core::variable::SubstitutionReport::new();
     let mut combined_env = HashMap::new();
     for level in &installation_plan.levels {
-        for feature_id in level {
-            if let Some(feature) = installation_plan.get_feature(feature_id) {
+        for &feature_index in level {
+            if let Some(feature) = installation_plan.feature_at(feature_index) {
                 for (key, value) in &feature.metadata.container_env {
                     let substituted_value =
                         deacon_core::variable::VariableSubstitution::substitute_string(
@@ -899,13 +924,16 @@ async fn resolve_and_stage_features(
     // is derived by that generator's own helper rather than re-spelled here.
     let mut install_index = 0usize;
     for level in installation_plan.levels.iter() {
-        for feature_id in level {
-            let feature = installation_plan.get_feature(feature_id).ok_or_else(|| {
-                DeaconError::Runtime(format!("Feature {} not found in plan", feature_id))
+        for &feature_index in level {
+            let feature = installation_plan.feature_at(feature_index).ok_or_else(|| {
+                DeaconError::Runtime(format!("Feature #{} not found in plan", feature_index))
             })?;
 
-            let downloaded = downloaded_features.get(feature_id).ok_or_else(|| {
-                DeaconError::Runtime(format!("Downloaded feature {} not found", feature_id))
+            // Keyed by the feature's id, not its install key: every instance of one
+            // Feature shares the same downloaded content and differs only in the options
+            // it is executed with (#489).
+            let downloaded = downloaded_features.get(&feature.id).ok_or_else(|| {
+                DeaconError::Runtime(format!("Downloaded feature {} not found", feature.id))
             })?;
 
             let feature_dir_name =
@@ -925,7 +953,7 @@ async fn resolve_and_stage_features(
     }
 
     let lockfile =
-        build_lockfile_from_features(&feature_refs, &downloaded_features, &user_id_by_canonical);
+        build_lockfile_from_features(&requested, &downloaded_features, &user_id_by_canonical);
 
     Ok(StagedFeatures {
         plan: installation_plan,
@@ -952,13 +980,20 @@ async fn resolve_and_stage_features(
 /// schema's semver validation never blocks lockfile assembly. A WARN log is
 /// emitted so the gap is visible in CI output.
 fn build_lockfile_from_features(
-    feature_refs: &[(String, FeatureRef)],
+    requested: &[RequestedFeature],
     downloaded_features: &HashMap<String, DownloadedFeature>,
     user_id_by_canonical: &HashMap<String, String>,
 ) -> Lockfile {
     let mut entries: HashMap<String, LockfileFeature> = HashMap::new();
 
-    for (canonical_id, feature_ref) in feature_refs {
+    // Keyed by user-provided id, so the several instances of one Feature (#489) collapse
+    // to the single resolved digest they all share.
+    for RequestedFeature {
+        canonical_id,
+        feature_ref,
+        ..
+    } in requested
+    {
         let Some(downloaded) = downloaded_features.get(canonical_id) else {
             // Should never happen — the caller populated downloaded_features
             // from the same feature_refs vec. If it does, skip rather than
@@ -1152,7 +1187,11 @@ mod lockfile_assembly_tests {
         user_id_by_canonical.insert(canonical.clone(), user_id.clone());
 
         let lockfile = build_lockfile_from_features(
-            &[(canonical, feature_ref)],
+            &[RequestedFeature {
+                canonical_id: canonical,
+                feature_ref,
+                options: HashMap::new(),
+            }],
             &downloaded_features,
             &user_id_by_canonical,
         );
@@ -1211,7 +1250,11 @@ mod lockfile_assembly_tests {
         user_id_by_canonical.insert(canonical.clone(), user_id.clone());
 
         let lockfile = build_lockfile_from_features(
-            &[(canonical, feature_ref)],
+            &[RequestedFeature {
+                canonical_id: canonical,
+                feature_ref,
+                options: HashMap::new(),
+            }],
             &downloaded_features,
             &user_id_by_canonical,
         );
@@ -1255,7 +1298,11 @@ mod lockfile_assembly_tests {
         user_id_by_canonical.insert(canonical.clone(), user_id.clone());
 
         let lockfile = build_lockfile_from_features(
-            &[(canonical, feature_ref)],
+            &[RequestedFeature {
+                canonical_id: canonical,
+                feature_ref,
+                options: HashMap::new(),
+            }],
             &downloaded_features,
             &user_id_by_canonical,
         );
@@ -1294,7 +1341,11 @@ mod lockfile_assembly_tests {
         user_id_by_canonical.insert(canonical.clone(), user_id.clone());
 
         let lockfile = build_lockfile_from_features(
-            &[(canonical, feature_ref)],
+            &[RequestedFeature {
+                canonical_id: canonical,
+                feature_ref,
+                options: HashMap::new(),
+            }],
             &downloaded_features,
             &user_id_by_canonical,
         );
@@ -1328,7 +1379,11 @@ mod lockfile_assembly_tests {
         user_id_by_canonical.insert(canonical.clone(), user_id.clone());
 
         let lockfile = build_lockfile_from_features(
-            &[(canonical, feature_ref)],
+            &[RequestedFeature {
+                canonical_id: canonical,
+                feature_ref,
+                options: HashMap::new(),
+            }],
             &downloaded_features,
             &user_id_by_canonical,
         );

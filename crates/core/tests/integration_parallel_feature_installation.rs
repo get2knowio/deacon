@@ -7,6 +7,16 @@ use deacon_core::features::{FeatureDependencyResolver, FeatureMetadata, Resolved
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
+/// Level members named by feature id. `InstallationPlan::levels` carries INDEXES into
+/// `plan.features` (one Feature may occupy several rows — once per option set it was
+/// requested with, #489), so a level is read back through the plan.
+fn level_ids(plan: &deacon_core::features::InstallationPlan, level: usize) -> Vec<String> {
+    plan.levels[level]
+        .iter()
+        .map(|&i| plan.features[i].id.clone())
+        .collect()
+}
+
 fn create_test_feature(id: &str, dependencies: Vec<String>) -> ResolvedFeature {
     let depends_on = dependencies
         .into_iter()
@@ -103,15 +113,15 @@ fn test_parallel_levels_computation() {
     assert_eq!(plan.levels.len(), 3, "Should have 3 execution levels");
 
     // Level 0: feature-a
-    assert_eq!(plan.levels[0], vec!["feature-a"]);
+    assert_eq!(level_ids(&plan, 0), vec!["feature-a"]);
 
     // Level 1: feature-b, feature-c (can run in parallel)
-    let mut level1 = plan.levels[1].clone();
+    let mut level1 = level_ids(&plan, 1);
     level1.sort();
     assert_eq!(level1, vec!["feature-b", "feature-c"]);
 
     // Level 2: feature-d
-    assert_eq!(plan.levels[2], vec!["feature-d"]);
+    assert_eq!(level_ids(&plan, 2), vec!["feature-d"]);
 }
 
 #[test]
@@ -131,7 +141,7 @@ fn test_parallel_execution_with_independent_features() {
     assert_eq!(plan.levels.len(), 1, "Should have 1 execution level");
     assert_eq!(plan.levels[0].len(), 4, "Level 0 should have 4 features");
 
-    let mut level0 = plan.levels[0].clone();
+    let mut level0 = level_ids(&plan, 0);
     level0.sort();
     assert_eq!(
         level0,
@@ -205,14 +215,14 @@ fn test_complex_dependency_chain_with_levels() {
     // Level 3: integration
     assert_eq!(plan.levels.len(), 4);
 
-    assert_eq!(plan.levels[0], vec!["base"]);
-    assert_eq!(plan.levels[1], vec!["middleware"]);
+    assert_eq!(level_ids(&plan, 0), vec!["base"]);
+    assert_eq!(level_ids(&plan, 1), vec!["middleware"]);
 
-    let mut level2 = plan.levels[2].clone();
+    let mut level2 = level_ids(&plan, 2);
     level2.sort();
     assert_eq!(level2, vec!["backend", "frontend"]);
 
-    assert_eq!(plan.levels[3], vec!["integration"]);
+    assert_eq!(level_ids(&plan, 3), vec!["integration"]);
 }
 
 #[test]
@@ -234,5 +244,8 @@ fn test_override_order_falls_back_to_sequential() {
 
     // With override order, should have 1 level with all features in specified order
     assert_eq!(plan.levels.len(), 1);
-    assert_eq!(plan.levels[0], vec!["feature-c", "feature-a", "feature-b"]);
+    assert_eq!(
+        level_ids(&plan, 0),
+        vec!["feature-c", "feature-a", "feature-b"]
+    );
 }
