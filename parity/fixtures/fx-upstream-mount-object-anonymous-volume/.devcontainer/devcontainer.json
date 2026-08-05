@@ -1,0 +1,9 @@
+{
+	"image": "mcr.microsoft.com/devcontainers/base:bookworm",
+	"mounts": [
+        {
+            "target": "/home/test_devcontainer_config",
+            "type": "volume",
+        }
+    ]
+}

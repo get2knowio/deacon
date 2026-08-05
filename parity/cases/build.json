@@ -863,6 +863,115 @@
       "notes": "FR-040 unsupported class for `build`: a well-formed configuration naming an image reference no registry serves. Nothing about the document is wrong; the failure can only appear once something tries to obtain the image."
     },
     {
+      "id": "case-build-upstream-dockerfile-syntax-directive",
+      "behaviors": [
+        "bhv-build-dockerfile-syntax-directive"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}"
+          ],
+          "fixtures": [
+            "fx-upstream-dockerfile-syntax-directive"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-build-dockerfile-syntax-directive",
+          "context": [],
+          "observablePath": "chan-image.labels.org.deacon.configHash",
+          "rationale": "deacon stamps `org.deacon.configHash` on the image it builds; the reference sets no such label. Identical in scope and reasoning to the tolerance every other `chan-image` case in this suite carries — one named key in deacon's own namespace, never the `org.deacon.*` namespace as a whole — and re-measured against oracle 0.87.0 on this fixture. No other image key is tolerated here, so a regression on any of them surfaces as a divergence rather than being excused.",
+          "divergenceId": "ext-build-image-bookkeeping-label"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "A Dockerfile whose first line is a `# syntax=docker/dockerfile:1` frontend directive, with an `ARG` consumed by `FROM` beneath it. The directive is meaningful only to BuildKit and only when it is the FIRST line — a CLI that rewrites, prepends to, or re-emits the Dockerfile (to inject Feature layers, or to resolve the `ARG`) can displace it, at which point Docker reads it as an ordinary comment and the build silently falls back to the classic frontend. The produced image is compared whole, so a frontend swap that changes anything observable about the image surfaces here.\n\nMEASURED at oracle 0.87.0: the two images agree on everything except deacon's `org.deacon.configHash`, which is the extension every `chan-image` case in this suite already tolerates.\n\nThe fixture carries one authored `LABEL` for a reason worth recording. Without it the reference's image has NO labels at all (`Config.Labels` is `null`) while deacon's has its bookkeeping key, so the sides differ at the `labels` NODE rather than at a key inside it — the case's key-scoped tolerance could not reach it, and the run reported a STALE tolerance instead of a tolerated difference. A tolerance scoped to `<map>.<key>` is unreachable whenever the other side's whole map is absent.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-build-upstream-target-and-options",
+      "behaviors": [
+        "bhv-build-target-and-build-options",
+        "bhv-build-options-passed-through"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}"
+          ],
+          "fixtures": [
+            "fx-upstream-build-target-options"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-build-target-and-build-options",
+          "context": [],
+          "observablePath": "chan-image.labels.org.deacon.configHash",
+          "rationale": "deacon stamps `org.deacon.configHash` on the image it builds; the reference sets no such label. Identical in scope and reasoning to the tolerance every other `chan-image` case in this suite carries — one named key in deacon's own namespace, never the `org.deacon.*` namespace as a whole — and re-measured against oracle 0.87.0 on this fixture. No other image key is tolerated here, so a regression on any of them surfaces as a divergence rather than being excused.",
+          "divergenceId": "ext-build-image-bookkeeping-label"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED AND EXPECTED — a deacon-side divergence. `build.target` and `build.options` together, on a Dockerfile written to catch a wrong answer: three stages, a decoy BEFORE the named target and a decoy AFTER it, so an implementation that builds the last stage and one that builds the first both produce a DIFFERENT image rather than a failure.\n\nMEASURED at oracle 0.87.0. `build.target` AGREES — `/var/test-marker` carries `||test-content||` in both images, so both built the middle stage and skipped both decoys. `build.options` does NOT: the reference's image carries `test_build_options=success`, deacon's carries no such label, so the `--label test_build_options=success` the configuration asked to be passed through to the builder never reached it. Diverging path: `chan-image.labels.test_build_options`.\n\n`devcontainerjson-reference.md` defines `build.options` as \"an array of Docker CLI build options\" the tool passes to the build, so this is a modelled property deacon accepts, echoes in `read-configuration`, and then ignores — the silent-fallback shape constitution IV rules out. Left red for triage; the ONE tolerance the case carries is the bookkeeping label every other `chan-image` case tolerates, and it is deliberately not widened to cover this.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
       "id": "case-errorpath-build-arg-failure",
       "behaviors": [
         "bhv-build-failure-reported"

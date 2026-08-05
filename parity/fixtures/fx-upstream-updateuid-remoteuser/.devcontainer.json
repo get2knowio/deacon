@@ -1,0 +1,7 @@
+{
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"remoteUser": "foo",
+	"postCreateCommand": "whoami > upstream-updateuid-marker.txt"
+}
