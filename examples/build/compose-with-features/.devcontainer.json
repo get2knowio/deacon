@@ -2,6 +2,6 @@
   "name": "compose-with-features",
   "dockerComposeFile": ["docker-compose.yml"],
   "service": "app",
-  "features": { "./features/hello": {} },
+  "features": { "./.devcontainer/features/hello": {} },
   "remoteUser": "root"
 }

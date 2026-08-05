@@ -23,13 +23,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-chmod +x "$SCRIPT_DIR"/hello-feature/install.sh
+chmod +x "$SCRIPT_DIR"/.devcontainer/hello-feature/install.sh
 
 cd "$SCRIPT_DIR"
 
-# Top-level devcontainer.json so the relative `./hello-feature` path resolves
+# Top-level devcontainer.json so the relative `./.devcontainer/hello-feature` path resolves
 # against the config dir; point deacon at it explicitly.
-echo "== Bring container up (installs a local ./hello-feature) ==" >&2
+echo "== Bring container up (installs a local ./.devcontainer/hello-feature) ==" >&2
 run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --config "$SCRIPT_DIR/devcontainer.json" --remove-existing-container "$@" >/dev/null
 cid="$(container_id)"
 [ -n "$cid" ] || { echo "FAIL: container not found after up" >&2; exit 1; }

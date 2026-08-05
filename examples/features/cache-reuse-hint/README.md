@@ -15,7 +15,7 @@ This example includes a simple cacheable feature:
 ### Cached Feature
 - A feature that can be cached and reused
 - Same feature content across multiple installations
-- Located in `./cached-feature/`
+- Located in `./.devcontainer/cached-feature/` and referenced as `./.devcontainer/cached-feature`
 
 ## How Feature Caching Works
 

@@ -22,7 +22,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-chmod +x "$SCRIPT_DIR"/report/install.sh
+chmod +x "$SCRIPT_DIR"/.devcontainer/report/install.sh
 
 cd "$SCRIPT_DIR"
 

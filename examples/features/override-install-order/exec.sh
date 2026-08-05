@@ -22,13 +22,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-chmod +x "$SCRIPT_DIR"/feature-*/install.sh
+chmod +x "$SCRIPT_DIR"/.devcontainer/feature-*/install.sh
 
 cd "$SCRIPT_DIR"
 
 echo "== Bring container up (features install in override order) ==" >&2
 # This example keeps `devcontainer.json` at the top level (not under
-# `.devcontainer/`) so the relative `./feature-*` paths resolve. Point
+# `.devcontainer/`) so the relative `./.devcontainer/feature-*` paths resolve. Point
 # deacon at it explicitly.
 run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --config "$SCRIPT_DIR/devcontainer.json" --remove-existing-container "$@" >/dev/null
 cid="$(container_id)"

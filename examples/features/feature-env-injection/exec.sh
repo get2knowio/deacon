@@ -22,7 +22,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-chmod +x "$SCRIPT_DIR"/capture-env/install.sh
+chmod +x "$SCRIPT_DIR"/.devcontainer/capture-env/install.sh
 
 cd "$SCRIPT_DIR"
 

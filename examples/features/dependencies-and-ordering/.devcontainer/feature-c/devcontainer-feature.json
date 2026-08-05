@@ -4,8 +4,8 @@
 	"name": "Feature C (Dependent)",
 	"description": "A feature that depends on both A and B, and installs after A",
 	"dependsOn": {
-		"feature-a": true,
-		"feature-b": true
+		"./.devcontainer/feature-a": {},
+		"./.devcontainer/feature-b": {}
 	},
-	"installsAfter": ["feature-a"]
+	"installsAfter": ["./.devcontainer/feature-a"]
 }

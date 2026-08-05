@@ -22,6 +22,32 @@ pass, so they don't have to be re-evaluated from scratch every session.
 - `🚫 deferred` — exercises a deacon capability that isn't implemented yet.
 - `❓ unverified` — not evaluated this cycle.
 
+Targeted sweep: **2026-08-05** against `main` @ `a496609` + the #493 example
+migration. The 13 rows that #488 had turned `⚠️ fixture` are `✅ pass` again. #493
+moved each example's local Feature folders under `.devcontainer/` and re-spelled the
+ids config-relative (`./.devcontainer/<dir>`) — no product code changed, so the
+release binary under test is plain `a496609`. Measured on both CLIs:
+
+- All **16** migrated configs exit 0 under `deacon read-configuration
+  --include-features-configuration`, and all 16 exit 0 under the pinned reference
+  CLI **0.87.0** on temp copies outside the repo. Before the migration the reference
+  exited 1 with `Local file path parse error. Resolved path must be a child of the
+  .devcontainer/ folder.` — verified old-vs-new for `features/local-feature`,
+  `build/dockerfile-with-features` and `read-configuration/features-minimal`.
+- All **13** canaries with an `exec.sh` were run end to end with Docker
+  (`--mount-workspace-git-root false` for the `up`-based ones, per the monorepo rule);
+  every asserted scenario passed, including the ordering assertions
+  (`base,lib,app` and `charlie,alpha,bravo`).
+- Two fixture defects surfaced that #488's error had been masking, both fixed here:
+  `features/dependencies-and-ordering` and `features/dependency-ordering` named their
+  `dependsOn` / `installsAfter` targets by bare metadata `id`. deacon resolves that
+  spelling, but the reference rejects it (`Legacy feature 'base' not supported`), so
+  both now use the config-relative path form that satisfies both CLIs.
+- The three migrated examples with no `exec.sh`
+  (`features/dependencies-and-ordering`, `features/parallel-install-demo`,
+  `features/cache-reuse-hint`) have no rows here; they were verified by
+  `read-configuration` on both CLIs only.
+
 Last broad sweep: **2026-07-22** against `main` @ `3db4306` (post-#338/#339/#340/#341,
 the merged-config base-image + lifecycle-`containerEnv` parity work) — all 91 canaries
 run with the release binary. **87 pass, 3 fixture, 1 deacon-bug** on first pass; after the
@@ -95,15 +121,15 @@ and aren't listed.
 | Canary | Status | Verified | Notes |
 |---|---|---|---|
 | build/basic-dockerfile | ✅ pass | 2026-07-20 `de5b045` |  |
-| build/buildkit-gated-feature | ⚠️ fixture | 2026-08-05 `86e2e9f` | needs debian base + `build.dockerfile` (#129) local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
+| build/buildkit-gated-feature | ✅ pass | 2026-08-05 `a496609` | needs debian base + `build.dockerfile` (#129) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
 | build/compose-missing-service | ✅ pass | 2026-07-20 `de5b045` | asserts error |
 | build/compose-service-target | ✅ pass | 2026-07-20 `de5b045` |  |
 | build/compose-unsupported-flags | ✅ pass | 2026-07-20 `de5b045` | asserts errors (`--push`/`--output`) |
-| build/compose-with-features | ⚠️ fixture | 2026-08-05 `86e2e9f` | compose+features build (#139) local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
-| build/dockerfile-with-features | ⚠️ fixture | 2026-08-05 `86e2e9f` | feature layering (#129) local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
+| build/compose-with-features | ✅ pass | 2026-08-05 `a496609` | compose+features build (#139) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
+| build/dockerfile-with-features | ✅ pass | 2026-08-05 `a496609` | feature layering (#129) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
 | build/duplicate-tags | ✅ pass | 2026-07-22 `3db4306` | tag de-dup (#129); exec.sh updated to assert `imageName` array form (#330) |
 | build/image-reference | ✅ pass | 2026-07-20 `de5b045` |  |
-| build/image-reference-with-features | ⚠️ fixture | 2026-08-05 `86e2e9f` | image-ref+features (#134) local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
+| build/image-reference-with-features | ✅ pass | 2026-08-05 `a496609` | image-ref+features (#134) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
 | build/invalid-config-name | ✅ pass | 2026-07-20 `de5b045` | asserts error |
 | build/multi-tags-and-labels | ✅ pass | 2026-07-20 `de5b045` |  |
 | build/output-archive | ✅ pass | 2026-07-20 `de5b045` |  |
@@ -132,22 +158,22 @@ and aren't listed.
 | exec/remote-user-execution | ✅ pass | 2026-07-20 `de5b045` | git-root mount flag (#149) |
 | exec/user-env-probe-modes | ✅ pass | 2026-07-20 `de5b045` | camelCase `--default-user-env-probe` values (#148); git-root flag (#149) |
 | exec/workspace-folder-discovery | ✅ pass | 2026-07-20 `de5b045` | git-root mount flag (#149) |
-| features/contributed-options | ⚠️ fixture | 2026-08-05 `86e2e9f` | feature-contributed mount/entrypoint/init/capAdd reach the container (new) local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
-| features/dependency-ordering | ⚠️ fixture | 2026-08-05 `86e2e9f` | auto install order via `installsAfter`+`dependsOn` (no override); now uses local-path `dependsOn` form `./feature-lib` (#155, PR #158) local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
-| features/feature-contributed-lifecycle | ⚠️ fixture | 2026-08-05 `86e2e9f` | local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
-| features/feature-env-injection | ⚠️ fixture | 2026-08-05 `86e2e9f` | local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
-| features/local-feature | ⚠️ fixture | 2026-08-05 `86e2e9f` | local `./` feature install + option override (new) local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
+| features/contributed-options | ✅ pass | 2026-08-05 `a496609` | feature-contributed mount/entrypoint/init/capAdd reach the container (new) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
+| features/dependency-ordering | ✅ pass | 2026-08-05 `a496609` | auto install order via `installsAfter`+`dependsOn` (no override); now uses local-path `dependsOn` form `./feature-lib` (#155, PR #158) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
+| features/feature-contributed-lifecycle | ✅ pass | 2026-08-05 `a496609` | #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
+| features/feature-env-injection | ✅ pass | 2026-08-05 `a496609` | #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
+| features/local-feature | ✅ pass | 2026-08-05 `a496609` | local `./` feature install + option override (new) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
 | features/lockfile | ✅ pass | 2026-07-20 `de5b045` | lockfile generate / `--frozen-lockfile` pass + mismatch fail; needs ghcr (new) |
 | features/oci-digest-pin | ✅ pass | 2026-07-20 `8179744` | digest ref round-trip regression of #131, fixed in PR #321 (`reference()` now joins a digest with `@`); re-verified green post-merge. |
-| features/option-sanitization | ⚠️ fixture | 2026-08-05 `86e2e9f` | local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
-| features/override-install-order | ⚠️ fixture | 2026-08-05 `86e2e9f` | local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
+| features/option-sanitization | ✅ pass | 2026-08-05 `a496609` | #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
+| features/override-install-order | ✅ pass | 2026-08-05 `a496609` | #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
 | observability/json-logs | ✅ pass | 2026-07-20 `de5b045` | Output Streams Contract: `--log-format json` stdout=1 JSON doc, stderr=JSON log lines, no log leakage to stdout; hermetic (read-configuration, no Docker) (new) |
 | outdated/basic | ✅ pass | 2026-07-20 `de5b045` | `outdated --output json` + `--fail-on-outdated`; needs ghcr (new) |
 | read-configuration/basic | ✅ pass | 2026-07-20 `de5b045` |  |
 | read-configuration/compose | ✅ pass | 2026-07-20 `de5b045` |  |
 | read-configuration/extends-chain | ✅ pass | 2026-07-20 `de5b045` |  |
-| read-configuration/features-additional | ⚠️ fixture | 2026-08-05 `86e2e9f` | local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
-| read-configuration/features-minimal | ⚠️ fixture | 2026-08-05 `86e2e9f` | local Features sit OUTSIDE `.devcontainer/`, which #488 now rejects per `devcontainer-features-distribution.md` §Locally Referenced — the reference CLI 0.87.0 rejects the same layout identically, so this is an example-fixture problem, not a deacon bug. Remediation tracked in [#493](https://github.com/get2knowio/deacon/issues/493). |
+| read-configuration/features-additional | ✅ pass | 2026-08-05 `a496609` | #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
+| read-configuration/features-minimal | ✅ pass | 2026-08-05 `a496609` | #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
 | read-configuration/id-labels-and-devcontainerId | ✅ pass | 2026-07-20 `de5b045` |  |
 | read-configuration/legacy-normalization | ✅ pass | 2026-07-20 `de5b045` |  |
 | read-configuration/named-config-search | ✅ pass | 2026-07-20 `de5b045` |  |

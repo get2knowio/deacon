@@ -10,7 +10,10 @@ This example shows how the DevContainer feature system handles:
 
 ## Feature Relationships
 
-This example includes three local features with the following dependency structure:
+This example includes three local features. Their source lives under
+`.devcontainer/`, as `devcontainer-features-distribution.md` §Locally Referenced
+Features requires, and `devcontainer.json` names them config-relative
+(`./.devcontainer/feature-a`, …). The dependency structure is:
 
 ```
 feature-a (independent)
@@ -21,18 +24,23 @@ feature-c (depends on: feature-a, feature-b; installs after: feature-a)
 ### Feature A
 - No dependencies
 - Can be installed at any time
-- Located in `./feature-a/`
+- Located in `./.devcontainer/feature-a/`
 
 ### Feature B  
 - No dependencies
 - Can be installed at any time
-- Located in `./feature-b/`
+- Located in `./.devcontainer/feature-b/`
 
 ### Feature C
 - **Depends on**: feature-a AND feature-b (via `dependsOn`)
 - **Installs after**: feature-a (via `installsAfter`)
 - Must be installed AFTER both A and B are installed
-- Located in `./feature-c/`
+- Located in `./.devcontainer/feature-c/`
+- Both `dependsOn` and `installsAfter` name their targets the way the `features`
+  map does — as config-relative local paths (`./.devcontainer/feature-a`,
+  `./.devcontainer/feature-b`), not bare metadata `id`s. deacon accepts the
+  bare-`id` spelling too, but the reference CLI 0.87.0 rejects it
+  (`Legacy feature 'feature-a' not supported`).
 
 ## Expected Installation Order
 
@@ -70,7 +78,7 @@ The plan output will show the dependency graph and installation order respecting
 The dependency resolver includes cycle detection. If you create a circular dependency (e.g., A depends on B, B depends on C, C depends on A), the resolver will detect the cycle and fail with a clear error message showing the cycle path.
 
 To test cycle detection, you could temporarily modify the features to create a cycle:
-- Add `"dependsOn": {"feature-c": true}` to feature-a/devcontainer-feature.json
+- Add `"dependsOn": {"./.devcontainer/feature-c": {}}` to `.devcontainer/feature-a/devcontainer-feature.json`
 - This creates: A → C → A (cycle)
 - The resolver will detect and report: "Dependency cycle detected: feature-a -> feature-c -> feature-a"
 

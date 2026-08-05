@@ -10,20 +10,23 @@ A local Feature must be spelled relatively and must live under `.devcontainer/`:
 `devcontainer-features-distribution.md` §Locally Referenced Features says "A
 local Feature may **not** be referenced by absolute path", and deacon rejects one
 (#495, matching the reference CLI). Absolute paths were accepted until then
-(#126); rewrite any as `./<feature-dir>`, relative to the folder holding
-`devcontainer.json`.
+(#126); rewrite any as a path relative to the folder holding `devcontainer.json`
+that lands inside `<workspace folder>/.devcontainer/` (#488).
 
 ## Files
 
-- `devcontainer.json` — references `./hello-feature` with an option override.
-- `hello-feature/devcontainer-feature.json` — feature metadata with one
-  `greeting` option (default `hello`).
-- `hello-feature/install.sh` — writes `${GREETING} from local feature v1.0.0`
-  to `/usr/local/share/local-feature/marker`.
+- `devcontainer.json` — references `./.devcontainer/hello-feature` with an
+  option override.
+- `.devcontainer/hello-feature/devcontainer-feature.json` — feature metadata
+  with one `greeting` option (default `hello`).
+- `.devcontainer/hello-feature/install.sh` — writes `${GREETING} from local
+  feature v1.0.0` to `/usr/local/share/local-feature/marker`.
 
-Local feature paths resolve relative to the **config directory**. Because the
+Local feature paths resolve relative to the **config directory**, while the
+containment rule anchors on `<workspace folder>/.devcontainer`. Because the
 config is kept at the example root (`devcontainer.json`, not under
-`.devcontainer/`), `exec.sh` points deacon at it with `--config`.
+`.devcontainer/`), the id is spelled `./.devcontainer/hello-feature` — the two
+rules together — and `exec.sh` points deacon at the config with `--config`.
 
 ## Scenarios exercised by `exec.sh`
 

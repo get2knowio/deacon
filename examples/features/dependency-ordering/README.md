@@ -7,21 +7,27 @@ install order **automatically** from feature dependency metadata —
 
 ## The setup
 
-Three local features whose **declaration / alphabetical** order would be
-`app, base, lib`:
+Three local features, kept under `.devcontainer/` as
+`devcontainer-features-distribution.md` §Locally Referenced Features requires,
+whose **declaration / alphabetical** order would be `app, base, lib`:
 
-- `feature-base` (id `base`) — no dependencies
-- `feature-lib` (id `lib`) — `"installsAfter": ["base"]`
-- `feature-app` (id `app`) — `"dependsOn": { "lib": {} }`
+- `.devcontainer/feature-base` (id `base`) — no dependencies
+- `.devcontainer/feature-lib` (id `lib`) —
+  `"installsAfter": ["./.devcontainer/feature-base"]`
+- `.devcontainer/feature-app` (id `app`) —
+  `"dependsOn": { "./.devcontainer/feature-lib": {} }`
 
 Each `install.sh` appends its name to `/usr/local/share/feature-order/log`.
 
 The dependency graph (`lib` after `base`, `app` after `lib`) forces a
 **different** order: `base → lib → app`.
 
-> Note: `installsAfter` and `dependsOn` reference a sibling feature by its
-> metadata `id` (here `base` / `lib`), which deacon maps onto the local
-> `./feature-*` path during resolution.
+> Note: both `installsAfter` and `dependsOn` name a **local** sibling the same
+> way the `features` map does — as a path resolved against the **config
+> directory**, here `./.devcontainer/feature-*`. deacon will also match a bare
+> metadata `id` (`"base"`), but the reference CLI 0.87.0 rejects that spelling
+> with `Legacy feature 'base' not supported`, so these fixtures use the path
+> form, which both CLIs accept.
 
 ## Scenario exercised by `exec.sh`
 

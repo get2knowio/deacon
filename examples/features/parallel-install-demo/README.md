@@ -14,12 +14,12 @@ This example includes two independent features:
 ### Independent Feature 1
 - No dependencies
 - Simulates work with a 2-second sleep
-- Located in `./independent-1/`
+- Located in `./.devcontainer/independent-1/` and referenced as `./.devcontainer/independent-1`
 
 ### Independent Feature 2
 - No dependencies  
 - Simulates work with a 2-second sleep
-- Located in `./independent-2/`
+- Located in `./.devcontainer/independent-2/` and referenced as `./.devcontainer/independent-2`
 
 ## Expected Behavior
 

@@ -19,10 +19,15 @@ the three patterns and dumps the resulting env to a file we can read.
 
 ## Files
 
-- `devcontainer.json` — provides values for each option.
-- `report/devcontainer-feature.json` — declares the option schema.
-- `report/install.sh` — records every uppercase env var and probes the
-  expected sanitized names.
+- `devcontainer.json` — provides values for each option, referencing the
+  feature as `./.devcontainer/report`.
+- `.devcontainer/report/devcontainer-feature.json` — declares the option
+  schema.
+- `.devcontainer/report/install.sh` — records every uppercase env var and
+  probes the expected sanitized names.
+
+The feature folder sits under `.devcontainer/` per
+`devcontainer-features-distribution.md` §Locally Referenced Features.
 
 ## Scenarios exercised by `exec.sh`
 
@@ -38,7 +43,7 @@ the three patterns and dumps the resulting env to a file we can read.
 ## Manual usage
 
 ```sh
-deacon up --workspace-folder . --remove-existing-container
+deacon up --workspace-folder . --config ./devcontainer.json --remove-existing-container
 docker exec <cid> cat /usr/local/share/option-sanitization/probes
 docker exec <cid> cat /usr/local/share/option-sanitization/all-env
 ```
@@ -48,7 +53,7 @@ docker exec <cid> cat /usr/local/share/option-sanitization/all-env
 - [#69](https://github.com/get2knowio/deacon/issues/69) — when this
   example is run via `--config <path>` (e.g. for verification outside
   the standard `.devcontainer/devcontainer.json` layout), local feature
-  paths of the form `./feature-X` are misinterpreted as OCI registry
+  paths of the form `./.devcontainer/feature-X` are misinterpreted as OCI registry
   refs (`registry: "."`).
 
 ## Spec references

@@ -5,7 +5,7 @@
 	"workspaceFolder": "/workspace",
 	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"features": {
-		"./report": {
+		"./.devcontainer/report": {
 			"my-string-option": "Hello, World!",
 			"another.weird-key": "x/y/z",
 			"flagOption": true

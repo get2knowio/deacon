@@ -2,6 +2,12 @@
 
 Demonstrates feature installation when building from a Dockerfile.
 
+Layout: the config is `.devcontainer.json` at the example root and the local
+Feature lives at `.devcontainer/features/hello/`, so the id is spelled
+`./.devcontainer/features/hello` — config-relative, and contained in
+`.devcontainer/` as `devcontainer-features-distribution.md` §Locally Referenced
+Features requires.
+
 ## Usage
 ```sh
 cd examples/build/dockerfile-with-features

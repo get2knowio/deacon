@@ -1,6 +1,6 @@
 {
   "name": "image-reference-with-features",
   "image": "debian:bookworm-slim",
-  "features": { "./features/hello": {} },
+  "features": { "./.devcontainer/features/hello": {} },
   "remoteUser": "root"
 }
