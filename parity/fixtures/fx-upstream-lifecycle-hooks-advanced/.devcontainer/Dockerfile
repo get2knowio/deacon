@@ -1,1 +1,1 @@
-FROM mcr.microsoft.com/devcontainers/base:bookworm
+FROM debian:bookworm-slim
