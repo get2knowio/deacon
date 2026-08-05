@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceSetUpConfigurationBase",
+	"image": "alpine:3.19",
+	"remoteUser": "root",
+	"containerEnv": {
+		"FROM_BASE": "1"
+	},
+	"onCreateCommand": "echo base-onCreate",
+	"postStartCommand": "echo base-postStart"
+}

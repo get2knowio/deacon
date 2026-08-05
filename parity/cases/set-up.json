@@ -75,6 +75,75 @@
         "tempdir": true
       },
       "notes": "Closes #483, and is the first case to invoke `set-up` at all (the subcommand joined `CONSUMER_SUBCOMMANDS` / `CONTAINER_SUBCOMMANDS` for it). The claim is the SHAPE of the `--include-merged-configuration` block, which had three defects at once: deacon emitted its flat configuration under a snake_case `merged_configuration` key, with the five lifecycle hooks as SINGULAR fields, where the reference emits `mergedConfiguration` carrying the collected plural arrays. Two operations are needed because the merge has two sources that must both land, in order: `op-up` stamps the workspace config into the container's `devcontainer.metadata` label, and `op-set-up` layers a SECOND, differently-worded config on top with `--config`. So `onCreateCommands` must be `[\"echo base-onCreate\", \"echo overlay-onCreate\"]` — collected, and devcontainer.json-last per the spec's image-metadata Merge Logic. Identical hook text in both sources would have made the collection and the ordering unobservable, which is why the overlay's commands are worded differently rather than repeated. The differential is what pins ORDER (array comparison is positional); the `jsonSubset` assertion is the absolute claim on deacon's side, so a run where BOTH CLIs stopped collecting could not pass. `chan-stdout` is deliberately NOT declared: both sides emit the same document with different key ORDER, which is a difference in serialization rather than in behavior and is exactly what the structured channel exists to see past. Measured against oracle 0.87.0 on this fixture; the two sides' `mergedConfiguration` agree on every key after normalization, with the three synthesized empties (`remoteEnv`, `containerEnv`, `portsAttributes`) elided on both sides by the `drop_absent_optional` rule — the standing `bhv-readconfig-merged-computed-empties-omitted` characterization, not a tolerance this case declares. Image pinned to alpine:3.19 (V18)."
+    },
+    {
+      "id": "case-set-up-configuration-authored",
+      "behaviors": [
+        "bhv-setup-configuration-authored-echo"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-set-up-configuration-authored"
+          ]
+        },
+        {
+          "id": "op-set-up",
+          "subcommand": "set-up",
+          "argv": [
+            "--container-id",
+            "${CONTAINER_ID}",
+            "--config",
+            "${WORKSPACE}/setup-overlay.json",
+            "--include-configuration"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-set-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-set-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "configuration": {
+                "name": "ConformanceSetUpConfigurationOverlay",
+                "postCreateCommand": "echo overlay-postCreate",
+                "configFilePath": {
+                  "$mid": 1,
+                  "scheme": "file",
+                  "path": "<WORKSPACE>/setup-overlay.json",
+                  "fsPath": "<WORKSPACE>/setup-overlay.json"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes #502, the one difference `case-set-up-merged-configuration-shape` measured on this surface and left without a scenario. The claim is that `--include-configuration` reports what the CALLER SUPPLIED — the `--config` document alone — and not what set-up resolved: `mergedConfiguration` (the sibling case) is where the merge belongs, the same authored-vs-resolved contract #490 and #407 settled elsewhere. The fixture is built so the fold is VISIBLE rather than merely absent: the workspace config authors `remoteUser` and `containerEnv`, which `op-up` stamps into the container's `devcontainer.metadata` label, and the overlay authors NEITHER. deacon folded the label into the block, so both appeared there as though the caller had written them; the reference echoes only the overlay. A `jsonSubset` cannot assert a key's ABSENCE, so those two keys are pinned by the DIFFERENTIAL — the reference is the authority on a spec-silent output surface — while the absolute deacon-side claim is `configFilePath`, which deacon omitted entirely and which no CLI emits by accident. Its `scheme` is `file` rather than the `vscode-fileHost` the same reference uses for `read-configuration`, and that falls out of the existing `config_file_path_value` rule (scheme keyed off whether the caller NAMED the file) rather than being a set-up special case. Also measured on the same oracle and NOT asserted here, because both sides agree and a case should claim what it pins: with no `--config` at all the reference emits `\"configuration\": {}` — an empty document, no `configFilePath` — and so does deacon. `chan-stdout` is deliberately NOT declared, for the same key-ordering reason as the sibling case. Measured against oracle 0.87.0 on this fixture; the two sides' `configuration` blocks agree on every key after normalization (`path_token` rewrites the per-side temp workspace to `<WORKSPACE>`), and the case declares no tolerance. Image pinned to alpine:3.19."
     }
   ]
 }
