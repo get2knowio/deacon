@@ -3,13 +3,16 @@
 //! This module provides functionality to collect system information, Docker details,
 //! configuration discovery results, and create support bundles for troubleshooting.
 
-use crate::docker::{CliDocker, Docker};
+use crate::docker::CliDocker;
 use crate::errors::{DeaconError, Result};
 use bytesize::ByteSize;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::Duration;
+use tokio::io::AsyncReadExt;
 use tracing::{debug, info, warn};
 
 /// Macro for printing redacted output
@@ -89,6 +92,46 @@ pub struct DockerDiagnostics {
     pub version: Option<String>,
     pub daemon_running: bool,
     pub info_summary: Option<DockerInfoSummary>,
+    /// Probes that produced no value, each with the reason why.
+    ///
+    /// Omitted when every probe reported — an always-present empty list would
+    /// say nothing. See [`SkippedProbe`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_probes: Vec<SkippedProbe>,
+}
+
+/// A diagnostic probe that produced no value, and why.
+///
+/// `doctor` shells out to the container runtime for several facts, and any of
+/// those calls can take unbounded time on a loaded daemon. Every one of them is
+/// therefore bounded by [`PROBE_TIMEOUT`]. A probe that is bounded out, fails,
+/// or cannot be launched is **reported here** — never silently omitted, and
+/// never replaced with a fabricated value.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkippedProbe {
+    /// Stable probe identifier, e.g. `docker_info`.
+    pub probe: String,
+    /// Always `"skipped"`, so an entry read on its own is self-describing.
+    pub status: String,
+    /// Why the probe produced nothing, e.g.
+    /// ``"`docker info --format json` exceeded the 10s probe timeout"``.
+    pub reason: String,
+}
+
+impl SkippedProbe {
+    /// Record a skipped probe. Construction is also the point where the skip is
+    /// logged, so a skip can never be reported in the output without also being
+    /// audible in the logs.
+    fn new(probe: impl Into<String>, reason: impl Into<String>) -> Self {
+        let probe = probe.into();
+        let reason = reason.into();
+        warn!(probe = %probe, reason = %reason, "doctor probe skipped");
+        Self {
+            probe,
+            status: "skipped".to_string(),
+            reason,
+        }
+    }
 }
 
 /// Summarized Docker info (not full docker info to avoid sensitive data)
@@ -167,6 +210,150 @@ pub struct ResourceInfo {
     pub load_average: Option<(f64, f64, f64)>,
 }
 
+/// Wall-clock bound for a single `doctor` probe that shells out to the
+/// container runtime.
+///
+/// Matches the container environment probe's existing bound
+/// ([`crate::container_env_probe`]'s `probe_timeout`), so deacon has one answer
+/// to "how long may a diagnostic probe take".
+///
+/// Sized against measurement rather than taste (#507). On the daemon that
+/// motivated the bound — ~4.1k images, ~300 volumes, 81 containers —
+/// `docker info` and `docker version` each cost ~0.3s, so 10s leaves better
+/// than an order of magnitude of headroom: a far more loaded daemon still
+/// reports rather than being skipped. It also keeps `doctor`'s worst case at
+/// three bounded probes (~30s) instead of unbounded, comfortably inside the
+/// parity suite's 120s per-invocation limit.
+pub const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Outcome of a bounded probe process.
+enum ProbeOutcome {
+    /// The process exited within the bound.
+    Completed {
+        status: std::process::ExitStatus,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
+    /// The process exceeded the bound and was killed and reaped.
+    TimedOut,
+}
+
+/// What a bounded probe produced: a value, or the reason there is none.
+enum Probed<T> {
+    /// The probe reported.
+    Value(T),
+    /// The probe ran (or was launched) but produced nothing usable.
+    Skipped(SkippedProbe),
+    /// The program could not be launched at all — the runtime CLI is absent.
+    NotLaunched(String),
+}
+
+/// Run `program args…` with a hard wall-clock bound.
+///
+/// The single place `doctor` shells out to a subprocess. Two properties matter
+/// and neither is free:
+///
+/// * **On timeout the child is killed _and reaped_.** [`tokio::process::Child::kill`]
+///   signals and then waits, so a hung daemon call leaves no zombie behind.
+/// * **stdout and stderr are drained concurrently with the wait.** Waiting on
+///   exit without reading the pipes deadlocks any process that outfills a pipe
+///   buffer.
+async fn run_bounded_probe(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> std::io::Result<ProbeOutcome> {
+    let mut child = tokio::process::Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+
+    // `spawn` with piped stdio always populates these; a missing pipe is an I/O
+    // condition to report, not something to unwrap.
+    let mut stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| std::io::Error::other("probe stdout pipe missing"))?;
+    let mut stderr_pipe = child
+        .stderr
+        .take()
+        .ok_or_else(|| std::io::Error::other("probe stderr pipe missing"))?;
+
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let waited = tokio::time::timeout(timeout, async {
+        let (out, err, status) = tokio::join!(
+            stdout_pipe.read_to_end(&mut stdout),
+            stderr_pipe.read_to_end(&mut stderr),
+            child.wait(),
+        );
+        out?;
+        err?;
+        status
+    })
+    .await;
+
+    match waited {
+        Ok(Ok(status)) => Ok(ProbeOutcome::Completed {
+            status,
+            stdout,
+            stderr,
+        }),
+        Ok(Err(e)) => Err(e),
+        Err(_elapsed) => {
+            // Kill AND reap in one call: `kill` sends SIGKILL then waits.
+            if let Err(e) = child.kill().await {
+                debug!("Failed to reap timed-out probe `{}`: {}", program, e);
+            }
+            Ok(ProbeOutcome::TimedOut)
+        }
+    }
+}
+
+/// Run a bounded probe and reduce it to its stdout bytes or a recorded skip.
+///
+/// Every `doctor` runtime probe goes through here, so the skip vocabulary
+/// (timeout, non-zero exit, absent binary) is written once.
+async fn probe_stdout(
+    probe: &str,
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Probed<Vec<u8>> {
+    let display = format!(
+        "`{}`",
+        std::iter::once(program)
+            .chain(args.iter().copied())
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    match run_bounded_probe(program, args, timeout).await {
+        Ok(ProbeOutcome::Completed { status, stdout, .. }) if status.success() => {
+            Probed::Value(stdout)
+        }
+        Ok(ProbeOutcome::Completed { status, stderr, .. }) => Probed::Skipped(SkippedProbe::new(
+            probe,
+            format!(
+                "{} exited with {}: {}",
+                display,
+                status,
+                String::from_utf8_lossy(&stderr).trim()
+            ),
+        )),
+        // `{:?}` on a `Duration` renders "10s" / "250ms" — the bound is stated
+        // in the reason so the reader can tell a slow daemon from a broken one.
+        Ok(ProbeOutcome::TimedOut) => Probed::Skipped(SkippedProbe::new(
+            probe,
+            format!("{} exceeded the {:?} probe timeout", display, timeout),
+        )),
+        Err(e) => Probed::NotLaunched(format!("{} could not be launched: {}", display, e)),
+    }
+}
+
 /// Run the doctor command to collect diagnostics and optionally create a bundle
 pub async fn run_doctor(
     json_output: bool,
@@ -210,7 +397,7 @@ async fn collect_diagnostics(context: &DoctorContext) -> Result<DoctorInfo> {
     let cli_version = crate::version().to_string();
     let host_os = collect_host_os_info();
     let platform = collect_platform_info();
-    let docker_info = collect_docker_info().await;
+    let docker_info = collect_docker_info(PROBE_TIMEOUT).await;
     let disk_space = collect_disk_space_info();
     let config_discovery = collect_config_discovery_info(context);
     let features = collect_features_info();
@@ -289,43 +476,145 @@ fn collect_platform_info() -> PlatformInfo {
     }
 }
 
-/// Collect Docker diagnostics information
-async fn collect_docker_info() -> DockerDiagnostics {
+/// Collect Docker diagnostics information.
+///
+/// Every call into the container runtime here is bounded by `timeout` (see
+/// [`PROBE_TIMEOUT`]), and every bounded-out or failed probe is reported in
+/// `skipped_probes` rather than dropped.
+async fn collect_docker_info(timeout: Duration) -> DockerDiagnostics {
     debug!("Collecting Docker information");
 
     let docker_client = CliDocker::new();
+    let runtime = docker_client.runtime_path().to_string();
+    let mut skipped_probes = Vec::new();
 
-    // Check if Docker is installed
-    let installed = docker_client.check_docker_installed().is_ok();
+    // Probe 1 — the CLI binary itself. A launch failure here IS the "not
+    // installed" signal, so this one bounded async call replaces the previous
+    // pairing of a *blocking* `check_docker_installed()` (a `std::process`
+    // call inside an async fn) with a second, duplicate `--version` exec.
+    let version = match probe_stdout("runtime_version", &runtime, &["--version"], timeout).await {
+        Probed::Value(out) => Some(String::from_utf8_lossy(&out).trim().to_string()),
+        Probed::Skipped(skip) => {
+            skipped_probes.push(skip);
+            None
+        }
+        Probed::NotLaunched(reason) => {
+            debug!("Container runtime not installed: {}", reason);
+            return DockerDiagnostics {
+                installed: false,
+                version: None,
+                daemon_running: false,
+                info_summary: None,
+                skipped_probes,
+            };
+        }
+    };
 
-    if !installed {
-        return DockerDiagnostics {
-            installed: false,
-            version: None,
-            daemon_running: false,
-            info_summary: None,
-        };
-    }
+    // Probe 2 — daemon reachability. `<runtime> version` (unlike `--version`)
+    // round-trips to the daemon, so it is the ping.
+    let daemon_running = match probe_stdout(
+        "daemon_ping",
+        &runtime,
+        &["version", "--format", "json"],
+        timeout,
+    )
+    .await
+    {
+        Probed::Value(_) => true,
+        Probed::Skipped(skip) => {
+            skipped_probes.push(skip);
+            false
+        }
+        Probed::NotLaunched(reason) => {
+            skipped_probes.push(SkippedProbe::new("daemon_ping", reason));
+            false
+        }
+    };
 
-    // Get Docker version
-    let version = docker_client.get_version().await.ok();
-
-    // Check if daemon is running
-    let daemon_running = docker_client.ping().await.is_ok();
-
-    // Get Docker info summary if daemon is running
+    // Probe 3 — daemon counters, via `<runtime> info`.
+    //
+    // NOT `<runtime> system df`, which this probe used to run: `system df`
+    // walks the disk usage of every image, container, volume and build-cache
+    // record and was measured in *minutes* on a loaded daemon (#507), while
+    // `info` returns these very fields in ~0.3s on the same host. The old code
+    // also discarded `system df`'s output entirely and returned hardcoded
+    // zeros and a hardcoded storage driver, so bounding it alone would have
+    // produced a fast fabrication rather than an answer.
     let info_summary = if daemon_running {
-        docker_client.get_info_summary().await.ok()
+        match probe_stdout(
+            "docker_info",
+            &runtime,
+            &["info", "--format", "json"],
+            timeout,
+        )
+        .await
+        {
+            Probed::Value(out) => match parse_info_summary(&out) {
+                Ok(summary) => Some(summary),
+                Err(e) => {
+                    skipped_probes.push(SkippedProbe::new(
+                        "docker_info",
+                        format!("could not parse `{} info --format json`: {}", runtime, e),
+                    ));
+                    None
+                }
+            },
+            Probed::Skipped(skip) => {
+                skipped_probes.push(skip);
+                None
+            }
+            Probed::NotLaunched(reason) => {
+                skipped_probes.push(SkippedProbe::new("docker_info", reason));
+                None
+            }
+        }
     } else {
+        skipped_probes.push(SkippedProbe::new(
+            "docker_info",
+            "the container runtime daemon is not reachable",
+        ));
         None
     };
 
     DockerDiagnostics {
-        installed,
+        installed: true,
         version,
         daemon_running,
         info_summary,
+        skipped_probes,
     }
+}
+
+/// The subset of `<runtime> info --format json` that [`DockerInfoSummary`]
+/// reports. Everything else the daemon returns (registry credentials, proxy
+/// settings, plugin paths) is deliberately not read.
+#[derive(Deserialize)]
+struct DockerInfoRaw {
+    #[serde(rename = "ContainersRunning")]
+    containers_running: Option<u32>,
+    #[serde(rename = "ContainersPaused")]
+    containers_paused: Option<u32>,
+    #[serde(rename = "ContainersStopped")]
+    containers_stopped: Option<u32>,
+    #[serde(rename = "Images")]
+    images: Option<u32>,
+    #[serde(rename = "ServerVersion")]
+    server_version: Option<String>,
+    #[serde(rename = "Driver")]
+    storage_driver: Option<String>,
+}
+
+/// Parse `<runtime> info --format json` into the reported summary.
+fn parse_info_summary(stdout: &[u8]) -> std::result::Result<DockerInfoSummary, serde_json::Error> {
+    let raw: DockerInfoRaw = serde_json::from_slice(stdout)?;
+    Ok(DockerInfoSummary {
+        containers_running: raw.containers_running,
+        containers_paused: raw.containers_paused,
+        containers_stopped: raw.containers_stopped,
+        images: raw.images,
+        server_version: raw.server_version,
+        storage_driver: raw.storage_driver,
+    })
 }
 
 /// Collect disk space information for current directory
@@ -631,6 +920,11 @@ fn print_text_output_with_redaction(
         if let Some(storage) = &summary.storage_driver {
             println_redacted!(redaction_config, "  Storage Driver: {}", storage);
         }
+    }
+    // A skipped probe is stated, not silently dropped: without these lines the
+    // text report is indistinguishable from a runtime that had nothing to say.
+    for line in skipped_probe_lines(&info.docker_info.skipped_probes) {
+        println_redacted!(redaction_config, "{}", line);
     }
     println!();
 
@@ -947,75 +1241,273 @@ pub fn sanitize_secrets(content: &str) -> Result<String> {
 }
 
 impl crate::docker::CliDocker {
-    /// Get Docker version information
+    /// Get the container runtime CLI version, bounded by [`PROBE_TIMEOUT`].
+    ///
+    /// Uses the configured runtime binary rather than a hardcoded `docker`, so
+    /// the reported version is the one deacon would actually drive.
     pub async fn get_version(&self) -> Result<String> {
-        let output = tokio::process::Command::new("docker")
-            .arg("--version")
-            .output()
-            .await
-            .map_err(|e| {
-                DeaconError::Docker(crate::errors::DockerError::CLIError(format!(
-                    "Failed to execute docker --version: {}",
-                    e
-                )))
-            })?;
-
-        if output.status.success() {
-            let version = String::from_utf8(output.stdout)
-                .map_err(|e| {
-                    DeaconError::Docker(crate::errors::DockerError::CLIError(format!(
-                        "Invalid UTF-8 in docker version output: {}",
-                        e
-                    )))
-                })?
-                .trim()
-                .to_string();
-            Ok(version)
-        } else {
-            Err(DeaconError::Docker(crate::errors::DockerError::CLIError(
-                "Failed to get Docker version".to_string(),
-            )))
+        match probe_stdout(
+            "runtime_version",
+            self.runtime_path(),
+            &["--version"],
+            PROBE_TIMEOUT,
+        )
+        .await
+        {
+            Probed::Value(out) => Ok(String::from_utf8_lossy(&out).trim().to_string()),
+            Probed::Skipped(skip) => Err(probe_error(skip.reason)),
+            Probed::NotLaunched(reason) => Err(probe_error(reason)),
         }
     }
 
-    /// Get summarized Docker info (not full docker info to avoid sensitive data)
+    /// Get summarized runtime info, bounded by [`PROBE_TIMEOUT`].
+    ///
+    /// Reads `<runtime> info --format json` and reports what it says — see
+    /// [`collect_docker_info`] for why this is not `system df`.
     pub async fn get_info_summary(&self) -> Result<DockerInfoSummary> {
-        let output = tokio::process::Command::new("docker")
-            .arg("system")
-            .arg("df")
-            .arg("--format")
-            .arg("json")
-            .output()
-            .await
-            .map_err(|e| {
-                DeaconError::Docker(crate::errors::DockerError::CLIError(format!(
-                    "Failed to execute docker system df: {}",
+        match probe_stdout(
+            "docker_info",
+            self.runtime_path(),
+            &["info", "--format", "json"],
+            PROBE_TIMEOUT,
+        )
+        .await
+        {
+            Probed::Value(out) => parse_info_summary(&out).map_err(|e| {
+                probe_error(format!(
+                    "could not parse `{} info --format json`: {}",
+                    self.runtime_path(),
                     e
-                )))
-            })?;
-
-        if output.status.success() {
-            // For now, return a basic summary. In a real implementation,
-            // this would parse docker info and extract safe, non-sensitive information
-            Ok(DockerInfoSummary {
-                containers_running: Some(0),
-                containers_paused: Some(0),
-                containers_stopped: Some(0),
-                images: Some(0),
-                server_version: None,
-                storage_driver: Some("overlay2".to_string()),
-            })
-        } else {
-            Err(DeaconError::Docker(crate::errors::DockerError::CLIError(
-                "Failed to get Docker info".to_string(),
-            )))
+                ))
+            }),
+            Probed::Skipped(skip) => Err(probe_error(skip.reason)),
+            Probed::NotLaunched(reason) => Err(probe_error(reason)),
         }
     }
+}
+
+/// Wrap a probe failure reason as a runtime CLI error.
+fn probe_error(reason: impl Into<String>) -> DeaconError {
+    DeaconError::Docker(crate::errors::DockerError::CLIError(reason.into()))
+}
+
+/// Render skipped probes for the human-readable report.
+///
+/// The text mode's counterpart to the `skipped_probes` array in `--json`: the
+/// two modes must agree that a probe was skipped and why, so this is the single
+/// definition of the text shape and the printer emits exactly what it returns.
+fn skipped_probe_lines(skipped: &[SkippedProbe]) -> Vec<String> {
+    skipped
+        .iter()
+        .map(|skip| format!("  Probe {}: {} ({})", skip.probe, skip.status, skip.reason))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A realistic `docker info --format json` payload, trimmed to the keys the
+    /// summary reads plus a few it must ignore.
+    const INFO_JSON: &str = r#"{
+        "Containers": 81,
+        "ContainersRunning": 79,
+        "ContainersPaused": 1,
+        "ContainersStopped": 1,
+        "Images": 4068,
+        "ServerVersion": "29.6.2-1",
+        "Driver": "overlayfs",
+        "RegistryConfig": {"IndexConfigs": {}},
+        "HttpProxy": "http://proxy.example:3128"
+    }"#;
+
+    #[test]
+    fn test_parse_info_summary_reports_what_the_daemon_said() {
+        let summary = parse_info_summary(INFO_JSON.as_bytes()).expect("info json should parse");
+
+        // The point of the change behind #507: these are the daemon's numbers,
+        // not the hardcoded zeros the `system df` probe used to fabricate.
+        assert_eq!(summary.containers_running, Some(79));
+        assert_eq!(summary.containers_paused, Some(1));
+        assert_eq!(summary.containers_stopped, Some(1));
+        assert_eq!(summary.images, Some(4068));
+        assert_eq!(summary.server_version.as_deref(), Some("29.6.2-1"));
+        assert_eq!(summary.storage_driver.as_deref(), Some("overlayfs"));
+    }
+
+    #[test]
+    fn test_parse_info_summary_rejects_non_json() {
+        assert!(parse_info_summary(b"Cannot connect to the Docker daemon").is_err());
+    }
+
+    /// The bound must actually bound: a probe that outlives it returns promptly
+    /// rather than waiting for the child.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_bounded_probe_times_out_instead_of_hanging() {
+        let started = std::time::Instant::now();
+        let outcome = run_bounded_probe("sleep", &["30"], Duration::from_millis(200))
+            .await
+            .expect("spawning `sleep` should succeed");
+
+        assert!(matches!(outcome, ProbeOutcome::TimedOut));
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the bound did not take effect: probe took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// A timed-out probe is killed AND reaped. Without the reap, every slow
+    /// `doctor` run would leave a zombie behind.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn test_timed_out_probe_leaves_no_zombie() {
+        let outcome = run_bounded_probe("sleep", &["30"], Duration::from_millis(200))
+            .await
+            .expect("spawning `sleep` should succeed");
+        assert!(matches!(outcome, ProbeOutcome::TimedOut));
+
+        let own_pid = std::process::id();
+        let mut zombies = Vec::new();
+        for entry in fs::read_dir("/proc")
+            .expect("/proc should be readable")
+            .flatten()
+        {
+            let Ok(stat) = fs::read_to_string(entry.path().join("stat")) else {
+                continue;
+            };
+            // `stat` is "pid (comm) state ppid …"; comm can contain spaces and
+            // parens, so split after the final ')'.
+            let Some(rest) = stat.rsplit_once(')').map(|(_, rest)| rest) else {
+                continue;
+            };
+            let fields: Vec<&str> = rest.split_whitespace().collect();
+            let (Some(state), Some(ppid)) = (fields.first(), fields.get(1)) else {
+                continue;
+            };
+            if *state == "Z" && ppid.parse::<u32>() == Ok(own_pid) {
+                zombies.push(entry.file_name().to_string_lossy().to_string());
+            }
+        }
+
+        assert!(
+            zombies.is_empty(),
+            "timed-out probe was not reaped; zombie children: {:?}",
+            zombies
+        );
+    }
+
+    /// A timed-out probe becomes a reported skip naming the probe and the bound.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_timed_out_probe_is_reported_as_skipped() {
+        let probed =
+            probe_stdout("docker_info", "sleep", &["30"], Duration::from_millis(200)).await;
+
+        let Probed::Skipped(skip) = probed else {
+            panic!("a probe that outran its bound must be reported as skipped");
+        };
+        assert_eq!(skip.probe, "docker_info");
+        assert_eq!(skip.status, "skipped");
+        assert!(
+            skip.reason.contains("exceeded the 200ms probe timeout"),
+            "the reason must state the bound, got: {}",
+            skip.reason
+        );
+    }
+
+    /// A non-zero exit is a skip too — reported, not silently swallowed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_failing_probe_is_reported_as_skipped() {
+        let probed = probe_stdout("docker_info", "false", &[], Duration::from_secs(5)).await;
+
+        let Probed::Skipped(skip) = probed else {
+            panic!("a probe exiting non-zero must be reported as skipped");
+        };
+        assert_eq!(skip.probe, "docker_info");
+        assert!(skip.reason.contains("exited with"), "got: {}", skip.reason);
+    }
+
+    /// An absent binary is distinguishable from a slow one — that distinction is
+    /// what lets `collect_docker_info` report `installed: false`.
+    #[tokio::test]
+    async fn test_absent_binary_is_not_launched() {
+        let probed = probe_stdout(
+            "runtime_version",
+            "deacon-no-such-runtime-binary",
+            &["--version"],
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(matches!(probed, Probed::NotLaunched(_)));
+    }
+
+    /// Both output modes must carry the skip. JSON mode: the array is present
+    /// with the self-describing entry shape.
+    #[test]
+    fn test_json_mode_carries_skipped_probe_shape() {
+        let diagnostics = DockerDiagnostics {
+            installed: true,
+            version: Some("Docker version 29.6.2".to_string()),
+            daemon_running: true,
+            info_summary: None,
+            skipped_probes: vec![SkippedProbe::new(
+                "docker_info",
+                "`docker info --format json` exceeded the 10s probe timeout",
+            )],
+        };
+
+        let json = serde_json::to_value(&diagnostics).expect("diagnostics should serialize");
+        let entry = &json["skipped_probes"][0];
+        assert_eq!(entry["probe"], "docker_info");
+        assert_eq!(entry["status"], "skipped");
+        assert_eq!(
+            entry["reason"],
+            "`docker info --format json` exceeded the 10s probe timeout"
+        );
+        // A skip is never a fabricated value.
+        assert!(json["info_summary"].is_null());
+    }
+
+    /// …and nothing is claimed when nothing was skipped.
+    #[test]
+    fn test_json_mode_omits_empty_skipped_probes() {
+        let diagnostics = DockerDiagnostics {
+            installed: true,
+            version: None,
+            daemon_running: true,
+            info_summary: None,
+            skipped_probes: Vec::new(),
+        };
+
+        let json = serde_json::to_value(&diagnostics).expect("diagnostics should serialize");
+        assert!(json.get("skipped_probes").is_none());
+    }
+
+    /// Text mode: the same fact, in the human report.
+    #[test]
+    fn test_text_mode_carries_skipped_probe_shape() {
+        let lines = skipped_probe_lines(&[SkippedProbe::new(
+            "docker_info",
+            "`docker info --format json` exceeded the 10s probe timeout",
+        )]);
+
+        assert_eq!(
+            lines,
+            vec![
+                "  Probe docker_info: skipped (`docker info --format json` exceeded the 10s probe timeout)"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_text_mode_says_nothing_when_nothing_skipped() {
+        assert!(skipped_probe_lines(&[]).is_empty());
+    }
 
     #[test]
     fn test_sanitize_secrets_quoted_keys() {
