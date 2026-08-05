@@ -52,7 +52,7 @@ use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
 /// Canonicalize a feature ID by trimming whitespace
@@ -476,6 +476,144 @@ pub fn feature_mount_to_string(mount: &serde_json::Value) -> Result<String> {
     }
 }
 
+/// Resolve a locally-referenced Feature (`./…`, `../…`, or an absolute path) to
+/// its directory on disk, enforcing the specification's containment rule.
+///
+/// `config_dir` is the folder holding the ACTIVE `devcontainer.json`: local
+/// Feature paths are config-relative, never workspace-relative, so
+/// `.devcontainer/devcontainer.json` + `./localFeatureA` and
+/// `.devcontainer.json` + `./.devcontainer/localFeatureA` name the same
+/// directory. `workspace_root` anchors the containment rule independently of
+/// where that config file sits.
+///
+/// `devcontainer-features-distribution.md` §Locally Referenced Features: "A
+/// local Feature's source code **must** be contained within a sub-folder of the
+/// `.devcontainer/ folder`." deacon used to resolve any path the author wrote and
+/// exit 0 on a document the specification forbids (#488); the reference CLI
+/// rejects it against the same anchor, `<workspace root>/.devcontainer`.
+pub fn resolve_local_feature_dir(
+    feature_id: &str,
+    config_dir: &Path,
+    workspace_root: &Path,
+) -> Result<PathBuf> {
+    let resolved = config_dir.join(feature_id);
+    let canonical_path = resolved
+        .canonicalize()
+        .map_err(|e| FeatureError::Validation {
+            message: format!(
+                "Local feature path '{}' (resolved to '{}' relative to {}) is not accessible: {}",
+                feature_id,
+                resolved.display(),
+                config_dir.display(),
+                e
+            ),
+        })?;
+
+    // Compare canonical-to-canonical: the workspace folder frequently reaches us
+    // through a symlink (`/tmp` on macOS, a `tempfile` workspace here), and a
+    // lexical prefix test against the uncanonicalized root would reject a
+    // perfectly contained Feature.
+    let containment_root = workspace_root.join(".devcontainer");
+    let containment_root = containment_root.canonicalize().unwrap_or_else(|_| {
+        // No `.devcontainer` folder at all — every local Feature is outside it.
+        // Still canonicalize the workspace so the reported path is the real one.
+        workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_root.to_path_buf())
+            .join(".devcontainer")
+    });
+
+    if !canonical_path.starts_with(&containment_root) {
+        return Err(FeatureError::Validation {
+            message: format!(
+                "Local file path parse error. Resolved path must be a child of the .devcontainer/ folder. \
+                 Feature '{}' resolved to '{}', which is outside '{}' \
+                 (devcontainer-features-distribution.md, Locally Referenced Features)",
+                feature_id,
+                canonical_path.display(),
+                containment_root.display()
+            ),
+        }
+        .into());
+    }
+
+    Ok(canonical_path)
+}
+
+/// Migrate a Feature's v1-era VS Code properties into `customizations.vscode`.
+///
+/// `devcontainer-feature.json` predates the `customizations` block and let a
+/// Feature declare `extensions` / `settings` at its top level. The reference CLI
+/// rewrites both into `customizations.vscode` while reading the document, so
+/// every downstream consumer sees exactly one shape; deacon models neither
+/// legacy key, so without this the authored values were dropped outright (#487).
+///
+/// The merge rules mirror the reference exactly: `extensions` is APPENDED to any
+/// already-authored `customizations.vscode.extensions`, and `settings` is merged
+/// UNDER them (an already-authored `customizations.vscode.settings` key wins).
+/// The legacy keys are removed.
+///
+/// A `customizations` (or `customizations.vscode`) that is present but not an
+/// object is left untouched, legacy keys and all: rewriting it would fabricate
+/// structure the author did not write, and the typed parse that follows reports
+/// the real mistake.
+fn migrate_legacy_vscode_properties(value: &mut serde_json::Value) {
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    if !root.contains_key("extensions") && !root.contains_key("settings") {
+        return;
+    }
+    // `customizations` is lifted out so the legacy keys can be removed without
+    // borrowing `root` twice; it goes back below, migrated or untouched.
+    let had_customizations = root.contains_key("customizations");
+    let mut customizations = root
+        .remove("customizations")
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+
+    let mut migrated = false;
+    if let Some(block) = customizations.as_object_mut() {
+        let vscode = block
+            .entry("vscode")
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        if let Some(vscode) = vscode.as_object_mut() {
+            if let Some(legacy) = root.remove("extensions") {
+                let mut merged = match vscode.remove("extensions") {
+                    Some(serde_json::Value::Array(existing)) => existing,
+                    _ => Vec::new(),
+                };
+                match legacy {
+                    serde_json::Value::Array(items) => merged.extend(items),
+                    other => merged.push(other),
+                }
+                vscode.insert("extensions".to_string(), serde_json::Value::Array(merged));
+            }
+            if let Some(legacy) = root.remove("settings") {
+                let merged = match (legacy, vscode.remove("settings")) {
+                    (
+                        serde_json::Value::Object(legacy),
+                        Some(serde_json::Value::Object(existing)),
+                    ) => {
+                        let mut merged = legacy;
+                        merged.extend(existing); // already-authored customizations win
+                        serde_json::Value::Object(merged)
+                    }
+                    // An authored `customizations.vscode.settings` of any other
+                    // shape still wins wholesale, per the reference's spread order.
+                    (_, Some(existing)) => existing,
+                    (legacy, None) => legacy,
+                };
+                vscode.insert("settings".to_string(), merged);
+            }
+            migrated = true;
+        }
+    }
+
+    if migrated || had_customizations {
+        root.insert("customizations".to_string(), customizations);
+    }
+}
+
 /// Parse feature metadata from a devcontainer-feature.json file
 ///
 /// This function only parses the JSON structure from the file. **Callers are responsible
@@ -510,9 +648,21 @@ pub fn parse_feature_metadata(path: &Path) -> Result<FeatureMetadata> {
     // Read file content
     let content = std::fs::read_to_string(path).map_err(FeatureError::Io)?;
 
-    // Parse JSON
-    let metadata: FeatureMetadata =
+    // Parse JSON. The document is taken as a `Value` first so the v1-era
+    // `extensions` / `settings` properties can be migrated into
+    // `customizations.vscode` BEFORE typing — `FeatureMetadata` models neither,
+    // so a direct `from_str` dropped whatever the Feature author wrote there
+    // (#487). This is the single chokepoint every consumer of a Feature's
+    // metadata goes through (the OCI fetcher, every local-Feature ingress), so
+    // the migrated shape reaches `featuresConfiguration`, the
+    // `devcontainer.metadata` label and lifecycle merging alike.
+    let mut raw: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| FeatureError::Parsing {
+            message: e.to_string(),
+        })?;
+    migrate_legacy_vscode_properties(&mut raw);
+    let metadata: FeatureMetadata =
+        serde_json::from_value(raw).map_err(|e| FeatureError::Parsing {
             message: e.to_string(),
         })?;
 
@@ -1969,6 +2119,145 @@ mod tests {
                 .as_ref()
                 .and_then(|value| value.pointer("/vscode/extensions/0")),
             Some(&serde_json::Value::String("ms-vscode.cpptools".to_string()))
+        );
+    }
+
+    /// #487: the v1-era top-level `extensions` / `settings` on a Feature must
+    /// land in `customizations.vscode`, matching the reference CLI — deacon
+    /// models neither key, so before this they were dropped outright.
+    #[test]
+    fn test_parse_feature_metadata_migrates_legacy_vscode_properties() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            r#"{{
+                "id": "localFeatureB",
+                "version": "1.0.0",
+                "extensions": ["ms-dotnettools.csharp"],
+                "settings": {{ "files.watcherExclude": {{ "**/test/**": true }} }}
+            }}"#
+        )
+        .unwrap();
+
+        let metadata = parse_feature_metadata(file.path()).unwrap();
+        let customizations = metadata.customizations.expect("migrated customizations");
+        assert_eq!(
+            customizations.pointer("/vscode/extensions"),
+            Some(&serde_json::json!(["ms-dotnettools.csharp"]))
+        );
+        assert_eq!(
+            customizations.pointer("/vscode/settings"),
+            Some(&serde_json::json!({ "files.watcherExclude": { "**/test/**": true } }))
+        );
+    }
+
+    /// The merge rules mirror the reference exactly: legacy `extensions` are
+    /// APPENDED after already-authored ones, and legacy `settings` are merged
+    /// UNDER them (the authored `customizations.vscode.settings` key wins).
+    #[test]
+    fn test_legacy_vscode_properties_merge_with_authored_customizations() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            r#"{{
+                "id": "both",
+                "extensions": ["legacy.ext"],
+                "settings": {{ "shared": "legacy", "only.legacy": 1 }},
+                "customizations": {{
+                    "vscode": {{
+                        "extensions": ["authored.ext"],
+                        "settings": {{ "shared": "authored" }}
+                    }},
+                    "codespaces": {{ "kept": true }}
+                }}
+            }}"#
+        )
+        .unwrap();
+
+        let metadata = parse_feature_metadata(file.path()).unwrap();
+        let customizations = metadata.customizations.expect("customizations");
+        assert_eq!(
+            customizations.pointer("/vscode/extensions"),
+            Some(&serde_json::json!(["authored.ext", "legacy.ext"])),
+            "authored extensions come first, legacy are appended"
+        );
+        assert_eq!(
+            customizations.pointer("/vscode/settings"),
+            Some(&serde_json::json!({ "shared": "authored", "only.legacy": 1 })),
+            "authored settings win on conflict; legacy-only keys survive"
+        );
+        assert_eq!(
+            customizations.pointer("/codespaces/kept"),
+            Some(&serde_json::Value::Bool(true)),
+            "unrelated product customizations are untouched"
+        );
+    }
+
+    /// A Feature that authors NEITHER legacy key must not grow an empty
+    /// `customizations` block — the migration is a rewrite, not an injection.
+    #[test]
+    fn test_no_legacy_properties_leaves_customizations_absent() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, r#"{{ "id": "plain", "version": "1.0.0" }}"#).unwrap();
+        let metadata = parse_feature_metadata(file.path()).unwrap();
+        assert!(metadata.customizations.is_none());
+    }
+
+    /// #488: `devcontainer-features-distribution.md` §Locally Referenced
+    /// Features — the containment root is `<workspace>/.devcontainer`, anchored
+    /// on the WORKSPACE, while the path itself resolves against the config's own
+    /// directory. Both fixture shapes the reference CLI ships must pass.
+    #[test]
+    fn test_resolve_local_feature_dir_accepts_contained_paths() {
+        let ws = tempfile::tempdir().unwrap();
+        let feature = ws.path().join(".devcontainer/localFeatureA");
+        std::fs::create_dir_all(&feature).unwrap();
+
+        // Config at `.devcontainer/devcontainer.json` naming `./localFeatureA`.
+        let from_devcontainer = resolve_local_feature_dir(
+            "./localFeatureA",
+            &ws.path().join(".devcontainer"),
+            ws.path(),
+        )
+        .expect("config inside .devcontainer resolves");
+        // Config at `.devcontainer.json` (workspace root) naming the same dir.
+        let from_root =
+            resolve_local_feature_dir("./.devcontainer/localFeatureA", ws.path(), ws.path())
+                .expect("config at the workspace root resolves");
+        assert_eq!(from_devcontainer, from_root);
+    }
+
+    #[test]
+    fn test_resolve_local_feature_dir_rejects_paths_outside_devcontainer() {
+        let ws = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(ws.path().join(".devcontainer")).unwrap();
+        let outside = ws.path().join("local-features/localFeatureA");
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let err = resolve_local_feature_dir("./local-features/localFeatureA", ws.path(), ws.path())
+            .expect_err("a Feature outside .devcontainer/ must be rejected");
+        assert!(
+            err.to_string()
+                .contains("must be a child of the .devcontainer/ folder"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// A workspace with no `.devcontainer` FOLDER at all (config is
+    /// `.devcontainer.json` at the root) contains no legal local Feature —
+    /// this is the exact upstream `invalid-configs` fixture behind #488.
+    #[test]
+    fn test_resolve_local_feature_dir_rejects_when_no_devcontainer_folder_exists() {
+        let ws = tempfile::tempdir().unwrap();
+        let feature = ws.path().join("local-features/localFeatureA");
+        std::fs::create_dir_all(&feature).unwrap();
+
+        let err = resolve_local_feature_dir("./local-features/localFeatureA", ws.path(), ws.path())
+            .expect_err("no .devcontainer/ folder means nothing is contained");
+        assert!(
+            err.to_string()
+                .contains("must be a child of the .devcontainer/ folder"),
+            "unexpected error: {err}"
         );
     }
 

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::features::{
     FeatureDependencyResolver, OptionValue, ResolvedFeature, canonical_feature_id,
-    parse_feature_metadata,
+    parse_feature_metadata, resolve_local_feature_dir,
 };
 use deacon_core::oci::{FeatureFetcher, FeatureRef, HttpClient};
 use deacon_core::registry_parser::parse_registry_reference;
@@ -29,6 +29,7 @@ pub(crate) async fn resolve_one_feature<C: HttpClient>(
     feature_id: &str,
     feature_value: &serde_json::Value,
     config_dir: &Path,
+    workspace_root: &Path,
     fetcher: &FeatureFetcher<C>,
 ) -> Result<ResolvedFeature> {
     let is_local = feature_id.starts_with("./")
@@ -36,16 +37,7 @@ pub(crate) async fn resolve_one_feature<C: HttpClient>(
         || feature_id.starts_with('/');
 
     let (canonical_id, source_string, metadata) = if is_local {
-        let resolved = config_dir.join(feature_id);
-        let canonical_path = resolved.canonicalize().map_err(|e| {
-            anyhow::anyhow!(
-                "Local feature path '{}' (resolved to '{}' relative to {}) is not accessible: {}",
-                feature_id,
-                resolved.display(),
-                config_dir.display(),
-                e
-            )
-        })?;
+        let canonical_path = resolve_local_feature_dir(feature_id, config_dir, workspace_root)?;
         let metadata_path = canonical_path.join("devcontainer-feature.json");
         if !metadata_path.exists() {
             anyhow::bail!(
@@ -134,6 +126,7 @@ fn options_from_value(feature_value: &serde_json::Value) -> HashMap<String, Opti
 pub(crate) async fn resolve_features_ordered<C: HttpClient>(
     config: &DevContainerConfig,
     config_dir: &Path,
+    workspace_root: &Path,
     fetcher: &FeatureFetcher<C>,
 ) -> Result<Vec<ResolvedFeature>> {
     let features_map = match config.features().as_object() {
@@ -144,8 +137,16 @@ pub(crate) async fn resolve_features_ordered<C: HttpClient>(
     let mut resolved_features = Vec::with_capacity(features_map.len());
 
     for (feature_id, feature_value) in features_map {
-        resolved_features
-            .push(resolve_one_feature(feature_id, feature_value, config_dir, fetcher).await?);
+        resolved_features.push(
+            resolve_one_feature(
+                feature_id,
+                feature_value,
+                config_dir,
+                workspace_root,
+                fetcher,
+            )
+            .await?,
+        );
     }
 
     // Auto-install transitive `dependsOn` (hard) dependencies — parity with the
@@ -165,7 +166,9 @@ pub(crate) async fn resolve_features_ordered<C: HttpClient>(
             .collect();
         deps.sort_by(|a, b| a.0.cmp(&b.0)); // deterministic despite the unordered map
         for (dep_key, dep_value) in deps {
-            let dep = resolve_one_feature(&dep_key, &dep_value, config_dir, fetcher).await?;
+            let dep =
+                resolve_one_feature(&dep_key, &dep_value, config_dir, workspace_root, fetcher)
+                    .await?;
             // Matched on the RESOURCE NAME (id without version): a hard dependency is
             // usually written unpinned, and a user who declared that Feature at a
             // specific version has already satisfied it. Only the user's own two-version
@@ -213,10 +216,17 @@ mod tests {
     use super::*;
     use deacon_core::oci::default_fetcher;
 
+    /// The config directory of a workspace laid out the way the spec requires:
+    /// local Features live under `<workspace>/.devcontainer/`, which is also the
+    /// containment root `resolve_local_feature_dir` enforces (#488).
+    fn config_dir_of(workspace: &Path) -> PathBuf {
+        workspace.join(".devcontainer")
+    }
+
     #[tokio::test]
     async fn resolves_local_feature_with_metadata() {
         let dir = tempfile::tempdir().unwrap();
-        let feat = dir.path().join("features/hi");
+        let feat = config_dir_of(dir.path()).join("features/hi");
         std::fs::create_dir_all(&feat).unwrap();
         std::fs::write(
             feat.join("devcontainer-feature.json"),
@@ -231,9 +241,10 @@ mod tests {
                 .unwrap();
 
         let fetcher = default_fetcher().unwrap();
-        let resolved = resolve_features_ordered(&config, dir.path(), &fetcher)
-            .await
-            .expect("local feature resolves without network");
+        let resolved =
+            resolve_features_ordered(&config, &config_dir_of(dir.path()), dir.path(), &fetcher)
+                .await
+                .expect("local feature resolves without network");
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].metadata.name.as_deref(), Some("Hi"));
         assert!(resolved[0].metadata.post_create_command.is_some());
@@ -245,7 +256,7 @@ mod tests {
         // declared. The reference auto-installs "lib" — so must we, and "lib"
         // must order before "app" (dependency edge).
         let dir = tempfile::tempdir().unwrap();
-        let feats = dir.path().join("features");
+        let feats = config_dir_of(dir.path()).join("features");
         for (name, body) in [
             (
                 "lib",
@@ -267,9 +278,10 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "features": { "./features/app": {} } }))
                 .unwrap();
         let fetcher = default_fetcher().unwrap();
-        let resolved = resolve_features_ordered(&config, dir.path(), &fetcher)
-            .await
-            .expect("transitive dependsOn resolves");
+        let resolved =
+            resolve_features_ordered(&config, &config_dir_of(dir.path()), dir.path(), &fetcher)
+                .await
+                .expect("transitive dependsOn resolves");
 
         let names: Vec<&str> = resolved
             .iter()
@@ -296,24 +308,60 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = DevContainerConfig::default();
         let fetcher = default_fetcher().unwrap();
-        let resolved = resolve_features_ordered(&config, dir.path(), &fetcher)
-            .await
-            .unwrap();
+        let resolved =
+            resolve_features_ordered(&config, &config_dir_of(dir.path()), dir.path(), &fetcher)
+                .await
+                .unwrap();
         assert!(resolved.is_empty());
     }
 
     #[tokio::test]
     async fn missing_local_feature_fails_fast() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(config_dir_of(dir.path())).unwrap();
         let config: DevContainerConfig =
             serde_json::from_value(serde_json::json!({ "features": { "./features/nope": {} } }))
                 .unwrap();
         let fetcher = default_fetcher().unwrap();
-        let err = resolve_features_ordered(&config, dir.path(), &fetcher)
-            .await
-            .expect_err("missing local feature must error");
+        let err =
+            resolve_features_ordered(&config, &config_dir_of(dir.path()), dir.path(), &fetcher)
+                .await
+                .expect_err("missing local feature must error");
         assert!(
             err.to_string().contains("not accessible") || err.to_string().contains("nope"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// #488: `devcontainer-features-distribution.md` §Locally Referenced
+    /// Features requires a local Feature to live under `.devcontainer/`. A
+    /// Feature that exists but sits outside it must be REJECTED, not resolved —
+    /// deacon used to resolve it happily where the reference CLI exits 1.
+    #[tokio::test]
+    async fn local_feature_outside_devcontainer_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        // The Feature is real and parseable — only its LOCATION is illegal.
+        let feat = dir.path().join("local-features/hi");
+        std::fs::create_dir_all(&feat).unwrap();
+        std::fs::write(
+            feat.join("devcontainer-feature.json"),
+            r#"{ "id": "hi", "version": "1.0.0", "name": "Hi" }"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(config_dir_of(dir.path())).unwrap();
+
+        let config: DevContainerConfig = serde_json::from_value(
+            serde_json::json!({ "features": { "../local-features/hi": {} } }),
+        )
+        .unwrap();
+        let fetcher = default_fetcher().unwrap();
+        let err =
+            resolve_features_ordered(&config, &config_dir_of(dir.path()), dir.path(), &fetcher)
+                .await
+                .expect_err("a local Feature outside .devcontainer/ must be rejected");
+        assert!(
+            err.to_string()
+                .contains("must be a child of the .devcontainer/ folder"),
             "unexpected error: {err}"
         );
     }

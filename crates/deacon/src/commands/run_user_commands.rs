@@ -305,6 +305,7 @@ async fn execute_lifecycle_commands(
     let resolved_features = crate::commands::shared::feature_resolver::resolve_features_ordered(
         config,
         &config_dir,
+        workspace_folder,
         &fetcher,
     )
     .await
