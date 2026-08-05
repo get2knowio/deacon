@@ -4105,7 +4105,8 @@
     {
       "id": "case-readconfig-upstream-local-feature-inside-devcontainer",
       "behaviors": [
-        "bhv-features-local-path-relative-to-config-dir"
+        "bhv-features-local-path-relative-to-config-dir",
+        "bhv-features-legacy-vscode-properties-dropped"
       ],
       "context": [],
       "oracleType": "live-differential",
@@ -4141,7 +4142,8 @@
     {
       "id": "case-readconfig-upstream-local-feature-config-at-workspace-root",
       "behaviors": [
-        "bhv-features-local-path-from-root-config"
+        "bhv-features-local-path-from-root-config",
+        "bhv-features-legacy-vscode-properties-dropped"
       ],
       "context": [],
       "oracleType": "live-differential",

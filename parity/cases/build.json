@@ -919,7 +919,8 @@
     {
       "id": "case-build-upstream-target-and-options",
       "behaviors": [
-        "bhv-build-target-and-build-options"
+        "bhv-build-target-and-build-options",
+        "bhv-build-options-passed-through"
       ],
       "context": [],
       "oracleType": "live-differential",
