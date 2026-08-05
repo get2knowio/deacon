@@ -469,10 +469,14 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     let mut authored_values: HashMap<String, serde_json::Value> =
         HashMap::with_capacity(features_map.len());
 
-    // Canonical id -> the id the configuration actually wrote, recorded only when
-    // canonicalization rewrote it (a bare deprecated v1 id, #491). Such an id
-    // carries no version component, so it is also its own
-    // `userFeatureIdWithoutVersion`.
+    // Install key -> the id the CONFIGURATION wrote, for every Feature. The
+    // reference reports that id verbatim in `sourceInformation.userFeatureId`,
+    // never the reference it resolved against: a bare deprecated v1 id stays
+    // `terraform` (#491) and an id with no version stays untagged rather than
+    // gaining `:latest` (#490). This is the same canonical -> authored carry the
+    // `up` staging path keeps for the lockfile (`user_id_by_canonical`), keyed
+    // like `authored_values` so the several instances one Feature may have —
+    // one per requested option set (#489) — each report their own.
     let mut authored_user_ids: HashMap<String, String> = HashMap::new();
 
     for (feature_id, feature_value) in features_map {
@@ -511,12 +515,6 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             let canonical_ref = deacon_core::feature_ref::canonicalize_user_feature_id(feature_id)?;
             let (registry_url, namespace, name, tag) = parse_registry_reference(&canonical_ref)?;
             let feature_ref = FeatureRef::new(registry_url, namespace, name, tag);
-            if canonical_ref != *feature_id {
-                // The reference CLI reports the id the CONFIGURATION wrote, not
-                // the one it resolved against — keep the original for the
-                // `userFeatureId` fields below.
-                authored_user_ids.insert(feature_ref.reference(), feature_id.clone());
-            }
             let downloaded = fetcher
                 .fetch_feature(&feature_ref)
                 .await
@@ -570,6 +568,7 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             metadata: downloaded_metadata,
         };
         authored_values.insert(resolved.install_key(), feature_value.clone());
+        authored_user_ids.insert(resolved.install_key(), feature_id.clone());
         resolved_features.push(resolved);
     }
 
@@ -602,6 +601,10 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
                 &dep,
             ) {
                 authored_values.insert(dep.install_key(), dep_value.clone());
+                // A `dependsOn` target is declared by the Feature rather than by
+                // the configuration, but it reaches `userFeatureId` through the
+                // same field and the reference reports it just as written.
+                authored_user_ids.insert(dep.install_key(), dep_key.clone());
                 resolved_features.push(dep);
             }
         }
@@ -700,14 +703,19 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
                 })?;
             let repository = feature_ref.repository(); // namespace/name
             let resource = format!("{}/{}", registry_url, repository);
-            // userFeatureIdWithoutVersion == registry/namespace/name (no tag),
-            // except for a bare deprecated v1 id, which the reference reports
-            // verbatim on both fields (#491).
-            let (user_feature_id, user_feature_id_without_version) =
-                match authored_user_ids.get(&resolved.id) {
-                    Some(authored) => (authored.clone(), authored.clone()),
-                    None => (resolved.source.clone(), resource.clone()),
-                };
+            // Both fields report the id the CONFIGURATION wrote, never the
+            // resolved reference (#490/#491): `userFeatureIdWithoutVersion` is
+            // that id with its version component stripped, which for an id
+            // authored without one is the id itself. Re-deriving it from the
+            // resolved `resource` would silently re-canonicalize a bare v1 id and
+            // append a `:latest` nobody wrote.
+            let user_feature_id = authored_user_ids
+                .get(&resolved.install_key())
+                .cloned()
+                .unwrap_or_else(|| resolved.source.clone());
+            let user_feature_id_without_version =
+                deacon_core::feature_ref::strip_user_feature_id_version(&user_feature_id)
+                    .to_string();
             let version = feature_ref.tag().to_string();
             // A digest-pinned reference carries `digest`; a tag reference carries
             // `tag`. A tag cannot contain `:`, so the algorithm separator of a

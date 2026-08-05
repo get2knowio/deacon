@@ -614,28 +614,42 @@ pub fn resolve_local_feature_dir(
     Ok(canonical_path)
 }
 
-/// Migrate a Feature's v1-era VS Code properties into `customizations.vscode`.
+/// Migrate a document's v1-era VS Code properties into `customizations.vscode`.
 ///
-/// `devcontainer-feature.json` predates the `customizations` block and let a
-/// Feature declare `extensions` / `settings` at its top level. The reference CLI
-/// rewrites both into `customizations.vscode` while reading the document, so
-/// every downstream consumer sees exactly one shape; deacon models neither
-/// legacy key, so without this the authored values were dropped outright (#487).
+/// Both `devcontainer-feature.json` (#487) and `devcontainer.json` (#486)
+/// predate the `customizations` block and let their author declare `extensions`
+/// / `settings` at the top level. The reference CLI rewrites them into
+/// `customizations.vscode` while READING each document — `Ob()` for a Feature,
+/// `Rb()` for a configuration — so every downstream consumer sees exactly one
+/// shape. deacon models none of the legacy keys, so without this a Feature's
+/// were dropped outright and a configuration's were echoed where they were
+/// authored, with no `customizations` block synthesized.
 ///
 /// The merge rules mirror the reference exactly: `extensions` is APPENDED to any
 /// already-authored `customizations.vscode.extensions`, and `settings` is merged
 /// UNDER them (an already-authored `customizations.vscode.settings` key wins).
 /// The legacy keys are removed.
 ///
+/// `migrate_dev_port` is the one place the reference's two readers differ: the
+/// CONFIGURATION reader also moves `devPort`, and only when
+/// `customizations.vscode.devPort` is absent (an authored one wins and the
+/// top-level key then STAYS); the Feature reader does not know the property.
+///
 /// A `customizations` (or `customizations.vscode`) that is present but not an
 /// object is left untouched, legacy keys and all: rewriting it would fabricate
 /// structure the author did not write, and the typed parse that follows reports
 /// the real mistake.
-fn migrate_legacy_vscode_properties(value: &mut serde_json::Value) {
+pub(crate) fn migrate_legacy_vscode_properties(
+    value: &mut serde_json::Value,
+    migrate_dev_port: bool,
+) {
     let Some(root) = value.as_object_mut() else {
         return;
     };
-    if !root.contains_key("extensions") && !root.contains_key("settings") {
+    if !root.contains_key("extensions")
+        && !root.contains_key("settings")
+        && !(migrate_dev_port && root.contains_key("devPort"))
+    {
         return;
     }
     // `customizations` is lifted out so the legacy keys can be removed without
@@ -678,6 +692,13 @@ fn migrate_legacy_vscode_properties(value: &mut serde_json::Value) {
                     (legacy, None) => legacy,
                 };
                 vscode.insert("settings".to_string(), merged);
+            }
+            // An authored `customizations.vscode.devPort` wins and the legacy key
+            // is NOT removed — the reference deletes it only when it migrates.
+            if migrate_dev_port && !vscode.contains_key("devPort") {
+                if let Some(legacy) = root.remove("devPort") {
+                    vscode.insert("devPort".to_string(), legacy);
+                }
             }
             migrated = true;
         }
@@ -734,7 +755,9 @@ pub fn parse_feature_metadata(path: &Path) -> Result<FeatureMetadata> {
         serde_json::from_str(&content).map_err(|e| FeatureError::Parsing {
             message: e.to_string(),
         })?;
-    migrate_legacy_vscode_properties(&mut raw);
+    // `devPort` is a configuration-level property the Feature reader does not
+    // know — see `migrate_legacy_vscode_properties`.
+    migrate_legacy_vscode_properties(&mut raw, false);
     let metadata: FeatureMetadata =
         serde_json::from_value(raw).map_err(|e| FeatureError::Parsing {
             message: e.to_string(),
