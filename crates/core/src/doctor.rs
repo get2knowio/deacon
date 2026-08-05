@@ -226,6 +226,18 @@ pub struct ResourceInfo {
 /// parity suite's 120s per-invocation limit.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long to wait for a killed probe to be reaped before handing it to
+/// tokio's orphan reaper. SIGKILL is prompt unless the child is stuck in
+/// uninterruptible sleep, which is exactly the case this bound exists for.
+const REAP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Cap on how much of a probe's output is read.
+///
+/// The probes read small JSON documents; anything beyond this is a runtime
+/// misbehaving, and reading it unbounded would put megabytes into a diagnostic
+/// report (and, via `reason`, into a support bundle).
+const MAX_PROBE_OUTPUT: u64 = 1 << 20;
+
 /// Outcome of a bounded probe process.
 enum ProbeOutcome {
     /// The process exited within the bound.
@@ -273,14 +285,18 @@ async fn run_bounded_probe(
 
     // `spawn` with piped stdio always populates these; a missing pipe is an I/O
     // condition to report, not something to unwrap.
+    // Capped so a runtime that floods a pipe cannot put megabytes into a
+    // diagnostic report (and, via `reason`, into a support bundle).
     let mut stdout_pipe = child
         .stdout
         .take()
-        .ok_or_else(|| std::io::Error::other("probe stdout pipe missing"))?;
+        .ok_or_else(|| std::io::Error::other("probe stdout pipe missing"))?
+        .take(MAX_PROBE_OUTPUT);
     let mut stderr_pipe = child
         .stderr
         .take()
-        .ok_or_else(|| std::io::Error::other("probe stderr pipe missing"))?;
+        .ok_or_else(|| std::io::Error::other("probe stderr pipe missing"))?
+        .take(MAX_PROBE_OUTPUT);
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -305,9 +321,19 @@ async fn run_bounded_probe(
         }),
         Ok(Err(e)) => Err(e),
         Err(_elapsed) => {
-            // Kill AND reap in one call: `kill` sends SIGKILL then waits.
-            if let Err(e) = child.kill().await {
-                debug!("Failed to reap timed-out probe `{}`: {}", program, e);
+            // Kill AND reap in one call: `kill` sends SIGKILL then waits. The
+            // wait is itself bounded, because it is the last thing in this
+            // module that could block forever — a child wedged in uninterruptible
+            // sleep (a dead `DOCKER_HOST` over a stuck mount) never reaps. If
+            // that bound trips, `kill_on_drop` hands the corpse to tokio's
+            // orphan reaper instead, so it is still collected, just not here.
+            match tokio::time::timeout(REAP_TIMEOUT, child.kill()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => debug!("Failed to reap timed-out probe `{}`: {}", program, e),
+                Err(_) => debug!(
+                    "Timed-out probe `{}` did not reap within {:?}; leaving it to kill_on_drop",
+                    program, REAP_TIMEOUT
+                ),
             }
             Ok(ProbeOutcome::TimedOut)
         }
@@ -341,7 +367,7 @@ async fn probe_stdout(
                 "{} exited with {}: {}",
                 display,
                 status,
-                String::from_utf8_lossy(&stderr).trim()
+                summarize_stderr(&stderr)
             ),
         )),
         // `{:?}` on a `Duration` renders "10s" / "250ms" — the bound is stated
@@ -350,7 +376,39 @@ async fn probe_stdout(
             probe,
             format!("{} exceeded the {:?} probe timeout", display, timeout),
         )),
-        Err(e) => Probed::NotLaunched(format!("{} could not be launched: {}", display, e)),
+        // Only an ABSENT (or unexecutable) binary means "the runtime is not
+        // installed" — that verdict makes `doctor` report `installed: false`,
+        // so it must not absorb every other I/O condition. A fork failure under
+        // load or a broken pipe mid-read is a probe that FAILED, and gets
+        // reported as such rather than silently reclassified.
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            Probed::NotLaunched(format!("{} could not be launched: {}", display, e))
+        }
+        Err(e) => Probed::Skipped(SkippedProbe::new(
+            probe,
+            format!("{} failed: {}", display, e),
+        )),
+    }
+}
+
+/// Reduce a probe's stderr to a bounded, single-line fragment for its reason.
+///
+/// The reason string travels into `--json`, the text report and the support
+/// bundle, so an unbounded copy of a noisy runtime's stderr would land in all
+/// three. Keep the tail short enough to read.
+fn summarize_stderr(stderr: &[u8]) -> String {
+    const MAX_REASON_STDERR: usize = 512;
+
+    let text = String::from_utf8_lossy(stderr);
+    let trimmed = text.trim();
+    match trimmed.char_indices().nth(MAX_REASON_STDERR) {
+        Some((cut, _)) => format!("{}…", &trimmed[..cut]),
+        None => trimmed.to_string(),
     }
 }
 
@@ -604,9 +662,32 @@ struct DockerInfoRaw {
     storage_driver: Option<String>,
 }
 
+/// Why `<runtime> info --format json` could not be turned into a summary.
+#[derive(Debug, thiserror::Error)]
+enum InfoParseError {
+    #[error("{0}")]
+    Json(#[from] serde_json::Error),
+    /// The document parsed but carried none of the fields the summary reports —
+    /// e.g. podman's `info`, which nests its counters under `store`/`host`
+    /// rather than using Docker's `types.Info` keys. Every field being
+    /// `Option`, this would otherwise deserialize "successfully" into a summary
+    /// of nothings, which the text report would then render as zeros.
+    #[error("no recognized fields (not a Docker `info` document)")]
+    NoRecognizedFields,
+}
+
 /// Parse `<runtime> info --format json` into the reported summary.
-fn parse_info_summary(stdout: &[u8]) -> std::result::Result<DockerInfoSummary, serde_json::Error> {
+fn parse_info_summary(stdout: &[u8]) -> std::result::Result<DockerInfoSummary, InfoParseError> {
     let raw: DockerInfoRaw = serde_json::from_slice(stdout)?;
+    if raw.containers_running.is_none()
+        && raw.containers_paused.is_none()
+        && raw.containers_stopped.is_none()
+        && raw.images.is_none()
+        && raw.server_version.is_none()
+        && raw.storage_driver.is_none()
+    {
+        return Err(InfoParseError::NoRecognizedFields);
+    }
     Ok(DockerInfoSummary {
         containers_running: raw.containers_running,
         containers_paused: raw.containers_paused,
@@ -907,16 +988,18 @@ fn print_text_output_with_redaction(
         info.docker_info.daemon_running
     );
     if let Some(summary) = &info.docker_info.info_summary {
-        println_redacted!(
-            redaction_config,
-            "  Containers Running: {}",
-            summary.containers_running.unwrap_or(0)
-        );
-        println_redacted!(
-            redaction_config,
-            "  Images: {}",
-            summary.images.unwrap_or(0)
-        );
+        // Each line only where the daemon actually reported the field. An
+        // `unwrap_or(0)` here would print "Images: 0" on a host with thousands
+        // — the same fabrication this probe was fixed to stop producing.
+        if let Some(running) = summary.containers_running {
+            println_redacted!(redaction_config, "  Containers Running: {}", running);
+        }
+        if let Some(images) = summary.images {
+            println_redacted!(redaction_config, "  Images: {}", images);
+        }
+        if let Some(server_version) = &summary.server_version {
+            println_redacted!(redaction_config, "  Server Version: {}", server_version);
+        }
         if let Some(storage) = &summary.storage_driver {
             println_redacted!(redaction_config, "  Storage Driver: {}", storage);
         }
@@ -1077,6 +1160,14 @@ async fn create_support_bundle(
                 message: format!("Failed to serialize doctor info: {}", e),
             })
         })?;
+        // Redact, as `environment.json` below already does. A bundle exists to
+        // be sent to someone else, and this document now carries a runtime's
+        // verbatim stderr in `skipped_probes[].reason` — which routinely names
+        // `DOCKER_HOST`, proxy URLs and registry-auth detail.
+        let doctor_json = crate::redaction::redact_if_enabled(
+            &doctor_json,
+            &crate::redaction::RedactionConfig::default(),
+        );
         zip.write_all(doctor_json.as_bytes()).map_err(|e| {
             DeaconError::Internal(crate::errors::InternalError::Generic {
                 message: format!("Failed to write doctor.json: {}", e),
@@ -1240,57 +1331,6 @@ pub fn sanitize_secrets(content: &str) -> Result<String> {
     Ok(sanitized)
 }
 
-impl crate::docker::CliDocker {
-    /// Get the container runtime CLI version, bounded by [`PROBE_TIMEOUT`].
-    ///
-    /// Uses the configured runtime binary rather than a hardcoded `docker`, so
-    /// the reported version is the one deacon would actually drive.
-    pub async fn get_version(&self) -> Result<String> {
-        match probe_stdout(
-            "runtime_version",
-            self.runtime_path(),
-            &["--version"],
-            PROBE_TIMEOUT,
-        )
-        .await
-        {
-            Probed::Value(out) => Ok(String::from_utf8_lossy(&out).trim().to_string()),
-            Probed::Skipped(skip) => Err(probe_error(skip.reason)),
-            Probed::NotLaunched(reason) => Err(probe_error(reason)),
-        }
-    }
-
-    /// Get summarized runtime info, bounded by [`PROBE_TIMEOUT`].
-    ///
-    /// Reads `<runtime> info --format json` and reports what it says — see
-    /// [`collect_docker_info`] for why this is not `system df`.
-    pub async fn get_info_summary(&self) -> Result<DockerInfoSummary> {
-        match probe_stdout(
-            "docker_info",
-            self.runtime_path(),
-            &["info", "--format", "json"],
-            PROBE_TIMEOUT,
-        )
-        .await
-        {
-            Probed::Value(out) => parse_info_summary(&out).map_err(|e| {
-                probe_error(format!(
-                    "could not parse `{} info --format json`: {}",
-                    self.runtime_path(),
-                    e
-                ))
-            }),
-            Probed::Skipped(skip) => Err(probe_error(skip.reason)),
-            Probed::NotLaunched(reason) => Err(probe_error(reason)),
-        }
-    }
-}
-
-/// Wrap a probe failure reason as a runtime CLI error.
-fn probe_error(reason: impl Into<String>) -> DeaconError {
-    DeaconError::Docker(crate::errors::DockerError::CLIError(reason.into()))
-}
-
 /// Render skipped probes for the human-readable report.
 ///
 /// The text mode's counterpart to the `skipped_probes` array in `--json`: the
@@ -1338,6 +1378,86 @@ mod tests {
     #[test]
     fn test_parse_info_summary_rejects_non_json() {
         assert!(parse_info_summary(b"Cannot connect to the Docker daemon").is_err());
+    }
+
+    /// A well-formed JSON document carrying none of the fields — podman's
+    /// `info`, which nests its counters under `store`/`host` — must be a
+    /// recorded failure, not a summary of nothings that renders as zeros.
+    #[test]
+    fn test_parse_info_summary_rejects_unrecognized_shape() {
+        let podman_shaped = br#"{
+            "host": {"arch": "amd64"},
+            "store": {"graphDriverName": "overlay",
+                      "imageStore": {"number": 12},
+                      "containerStore": {"number": 3, "running": 2}},
+            "version": {"Version": "5.0.0"}
+        }"#;
+
+        let err = parse_info_summary(podman_shaped)
+            .expect_err("a document with no recognized fields must not parse to all-None");
+        assert!(
+            err.to_string().contains("no recognized fields"),
+            "got: {err}"
+        );
+    }
+
+    /// A partially-populated document is still usable — the fields are
+    /// genuinely optional, and `None` is reported as absent rather than zero.
+    #[test]
+    fn test_parse_info_summary_accepts_partial() {
+        let summary = parse_info_summary(br#"{"Images": 7}"#).expect("a known field should parse");
+        assert_eq!(summary.images, Some(7));
+        assert_eq!(summary.containers_running, None);
+    }
+
+    /// Only an absent binary means "not installed". Every other I/O condition
+    /// is a probe that FAILED, and must be reported rather than reclassified
+    /// into `installed: false` with no reason attached.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_unexecutable_binary_is_not_launched() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("wedged-runtime");
+        fs::write(&script, "#!/bin/sh\nexit 0\n").expect("write");
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).expect("chmod");
+
+        let probed = probe_stdout(
+            "runtime_version",
+            &script.to_string_lossy(),
+            &["--version"],
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(
+            matches!(probed, Probed::NotLaunched(_)),
+            "a non-executable runtime binary is 'not installed', not a failed probe"
+        );
+    }
+
+    /// Stderr in a reason is bounded — it travels into `--json`, the text
+    /// report and the support bundle.
+    #[test]
+    fn test_stderr_summary_is_bounded() {
+        let noisy = "x".repeat(10_000);
+        let summarized = summarize_stderr(noisy.as_bytes());
+
+        assert!(
+            summarized.chars().count() <= 513,
+            "reason stderr must be capped, got {} chars",
+            summarized.chars().count()
+        );
+        assert!(summarized.ends_with('…'));
+    }
+
+    #[test]
+    fn test_stderr_summary_passes_short_output_through() {
+        assert_eq!(
+            summarize_stderr(b"  Cannot connect to the Docker daemon\n"),
+            "Cannot connect to the Docker daemon"
+        );
     }
 
     /// The bound must actually bound: a probe that outlives it returns promptly
