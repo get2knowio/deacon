@@ -259,12 +259,20 @@ pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Re
     // wins over image metadata on scalar fields, lists are concatenated.
     let merged_config = merge_configs(&base_config, metadata_config.as_ref());
 
-    // Phase 5: Variable substitution. Without a workspace we still need a
-    // substitution context — use the current working directory as a
-    // best-effort stand-in (spec §4 notes workspace placeholders are
-    // typically not applicable to set-up).
+    // Phase 5: Variable substitution. `set-up` adopts a running container and takes no
+    // `--workspace-folder`, so the workspace-derived variables have no answer:
+    // `${localWorkspaceFolder}`, `${localWorkspaceFolderBasename}` and
+    // `${devcontainerId}` stay LITERAL, which is what the reference CLI emits here —
+    // measured at oracle 0.87.0 on both the reported blocks and the lifecycle commands
+    // it exec's (#510). `${localEnv:*}` still resolves; both sides agree on that.
+    //
+    // The cwd is passed as a MECHANICAL anchor only (lifecycle phase markers and the
+    // host-side working directory need a path); `without_workspace` is what makes the
+    // absence of a workspace explicit, so no variable can observe it. Anchoring with
+    // `SubstitutionContext::new` instead silently substituted the cwd for a workspace
+    // the caller never named.
     let cwd = std::env::current_dir().context("Failed to get current working directory")?;
-    let substitution_context = SubstitutionContext::new(&cwd)?;
+    let substitution_context = SubstitutionContext::without_workspace(&cwd)?;
 
     // The `configuration` block reports what the CALLER SUPPLIED — the `--config`
     // document alone, substituted, never folded with the container's image metadata.
@@ -1137,6 +1145,63 @@ mod tests {
 
         let unnamed = merged_configuration_document(&merged, None).unwrap();
         assert!(unnamed.get("configFilePath").is_none());
+    }
+
+    /// `set-up` has no `--workspace-folder`, so the workspace-derived variables must
+    /// survive substitution as LITERALS — in the reported blocks AND in the lifecycle
+    /// command strings set-up goes on to exec, which is the surface a test of the JSON
+    /// alone cannot see. deacon used to anchor at the process cwd and substitute an
+    /// invented workspace into both (#510); the reference leaves all three literal and
+    /// resolves `${localEnv:*}` only. Measured at oracle 0.87.0.
+    #[test]
+    fn set_up_substitution_leaves_workspace_derived_variables_literal() {
+        let probe = "ws=${localWorkspaceFolder} base=${localWorkspaceFolderBasename} \
+                     id=${devcontainerId} env=${localEnv:DEACON_TEST_SETUP_SCOPE}";
+        let config = DevContainerConfig {
+            remote_env: Some(
+                [("PROBE".to_string(), Some(probe.to_string()))]
+                    .into_iter()
+                    .collect(),
+            ),
+            post_create_command: Some(serde_json::json!(probe)),
+            ..Default::default()
+        };
+
+        // Exactly what `execute_set_up` builds, anchored at a path that would be a
+        // plausible-looking (and wrong) answer if any variable could observe it.
+        let anchor = std::env::current_dir().expect("cwd is readable");
+        let mut context =
+            SubstitutionContext::without_workspace(&anchor).expect("context builds from the cwd");
+        context.local_env.insert(
+            "DEACON_TEST_SETUP_SCOPE".to_string(),
+            "resolved".to_string(),
+        );
+
+        let (substituted, _) = config.apply_variable_substitution(&context);
+
+        let expected = "ws=${localWorkspaceFolder} base=${localWorkspaceFolderBasename} \
+                        id=${devcontainerId} env=resolved";
+        assert_eq!(
+            substituted.remote_env.as_ref().unwrap()["PROBE"].as_deref(),
+            Some(expected),
+            "the reported remoteEnv must keep the workspace tokens literal"
+        );
+        assert_eq!(
+            substituted.post_create_command.as_ref().unwrap(),
+            &serde_json::json!(expected),
+            "the command set-up EXECS must keep the workspace tokens literal too"
+        );
+
+        let anchor = anchor.to_string_lossy();
+        assert!(
+            !substituted
+                .post_create_command
+                .as_ref()
+                .unwrap()
+                .to_string()
+                .contains(anchor.as_ref()),
+            "the mechanical cwd anchor must never leak into a substituted value"
+        );
     }
 
     /// A `--config` document and the metadata-merged config that set-up RUNS, so the two

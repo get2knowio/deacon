@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceSetUpSubstitutionScopeOverlay",
+	"remoteEnv": {
+		"PROBE_LOCAL_ENV": "${localEnv:HOME}",
+		"PROBE_LOCAL_WS": "${localWorkspaceFolder}",
+		"PROBE_LOCAL_WS_BASENAME": "${localWorkspaceFolderBasename}",
+		"PROBE_DEVCONTAINER_ID": "${devcontainerId}"
+	},
+	"postCreateCommand": "printf 'ws=[%s] base=[%s] id=[%s]\\n' \"${localWorkspaceFolder}\" \"${localWorkspaceFolderBasename}\" \"${devcontainerId}\" > /work/setup-substitution.txt"
+}
