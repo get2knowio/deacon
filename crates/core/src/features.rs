@@ -915,8 +915,15 @@ impl ResolvedFeature {
 /// The comparison, measured against oracle 0.87.0 rather than read off the prose:
 /// number of authored keys first (FEWER first — the spec text says "greatest number"
 /// but the reference returns `a.length - b.length` and an empty option set demonstrably
-/// sorts first), then the sorted keys, then their values. Values are rendered as
-/// canonical JSON so every `OptionValue` variant participates in a total order.
+/// sorts first), then the sorted keys, then their values.
+///
+/// Values are rendered as canonical JSON so EVERY `OptionValue` variant participates in
+/// the total order. That is deliberately wider than the reference, whose comparator has
+/// branches for strings and booleans only and therefore reports `{"port": 3000}` and
+/// `{"port": 8080}` as the same Feature. The spec is not silent here — §Feature Equality
+/// requires the options to be "compared value by value" — so the wider comparison is the
+/// conformant side, and narrowing it to match the reference would reintroduce exactly the
+/// silent substitution #489 was about.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct OptionSetKey {
     /// Number of authored options. Leads the ordering, so it must stay first.

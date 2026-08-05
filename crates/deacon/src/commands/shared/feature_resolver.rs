@@ -352,7 +352,7 @@ mod tests {
 
         let fetcher = default_fetcher().unwrap();
         let resolved =
-            resolve_features_ordered(&config, &dir.path().join(".devcontainer"), &fetcher)
+            resolve_features_ordered(&config, &config_dir_of(dir.path()), dir.path(), &fetcher)
                 .await
                 .expect("local dependsOn closure resolves");
 
@@ -399,7 +399,7 @@ mod tests {
 
         let fetcher = default_fetcher().unwrap();
         let resolved =
-            resolve_features_ordered(&config, &dir.path().join(".devcontainer"), &fetcher)
+            resolve_features_ordered(&config, &config_dir_of(dir.path()), dir.path(), &fetcher)
                 .await
                 .expect("identical option sets resolve");
 
@@ -433,7 +433,7 @@ mod tests {
 
         let fetcher = default_fetcher().unwrap();
         let resolved =
-            resolve_features_ordered(&config, &dir.path().join(".devcontainer"), &fetcher)
+            resolve_features_ordered(&config, &config_dir_of(dir.path()), dir.path(), &fetcher)
                 .await
                 .expect("declared dependency resolves");
 
