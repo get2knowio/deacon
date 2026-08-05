@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "case-set-up-merged-configuration-shape",
+      "behaviors": [
+        "bhv-setup-merged-configuration-shape"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-set-up-merged-configuration"
+          ]
+        },
+        {
+          "id": "op-set-up",
+          "subcommand": "set-up",
+          "argv": [
+            "--container-id",
+            "${CONTAINER_ID}",
+            "--config",
+            "${WORKSPACE}/setup-overlay.json",
+            "--include-merged-configuration"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-set-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-set-up",
+          "assertion": {
+            "jsonSubset": {
+              "mergedConfiguration": {
+                "onCreateCommands": [
+                  "echo base-onCreate",
+                  "echo overlay-onCreate"
+                ],
+                "postCreateCommands": [
+                  "echo base-postCreate",
+                  "echo overlay-postCreate"
+                ],
+                "postStartCommands": [
+                  "echo base-postStart"
+                ],
+                "updateContentCommands": [],
+                "postAttachCommands": [],
+                "init": false,
+                "privileged": false
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes #483, and is the first case to invoke `set-up` at all (the subcommand joined `CONSUMER_SUBCOMMANDS` / `CONTAINER_SUBCOMMANDS` for it). The claim is the SHAPE of the `--include-merged-configuration` block, which had three defects at once: deacon emitted its flat configuration under a snake_case `merged_configuration` key, with the five lifecycle hooks as SINGULAR fields, where the reference emits `mergedConfiguration` carrying the collected plural arrays. Two operations are needed because the merge has two sources that must both land, in order: `op-up` stamps the workspace config into the container's `devcontainer.metadata` label, and `op-set-up` layers a SECOND, differently-worded config on top with `--config`. So `onCreateCommands` must be `[\"echo base-onCreate\", \"echo overlay-onCreate\"]` — collected, and devcontainer.json-last per the spec's image-metadata Merge Logic. Identical hook text in both sources would have made the collection and the ordering unobservable, which is why the overlay's commands are worded differently rather than repeated. The differential is what pins ORDER (array comparison is positional); the `jsonSubset` assertion is the absolute claim on deacon's side, so a run where BOTH CLIs stopped collecting could not pass. `chan-stdout` is deliberately NOT declared: both sides emit the same document with different key ORDER, which is a difference in serialization rather than in behavior and is exactly what the structured channel exists to see past. Measured against oracle 0.87.0 on this fixture; the two sides' `mergedConfiguration` agree on every key after normalization, with the three synthesized empties (`remoteEnv`, `containerEnv`, `portsAttributes`) elided on both sides by the `drop_absent_optional` rule — the standing `bhv-readconfig-merged-computed-empties-omitted` characterization, not a tolerance this case declares. Image pinned to alpine:3.19 (V18)."
+    }
+  ]
+}

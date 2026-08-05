@@ -1,0 +1,7 @@
+{
+	"name": "ConformanceSetUpMergedConfiguration",
+	"image": "alpine:3.19",
+	"onCreateCommand": "echo base-onCreate",
+	"postCreateCommand": "echo base-postCreate",
+	"postStartCommand": "echo base-postStart"
+}
