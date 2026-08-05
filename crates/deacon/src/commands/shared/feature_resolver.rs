@@ -9,12 +9,11 @@
 //! hooks).
 
 use anyhow::{Context, Result};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use deacon_core::config::DevContainerConfig;
 use deacon_core::features::{
-    FeatureDependencyResolver, OptionValue, ResolvedFeature, canonical_feature_id,
+    FeatureDependencyResolver, ResolvedFeature, canonical_feature_id, options_from_json,
     parse_feature_metadata, resolve_local_feature_dir,
 };
 use deacon_core::oci::{FeatureFetcher, FeatureRef, HttpClient};
@@ -80,37 +79,31 @@ pub(crate) async fn resolve_one_feature<C: HttpClient>(
     Ok(ResolvedFeature {
         id: canonical_id,
         source: source_string,
-        options: options_from_value(feature_value),
+        options: options_from_json(feature_value),
         metadata,
     })
 }
 
-/// Extract per-feature options from a `devcontainer.json` feature/`dependsOn`
-/// value: an object yields typed options, a bare string is treated as
-/// `{"version": <string>}`, anything else yields no options.
-fn options_from_value(feature_value: &serde_json::Value) -> HashMap<String, OptionValue> {
-    match feature_value {
-        serde_json::Value::Object(map) => map
-            .iter()
-            .map(|(k, v)| {
-                let option_value = match v {
-                    serde_json::Value::Bool(b) => OptionValue::Boolean(*b),
-                    serde_json::Value::String(s) => OptionValue::String(s.clone()),
-                    serde_json::Value::Number(n) => OptionValue::Number(n.clone()),
-                    serde_json::Value::Array(a) => OptionValue::Array(a.clone()),
-                    serde_json::Value::Object(o) => OptionValue::Object(o.clone()),
-                    serde_json::Value::Null => OptionValue::Null,
-                };
-                (k.clone(), option_value)
-            })
-            .collect(),
-        serde_json::Value::String(s) => {
-            let mut map = HashMap::new();
-            map.insert("version".to_string(), OptionValue::String(s.clone()));
-            map
-        }
-        _ => HashMap::new(),
-    }
+/// Is this exact Feature — same resource AND same option set — already in the set?
+///
+/// `feature-dependencies.md` §(B1) skips a `dependsOn` target only "if the **exact**
+/// Feature (see Feature Equality) has already been added", and §Definition: Feature
+/// Equality makes the options part of that identity. So two `dependsOn` references to one
+/// Feature with different options are two instances that both install (#489), while
+/// identical option sets still collapse to one (measured against oracle 0.87.0).
+///
+/// The resource half stays the TAG-LESS name, per #430: a hard dependency is written
+/// without a pin more often than not, and a user who declared that Feature at a specific
+/// version has already satisfied it.
+pub(crate) fn same_feature_already_resolved(
+    resolved: &[ResolvedFeature],
+    candidate: &ResolvedFeature,
+) -> bool {
+    let resource = canonical_feature_id(&candidate.id);
+    let options = candidate.option_set();
+    resolved
+        .iter()
+        .any(|f| canonical_feature_id(&f.id) == resource && f.option_set() == options)
 }
 
 /// Resolve `config.features` into install-ordered `ResolvedFeature`s.
@@ -169,14 +162,7 @@ pub(crate) async fn resolve_features_ordered<C: HttpClient>(
             let dep =
                 resolve_one_feature(&dep_key, &dep_value, config_dir, workspace_root, fetcher)
                     .await?;
-            // Matched on the RESOURCE NAME (id without version): a hard dependency is
-            // usually written unpinned, and a user who declared that Feature at a
-            // specific version has already satisfied it. Only the user's own two-version
-            // declaration is a deliberate double install (#430).
-            if !resolved_features
-                .iter()
-                .any(|f| canonical_feature_id(&f.id) == canonical_feature_id(&dep.id))
-            {
+            if !same_feature_already_resolved(&resolved_features, &dep) {
                 debug!(dependency = %dep_key, "Auto-installing transitive dependsOn feature");
                 resolved_features.push(dep);
             }
@@ -300,6 +286,161 @@ mod tests {
         assert!(
             pos("Lib") < pos("App"),
             "dep must order before dependent: {names:?}"
+        );
+    }
+
+    /// Write a tree of local Features under `<dir>/.devcontainer/<name>`.
+    fn write_local_features(dir: &Path, features: &[(&str, &str)]) {
+        for (name, body) in features {
+            let d = dir.join(".devcontainer").join(name);
+            std::fs::create_dir_all(&d).expect("create feature dir");
+            std::fs::write(d.join("devcontainer-feature.json"), body).expect("write metadata");
+            std::fs::write(d.join("install.sh"), "#!/bin/sh\ntrue\n").expect("write install.sh");
+        }
+    }
+
+    /// `(userFeatureId, option set)` for each node of the resolved plan — the same two
+    /// columns the reference's `featuresConfiguration.featureSets` reports.
+    fn plan_shape(features: &[ResolvedFeature]) -> Vec<String> {
+        features
+            .iter()
+            .map(|f| format!("{} {}", f.source, f.option_set()))
+            .collect()
+    }
+
+    /// #489 — the reference's own `dependsOn/local-with-options` e2e fixture: `./b` is
+    /// requested with five different option sets and must yield five nodes, one per set.
+    ///
+    /// MEASURED at oracle 0.87.0 (`read-configuration --include-features-configuration`
+    /// over `parity/fixtures/fx-upstream-dependson-local-with-options`): nine nodes,
+    /// `b_0`…`b_4` then `./d`, `./e`, `./c`, `./a`. Before the fix deacon produced five,
+    /// with a single `./b` carrying the CONFIGURATION's options — so the four dependents
+    /// that asked for `./b` with their own options silently received someone else's.
+    #[tokio::test]
+    async fn depends_on_yields_one_instance_per_requested_option_set() {
+        let dir = tempfile::tempdir().unwrap();
+        write_local_features(
+            dir.path(),
+            &[
+                (
+                    "a",
+                    r#"{ "id": "a", "version": "0.0.1",
+                         "dependsOn": { "./b": { "optA": "a", "optB": "a" }, "./c": {} } }"#,
+                ),
+                ("b", r#"{ "id": "b", "version": "0.0.1" }"#),
+                (
+                    "c",
+                    r#"{ "id": "c", "version": "0.0.1",
+                         "dependsOn": { "./b": { "optA": "b", "optB": "a" }, "./d": {}, "./e": {} } }"#,
+                ),
+                (
+                    "d",
+                    r#"{ "id": "d", "version": "0.0.1",
+                         "dependsOn": { "./b": { "optA": "b", "optB": "b" } } }"#,
+                ),
+                (
+                    "e",
+                    r#"{ "id": "e", "version": "0.0.1", "dependsOn": { "./b": {} } }"#,
+                ),
+            ],
+        );
+
+        let config: DevContainerConfig = serde_json::from_value(serde_json::json!({
+            "features": { "./a": { "optA": "a", "optB": "b" }, "./b": { "optA": "a", "optB": "b" } }
+        }))
+        .unwrap();
+
+        let fetcher = default_fetcher().unwrap();
+        let resolved =
+            resolve_features_ordered(&config, &dir.path().join(".devcontainer"), &fetcher)
+                .await
+                .expect("local dependsOn closure resolves");
+
+        assert_eq!(
+            plan_shape(&resolved),
+            vec![
+                "./b {}",
+                "./b {optA=a,optB=a}",
+                "./b {optA=a,optB=b}",
+                "./b {optA=b,optB=a}",
+                "./b {optA=b,optB=b}",
+                "./d {}",
+                "./e {}",
+                "./c {}",
+                "./a {optA=a,optB=b}",
+            ],
+            "nine nodes, five of them `./b` — one per distinct option set requested \
+             (measured at oracle 0.87.0)"
+        );
+    }
+
+    /// The other half of the equality rule: IDENTICAL option sets are the same Feature and
+    /// still collapse to one node. Measured at oracle 0.87.0 on the same shape — two
+    /// nodes, not three.
+    #[tokio::test]
+    async fn depends_on_with_identical_options_still_dedups() {
+        let dir = tempfile::tempdir().unwrap();
+        write_local_features(
+            dir.path(),
+            &[
+                (
+                    "a",
+                    r#"{ "id": "a", "version": "0.0.1",
+                         "dependsOn": { "./b": { "optA": "a", "optB": "b" } } }"#,
+                ),
+                ("b", r#"{ "id": "b", "version": "0.0.1" }"#),
+            ],
+        );
+
+        let config: DevContainerConfig = serde_json::from_value(serde_json::json!({
+            "features": { "./a": {}, "./b": { "optA": "a", "optB": "b" } }
+        }))
+        .unwrap();
+
+        let fetcher = default_fetcher().unwrap();
+        let resolved =
+            resolve_features_ordered(&config, &dir.path().join(".devcontainer"), &fetcher)
+                .await
+                .expect("identical option sets resolve");
+
+        assert_eq!(
+            plan_shape(&resolved),
+            vec!["./b {optA=a,optB=b}", "./a {}"],
+            "a `dependsOn` asking for the option set already declared is the SAME Feature"
+        );
+    }
+
+    /// #430's rule survives #489: an unpinned hard dependency is satisfied by the user's
+    /// pinned declaration when the options agree, rather than double-installing.
+    #[tokio::test]
+    async fn depends_on_auto_install_still_dedups_against_the_user_declaration() {
+        let dir = tempfile::tempdir().unwrap();
+        write_local_features(
+            dir.path(),
+            &[
+                (
+                    "app",
+                    r#"{ "id": "app", "version": "0.0.1", "dependsOn": { "./lib": {} } }"#,
+                ),
+                ("lib", r#"{ "id": "lib", "version": "0.0.1" }"#),
+            ],
+        );
+
+        let config: DevContainerConfig = serde_json::from_value(serde_json::json!({
+            "features": { "./app": {}, "./lib": {} }
+        }))
+        .unwrap();
+
+        let fetcher = default_fetcher().unwrap();
+        let resolved =
+            resolve_features_ordered(&config, &dir.path().join(".devcontainer"), &fetcher)
+                .await
+                .expect("declared dependency resolves");
+
+        assert_eq!(
+            plan_shape(&resolved),
+            vec!["./lib {}", "./app {}"],
+            "the user's own declaration satisfies the hard dependency — no second copy"
         );
     }
 

@@ -178,11 +178,11 @@ impl DockerfileGenerator {
         for (level_idx, level) in plan.levels.iter().enumerate() {
             dockerfile.push_str(&format!("# Level {}: Installing features\n", level_idx));
 
-            for feature_id in level {
+            for &feature_index in level {
                 let feature =
-                    plan.get_feature(feature_id)
+                    plan.feature_at(feature_index)
                         .ok_or_else(|| FeatureError::NotFound {
-                            path: format!("Feature {} in installation plan", feature_id),
+                            path: format!("Feature #{} in installation plan", feature_index),
                         })?;
 
                 dockerfile.push_str(&self.generate_feature_install_command(
@@ -245,11 +245,11 @@ impl DockerfileGenerator {
         for (level_idx, level) in plan.levels.iter().enumerate() {
             dockerfile.push_str(&format!("# Level {}: Installing features\n", level_idx));
 
-            for feature_id in level {
+            for &feature_index in level {
                 let feature =
-                    plan.get_feature(feature_id)
+                    plan.feature_at(feature_index)
                         .ok_or_else(|| FeatureError::NotFound {
-                            path: format!("Feature {} in installation plan", feature_id),
+                            path: format!("Feature #{} in installation plan", feature_index),
                         })?;
 
                 dockerfile.push_str(&self.generate_feature_install_command(
@@ -425,6 +425,23 @@ impl DockerfileGenerator {
     /// Option *values* are never sanitized — only keys (#88).
     fn build_environment_variables(feature: &ResolvedFeature) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
+
+        // The Feature's own declared defaults first, then the options the user (or the
+        // `dependsOn` entry) actually authored, which win.
+        //
+        // Defaults are materialized HERE rather than in `ResolvedFeature.options` because
+        // that map is half the Feature's IDENTITY (#489): `feature-dependencies.md`
+        // §Definition: Feature Equality compares the options a Feature "is executed with"
+        // as AUTHORED, so pre-filling defaults there would make two differently-authored
+        // instances compare equal (and would order them by their defaults).
+        for (name, definition) in &feature.metadata.options {
+            if let Some(default_value) = definition.default_value() {
+                env_vars.insert(
+                    Self::sanitize_option_key(name),
+                    Self::option_value_to_string(&default_value),
+                );
+            }
+        }
 
         for (key, value) in &feature.options {
             let env_key = Self::sanitize_option_key(key);

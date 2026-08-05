@@ -1,5 +1,6 @@
-//! Docker-backed proof that a `features` map naming ONE Feature at TWO versions installs
-//! BOTH of them (#430).
+//! Docker-backed proof that ONE Feature installs several times when the document really
+//! names several Features: once per declared version (#430) and once per requested option
+//! set (#489).
 //!
 //! `feature-dependencies.md` (spec `113500f4`) settles the shape in three passages:
 //! §Definition: Feature Equality makes two OCI Features equal only when their manifest
@@ -159,6 +160,160 @@ fn build_installs_both_versions_of_one_feature_oldest_tag_first() {
             "§Round Stable Sort orders equal resource names oldest tag first, so \
              :{OLDER_TAG} must install before :{NEWER_TAG} — got {OLDER_USER}={older_uid}, \
              {NEWER_USER}={newer_uid}\n{passwd}"
+        );
+    });
+
+    remove_image(&image_tag);
+    if let Some(id) = image_id {
+        remove_image(&id);
+    }
+
+    if let Err(payload) = result {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+/// Write the reference's `dependsOn/local-with-options` shape into `<dir>/.devcontainer`:
+/// five local Features where `./b` is requested with five different option sets.
+///
+/// `./b`'s `install.sh` drops one marker per option set it is executed with, so the image
+/// itself records how many distinct instances really ran.
+fn write_option_set_fixture(dir: &std::path::Path) {
+    let config_dir = dir.join(".devcontainer");
+    let metadata = [
+        (
+            "a",
+            r#"{ "id": "a", "version": "0.0.1",
+                 "dependsOn": { "./b": { "optA": "a", "optB": "a" }, "./c": {} },
+                 "options": { "optA": { "type": "string", "default": "0" },
+                              "optB": { "type": "string", "default": "0" } } }"#,
+        ),
+        (
+            "b",
+            r#"{ "id": "b", "version": "0.0.1",
+                 "options": { "optA": { "type": "string", "default": "0" },
+                              "optB": { "type": "string", "default": "0" } } }"#,
+        ),
+        (
+            "c",
+            r#"{ "id": "c", "version": "0.0.1",
+                 "dependsOn": { "./b": { "optA": "b", "optB": "a" }, "./d": {}, "./e": {} } }"#,
+        ),
+        (
+            "d",
+            r#"{ "id": "d", "version": "0.0.1",
+                 "dependsOn": { "./b": { "optA": "b", "optB": "b" } } }"#,
+        ),
+        (
+            "e",
+            r#"{ "id": "e", "version": "0.0.1", "dependsOn": { "./b": {} } }"#,
+        ),
+    ];
+
+    for (name, body) in metadata {
+        let d = config_dir.join(name);
+        fs::create_dir_all(&d).expect("create feature dir");
+        fs::write(d.join("devcontainer-feature.json"), body).expect("write feature metadata");
+        // `./b` records the option set it ran with; the others just prove they ran.
+        let script = if name == "b" {
+            "#!/bin/sh\nset -e\nmkdir -p /markers\ntouch \"/markers/b-${OPTA}-${OPTB}\"\n"
+        } else {
+            "#!/bin/sh\nset -e\nmkdir -p /markers\ntouch /markers/FEATURE\n"
+        };
+        let script = script.replace("FEATURE", name);
+        fs::write(d.join("install.sh"), script).expect("write install.sh");
+    }
+
+    fs::write(
+        config_dir.join("devcontainer.json"),
+        r#"{
+  "name": "OptionSetInstances",
+  "image": "debian:bookworm-slim",
+  "features": {
+    "./a": { "optA": "a", "optB": "b" },
+    "./b": { "optA": "a", "optB": "b" }
+  }
+}
+"#,
+    )
+    .expect("write devcontainer.json");
+}
+
+/// #489 — a local Feature depended on with FIVE different option sets installs five
+/// times, once per set.
+///
+/// `feature-dependencies.md` §Definition: Feature Equality: "two Features [are] equal if
+/// both Features point to the same exact contents **and are executed with the same
+/// options**", and §(B1) skips a `dependsOn` target only "if the **exact** Feature […]
+/// has already been added".
+///
+/// The same trap as #430 applies, which is why this asserts on image CONTENTS: making the
+/// graph accept distinct nodes is necessary but not sufficient. Staging directories,
+/// install ordering, the option env vars and the install loop must each carry the
+/// instances, and every one of those failures still exits 0 with a plausible-looking JSON
+/// result. Only the markers inside the image distinguish five installs from one.
+#[test]
+fn build_installs_one_instance_per_requested_option_set() {
+    if !is_runtime_available() {
+        eprintln!("Skipping: no container runtime available");
+        return;
+    }
+
+    let workspace = TempDir::new().expect("temp workspace");
+    write_option_set_fixture(workspace.path());
+
+    let image_tag = format!("{}:test", unique_name("deacon-optset-features"));
+
+    let output = deacon_command()
+        .args([
+            "build",
+            "--workspace-folder",
+            workspace.path().to_str().expect("utf-8 workspace path"),
+            "--image-name",
+            &image_tag,
+        ])
+        .output()
+        .expect("failed to run deacon build");
+
+    let image_id = StdCommand::new(runtime_bin())
+        .args(["inspect", "-f", "{{.Id}}", &image_tag])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    let result = std::panic::catch_unwind(|| {
+        assert!(
+            output.status.success(),
+            "deacon build failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let listing = StdCommand::new(runtime_bin())
+            .args(["run", "--rm", "--entrypoint", "ls", &image_tag, "/markers"])
+            .output()
+            .expect("failed to list /markers in the built image");
+        assert!(
+            listing.status.success(),
+            "listing /markers failed: {}",
+            String::from_utf8_lossy(&listing.stderr)
+        );
+        let mut markers: Vec<String> = String::from_utf8_lossy(&listing.stdout)
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+        markers.sort();
+
+        // The unrequested options fall back to `./b`'s declared defaults ("0"), so the
+        // `{}` instance is `b-0-0`. Before #489 only `b-a-b` existed: the configuration's
+        // option set, handed to all four dependents that asked for their own.
+        assert_eq!(
+            markers,
+            vec![
+                "a", "b-0-0", "b-a-a", "b-a-b", "b-b-a", "b-b-b", "c", "d", "e",
+            ],
+            "`./b` must install once per distinct option set it was requested with"
         );
     });
 

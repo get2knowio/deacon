@@ -870,10 +870,133 @@ pub struct ResolvedFeature {
     pub id: String,
     /// Source path or reference (e.g., OCI registry reference)
     pub source: String,
-    /// Feature options
+    /// The options this instance was REQUESTED with, exactly as authored in the
+    /// `features` object or in the `dependsOn` entry that pulled it in.
+    ///
+    /// This map is half of the Feature's identity (see [`ResolvedFeature::option_set`])
+    /// and MUST NOT be pre-filled with the Feature's declared defaults —
+    /// `feature-dependencies.md` §Definition: Feature Equality compares the options a
+    /// Feature "is executed with" as authored, and the reference CLI orders and dedups
+    /// on exactly that map. Defaults are applied where options are *consumed*
+    /// (`DockerfileGenerator::build_environment_variables`), not here.
     pub options: HashMap<String, OptionValue>,
     /// Feature metadata
     pub metadata: FeatureMetadata,
+}
+
+impl ResolvedFeature {
+    /// The option-set half of this Feature's identity — see [`OptionSetKey`].
+    pub fn option_set(&self) -> OptionSetKey {
+        OptionSetKey::of(&self.options)
+    }
+
+    /// A human-readable instance identity (`<id>` plus its option set), used in
+    /// diagnostics where two instances of one Feature would otherwise be
+    /// indistinguishable.
+    pub fn install_key(&self) -> String {
+        let options = self.option_set();
+        if options.is_empty() {
+            self.id.clone()
+        } else {
+            format!("{} {}", self.id, options)
+        }
+    }
+}
+
+/// A Feature's option set, as both an EQUALITY and an ORDERING key.
+///
+/// `feature-dependencies.md` §Definition: Feature Equality makes the options part of a
+/// Feature's identity — "two Features [are] equal if both Features point to the same
+/// exact contents **and are executed with the same options**" — and §Definition: Round
+/// Stable Sort then orders same-resource Features "by their options". The reference CLI
+/// implements both from one comparator (its `equals` is `compareTo() === 0`), so this
+/// type does too: `Ord` IS the equality rule.
+///
+/// The comparison, measured against oracle 0.87.0 rather than read off the prose:
+/// number of authored keys first (FEWER first — the spec text says "greatest number"
+/// but the reference returns `a.length - b.length` and an empty option set demonstrably
+/// sorts first), then the sorted keys, then their values. Values are rendered as
+/// canonical JSON so every `OptionValue` variant participates in a total order.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct OptionSetKey {
+    /// Number of authored options. Leads the ordering, so it must stay first.
+    count: usize,
+    /// `(key, rendered value)` sorted by key.
+    entries: Vec<(String, String)>,
+}
+
+impl OptionSetKey {
+    /// Derive the key from an authored option map.
+    pub fn of(options: &HashMap<String, OptionValue>) -> Self {
+        let mut entries: Vec<(String, String)> = options
+            .iter()
+            .map(|(k, v)| (k.clone(), render_option_value(v)))
+            .collect();
+        entries.sort();
+        Self {
+            count: entries.len(),
+            entries,
+        }
+    }
+
+    /// Whether no options were authored.
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+}
+
+impl std::fmt::Display for OptionSetKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("{")?;
+        for (idx, (key, value)) in self.entries.iter().enumerate() {
+            if idx > 0 {
+                f.write_str(",")?;
+            }
+            write!(f, "{}={}", key, value)?;
+        }
+        f.write_str("}")
+    }
+}
+
+/// Convert a `features` / `dependsOn` map VALUE into a typed option map.
+///
+/// An object yields its entries; a bare string is the documented shorthand for
+/// `{"version": <string>}`; anything else (`true`, `null`) authors no options.
+pub fn options_from_json(value: &serde_json::Value) -> HashMap<String, OptionValue> {
+    match value {
+        serde_json::Value::Object(map) => map
+            .iter()
+            .map(|(k, v)| {
+                let option_value = match v {
+                    serde_json::Value::Bool(b) => OptionValue::Boolean(*b),
+                    serde_json::Value::String(s) => OptionValue::String(s.clone()),
+                    serde_json::Value::Number(n) => OptionValue::Number(n.clone()),
+                    serde_json::Value::Array(a) => OptionValue::Array(a.clone()),
+                    serde_json::Value::Object(o) => OptionValue::Object(o.clone()),
+                    serde_json::Value::Null => OptionValue::Null,
+                };
+                (k.clone(), option_value)
+            })
+            .collect(),
+        serde_json::Value::String(s) => {
+            HashMap::from([("version".to_string(), OptionValue::String(s.clone()))])
+        }
+        _ => HashMap::new(),
+    }
+}
+
+/// Render an option value as canonical JSON text so option sets compare as a total
+/// order regardless of variant. Serialization of a plain JSON scalar cannot fail; the
+/// fallback keeps the function total rather than panicking on an impossible branch.
+fn render_option_value(value: &OptionValue) -> String {
+    match value {
+        OptionValue::Boolean(b) => b.to_string(),
+        OptionValue::String(s) => s.clone(),
+        OptionValue::Number(n) => n.to_string(),
+        OptionValue::Array(a) => serde_json::to_string(a).unwrap_or_default(),
+        OptionValue::Object(o) => serde_json::to_string(o).unwrap_or_default(),
+        OptionValue::Null => "null".to_string(),
+    }
 }
 
 /// Installation plan for features in dependency order
@@ -881,22 +1004,32 @@ pub struct ResolvedFeature {
 pub struct InstallationPlan {
     /// Features in installation order
     pub features: Vec<ResolvedFeature>,
-    /// Parallel execution levels - each level contains features that can be installed concurrently
-    pub levels: Vec<Vec<String>>,
+    /// Parallel execution levels — each level holds the INDEXES into `features` that
+    /// may be installed concurrently.
+    ///
+    /// Indexes, not ids: one Feature may legitimately appear several times in a plan,
+    /// once per option set it was requested with (#489) or once per declared version
+    /// (#430), and an id can no longer name a single row.
+    pub levels: Vec<Vec<usize>>,
 }
 
 impl InstallationPlan {
     /// Create a new installation plan
     pub fn new(features: Vec<ResolvedFeature>) -> Self {
         Self {
-            levels: vec![features.iter().map(|f| f.id.clone()).collect()],
+            levels: vec![(0..features.len()).collect()],
             features,
         }
     }
 
     /// Create a new installation plan with parallel levels
-    pub fn new_with_levels(features: Vec<ResolvedFeature>, levels: Vec<Vec<String>>) -> Self {
+    pub fn new_with_levels(features: Vec<ResolvedFeature>, levels: Vec<Vec<usize>>) -> Self {
         Self { features, levels }
+    }
+
+    /// Get the feature at an install index (as carried in [`InstallationPlan::levels`]).
+    pub fn feature_at(&self, index: usize) -> Option<&ResolvedFeature> {
+        self.features.get(index)
     }
 
     /// Get feature IDs in installation order
@@ -1018,24 +1151,26 @@ impl TagOrder {
 /// `…/go:1` sorts *after* `…/go-lang:1` because `-` < `:` — so the key is built
 /// structurally from the two parts instead.
 ///
-/// Steps 3+ collapse into the trailing full id. Within one resource name at one tag the id
-/// is already distinct and deterministic, which is what the spec asks for "in instances of
-/// ambiguity (i.e. sort alphanumerically by identifier)".
+/// Step 3 is [`OptionSetKey`], which is what separates the several instances of one local
+/// Feature requested with different option sets (#489). The trailing full id resolves what
+/// remains, which is what the spec asks for "in instances of ambiguity (i.e. sort
+/// alphanumerically by identifier)".
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RoundSortKey {
     resource: String,
     tag: TagOrder,
+    options: OptionSetKey,
     id: String,
 }
 
 impl RoundSortKey {
-    /// Derive the key from a feature id (`ResolvedFeature::id`, which is also the
-    /// dependency graph's node key).
-    fn of(id: &str) -> Self {
+    /// Derive the key from a resolved feature — the dependency graph's node.
+    fn of(feature: &ResolvedFeature) -> Self {
         RoundSortKey {
-            resource: strip_oci_tag(id).to_string(),
-            tag: TagOrder::of(id),
-            id: id.to_string(),
+            resource: strip_oci_tag(&feature.id).to_string(),
+            tag: TagOrder::of(&feature.id),
+            options: feature.option_set(),
+            id: feature.id.clone(),
         }
     }
 }
@@ -1054,11 +1189,23 @@ struct FeatureIdResolver {
     alias_to_canonical: HashMap<String, String>,
     source_to_canonical: HashMap<String, String>,
     source_notag_to_canonical: HashMap<String, String>,
+    /// Canonical id → every INSTANCE of it, in input order. One canonical id may name
+    /// several nodes: the same Feature requested with different option sets is several
+    /// distinct Features (#489).
+    instances_by_canonical: HashMap<String, Vec<usize>>,
 }
 
 impl FeatureIdResolver {
     fn new(features: &[ResolvedFeature]) -> Self {
         let feature_ids: HashSet<String> = features.iter().map(|f| f.id.clone()).collect();
+
+        let mut instances_by_canonical: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, feature) in features.iter().enumerate() {
+            instances_by_canonical
+                .entry(feature.id.clone())
+                .or_default()
+                .push(idx);
+        }
 
         // Map a feature's metadata id to its canonical id, but only when it
         // does not itself collide with a real canonical id (so OCI features
@@ -1096,7 +1243,38 @@ impl FeatureIdResolver {
             alias_to_canonical,
             source_to_canonical,
             source_notag_to_canonical,
+            instances_by_canonical,
         }
+    }
+
+    /// Every node carrying the canonical id `dep_id` resolves to, in input order.
+    fn instances(&self, dep_id: &str) -> &[usize] {
+        self.resolve(dep_id)
+            .and_then(|canonical| self.instances_by_canonical.get(&canonical))
+            .map(|v| v.as_slice())
+            .unwrap_or_default()
+    }
+
+    /// The single node a HARD (`dependsOn`) edge points at: the instance of `dep_id`
+    /// requested with `dep_options`.
+    ///
+    /// `dependsOn` carries options, and the accumulator that fed this resolver added one
+    /// instance per distinct option set, so the exact-options match is the edge's real
+    /// target. The first-instance fallback covers a feature list assembled without that
+    /// accumulator (unit tests, and any caller that declares the dependency itself), where
+    /// the old resource-only behavior is still the right answer.
+    fn hard_dependency_instance(
+        &self,
+        features: &[ResolvedFeature],
+        dep_id: &str,
+        dep_options: &OptionSetKey,
+    ) -> Option<usize> {
+        let candidates = self.instances(dep_id);
+        candidates
+            .iter()
+            .find(|&&idx| features[idx].option_set() == *dep_options)
+            .or_else(|| candidates.first())
+            .copied()
     }
 
     /// Resolve `dep_id` to a canonical id, or `None` when no feature matches.
@@ -1169,10 +1347,12 @@ impl FeatureDependencyResolver {
         let graph = self.build_dependency_graph(features)?;
 
         // Compute parallel execution levels
-        let levels = self.compute_parallel_levels(&graph)?;
+        let levels = self.compute_parallel_levels(features, &graph)?;
 
-        // Apply override order constraints if present
-        let (sorted_features, final_levels) = if let Some(ref override_order) = override_order {
+        // Apply override order constraints if present. Both branches produce the plan's
+        // node order as INDEXES into `features`, then renumber the levels to index the
+        // plan's own (reordered) `features` vector.
+        let ordered_nodes = if let Some(ref override_order) = override_order {
             // Priority topological sort: features listed in
             // `overrideFeatureInstallOrder` are preferred (in the listed order)
             // among the ready set each round; the rest tie-break lexicographically
@@ -1180,25 +1360,21 @@ impl FeatureDependencyResolver {
             // listed features come first, unlisted ones follow); `installsAfter`
             // dependencies are always respected. Install sequentially in this
             // order.
-            let sorted_ids = self.topological_sort(&graph, Some(override_order))?;
-            let sorted_features = sorted_ids
-                .iter()
-                .filter_map(|id| features.iter().find(|f| f.id == *id).cloned())
-                .collect::<Vec<_>>();
-            let sequential_levels = vec![sorted_ids];
-            (sorted_features, sequential_levels)
+            vec![self.topological_sort(features, &graph, Some(override_order))?]
         } else {
-            // Use parallel levels - flatten for features list but keep levels for parallel execution
-            let mut all_features = Vec::new();
-            for level in &levels {
-                for feature_id in level {
-                    if let Some(feature) = features.iter().find(|f| f.id == *feature_id) {
-                        all_features.push(feature.clone());
-                    }
-                }
-            }
-            (all_features, levels)
+            levels
         };
+
+        let mut sorted_features = Vec::new();
+        let mut final_levels: Vec<Vec<usize>> = Vec::with_capacity(ordered_nodes.len());
+        for level in &ordered_nodes {
+            let mut plan_level = Vec::with_capacity(level.len());
+            for &node in level {
+                plan_level.push(sorted_features.len());
+                sorted_features.push(features[node].clone());
+            }
+            final_levels.push(plan_level);
+        }
 
         Ok(InstallationPlan::new_with_levels(
             sorted_features,
@@ -1228,12 +1404,16 @@ impl FeatureDependencyResolver {
         Ok(())
     }
 
-    /// Build dependency graph from features
+    /// Build the dependency graph from features.
+    ///
+    /// Nodes are INDEXES into `features`, not ids: the same Feature may appear several
+    /// times — once per option set it was requested with (#489), once per declared
+    /// version (#430) — and each occurrence is a distinct node that installs.
     fn build_dependency_graph(
         &self,
         features: &[ResolvedFeature],
-    ) -> std::result::Result<HashMap<String, HashSet<String>>, FeatureError> {
-        let mut graph: HashMap<String, HashSet<String>> = HashMap::new();
+    ) -> std::result::Result<HashMap<usize, HashSet<usize>>, FeatureError> {
+        let mut graph: HashMap<usize, HashSet<usize>> = HashMap::new();
 
         // Per spec (https://containers.dev/implementors/features/#dependson and
         // #installation-order), `dependsOn`/`installsAfter` keys use "the same
@@ -1244,18 +1424,17 @@ impl FeatureDependencyResolver {
         // those rules and is shared with `overrideFeatureInstallOrder`
         // translation in `resolve()`.
         let id_resolver = FeatureIdResolver::new(features);
-        let resolve_dep = |dep_id: &str| -> Option<String> { id_resolver.resolve(dep_id) };
 
-        // Initialize graph with all feature IDs
-        for feature in features {
-            graph.insert(feature.id.clone(), HashSet::new());
+        // Initialize graph with every node
+        for node in 0..features.len() {
+            graph.insert(node, HashSet::new());
         }
 
         // Add dependencies from metadata
-        for feature in features {
+        for (node, feature) in features.iter().enumerate() {
             let dependencies =
                 graph
-                    .get_mut(&feature.id)
+                    .get_mut(&node)
                     .ok_or_else(|| FeatureError::DependencyResolution {
                         message: format!(
                             "Internal error: feature '{}' not found in dependency graph",
@@ -1263,33 +1442,41 @@ impl FeatureDependencyResolver {
                         ),
                     })?;
 
-            // Add installsAfter dependencies
+            // Add installsAfter dependencies. A soft dependency carries no options
+            // (`feature-dependencies.md` §installsAfter: "can not provide options"), so it
+            // names the RESOURCE and orders after every instance of it.
             for after_id in &feature.metadata.installs_after {
-                match resolve_dep(after_id) {
-                    Some(canonical) => {
-                        dependencies.insert(canonical);
-                    }
-                    None => {
-                        // `installsAfter` is a soft ordering hint, not a dependency:
-                        // per spec it only orders features already in the set and never
-                        // pulls in missing ones. An unresolved entry is expected, common
-                        // (e.g. every feature's installsAfter on common-utils), and not
-                        // actionable by the user — pure ordering bookkeeping, so debug.
-                        debug!(
-                            "Feature '{}' lists 'installsAfter' '{}', which is not in the feature set; ignoring for ordering",
-                            feature.id, after_id
-                        );
-                    }
+                let instances = id_resolver.instances(after_id);
+                if instances.is_empty() {
+                    // `installsAfter` is a soft ordering hint, not a dependency:
+                    // per spec it only orders features already in the set and never
+                    // pulls in missing ones. An unresolved entry is expected, common
+                    // (e.g. every feature's installsAfter on common-utils), and not
+                    // actionable by the user — pure ordering bookkeeping, so debug.
+                    debug!(
+                        "Feature '{}' lists 'installsAfter' '{}', which is not in the feature set; ignoring for ordering",
+                        feature.id, after_id
+                    );
+                }
+                for &instance in instances {
+                    dependencies.insert(instance);
                 }
             }
 
             // Add dependsOn dependencies. `dependsOn` is a HARD dependency: per
             // spec the referenced feature MUST be installed. An unresolvable key
             // is therefore a hard error (no silent fallback) rather than a warn.
-            for depend_id in feature.metadata.depends_on.keys() {
-                match resolve_dep(depend_id) {
-                    Some(canonical) => {
-                        dependencies.insert(canonical);
+            //
+            // The edge points at the instance requested with THESE options, not merely at
+            // the resource: `feature-dependencies.md` §Definition: Feature Equality makes
+            // the option set part of the Feature's identity, so a dependent that asked for
+            // `./b` with `{optA: a}` must be ordered behind that instance and not behind
+            // whichever `./b` somebody else requested (#489).
+            for (depend_id, depend_options) in &feature.metadata.depends_on {
+                let requested = OptionSetKey::of(&options_from_json(depend_options));
+                match id_resolver.hard_dependency_instance(features, depend_id, &requested) {
+                    Some(instance) => {
+                        dependencies.insert(instance);
                     }
                     None => {
                         return Err(FeatureError::DependencyResolution {
@@ -1319,29 +1506,38 @@ impl FeatureDependencyResolver {
     ///    the reference CLI for features absent from the override).
     fn topological_sort(
         &self,
-        graph: &HashMap<String, HashSet<String>>,
+        features: &[ResolvedFeature],
+        graph: &HashMap<usize, HashSet<usize>>,
         priority: Option<&[String]>,
-    ) -> std::result::Result<Vec<String>, FeatureError> {
+    ) -> std::result::Result<Vec<usize>, FeatureError> {
         use std::cmp::Reverse;
         use std::collections::BinaryHeap;
 
-        // Map each feature id to its override position (lower = earlier);
-        // features absent from the override sort after every listed one.
-        let priority_index = |id: &str| -> usize {
+        // Map each node to its override position (lower = earlier); features absent from
+        // the override sort after every listed one. `overrideFeatureInstallOrder` names a
+        // Feature, not one of its option-set instances, so every instance shares the
+        // position — exactly what §(B2) assigns (a `roundPriority` per matching node).
+        let priority_index = |node: usize| -> usize {
             priority
-                .and_then(|p| p.iter().position(|o| o == id))
+                .and_then(|p| p.iter().position(|o| *o == features[node].id))
                 .unwrap_or(usize::MAX)
         };
-        // Sort key for the ready set: (override position, Round Stable Sort key).
-        let sort_key = |id: &str| (priority_index(id), RoundSortKey::of(id));
+        // Sort key for the ready set: (override position, Round Stable Sort key, node).
+        let sort_key = |node: usize| {
+            (
+                priority_index(node),
+                RoundSortKey::of(&features[node]),
+                node,
+            )
+        };
 
-        let mut in_degree: HashMap<String, usize> = HashMap::new();
-        let mut adj_list: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut in_degree: HashMap<usize, usize> = HashMap::new();
+        let mut adj_list: HashMap<usize, HashSet<usize>> = HashMap::new();
 
         // Initialize in-degree and adjacency list
-        for node in graph.keys() {
-            in_degree.insert(node.clone(), 0);
-            adj_list.insert(node.clone(), HashSet::new());
+        for &node in graph.keys() {
+            in_degree.insert(node, 0);
+            adj_list.insert(node, HashSet::new());
         }
 
         // Build adjacency list and calculate in-degrees
@@ -1352,24 +1548,24 @@ impl FeatureDependencyResolver {
                     .ok_or_else(|| FeatureError::DependencyResolution {
                         message: format!(
                             "Internal error: dependency '{}' not found in adjacency list",
-                            dep
+                            node_label(features, *dep)
                         ),
                     })?
-                    .insert(node.clone());
+                    .insert(*node);
                 *in_degree
                     .get_mut(node)
                     .ok_or_else(|| FeatureError::DependencyResolution {
                         message: format!(
                             "Internal error: node '{}' not found in in-degree map",
-                            node
+                            node_label(features, *node)
                         ),
                     })? += 1;
             }
         }
 
         // Min-heap (via Reverse) over the ready set, keyed by (priority, round-sort key).
-        let mut ready: BinaryHeap<Reverse<(usize, RoundSortKey)>> = BinaryHeap::new();
-        for (node, &degree) in &in_degree {
+        let mut ready: BinaryHeap<Reverse<(usize, RoundSortKey, usize)>> = BinaryHeap::new();
+        for (&node, &degree) in &in_degree {
             if degree == 0 {
                 ready.push(Reverse(sort_key(node)));
             }
@@ -1378,39 +1574,38 @@ impl FeatureDependencyResolver {
         let mut result = Vec::new();
         let mut processed = 0;
 
-        while let Some(Reverse((_, current))) = ready.pop() {
-            let current = current.id;
-            result.push(current.clone());
+        while let Some(Reverse((_, _, current))) = ready.pop() {
+            result.push(current);
             processed += 1;
 
             // Decrement dependents; newly-ready nodes enter the priority heap.
-            let mut neighbors: Vec<String> = adj_list[&current].iter().cloned().collect();
-            neighbors.sort(); // deterministic iteration (heap re-prioritizes)
+            let mut neighbors: Vec<usize> = adj_list[&current].iter().copied().collect();
+            neighbors.sort_unstable(); // deterministic iteration (heap re-prioritizes)
             for neighbor in neighbors {
                 let degree = in_degree.get_mut(&neighbor).ok_or_else(|| {
                     FeatureError::DependencyResolution {
                         message: format!(
                             "Internal error: neighbor '{}' not found in in-degree map",
-                            neighbor
+                            node_label(features, neighbor)
                         ),
                     }
                 })?;
                 *degree -= 1;
                 if *degree == 0 {
-                    ready.push(Reverse(sort_key(&neighbor)));
+                    ready.push(Reverse(sort_key(neighbor)));
                 }
             }
         }
 
         // Check for cycles
         if processed != graph.len() {
-            let remaining: Vec<String> = graph
+            let remaining: Vec<usize> = graph
                 .keys()
+                .copied()
                 .filter(|k| !result.contains(k))
-                .cloned()
                 .collect();
 
-            let cycle_path = self.find_cycle_path(graph, &remaining)?;
+            let cycle_path = self.find_cycle_path(features, graph, &remaining)?;
             return Err(FeatureError::DependencyCycle { cycle_path });
         }
 
@@ -1422,15 +1617,16 @@ impl FeatureDependencyResolver {
     /// Returns levels where features in the same level can be executed concurrently
     fn compute_parallel_levels(
         &self,
-        graph: &HashMap<String, HashSet<String>>,
-    ) -> std::result::Result<Vec<Vec<String>>, FeatureError> {
-        let mut in_degree: HashMap<String, usize> = HashMap::new();
-        let mut adj_list: HashMap<String, HashSet<String>> = HashMap::new();
+        features: &[ResolvedFeature],
+        graph: &HashMap<usize, HashSet<usize>>,
+    ) -> std::result::Result<Vec<Vec<usize>>, FeatureError> {
+        let mut in_degree: HashMap<usize, usize> = HashMap::new();
+        let mut adj_list: HashMap<usize, HashSet<usize>> = HashMap::new();
 
         // Initialize in-degree and adjacency list
-        for node in graph.keys() {
-            in_degree.insert(node.clone(), 0);
-            adj_list.insert(node.clone(), HashSet::new());
+        for &node in graph.keys() {
+            in_degree.insert(node, 0);
+            adj_list.insert(node, HashSet::new());
         }
 
         // Build adjacency list and calculate in-degrees
@@ -1441,47 +1637,51 @@ impl FeatureDependencyResolver {
                     .ok_or_else(|| FeatureError::DependencyResolution {
                         message: format!(
                             "Internal error: dependency '{}' not found in adjacency list",
-                            dep
+                            node_label(features, *dep)
                         ),
                     })?
-                    .insert(node.clone());
+                    .insert(*node);
                 *in_degree
                     .get_mut(node)
                     .ok_or_else(|| FeatureError::DependencyResolution {
                         message: format!(
                             "Internal error: node '{}' not found in in-degree map",
-                            node
+                            node_label(features, *node)
                         ),
                     })? += 1;
             }
         }
 
-        let mut levels: Vec<Vec<String>> = Vec::new();
+        let mut levels: Vec<Vec<usize>> = Vec::new();
         let mut processed = 0;
 
         while processed < graph.len() {
             // Find all nodes with zero in-degree (can be processed in parallel)
-            let mut current_level: Vec<String> = in_degree
+            let mut current_level: Vec<usize> = in_degree
                 .iter()
                 .filter(|&(_, &degree)| degree == 0)
-                .map(|(node, _)| node.clone())
+                .map(|(&node, _)| node)
                 .collect();
 
             if current_level.is_empty() {
                 // No nodes with zero in-degree means there's a cycle
-                let remaining: Vec<String> = in_degree
-                    .keys()
-                    .filter(|k| in_degree[*k] > 0)
-                    .cloned()
+                let remaining: Vec<usize> = in_degree
+                    .iter()
+                    .filter(|&(_, &degree)| degree > 0)
+                    .map(|(&node, _)| node)
                     .collect();
 
-                let cycle_path = self.find_cycle_path(graph, &remaining)?;
+                let cycle_path = self.find_cycle_path(features, graph, &remaining)?;
                 return Err(FeatureError::DependencyCycle { cycle_path });
             }
 
             // Deterministic ordering — the spec's Round Stable Sort (resource name, then
-            // oldest tag first), not a raw string sort. See `RoundSortKey`.
-            current_level.sort_by_key(|id| RoundSortKey::of(id));
+            // oldest tag first, then option set), not a raw string sort. See `RoundSortKey`.
+            current_level.sort_by(|a, b| {
+                RoundSortKey::of(&features[*a])
+                    .cmp(&RoundSortKey::of(&features[*b]))
+                    .then(a.cmp(b))
+            });
             processed += current_level.len();
 
             // Process all nodes in the current level
@@ -1490,8 +1690,8 @@ impl FeatureDependencyResolver {
                 in_degree.remove(node);
 
                 // Update in-degrees for dependent nodes
-                let mut neighbors: Vec<String> = adj_list[node].iter().cloned().collect();
-                neighbors.sort(); // Lexicographic ordering for determinism - tie-breaks neighbor processing
+                let mut neighbors: Vec<usize> = adj_list[node].iter().copied().collect();
+                neighbors.sort_unstable(); // deterministic tie-break of neighbor processing
                 for neighbor in neighbors {
                     if let Some(degree) = in_degree.get_mut(&neighbor) {
                         *degree -= 1;
@@ -1509,20 +1709,27 @@ impl FeatureDependencyResolver {
     /// Find and format a cycle path for error reporting
     fn find_cycle_path(
         &self,
-        graph: &HashMap<String, HashSet<String>>,
-        remaining_nodes: &[String],
+        features: &[ResolvedFeature],
+        graph: &HashMap<usize, HashSet<usize>>,
+        remaining_nodes: &[usize],
     ) -> std::result::Result<String, FeatureError> {
         // Simple cycle detection using DFS
         let mut visited = HashSet::new();
         let mut rec_stack = HashSet::new();
         let mut path = Vec::new();
 
-        for node in remaining_nodes {
-            if !visited.contains(node) {
+        // Deterministic entry order — the error message must not depend on hash order.
+        let mut roots = remaining_nodes.to_vec();
+        roots.sort_unstable();
+
+        for node in roots {
+            if !visited.contains(&node) {
                 if let Some(cycle) =
                     Self::dfs_find_cycle(node, graph, &mut visited, &mut rec_stack, &mut path)
                 {
-                    return Ok(cycle.join(" -> "));
+                    let labels: Vec<String> =
+                        cycle.into_iter().map(|n| node_label(features, n)).collect();
+                    return Ok(labels.join(" -> "));
                 }
             }
         }
@@ -1532,37 +1739,48 @@ impl FeatureDependencyResolver {
 
     /// DFS helper for cycle detection
     fn dfs_find_cycle(
-        node: &str,
-        graph: &HashMap<String, HashSet<String>>,
-        visited: &mut HashSet<String>,
-        rec_stack: &mut HashSet<String>,
-        path: &mut Vec<String>,
-    ) -> Option<Vec<String>> {
-        visited.insert(node.to_string());
-        rec_stack.insert(node.to_string());
-        path.push(node.to_string());
+        node: usize,
+        graph: &HashMap<usize, HashSet<usize>>,
+        visited: &mut HashSet<usize>,
+        rec_stack: &mut HashSet<usize>,
+        path: &mut Vec<usize>,
+    ) -> Option<Vec<usize>> {
+        visited.insert(node);
+        rec_stack.insert(node);
+        path.push(node);
 
-        if let Some(dependencies) = graph.get(node) {
-            for dep in dependencies {
-                if !visited.contains(dep) {
+        if let Some(dependencies) = graph.get(&node) {
+            let mut deps: Vec<usize> = dependencies.iter().copied().collect();
+            deps.sort_unstable();
+            for dep in deps {
+                if !visited.contains(&dep) {
                     if let Some(cycle) = Self::dfs_find_cycle(dep, graph, visited, rec_stack, path)
                     {
                         return Some(cycle);
                     }
-                } else if rec_stack.contains(dep) {
+                } else if rec_stack.contains(&dep) {
                     // Found cycle, return path from dependency to current node
-                    let cycle_start = path.iter().position(|x| x == dep).unwrap_or(0);
+                    let cycle_start = path.iter().position(|x| *x == dep).unwrap_or(0);
                     let mut cycle_path = path[cycle_start..].to_vec();
-                    cycle_path.push(dep.to_string()); // Close the cycle
+                    cycle_path.push(dep); // Close the cycle
                     return Some(cycle_path);
                 }
             }
         }
 
         path.pop();
-        rec_stack.remove(node);
+        rec_stack.remove(&node);
         None
     }
+}
+
+/// How a graph node is named in a diagnostic. Falls back to the raw index only if the
+/// node is out of range, which the resolver's own construction rules out.
+fn node_label(features: &[ResolvedFeature], node: usize) -> String {
+    features
+        .get(node)
+        .map(|f| f.install_key())
+        .unwrap_or_else(|| format!("<node {}>", node))
 }
 
 /// Entrypoint configuration after chaining feature entrypoints
@@ -3081,12 +3299,10 @@ mod tests {
             .build_dependency_graph(&[lib.clone(), app.clone()])
             .expect("graph builds");
 
-        // An edge from app -> lib (canonical id) must exist.
-        let app_deps = graph
-            .get("local:/abs/feature-app")
-            .expect("app node present");
+        // An edge from app (node 1) -> lib (node 0) must exist.
+        let app_deps = graph.get(&1).expect("app node present");
         assert!(
-            app_deps.contains("local:/abs/feature-lib"),
+            app_deps.contains(&0),
             "expected app to depend on lib via local-path source, got {:?}",
             app_deps
         );
@@ -3158,7 +3374,7 @@ mod tests {
         let graph = resolver
             .build_dependency_graph(&[app])
             .expect("unresolvable installsAfter must not error");
-        let deps = graph.get("local:/abs/feature-app").expect("app present");
+        let deps = graph.get(&0).expect("app present");
         assert!(
             deps.is_empty(),
             "expected no edge for skipped installsAfter"
@@ -3282,7 +3498,11 @@ mod tests {
     /// applied only when the resource names compare equal.
     #[test]
     fn round_sort_key_orders_by_resource_then_oldest_tag() {
-        let key = |id: &str| RoundSortKey::of(id);
+        let key = |id: &str| {
+            let mut f = create_test_feature("x", vec![], HashMap::new());
+            f.id = id.to_string();
+            RoundSortKey::of(&f)
+        };
         let ordered = |a: &str, b: &str| key(a) < key(b);
 
         // Same resource, ordered by tag age — the one rule written for a `features`
@@ -3335,6 +3555,134 @@ mod tests {
                 "ghcr.io/devcontainers/features/git:1.3.2".to_string(),
             ],
             "both Features must install, oldest tag first"
+        );
+    }
+
+    /// `feature-dependencies.md` §Definition: Round Stable Sort orders same-resource
+    /// Features "by their options". The comparison is MEASURED against oracle 0.87.0
+    /// (its `dI` comparator), not read off the prose — the prose says "greatest number of
+    /// user-defined options" while the reference returns `a.length - b.length` and an
+    /// empty option set demonstrably sorts first.
+    #[test]
+    fn option_set_key_orders_fewest_options_then_keys_then_values() {
+        let key = |pairs: &[(&str, &str)]| {
+            OptionSetKey::of(
+                &pairs
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), OptionValue::String(v.to_string())))
+                    .collect(),
+            )
+        };
+
+        // Fewer authored options first — an empty set leads.
+        assert!(key(&[]) < key(&[("optA", "a")]));
+        assert!(key(&[("optA", "a")]) < key(&[("optA", "a"), ("optB", "b")]));
+        // Then the keys, lexicographically.
+        assert!(key(&[("optA", "z")]) < key(&[("optB", "a")]));
+        // Then the values, lexicographically.
+        assert!(key(&[("optA", "a"), ("optB", "a")]) < key(&[("optA", "a"), ("optB", "b")]));
+        assert!(key(&[("optA", "a"), ("optB", "b")]) < key(&[("optA", "b"), ("optB", "a")]));
+        // Authoring order is not identity — a map has none.
+        assert_eq!(
+            key(&[("optA", "a"), ("optB", "b")]),
+            key(&[("optB", "b"), ("optA", "a")])
+        );
+        // Every variant participates, so two differently-typed values never compare equal.
+        let typed = |v: OptionValue| OptionSetKey::of(&HashMap::from([("x".to_string(), v)]));
+        assert_ne!(
+            typed(OptionValue::Boolean(true)),
+            typed(OptionValue::Boolean(false))
+        );
+        assert_ne!(
+            typed(OptionValue::Number(1.into())),
+            typed(OptionValue::Number(2.into()))
+        );
+    }
+
+    /// #489 — the option set is part of a Feature's identity, so one Feature requested
+    /// with five different option sets is five nodes that all install, ordered by
+    /// §Round Stable Sort. Measured against oracle 0.87.0 on the reference's own
+    /// `dependsOn/local-with-options` e2e fixture.
+    #[test]
+    fn resolver_keeps_one_instance_per_option_set_ordered_by_options() {
+        let instance = |a: Option<&str>, b: Option<&str>| {
+            let mut f = create_test_feature("b", vec![], HashMap::new());
+            f.id = "local:/ws/.devcontainer/b".to_string();
+            f.source = "./b".to_string();
+            f.options = [("optA", a), ("optB", b)]
+                .into_iter()
+                .filter_map(|(k, v)| v.map(|v| (k.to_string(), OptionValue::String(v.to_string()))))
+                .collect();
+            f
+        };
+
+        // Declared in an order that disagrees with the sort, so a stable pass-through
+        // would be caught.
+        let plan = FeatureDependencyResolver::new(None)
+            .resolve(&[
+                instance(Some("b"), Some("b")),
+                instance(Some("a"), Some("b")),
+                instance(None, None),
+                instance(Some("b"), Some("a")),
+                instance(Some("a"), Some("a")),
+            ])
+            .expect("distinct option sets resolve");
+
+        assert_eq!(
+            plan.len(),
+            5,
+            "one node per requested option set — collapsing them silently hands four \
+             requesters somebody else's instance"
+        );
+        let ordered: Vec<String> = plan
+            .features
+            .iter()
+            .map(|f| f.option_set().to_string())
+            .collect();
+        assert_eq!(
+            ordered,
+            vec![
+                "{}",
+                "{optA=a,optB=a}",
+                "{optA=a,optB=b}",
+                "{optA=b,optB=a}",
+                "{optA=b,optB=b}",
+            ],
+            "§Round Stable Sort orders same-resource Features by their options"
+        );
+        // The levels index the plan's own rows, so each instance is addressable.
+        assert_eq!(plan.levels, vec![vec![0, 1, 2, 3, 4]]);
+    }
+
+    /// A `dependsOn` edge points at the instance requested with THOSE options, not at
+    /// whichever instance of the resource happens to come first (#489).
+    #[test]
+    fn depends_on_edge_targets_the_instance_with_matching_options() {
+        let b = |v: &str| {
+            let mut f = create_test_feature("b", vec![], HashMap::new());
+            f.id = "local:/ws/.devcontainer/b".to_string();
+            f.source = "./b".to_string();
+            f.options = HashMap::from([("optA".to_string(), OptionValue::String(v.to_string()))]);
+            f
+        };
+        let mut dependent = create_test_feature(
+            "a",
+            vec![],
+            HashMap::from([("./b".to_string(), serde_json::json!({ "optA": "z" }))]),
+        );
+        dependent.id = "local:/ws/.devcontainer/a".to_string();
+        dependent.source = "./a".to_string();
+
+        // Node 0 is `./b {optA: a}`, node 1 is `./b {optA: z}`, node 2 the dependent.
+        let features = [b("a"), b("z"), dependent];
+        let graph = FeatureDependencyResolver::new(None)
+            .build_dependency_graph(&features)
+            .expect("graph builds");
+
+        assert_eq!(
+            graph.get(&2).expect("dependent node present"),
+            &HashSet::from([1]),
+            "the edge must name the `{{optA: z}}` instance, not the first `./b` in the set"
         );
     }
 

@@ -16,7 +16,6 @@ use deacon_core::container::ContainerSelector;
 
 use deacon_core::features::{
     FeatureDependencyResolver, FeatureMergeConfig, FeatureMerger, OptionValue, ResolvedFeature,
-    canonical_feature_id,
 };
 use deacon_core::io::Output;
 use deacon_core::oci::{FeatureRef, default_fetcher_with_config};
@@ -452,10 +451,14 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     let mut resolved_features = Vec::with_capacity(features_map.len());
 
     // The option values the configuration wrote for each feature, keyed by the
-    // canonical id, kept VERBATIM for the reported `value`. `ResolvedFeature`
-    // stores options as a typed map, and reconstructing the authored document
-    // from it would lose the shorthand string form (`"features": {"x": "1.2"}`,
-    // which resolution expands to `{"version": "1.2"}`).
+    // feature's INSTALL KEY (canonical id + option set) and kept VERBATIM for the
+    // reported `value`. `ResolvedFeature` stores options as a typed map, and
+    // reconstructing the authored document from it would lose the shorthand string form
+    // (`"features": {"x": "1.2"}`, which resolution expands to `{"version": "1.2"}`).
+    //
+    // The canonical id alone cannot key this map: one Feature may appear several times,
+    // once per option set it was requested with (#489), and each instance reports its own
+    // `value`.
     let mut authored_values: HashMap<String, serde_json::Value> =
         HashMap::with_capacity(features_map.len());
 
@@ -538,13 +541,14 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             _ => HashMap::new(),
         };
 
-        authored_values.insert(canonical_id.clone(), feature_value.clone());
-        resolved_features.push(ResolvedFeature {
+        let resolved = ResolvedFeature {
             id: canonical_id,
             source: source_string,
             options,
             metadata: downloaded_metadata,
-        });
+        };
+        authored_values.insert(resolved.install_key(), feature_value.clone());
+        resolved_features.push(resolved);
     }
 
     // Auto-install transitive `dependsOn` (hard) dependencies before resolving
@@ -570,13 +574,12 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
                 fetcher,
             )
             .await?;
-            // Resource-name match, mirroring `resolve_features_ordered`: an unpinned
-            // hard dependency is satisfied by the user's pinned declaration (#430).
-            if !resolved_features
-                .iter()
-                .any(|f| canonical_feature_id(&f.id) == canonical_feature_id(&dep.id))
-            {
-                authored_values.insert(dep.id.clone(), dep_value.clone());
+            // Same identity rule as `resolve_features_ordered`: resource + option set.
+            if !crate::commands::shared::feature_resolver::same_feature_already_resolved(
+                &resolved_features,
+                &dep,
+            ) {
+                authored_values.insert(dep.install_key(), dep_value.clone());
                 resolved_features.push(dep);
             }
         }
@@ -639,7 +642,7 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             post_attach_command: metadata.post_attach_command.clone(),
             value: Some(
                 authored_values
-                    .get(&resolved.id)
+                    .get(&resolved.install_key())
                     .cloned()
                     .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())),
             ),
