@@ -1,0 +1,10 @@
+{
+	"build": {
+		"dockerfile": "Dockerfile",
+		"target": "desired-image",
+		"args": {
+			"VARIANT": "bookworm-slim"
+		},
+		"options": [ "--label", "test_build_options=success" ]
+	}
+}

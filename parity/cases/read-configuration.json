@@ -3819,6 +3819,613 @@
         "tempdir": true
       },
       "notes": "Tier-1 corpus case `workspacefolder-custom`: deacon and the pinned reference resolve the same configuration for this workspace. The structured-output channel is compared under the declarative normalizer (path_token + null_preserving), which — unlike the legacy `prune` path — does NOT drop null/empty values or `configFilePath` (research D3). Differences it surfaces are strictness improvements to characterize in US4/T064, never to re-hide."
+    },
+    {
+      "id": "case-readconfig-upstream-containerenv-escaping",
+      "behaviors": [
+        "bhv-readconfig-containerenv-values-round-trip-verbatim"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-containerenv-escaping"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "A `containerEnv` block whose values only survive if nothing re-interprets them: embedded double quotes, a literal `$`, a backslash, leading AND trailing runs of spaces, and a value that is itself a shell command (`bash -c 'echo -n \"…\"'`). Upstream keeps this fixture because each of those has broken a shell-quoting path at some point; running it differentially asks whether deacon's `containerEnv` round trip and the reference's agree character for character. MEASURED at oracle 0.87.0: byte-identical.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-containerenv-dollar-escape",
+      "behaviors": [
+        "bhv-readconfig-containerenv-escaped-placeholders-preserved"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-containerenv-dollar-escape"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The `$$`-escape half of the same question, on the Compose shape. The values carry `$${severity}`-style placeholders that must reach the container as literal `${severity}` rather than being substituted away or double-escaped, and TWO of the names are also set in the Compose service's own `environment:` block — so a configuration read has to report the configuration's value without consulting or merging Compose's. MEASURED at oracle 0.87.0: byte-identical.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-runargs-env-subst",
+      "behaviors": [
+        "bhv-readconfig-containerenv-variable-in-remote-env"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-runargs-env-subst"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`remoteEnv` reading three different sources in one document: `${localEnv:PATH}` (the host), `${containerEnv:PATH}` (the image), and `${containerEnv:TEST_CE}` — a name that exists ONLY because `runArgs` injects it with `-e`. The third is the interesting one: it is a container variable the configuration itself creates, so an implementation that resolves `${containerEnv:*}` eagerly against the image and an implementation that defers it to the running container disagree about whether it resolves at all. MEASURED at oracle 0.87.0: byte-identical — both defer, and the read reports the templates unresolved.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-legacy-vscode-properties",
+      "behaviors": [
+        "bhv-readconfig-legacy-vscode-properties-migrated"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-devport-userenvprobe"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "RED AND EXPECTED — a deacon-side divergence this case was written to record, not to excuse. The fixture carries the three pre-`customizations` VS Code properties (`settings`, `extensions`, `devPort`) at the TOP LEVEL, plus `userEnvProbe`.\n\nMEASURED at oracle 0.87.0: the reference MIGRATES all three into `customizations.vscode` and emits no top-level copy; deacon echoes all three where they were authored and synthesizes no `customizations` block. `userEnvProbe` agrees on both sides.\n\nNeither side is obviously wrong from the pinned spec: `supporting-tools.md` says \"Visual Studio Code specific properties go under `vscode` inside `customizations`\", and `devcontainerjson-reference.md` models neither the top-level trio nor `devPort` at all — so deacon reaches them through its unmodeled `extra` passthrough, which preserves rather than rewrites by design. On a spec-silent OUTPUT surface the reference is the authority, which is why this is filed as deacon's difference and left red rather than allowlisted. Adjudication is the maintainer's.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-mount-object-anonymous-volume",
+      "behaviors": [
+        "bhv-readconfig-mount-object-form-without-source"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-mount-object-anonymous-volume"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "A `mounts` entry in the OBJECT form carrying only `target` and `type: volume` — no `source`, which is how an anonymous volume is requested — written with a trailing comma inside the object. Every mount fixture in this suite before it used the STRING form, so the object form's parse, its optional `source`, and JSONC tolerance inside a nested object were all unexercised. MEASURED at oracle 0.87.0: byte-identical.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-initialize-command-object",
+      "behaviors": [
+        "bhv-readconfig-initialize-command-object-form"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-initialize-command-object"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`initializeCommand` in the OBJECT (parallel) form. The suite covered the string and array forms of the host-side hook and the object form of the CONTAINER-side hooks, but not this combination — which matters to deacon specifically, because `initializeCommand` is the one hook that runs on the developer's host and therefore the one the workspace-trust gate stands in front of. The operation is a configuration read, so nothing is executed on either side and the case measures the parse alone. MEASURED at oracle 0.87.0: byte-identical.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-feature-v1-shorthand-ids",
+      "behaviors": [
+        "bhv-features-v1-shorthand-id-resolution"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-feature-digest-and-v1-ids"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "RED AND EXPECTED — a deacon-side divergence. One `features` map mixing three reference forms: a bare v1-era id (`terraform`), a fully qualified id pinned by MANIFEST DIGEST (`…/docker-in-docker@sha256:440bdb81…`), and a second bare id with a version value (`\"node\": \"16\"`).\n\nMEASURED at oracle 0.87.0: the reference resolves each bare id to `ghcr.io/devcontainers/features/<id>` at version `1` and exits 0. deacon resolves them to `ghcr.io/devcontainers/<id>:latest` — one path segment short — and exits 1 on `Authentication failed for URL: https://ghcr.io/v2/devcontainers/terraform/manifests/latest`, a repository that does not exist. deacon's short-form default namespace is `devcontainers`, not `devcontainers/features` (`core::feature_ref`), so NO bare id resolves to a published Feature.\n\n`devcontainer-features.md` does say deprecated identifiers \"are not supported and the presence of this property may be considered a fatal error or ignored\" — so rejecting a bare id is defensible. Failing on a mis-derived registry URL is not either of those two, which is why this is recorded as deacon's difference. Without `--include-features-configuration` the two sides' output is byte-identical, so the divergence is in resolution, not in the echo.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-feature-no-version-tag",
+      "behaviors": [
+        "bhv-features-declared-reference-preserved-untagged"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-feature-no-version-tag"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "RED AND EXPECTED — a deacon-side divergence. A Feature referenced with NO version at all (`ghcr.io/devcontainers/features/git`).\n\nMEASURED at oracle 0.87.0: both sides resolve the same Feature (identical `computedDigest`, identical `consecutiveId` `git_0`), but `featuresConfiguration.featureSets[].sourceInformation.userFeatureId` differs — the reference reports the id the configuration DECLARED (`ghcr.io/devcontainers/features/git`), deacon reports `ghcr.io/devcontainers/features/git:latest`, having canonicalized the omitted version into the field that names what the user wrote.\n\nThis is the same class as the `outdated` report-key divergence that #407 closed — a resolved value written into a field whose contract is the DECLARED one — on a surface that fix did not reach.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-local-feature-inside-devcontainer",
+      "behaviors": [
+        "bhv-features-local-path-relative-to-config-dir"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-local-feature-inside-devcontainer"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Two local Features referenced as `./localFeatureA` / `./localFeatureB` from a config at `.devcontainer/devcontainer.json`, so the paths resolve against the `.devcontainer` folder. Paired deliberately with `case-readconfig-upstream-local-feature-config-at-workspace-root`, which declares the SAME two Feature directories from a config one level up — the two together pin that local paths resolve against the folder containing the active `devcontainer.json` (`devcontainer-features-distribution.md`: \"relative to the folder containing the project's devcontainer.json\") rather than against a fixed `.devcontainer`.\n\nRED AND EXPECTED, on a SECOND axis this case was not written for and found anyway. `localFeatureB/devcontainer-feature.json` declares the pre-`customizations` VS Code properties `extensions` and `settings` at its top level. MEASURED at oracle 0.87.0: the reference migrates both into a `customizations.vscode` block on the resolved Feature; deacon emits NEITHER a `customizations` key nor the authored properties — it drops them. That is a fidelity loss rather than a formatting choice, and it is the Feature-level twin of the configuration-level divergence `case-readconfig-upstream-legacy-vscode-properties` records. Both are left red for triage; neither is allowlisted.\n\nThe axis the case WAS written for agrees exactly and is what the row will claim once the legacy-property difference is settled: both sides resolve the same two Features, in the same order, with the same options and the same `consecutiveId`s.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-local-feature-config-at-workspace-root",
+      "behaviors": [
+        "bhv-features-local-path-from-root-config"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-local-feature-outside-devcontainer"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The other half of the pair. The config is `.devcontainer.json` at the WORKSPACE ROOT and the same two Feature directories are named `./.devcontainer/localFeatureA` and `./.devcontainer/localFeatureB` — a path that is correct only if resolution is anchored at the config's own directory. An implementation that hardcodes `<workspace>/.devcontainer` as the anchor resolves this to `.devcontainer/.devcontainer/localFeatureA` and fails; one that hardcodes the workspace root fails the sibling case instead.\n\nRED AND EXPECTED, on a SECOND axis this case was not written for and found anyway. `localFeatureB/devcontainer-feature.json` declares the pre-`customizations` VS Code properties `extensions` and `settings` at its top level. MEASURED at oracle 0.87.0: the reference migrates both into a `customizations.vscode` block on the resolved Feature; deacon emits NEITHER a `customizations` key nor the authored properties — it drops them. That is a fidelity loss rather than a formatting choice, and it is the Feature-level twin of the configuration-level divergence `case-readconfig-upstream-legacy-vscode-properties` records. Both are left red for triage; neither is allowlisted.\n\nThe axis the case WAS written for agrees exactly and is what the row will claim once the legacy-property difference is settled: both sides resolve the same two Features, in the same order, with the same options and the same `consecutiveId`s.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-local-feature-outside-devcontainer",
+      "behaviors": [
+        "bhv-features-local-path-outside-devcontainer-rejected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-local-feature-missing-folder"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "RED AND EXPECTED — a deacon-side divergence, and the one in this batch with the most direct spec text behind it. The workspace has no `.devcontainer` FOLDER at all: the config is `.devcontainer.json` at the root and the two local Features live under `./local-features/`. Upstream files this fixture under `invalid-configs/`.\n\n`devcontainer-features-distribution.md` §Locally Referenced Features: \"A local Feature's source code **must** be contained within a sub-folder of the `.devcontainer/ folder`.\"\n\nMEASURED at oracle 0.87.0: the reference exits 1 with `Local file path parse error. Resolved path must be a child of the .devcontainer/ folder.` and names the resolved path. deacon exits 0 and resolves both Features happily. deacon accepts a document the specification forbids — the fail-fast direction of constitution IV, not the lenient one, and the inverse of every characterized read-configuration divergence this project already has.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-dependson-local-with-options",
+      "behaviors": [
+        "bhv-features-local-dependency-instance-per-option-set"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-dependson-local-with-options"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "RED AND EXPECTED — a deacon-side divergence, spec-backed. Five local Features where `./b` is depended on by four different dependents, each requesting a DIFFERENT option set (`{}`, `{optA:a,optB:a}`, `{optA:b,optB:a}`, `{optA:b,optB:b}`), and the configuration itself declares a fifth (`{optA:a,optB:b}`).\n\n`feature-dependencies.md` §Definition: Feature Equality — \"This specification defines two Features as equal if both Features point to the same exact contents and are executed with the same options\", and \"**For local Features**, each Feature is considered unique and not equal to any other local Feature.\"\n\nMEASURED at oracle 0.87.0: the reference produces NINE installation nodes, five of them `./b` (`b_0`…`b_4`), one per distinct option set requested. deacon produces FIVE nodes with a single `./b`, carrying the option set the CONFIGURATION declared — so four dependents that asked for `./b` with specific options silently receive someone else's. The relative order of the other four (`./d`, `./e`, `./c`, `./a`) agrees. This is the same equality rule #430 settled for duplicate OCI tags, one level deeper: options, not just contents, are part of Feature identity.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-installsafter-cycle",
+      "behaviors": [
+        "bhv-features-installsafter-cycle-rejected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-installsafter-circular"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Three local Features whose `installsAfter` entries form a cycle (a→b→c→a). `installsAfter` is the SOFT edge — a mere ordering preference, which an implementation could plausibly resolve by dropping an edge and installing anyway — so this is a genuinely open question rather than a restatement of the `dependsOn` cycle case the suite already has. `feature-dependencies.md` §(B3): \"If there is ever a round where no elements are added to `installationOrder`, the algorithm should terminate and return an error.\" MEASURED at oracle 0.87.0: both sides exit 1. A both-reject agreement, and the only one of the four dependency-resolution fixtures in this batch that fails on both sides.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-override-order-intermediate",
+      "behaviors": [
+        "bhv-features-override-order-names-transitive-dependency"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-override-order-intermediate"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`overrideFeatureInstallOrder` naming two Features the configuration never declares. The config asks for `./a` alone; `./a` dependsOn `./b` and `./d` and installsAfter `./c`, `./b` dependsOn `./c` — and the override lists `./c`, `./d`, neither of which is a user Feature. Per §(B2) the override assigns `roundPriority`, so it has to reach Features pulled in transitively or it does nothing here. Upstream pins the answer as `./c`, `./d`, `./b`, `./a`. MEASURED at oracle 0.87.0: both sides produce exactly that, with identical options and `consecutiveId`s.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-override-order-round-priority",
+      "behaviors": [
+        "bhv-features-override-order-round-priority-beats-independent"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-override-order-round-priority"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The `roundPriority` tie-break itself. `./b` and `./c` are declared; `./b` dependsOn `./a`; the override lists `./a`, `./b`, `./c`. `./c` has no dependencies, so a naive round-based sort commits it in the FIRST round alongside `./a` — the override's job is to hold it back, because §(B3) commits only the nodes sharing the maximum `roundPriority` of a round and returns the rest to the worklist. Upstream pins `./a`, `./b`, `./c`. MEASURED at oracle 0.87.0: both sides produce exactly that.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-dependson-and-installsafter",
+      "behaviors": [
+        "bhv-features-dependson-and-installsafter-combined"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-dependson-installsafter-local"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "One Feature carrying BOTH edge kinds at once: `./a` dependsOn `./c` (hard — `./c` must be installed and is pulled in even though the configuration never named it) and installsAfter `./b` (soft — `./b` is not declared anywhere, so the edge has nothing to order against and must be dropped rather than pulling `./b` in or failing). Getting the two kinds' semantics crossed produces either a spurious install or a spurious error. MEASURED at oracle 0.87.0: both sides install `./c` then `./a`, and neither installs `./b`.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-subfolder-config",
+      "behaviors": [
+        "bhv-readconfig-explicit-config-in-nested-subfolder"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/.devcontainer/subfolder/devcontainer.json"
+          ],
+          "fixtures": [
+            "fx-upstream-subfolder-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "An explicit `--config` naming a devcontainer.json nested TWO levels down (`.devcontainer/subfolder/devcontainer.json`) while a different, valid config sits at the workspace root. Two things have to be right at once: the named file wins over the discoverable one, and `build.dockerfile` resolves against the NAMED config's directory rather than the workspace root — the subfolder has its own Dockerfile, so resolving against the root would silently build the wrong image. MEASURED at oracle 0.87.0: byte-identical.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
     }
   ]
 }

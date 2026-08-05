@@ -2447,6 +2447,150 @@
         "tempdir": true
       },
       "notes": "The compose twin of `case-up-image-metadata-same-phase-differential`, and the reason there are two.\n\n#467 is NOT a compose defect. It lives in the merge that folds an image's `devcontainer.metadata` into the configuration — `merge_image_metadata_after_image_ready` — which `up`'s single-container path, `up`'s compose path (since #448) and `container_metadata::resolve_config_against_container` (`exec` and `run-user-commands`, since #405) all share. It reproduced IDENTICALLY on both `up` paths when it was filed, which is what identified it as a config-merge defect rather than an `up`-path one. A single-path case would misattribute a future regression to whichever path it happened to cover, so both paths are pinned and the two fixtures differ ONLY in how the container is brought up.\n\nSame three phases and the same reasoning as the sibling: `onCreate` and `postCreate` declared on BOTH sides (and `postCreate` in two different command forms), `postStart` by the IMAGE ONLY so a double-run is visible, and an assertion over the whole log rather than any one line.\n\nThe marker path is absolute (`/workspace/lifecycle.log`) where the sibling's is relative: deacon injects no workspace mount of its own on the compose path, so the hook's working directory is whatever the service provides. Naming the bind-mount path outright keeps this case measuring the merge rather than the lifecycle CWD resolution that `case-up-compose-lifecycle-phases` already covers.\n\nSTRENGTHENED after the fix landed (#467 follow-up): the fixture label carried ONE entry, which pins the collision but says nothing about the order BETWEEN metadata entries — and the merge rule is a \"Collected list\", so the label is an ordered array and that order is part of the claim. It now carries TWO entries, both declaring `onCreateCommand`, so `img1-onCreate` preceding `img2-onCreate` is the cross-entry assertion; an implementation that collected the entries into a set, reversed them, or read only the first or last would have satisfied the single-entry fixture. Cross-entry ordering had been pinned only by unit tests asserting `ImageMetadata { index: 0 }` / `{ index: 1 }`, never end-to-end against the oracle. The other two phases moved one per entry, so every property the single-entry revision pinned — the string-vs-string collision, the string-vs-ARRAY collision, and the image-only phase running exactly once — is unchanged."
+    },
+    {
+      "id": "case-up-upstream-lifecycle-hooks-inline",
+      "behaviors": [
+        "bhv-up-lifecycle-hooks-from-features-and-configuration"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-lifecycle-hooks-inline"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up"
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-order.log"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The five-phase, two-source matrix, in one case. Two local Features (`./tiger`, `./panda`, ordered by `installsAfter`) each declare ALL FIVE lifecycle phases, and the configuration declares the same five itself — so every phase has two sources plus a Feature ordering between them. That is the exact shape #467 and #477 were defects in, and this is the fixture upstream keeps for it.\n\nThe observation is `lifecycle-order.log`, appended to once per hook: it records which hooks ran AND in what order, in one compared value. An implementation that collects only one source per phase, or runs the Feature hooks after the configuration's, or skips a phase entirely, writes a different file while still exiting 0 — which is why the exit code is not the claim here.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-up-upstream-lifecycle-hooks-advanced",
+      "behaviors": [
+        "bhv-up-lifecycle-hooks-parallel-and-feature-installed-commands"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-lifecycle-hooks-advanced"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-up"
+        }
+      ],
+      "fsAllowlist": [
+        "helperScript.devContainer.parallel_postCreateCommand_1.testMarker",
+        "helperScript.devContainer.parallel_postCreateCommand_2.testMarker",
+        "i-am-a-rabbit.postStartCommand.testMarker",
+        "i-am-an-otter.postAttachCommand.testMarker",
+        "helperScript.otter.onCreateCommand.testMarker",
+        "helperScript.otter.updateContentCommand.testMarker",
+        "helperScript.otter.parallel_postCreateCommand_1.testMarker",
+        "helperScript.otter.parallel_postCreateCommand_2.testMarker",
+        "helperScript.otter.postStartCommand.testMarker",
+        "helperScript.otter.postAttachCommand.testMarker",
+        "helperScript.rabbit.onCreateCommand.testMarker",
+        "helperScript.rabbit.updateContentCommand.testMarker",
+        "helperScript.rabbit.parallel_postCreateCommand_1.testMarker",
+        "helperScript.rabbit.parallel_postCreateCommand_2.testMarker",
+        "helperScript.rabbit.postStartCommand.testMarker",
+        "helperScript.rabbit.postAttachCommand.testMarker"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The same two-source matrix in its harder forms. Both Features AND the configuration declare `postCreateCommand` in the OBJECT (parallel) form, with one member a string and the other an array; both Features declare `postStartCommand`/`postAttachCommand` as arrays; and the configuration's own `postStart`/`postAttach` are shell strings containing COMMAND SUBSTITUTION of binaries the Features install (`touch `rabbit`.postStartCommand.testMarker`), so they can only succeed if the Feature's `install.sh` already ran and put its binary on the PATH the hook is given.\n\nSixteen marker paths are observed rather than an ordered log, deliberately: the parallel members of an object-form hook have no defined order between them, so presence is the only honest observable. Absence is captured too (`exists:false`), so a phase that silently did not run is a difference rather than a gap.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-up-upstream-remote-user-uid-remap",
+      "behaviors": [
+        "bhv-up-remote-user-uid-remap-dockerfile"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-updateuid-remoteuser"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up"
+        }
+      ],
+      "fsAllowlist": [
+        "upstream-updateuid-marker.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The single-container analogue of the compose uid-remap case (#462). The Dockerfile creates `foo` at uid 1234 / gid 4321 and the configuration selects it as `remoteUser`; the workspace is a bind mount of a host directory the runner owns. `postCreateCommand` writes `whoami` into that mount, which succeeds only if BOTH halves hold: the hook ran as `remoteUser`, and that user's uid was remapped to the host's. 1234 is not a plausible host uid, so neither half can pass by coincidence — the failure mode this fixture's compose sibling hit on GitHub's runners and not locally.\n\nThe marker records the NAME, not `id -u`: the remapped uid is the host's and so differs between a dev box and a CI runner, which would make a fixed assertion a statement about the host. The remap is measured by the file existing at all.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
     }
   ]
 }

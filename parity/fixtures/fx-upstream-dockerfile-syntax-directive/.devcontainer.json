@@ -1,0 +1,8 @@
+{
+	"build": {
+		"dockerfile": "Dockerfile",
+		"args": {
+			"VARIANT": "bookworm-slim"
+		}
+	}
+}
