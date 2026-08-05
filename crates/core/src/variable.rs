@@ -90,6 +90,16 @@ pub struct SubstitutionContext {
     /// (which set `devcontainer_id` to a meaningful value) keep resolving it;
     /// `read-configuration`'s pre-container output passes set this to `false`.
     pub resolve_devcontainer_id: bool,
+    /// Whether `${localWorkspaceFolder}` / `${localWorkspaceFolderBasename}` should be
+    /// resolved in this pass.
+    ///
+    /// Defaults to `true`: every workspace-anchored pass (`up`, `exec`,
+    /// `read-configuration`, …) took a `--workspace-folder` and therefore has a real
+    /// answer. `set-up` does NOT — it targets an existing container and never learns a
+    /// host workspace — so it sets this to `false` via
+    /// [`SubstitutionContext::without_workspace`] and the tokens survive as literals,
+    /// which is what the reference CLI emits there (#510).
+    pub resolve_workspace_folder_vars: bool,
 }
 
 impl SubstitutionContext {
@@ -162,6 +172,43 @@ impl SubstitutionContext {
             feature_vars: HashMap::new(),
             template_options: None,
             resolve_devcontainer_id: true,
+            resolve_workspace_folder_vars: true,
+        })
+    }
+
+    /// Create a substitution context for a pass that has **no workspace folder**.
+    ///
+    /// `set-up` adopts an already-running container and takes no `--workspace-folder`,
+    /// so there is no host workspace for `${localWorkspaceFolder}`,
+    /// `${localWorkspaceFolderBasename}` or `${devcontainerId}` to name. The reference
+    /// CLI leaves all three literal on that surface; deacon used to anchor at the
+    /// process cwd and substitute an invented answer into both the reported
+    /// configuration and the lifecycle commands it exec'd (#510).
+    ///
+    /// `anchor` is a MECHANICAL anchor only — it roots lifecycle phase markers and the
+    /// host-side working directory, and no variable may observe it. The absence of a
+    /// workspace is carried explicitly by `resolve_workspace_folder_vars: false` and
+    /// `resolve_devcontainer_id: false` rather than by a dummy path that reads like a
+    /// real workspace.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use deacon_core::variable::SubstitutionContext;
+    /// use std::path::Path;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let context = SubstitutionContext::without_workspace(Path::new("."))?;
+    /// assert!(!context.resolve_workspace_folder_vars);
+    /// assert!(!context.resolve_devcontainer_id);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn without_workspace(anchor: &Path) -> Result<Self> {
+        Ok(Self {
+            resolve_devcontainer_id: false,
+            resolve_workspace_folder_vars: false,
+            ..Self::new(anchor)?
         })
     }
 
@@ -464,13 +511,20 @@ impl VariableSubstitution {
     /// - `feature:VAR` - Returns feature-provided variable (if available)
     fn resolve_variable(variable_expr: &str, context: &SubstitutionContext) -> Option<String> {
         match variable_expr {
-            "localWorkspaceFolder" => Some(context.local_workspace_folder.clone()),
-            "localWorkspaceFolderBasename" => Some(
+            // Both workspace-derived tokens are gated together: a pass with no workspace
+            // (`set-up`, via `without_workspace`) has no answer for either, and the
+            // reference CLI leaves both literal there. `None` preserves the token, the
+            // same deferral `containerWorkspaceFolder` and `devcontainerId` use below.
+            "localWorkspaceFolder" if context.resolve_workspace_folder_vars => {
+                Some(context.local_workspace_folder.clone())
+            }
+            "localWorkspaceFolderBasename" if context.resolve_workspace_folder_vars => Some(
                 std::path::Path::new(&context.local_workspace_folder)
                     .file_name()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default(),
             ),
+            "localWorkspaceFolder" | "localWorkspaceFolderBasename" => None,
             // Per the reference CLI, `${devcontainerId}` is only resolved once a
             // container identity exists. When `resolve_devcontainer_id` is false
             // (config-load / `read-configuration` output before any container),
@@ -700,6 +754,48 @@ mod tests {
         assert!(result.starts_with("container-"));
         assert_eq!(result.len(), "container-".len() + 12); // 12-char ID
         assert!(report.replacements.contains_key("devcontainerId"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_without_workspace_leaves_workspace_vars_literal() -> anyhow::Result<()> {
+        // Parity (#510): `set-up` takes no `--workspace-folder`, so the three
+        // workspace-derived variables have no answer and the reference CLI leaves
+        // all three literal. `${localEnv:*}` still resolves — that is the whole
+        // point of gating the workspace variables rather than the pass.
+        let temp_dir = TempDir::new()?;
+        let mut context = SubstitutionContext::without_workspace(temp_dir.path())?;
+        context.local_env.insert(
+            "DEACON_TEST_SETUP_SCOPE".to_string(),
+            "resolved".to_string(),
+        );
+        let mut report = SubstitutionReport::new();
+
+        let input = "ws=${localWorkspaceFolder} base=${localWorkspaceFolderBasename} \
+                     id=${devcontainerId} env=${localEnv:DEACON_TEST_SETUP_SCOPE}";
+        let result = VariableSubstitution::substitute_string(input, &context, &mut report);
+
+        assert_eq!(
+            result,
+            "ws=${localWorkspaceFolder} base=${localWorkspaceFolderBasename} \
+             id=${devcontainerId} env=resolved",
+            "workspace-derived variables must survive as literals while localEnv resolves"
+        );
+        for var in [
+            "localWorkspaceFolder",
+            "localWorkspaceFolderBasename",
+            "devcontainerId",
+        ] {
+            assert!(
+                !report.replacements.contains_key(var),
+                "{var} must not be recorded as replaced"
+            );
+        }
+
+        // The anchor is mechanical: it still populates the field the lifecycle
+        // helper uses to root phase markers, it is just not observable as a variable.
+        assert!(!context.local_workspace_folder.is_empty());
 
         Ok(())
     }

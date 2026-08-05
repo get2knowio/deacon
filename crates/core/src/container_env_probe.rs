@@ -680,6 +680,12 @@ impl ContainerEnvironmentProber {
                 feature_vars: HashMap::new(),
                 template_options: None,
                 resolve_devcontainer_id: true,
+                // This context carries an EMPTY `local_workspace_folder`, so resolving
+                // the workspace-derived tokens here would silently blank them. Per the
+                // comment above they are already resolved by the time this pass runs;
+                // where one does survive (`set-up` keeps them literal on purpose, #510)
+                // preserving the token is strictly safer than emptying it.
+                resolve_workspace_folder_vars: false,
             };
             let mut report = crate::variable::SubstitutionReport::new();
             for (k, v_opt) in remote {

@@ -144,6 +144,94 @@
         "tempdir": true
       },
       "notes": "Closes #502, the one difference `case-set-up-merged-configuration-shape` measured on this surface and left without a scenario. The claim is that `--include-configuration` reports what the CALLER SUPPLIED — the `--config` document alone — and not what set-up resolved: `mergedConfiguration` (the sibling case) is where the merge belongs, the same authored-vs-resolved contract #490 and #407 settled elsewhere. The fixture is built so the fold is VISIBLE rather than merely absent: the workspace config authors `remoteUser` and `containerEnv`, which `op-up` stamps into the container's `devcontainer.metadata` label, and the overlay authors NEITHER. deacon folded the label into the block, so both appeared there as though the caller had written them; the reference echoes only the overlay. A `jsonSubset` cannot assert a key's ABSENCE, so those two keys are pinned by the DIFFERENTIAL — the reference is the authority on a spec-silent output surface — while the absolute deacon-side claim is `configFilePath`, which deacon omitted entirely and which no CLI emits by accident. Its `scheme` is `file` rather than the `vscode-fileHost` the same reference uses for `read-configuration`, and that falls out of the existing `config_file_path_value` rule (scheme keyed off whether the caller NAMED the file) rather than being a set-up special case. Also measured on the same oracle and NOT asserted here, because both sides agree and a case should claim what it pins: with no `--config` at all the reference emits `\"configuration\": {}` — an empty document, no `configFilePath` — and so does deacon. `chan-stdout` is deliberately NOT declared, for the same key-ordering reason as the sibling case. Measured against oracle 0.87.0 on this fixture; the two sides' `configuration` blocks agree on every key after normalization (`path_token` rewrites the per-side temp workspace to `<WORKSPACE>`), and the case declares no tolerance. Image pinned to alpine:3.19."
+    },
+    {
+      "id": "case-set-up-substitution-scope",
+      "behaviors": [
+        "bhv-setup-substitution-workspace-vars-literal"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-set-up-substitution-scope"
+          ]
+        },
+        {
+          "id": "op-set-up",
+          "subcommand": "set-up",
+          "argv": [
+            "--container-id",
+            "${CONTAINER_ID}",
+            "--config",
+            "${WORKSPACE}/setup-overlay.json",
+            "--container-data-folder",
+            "/tmp/conformance-set-up-scope",
+            "--include-configuration",
+            "--include-merged-configuration"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-set-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-set-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "configuration": {
+                "remoteEnv": {
+                  "PROBE_LOCAL_WS": "${localWorkspaceFolder}",
+                  "PROBE_LOCAL_WS_BASENAME": "${localWorkspaceFolderBasename}",
+                  "PROBE_DEVCONTAINER_ID": "<ID>"
+                }
+              },
+              "mergedConfiguration": {
+                "remoteEnv": {
+                  "PROBE_LOCAL_WS": "${localWorkspaceFolder}",
+                  "PROBE_LOCAL_WS_BASENAME": "${localWorkspaceFolderBasename}",
+                  "PROBE_DEVCONTAINER_ID": "<ID>"
+                }
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-set-up",
+          "assertion": {
+            "jsonSubset": {
+              "setup-substitution.txt": "ws=[] base=[] id=[]\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "setup-substitution.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes #510, the one difference `case-set-up-configuration-authored` measured on this surface and left without a scenario. The claim is the SCOPE of variable substitution: `set-up` takes no `--workspace-folder`, so `${localWorkspaceFolder}`, `${localWorkspaceFolderBasename}` and `${devcontainerId}` have no answer and the reference leaves all three LITERAL, while `${localEnv:*}` still resolves. deacon anchored its `SubstitutionContext` at the process cwd and substituted an invented workspace into both. The case observes the two surfaces the defect actually reaches. `chan-structured-output` pins the reported blocks — the same three tokens must survive verbatim in BOTH `configuration` and `mergedConfiguration`, because the two blocks are shaped by different code paths and an earlier fix to one has already left the other behind here (#483/#502). `chan-file-content` pins what set-up RAN, which is the half no assertion on the JSON can see: the overlay's `postCreateCommand` writes the three tokens to a file, and the reference's literal tokens reach the container shell as unset names and expand to empty, so the artifact is `ws=[] base=[] id=[]` — where deacon wrote the cwd, its basename and a computed id into the command string host-side. The artifact is host-visible because the BASE fixture pins `workspaceFolder: /work` with a matching `workspaceMount`, giving the hook a bind-mounted absolute path instead of the per-side random `/workspaces/<basename>`; the hook writes to that absolute path, so the exec cwd (which the two CLIs need not agree on) cannot affect the result. `--container-data-folder` is NOT incidental: `op-up` leaves the reference's lifecycle markers in the default folder and a marked phase does not re-run, so without a fresh folder the hook is silently skipped and the execution channel would pass while proving nothing. The overlay deliberately authors NO `${containerWorkspaceFolder}`: that variable diverges on this surface in a different way (deacon never resolves it in the reported blocks and invents `/` at exec time when unauthored), which is a different defect in kind, filed as #513 — including it would have coupled this case to an unsettled question instead of pinning the three variables it is about. `${localEnv:HOME}` is authored but NOT asserted absolutely, because its value is host-specific; the differential covers it, and it is the control that shows the fix gated the workspace variables rather than the whole pass. `chan-stdout` is deliberately NOT declared, for the same key-ordering reason as the sibling cases. Measured against oracle 0.87.0 on this fixture; the two sides agree on every declared channel after normalization, and the case declares no tolerance. Image pinned to alpine:3.19. One assertion is written in POST-NORMALIZATION vocabulary and must stay that way: the `devcontainer_id_token` rule rewrites the literal `${devcontainerId}` to `<ID>` everywhere in `configuration`/`mergedConfiguration`, so the absolute claim on `PROBE_DEVCONTAINER_ID` is `<ID>`, not the raw token. That rule is also why the DIFFERENTIAL on this key cannot be the thing that pins it — both a literal token and a substituted 12-char hex id normalize into that field's `<ID>` — which is exactly why the case carries the absolute assertion and the execution channel as well. The two `localWorkspaceFolder*` keys are NOT rewritten by any rule, so they are asserted as the raw tokens and are the sharpest claim in the case."
     }
   ]
 }
