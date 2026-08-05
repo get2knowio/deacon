@@ -2,7 +2,8 @@
 //!
 //! Resolves the features declared in a `DevContainerConfig` into an ordered
 //! `Vec<ResolvedFeature>` (full metadata included), honoring local paths
-//! (`./`, `../`, `/abs`) and OCI references, then applies dependency / install
+//! (`./`, `../` — an absolute path is rejected per #495) and OCI
+//! references, then applies dependency / install
 //! order resolution. This is the common primitive behind `read-configuration`
 //! (which groups the result by registry) and `run-user-commands` (which feeds
 //! it to `aggregate_lifecycle_commands` for feature-contributed lifecycle
@@ -21,10 +22,14 @@ use deacon_core::oci::{FeatureFetcher, FeatureRef, HttpClient};
 use deacon_core::registry_parser::parse_registry_reference;
 use tracing::debug;
 
-/// Resolve a single feature reference (local `./`,`../`,`/abs` or OCI) plus its
+/// Resolve a single feature reference (local `./`, `../`, or OCI) plus its
 /// option value into a `ResolvedFeature`. Shared by the declared-feature loop
 /// and the transitive-`dependsOn` closure in [`resolve_features_ordered`], and
 /// reused by `read-configuration` to resolve its own `dependsOn` closure.
+///
+/// An absolute path is still classified as local so that
+/// `resolve_local_feature_dir` rejects it with the spec citation and the
+/// migration (#495), rather than an OCI parse failure.
 pub(crate) async fn resolve_one_feature<C: HttpClient>(
     feature_id: &str,
     feature_value: &serde_json::Value,
