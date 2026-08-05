@@ -50,6 +50,113 @@ pub enum FeatureRefError {
     /// Absolute paths are not supported (must be relative)
     #[error("Absolute paths not supported, use relative paths (./path or ../path): {0}")]
     AbsolutePathNotSupported(String),
+
+    /// A bare (single-segment) id that is not one of the deprecated v1 Features
+    /// the reference CLI still maps. Wording mirrors the reference's own
+    /// diagnostic so the two CLIs give a user the same guidance.
+    #[error(
+        "Legacy feature '{0}' not supported. Please check https://containers.dev/features for replacements.\n\
+         If you were hoping to use local Features, remember to prepend your Feature name with \"./\". \
+         Please check https://containers.dev/implementors/features-distribution/#addendum-locally-referenced for more information."
+    )]
+    LegacyFeatureNotSupported(String),
+}
+
+/// The v2 collection the deprecated v1 (GitHub Release era) Feature ids live in.
+const V1_FEATURE_COLLECTION: &str = "ghcr.io/devcontainers/features";
+
+/// The major version the reference CLI pins a mapped v1 id to.
+const V1_FEATURE_MAJOR: &str = "1";
+
+/// Deprecated v1 Feature ids that kept their name in the v2 collection.
+///
+/// Mirrors `getBackwardCompatibleFeatureId` in devcontainers/cli (measured at
+/// v0.87.0). The list is exact, not a prefix rule: an id outside it is rejected
+/// rather than turned into a registry path that does not exist.
+const DEPRECATED_V1_FEATURE_IDS: &[&str] = &[
+    "aws-cli",
+    "azure-cli",
+    "desktop-lite",
+    "docker-in-docker",
+    "docker-from-docker",
+    "dotnet",
+    "git",
+    "git-lfs",
+    "github-cli",
+    "java",
+    "kubectl-helm-minikube",
+    "node",
+    "powershell",
+    "python",
+    "ruby",
+    "rust",
+    "sshd",
+    "terraform",
+];
+
+/// Deprecated v1 Feature ids that were renamed on the way into the v2 collection.
+const RENAMED_V1_FEATURE_IDS: &[(&str, &str)] = &[("golang", "go"), ("common", "common-utils")];
+
+/// Canonicalize a `features` map key into the OCI reference to fetch.
+///
+/// A key carrying any path segment (`ghcr.io/devcontainers/features/node:1`,
+/// `myorg/myfeature`) is already an OCI reference and passes through untouched.
+/// A bare single-segment key is the deprecated v1 (GitHub Release) form, which
+/// the reference CLI resolves through a fixed table onto
+/// `ghcr.io/devcontainers/features/<name>:1` — measured at oracle 0.87.0, and
+/// applied unconditionally there (`--skip-feature-auto-mapping` does not gate
+/// it). Anything else bare is rejected at ingress, which is the spec's "fatal
+/// error" option for a deprecated identifier; deriving a registry path from it
+/// only yields a 401 against a repository that does not exist.
+///
+/// Callers must handle local paths (`./`, `../`, absolute) and `https://`
+/// tarballs before reaching here — those are not OCI references at all.
+///
+/// # Examples
+///
+/// ```
+/// use deacon_core::feature_ref::canonicalize_user_feature_id;
+///
+/// assert_eq!(
+///     canonicalize_user_feature_id("terraform").unwrap(),
+///     "ghcr.io/devcontainers/features/terraform:1"
+/// );
+/// // Renamed on the way into the v2 collection.
+/// assert_eq!(
+///     canonicalize_user_feature_id("golang").unwrap(),
+///     "ghcr.io/devcontainers/features/go:1"
+/// );
+/// // Already qualified: untouched.
+/// assert_eq!(
+///     canonicalize_user_feature_id("ghcr.io/devcontainers/features/node:1").unwrap(),
+///     "ghcr.io/devcontainers/features/node:1"
+/// );
+/// // Not a known deprecated id: rejected, not mis-derived.
+/// assert!(canonicalize_user_feature_id("my-feature").is_err());
+/// ```
+pub fn canonicalize_user_feature_id(user_feature_id: &str) -> Result<std::borrow::Cow<'_, str>> {
+    if user_feature_id.contains('/') {
+        return Ok(std::borrow::Cow::Borrowed(user_feature_id));
+    }
+
+    let mapped = if DEPRECATED_V1_FEATURE_IDS.contains(&user_feature_id) {
+        Some(user_feature_id)
+    } else {
+        RENAMED_V1_FEATURE_IDS
+            .iter()
+            .find(|(old, _)| *old == user_feature_id)
+            .map(|(_, new)| *new)
+    };
+
+    match mapped {
+        Some(name) => Ok(std::borrow::Cow::Owned(format!(
+            "{}/{}:{}",
+            V1_FEATURE_COLLECTION, name, V1_FEATURE_MAJOR
+        ))),
+        None => Err(FeatureRefError::LegacyFeatureNotSupported(
+            user_feature_id.to_string(),
+        )),
+    }
 }
 
 /// Result type for feature reference operations
@@ -213,8 +320,10 @@ pub fn parse_feature_reference(reference: &str) -> Result<FeatureRefType> {
         return Err(FeatureRefError::HttpNotSupported(reference.to_string()));
     }
 
-    // Rule 3: OCI reference (default for everything else)
-    let (registry, namespace, name, tag) = parse_registry_reference(reference)
+    // Rule 3: OCI reference (default for everything else). A bare id is the
+    // deprecated v1 form and is mapped (or rejected) before parsing.
+    let canonical = canonicalize_user_feature_id(reference)?;
+    let (registry, namespace, name, tag) = parse_registry_reference(&canonical)
         .map_err(|e| FeatureRefError::InvalidOciReference(format!("{}: {}", reference, e)))?;
 
     Ok(FeatureRefType::Oci(OciFeatureRef {
@@ -243,14 +352,17 @@ mod tests {
             _ => panic!("Expected OCI reference"),
         }
 
-        // Short form with defaults
-        let result = parse_feature_reference("node:18").unwrap();
+        // Bare deprecated v1 id: mapped onto the v2 collection at major 1, the
+        // same reference the CLI resolves it to (#491). A bare id carrying a tag
+        // (`node:18`) is NOT in the table and is rejected — see
+        // `test_bare_id_with_tag_is_rejected`.
+        let result = parse_feature_reference("node").unwrap();
         match result {
             FeatureRefType::Oci(ref_info) => {
                 assert_eq!(ref_info.registry, "ghcr.io");
-                assert_eq!(ref_info.namespace, "devcontainers");
+                assert_eq!(ref_info.namespace, "devcontainers/features");
                 assert_eq!(ref_info.name, "node");
-                assert_eq!(ref_info.tag, Some("18".to_string()));
+                assert_eq!(ref_info.tag, Some("1".to_string()));
             }
             _ => panic!("Expected OCI reference"),
         }
@@ -394,16 +506,55 @@ mod tests {
 
     #[test]
     fn test_oci_reference_minimal() {
-        // Just a name (defaults to ghcr.io/devcontainers)
-        let result = parse_feature_reference("common-utils").unwrap();
+        // A bare id is only accepted when it is one of the deprecated v1
+        // Features; `common` is the renamed one that becomes `common-utils`.
+        // `common-utils` itself is NOT a v1 id and must be written in full.
+        let result = parse_feature_reference("common").unwrap();
         match result {
             FeatureRefType::Oci(ref_info) => {
                 assert_eq!(ref_info.registry, "ghcr.io");
-                assert_eq!(ref_info.namespace, "devcontainers");
+                assert_eq!(ref_info.namespace, "devcontainers/features");
                 assert_eq!(ref_info.name, "common-utils");
-                assert_eq!(ref_info.tag, None);
+                assert_eq!(ref_info.tag, Some("1".to_string()));
             }
             _ => panic!("Expected OCI reference"),
+        }
+        assert!(parse_feature_reference("common-utils").is_err());
+    }
+
+    #[test]
+    fn test_bare_id_with_tag_is_rejected() {
+        // The reference CLI's table is keyed on the exact id, so `node:18`
+        // misses it and is rejected rather than mis-derived (#491).
+        let err = parse_feature_reference("node:18").unwrap_err();
+        assert!(
+            matches!(err, FeatureRefError::LegacyFeatureNotSupported(ref id) if id == "node:18"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_unknown_bare_id_is_rejected_with_guidance() {
+        let err = canonicalize_user_feature_id("my-feature").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Legacy feature 'my-feature' not supported"),
+            "{msg}"
+        );
+        assert!(
+            msg.contains("prepend your Feature name with \"./\""),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_passes_through_qualified_ids() {
+        for id in [
+            "ghcr.io/devcontainers/features/node:1",
+            "myteam/myfeature",
+            "ghcr.io/devcontainers/features/docker-in-docker@sha256:abc123",
+        ] {
+            assert_eq!(canonicalize_user_feature_id(id).unwrap(), id);
         }
     }
 
@@ -666,26 +817,24 @@ mod tests {
 
     #[test]
     fn test_dot_only_not_local_path() {
-        // Single dot without slash is not a local path
-        let result = parse_feature_reference(".feature").unwrap();
-        match result {
-            FeatureRefType::Oci(_) => {
-                // Should be OCI reference
-            }
-            _ => panic!("Expected OCI reference"),
-        }
+        // A single dot without a slash is not a local path. It falls through to
+        // the OCI branch, where — being bare and not a known deprecated v1 id —
+        // it is rejected rather than silently pointed at a registry (#491).
+        let err = parse_feature_reference(".feature").unwrap_err();
+        assert!(
+            matches!(err, FeatureRefError::LegacyFeatureNotSupported(_)),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
     fn test_double_dot_only_not_local_path() {
-        // Double dot without slash is not a local path
-        let result = parse_feature_reference("..feature").unwrap();
-        match result {
-            FeatureRefType::Oci(_) => {
-                // Should be OCI reference
-            }
-            _ => panic!("Expected OCI reference"),
-        }
+        // Same as above for a leading `..` with no slash.
+        let err = parse_feature_reference("..feature").unwrap_err();
+        assert!(
+            matches!(err, FeatureRefError::LegacyFeatureNotSupported(_)),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

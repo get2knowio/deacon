@@ -121,6 +121,71 @@ RUN echo "FOO is $FOO"
     }
 }
 
+/// `build.options` is an array of Docker CLI build options the tool must pass
+/// through to the builder verbatim (#492). Proven on the produced IMAGE, not on
+/// the JSON outcome: a `--label` the config asked for must be on the image.
+#[test]
+fn build_options_from_config_are_applied() {
+    let temp_dir = TempDir::new().unwrap();
+    let ws = temp_dir.path();
+
+    fs::write(ws.join("Dockerfile"), "FROM alpine:3.19\nRUN true\n").unwrap();
+    fs::write(
+        ws.join(".devcontainer.json"),
+        r#"{
+  "name": "BuildOptionsTest",
+  "dockerFile": "Dockerfile",
+  "build": {
+    "context": ".",
+    "options": [ "--label", "deacon.test.buildoptions=passed-through" ]
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let image_tag = "deacon-test/build-options:latest";
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let assert = cmd
+        .current_dir(ws)
+        .arg("build")
+        .arg("--image-name")
+        .arg(image_tag)
+        .arg("--output-format")
+        .arg("json")
+        .assert();
+
+    let output = assert.get_output();
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_lc = stderr.to_lowercase();
+        assert!(
+            stderr.contains("Docker is not installed")
+                || stderr.contains("Docker daemon is not")
+                || stderr.contains("Docker build failed")
+                || stderr_lc.contains("permission denied"),
+            "Unexpected error: {}",
+            stderr
+        );
+        return;
+    }
+
+    let inspect = std::process::Command::new("docker")
+        .args(["inspect", "-f", "{{ json .Config.Labels }}", image_tag])
+        .output()
+        .unwrap();
+    let labels_json = String::from_utf8_lossy(&inspect.stdout).to_string();
+    let _ = std::process::Command::new("docker")
+        .args(["rmi", "-f", image_tag])
+        .output();
+
+    assert!(
+        labels_json.contains("\"deacon.test.buildoptions\":\"passed-through\""),
+        "build.options never reached the builder; labels were {}",
+        labels_json
+    );
+}
+
 #[test]
 fn build_accepts_multiple_image_names() {
     // Prepare a temp workspace

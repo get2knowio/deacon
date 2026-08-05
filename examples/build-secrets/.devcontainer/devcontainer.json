@@ -3,7 +3,7 @@
   "dockerFile": "Dockerfile",
   "build": {
     "context": ".",
-    "options": {
+    "args": {
       "BUILDKIT_INLINE_CACHE": "1"
     }
   }

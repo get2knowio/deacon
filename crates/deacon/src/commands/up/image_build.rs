@@ -21,7 +21,11 @@ pub(crate) struct BuildConfig {
     pub context: String,
     pub context_folder: PathBuf,
     pub target: Option<String>,
-    pub options: HashMap<String, String>,
+    /// `build.args` — one `--build-arg K=V` pair each.
+    pub build_args: HashMap<String, String>,
+    /// `build.options` — Docker CLI build options, forwarded verbatim as
+    /// discrete argv elements (#492).
+    pub options: Vec<String>,
 }
 
 /// Extract build configuration from DevContainerConfig.build object
@@ -47,6 +51,7 @@ pub(crate) fn extract_build_config_from_devcontainer(
         context: resolved.context,
         context_folder: resolved.context_folder,
         target: resolved.target,
+        build_args: resolved.build_args,
         options: resolved.options,
     }))
 }
@@ -117,9 +122,18 @@ pub(crate) async fn build_image_from_config(
     }
 
     // Add build args from config
-    for (key, value) in &build_config.options {
+    for (key, value) in &build_config.build_args {
         build_args.push("--build-arg".to_string());
         build_args.push(format!("{}={}", key, value));
+    }
+
+    // Add `build.options` verbatim, right after the build args — the position
+    // and the pass-through semantics the reference CLI uses (measured at
+    // 0.87.0: `options?.length && argv.push(...options)`; no filtering). Each
+    // entry is its own argv element, never concatenated into a shell line.
+    if !build_config.options.is_empty() {
+        debug!("Adding config build.options: {:?}", build_config.options);
+        build_args.extend(build_config.options.iter().cloned());
     }
 
     // Retrieve the image ID via `--iidfile` instead of `docker build -q`
