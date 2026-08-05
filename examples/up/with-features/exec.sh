@@ -46,9 +46,9 @@ out_additional="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove
 	"$@")"
 additional_container="$(extract_container_id "$out_additional")"
 
-echo "== Skip Feature Auto-Mapping ==" >&2
+echo "== Ignore Command-Line Features ==" >&2
 out_skip_map="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove-existing-container --skip-post-create \
-	--skip-feature-auto-mapping \
+	--ignore-additional-features \
 	"$@")"
 skip_map_container="$(extract_container_id "$out_skip_map")"
 

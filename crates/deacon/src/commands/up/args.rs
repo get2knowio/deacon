@@ -297,7 +297,7 @@ pub struct NormalizedUpInput {
 
     // Features and dotfiles
     pub additional_features: Option<String>,
-    pub skip_feature_auto_mapping: bool,
+    pub ignore_additional_features: bool,
     pub dotfiles_repository: Option<String>,
     pub dotfiles_install_command: Option<String>,
     pub dotfiles_target_path: Option<String>,
@@ -413,7 +413,10 @@ pub struct UpArgs {
     pub additional_features: Option<String>,
     pub prefer_cli_features: bool,
     pub feature_install_order: Option<String>,
-    pub skip_feature_auto_mapping: bool,
+    /// Drop `additional_features` entirely, resolving only the Features the configuration
+    /// declared. A deacon extension (#498) with no counterpart in the reference CLI,
+    /// which honors `--additional-features` unconditionally.
+    pub ignore_additional_features: bool,
     pub dotfiles_repository: Option<String>,
     pub dotfiles_install_command: Option<String>,
     pub dotfiles_target_path: Option<String>,
@@ -524,7 +527,7 @@ impl Default for UpArgs {
             additional_features: None,
             prefer_cli_features: false,
             feature_install_order: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             dotfiles_repository: None,
             dotfiles_install_command: None,
             dotfiles_target_path: None,
@@ -703,7 +706,7 @@ pub(crate) fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpI
         cache_to: args.cache_to.clone(),
         buildkit_mode,
         additional_features: args.additional_features.clone(),
-        skip_feature_auto_mapping: args.skip_feature_auto_mapping,
+        ignore_additional_features: args.ignore_additional_features,
         dotfiles_repository: args.dotfiles_repository.clone(),
         dotfiles_install_command: args.dotfiles_install_command.clone(),
         dotfiles_target_path: args.dotfiles_target_path.clone(),

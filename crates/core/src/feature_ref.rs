@@ -104,8 +104,11 @@ const RENAMED_V1_FEATURE_IDS: &[(&str, &str)] = &[("golang", "go"), ("common", "
 /// A bare single-segment key is the deprecated v1 (GitHub Release) form, which
 /// the reference CLI resolves through a fixed table onto
 /// `ghcr.io/devcontainers/features/<name>:1` — measured at oracle 0.87.0, and
-/// applied unconditionally there (`--skip-feature-auto-mapping` does not gate
-/// it). Anything else bare is rejected at ingress, which is the spec's "fatal
+/// applied unconditionally there. `--skip-feature-auto-mapping` does not gate it:
+/// the gate exists as `processFeatureIdentifier`'s sixth parameter, but
+/// `generateFeaturesConfig` calls that function with five arguments and never
+/// supplies it, so the flag is inert (#498). Anything else bare is rejected at
+/// ingress, which is the spec's "fatal
 /// error" option for a deprecated identifier; deriving a registry path from it
 /// only yields a 401 against a repository that does not exist.
 ///

@@ -2570,6 +2570,66 @@
       "notes": "Covers the high-risk triple `hrt-readconfig-cli-overlay-dockerfile-dependency-order`. The configuration declares only `needs-base-tool`; `base-tool`, which it `installsAfter`, arrives ONLY through `--additional-features`. The stdout assertion pins the resolved order positionally — a `jsonSubset` over an array matches without regard to order, so it alone would pass for an implementation that appended the overlay after the declared set instead of resolving both together."
     },
     {
+      "id": "case-readconfig-skip-feature-auto-mapping-inert",
+      "behaviors": [
+        "bhv-readconfig-skip-feature-auto-mapping-inert"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration",
+            "--additional-features",
+            "{\"./features/base-tool\":{}}",
+            "--skip-feature-auto-mapping"
+          ],
+          "fixtures": [
+            "fx-readconfig-dockerfile-depends-overlay"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "featuresConfiguration": {
+                "featureSets": [
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/base-tool"
+                    }
+                  },
+                  {
+                    "sourceInformation": {
+                      "userFeatureId": "./features/needs-base-tool"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`--skip-feature-auto-mapping` must change NOTHING (#498). Deliberately the same fixture and the same argv as `case-readconfig-overlay-dockerfile-depends` with the flag appended, so the pair is a controlled experiment: the expectation is byte-identical because passing the flag is supposed to be indistinguishable from not passing it.\n\nMEASURED at oracle 0.87.0 rather than inferred. The reference's flag of this name is hidden and self-described as 'Temporary option for testing.'; it is parsed, threaded into the internal options object, and never read. The one gate that would consume it — `processFeatureIdentifier`'s sixth parameter, which suppresses `getBackwardCompatibleFeatureId` — is never supplied, because `generateFeaturesConfig` calls that function with five arguments. Confirmed end to end: `read-configuration` over a config declaring `terraform` and `golang` produced identical output with and without the flag, deprecation warnings and the `golang`→`go` rename included, differing only in a timestamped temp path. A second run proved the same for `--additional-features`: the overlay Feature resolved either way.\n\nThat second measurement is what this case pins, and it is the one deacon got wrong. deacon's flag used to mean 'drop `--additional-features`' — an invention with no reference counterpart, reached by reading the flag's NAME rather than the reference's behavior (007 FR-004). Under the old semantics this case resolves ONE featureSet instead of two and fails, which is how it was watched to fail before the fix. The behavior itself was not deleted, only renamed to `--ignore-additional-features`, so nothing a user could have relied on is unreachable.\n\nThe array assertion is positional for the reason its sibling records, and it is load-bearing here for a second reason: the overlay Feature is the FIRST element, so an implementation that drops the overlay cannot satisfy the assertion by accident."
+    },
+    {
       "id": "case-readconfig-overlay-dockerfile-depends-order",
       "behaviors": [
         "bhv-readconfig-feature-resolution-order"
