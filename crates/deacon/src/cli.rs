@@ -321,7 +321,10 @@ pub enum Commands {
         /// Override feature installation order (comma-separated list of IDs)
         #[arg(long)]
         feature_install_order: Option<String>,
-        /// Skip feature auto-mapping (hidden testing flag)
+        /// Ignore --additional-features; resolve only the Features declared in devcontainer.json
+        #[arg(long)]
+        ignore_additional_features: bool,
+        /// Accepted for reference-CLI compatibility; has no effect (hidden testing option)
         #[arg(long, hide = true)]
         skip_feature_auto_mapping: bool,
         /// Disable lockfile generation and verification. Mutually exclusive with --frozen-lockfile.
@@ -498,7 +501,10 @@ pub enum Commands {
         /// Export image to file or directory (BuildKit format: type=...,dest=...)
         #[arg(long)]
         output: Option<String>,
-        /// Skip feature auto-mapping (hidden testing flag)
+        /// Ignore --additional-features; resolve only the Features declared in devcontainer.json
+        #[arg(long)]
+        ignore_additional_features: bool,
+        /// Accepted for reference-CLI compatibility; has no effect (hidden testing option)
         #[arg(long, hide = true)]
         skip_feature_auto_mapping: bool,
         /// Disable lockfile generation and verification. Mutually exclusive with --frozen-lockfile.
@@ -592,7 +598,10 @@ pub enum Commands {
         /// Additional features to install (JSON map of id -> value/options)
         #[arg(long)]
         additional_features: Option<String>,
-        /// Skip feature auto-mapping (hidden testing flag)
+        /// Ignore --additional-features; resolve only the Features declared in devcontainer.json
+        #[arg(long)]
+        ignore_additional_features: bool,
+        /// Accepted for reference-CLI compatibility; has no effect (hidden testing option)
         #[arg(long, hide = true)]
         skip_feature_auto_mapping: bool,
         /// Terminal columns (requires --terminal-rows)
@@ -1121,6 +1130,30 @@ pub struct Cli {
     pub command: Option<Commands>,
 }
 
+/// Warn that `--skip-feature-auto-mapping` did nothing, whenever it was passed.
+///
+/// The flag is accepted only for command-line compatibility with the reference CLI.
+/// Measured at the pinned 0.87.0 oracle, the reference's flag of the same name is
+/// INERT: it is parsed, threaded into the internal options object, and never read.
+/// `generateFeaturesConfig` calls `processFeatureIdentifier` with five of its six
+/// arguments, omitting exactly the one that would gate the deprecated-id auto-mapping,
+/// so `getBackwardCompatibleFeatureId` runs unconditionally — a run with and without
+/// the flag produced identical output, deprecation warnings included.
+///
+/// deacon's flag used to mean "drop `--additional-features`", an invention with no
+/// reference counterpart (#498). That behavior now lives on
+/// `--ignore-additional-features`, which says what it does. Per the fail-fast
+/// principle, an inert flag must still be audible rather than silently swallowed.
+fn warn_if_skip_feature_auto_mapping(enabled: bool) {
+    if enabled {
+        tracing::warn!(
+            "--skip-feature-auto-mapping has no effect: deprecated Feature id auto-mapping is \
+             applied unconditionally, matching the reference CLI. To resolve only the Features \
+             declared in devcontainer.json, use --ignore-additional-features."
+        );
+    }
+}
+
 /// Resolve the host-CA activation decision at the CLI tier (016, T013/T045).
 ///
 /// Precedence: `--inject-host-ca` flag > `DEACON_INJECT_HOST_CA` env >
@@ -1368,6 +1401,7 @@ impl Cli {
                 additional_features,
                 prefer_cli_features,
                 feature_install_order,
+                ignore_additional_features,
                 skip_feature_auto_mapping,
                 no_lockfile,
                 frozen_lockfile,
@@ -1389,6 +1423,8 @@ impl Cli {
                 env_file,
             }) => {
                 use crate::commands::up::{UpArgs, execute_up};
+
+                warn_if_skip_feature_auto_mapping(skip_feature_auto_mapping);
 
                 // Mutual exclusivity check (mirrors devcontainers/cli).
                 if no_lockfile && frozen_lockfile {
@@ -1427,7 +1463,7 @@ impl Cli {
                     cache_to,
                     buildkit,
                     build_output_mode,
-                    skip_feature_auto_mapping,
+                    ignore_additional_features,
                     no_lockfile,
                     frozen_lockfile,
                     dotfiles_repository,
@@ -1578,12 +1614,15 @@ impl Cli {
                 label,
                 push,
                 output,
+                ignore_additional_features,
                 skip_feature_auto_mapping,
                 no_lockfile,
                 frozen_lockfile,
                 inject_host_ca,
             }) => {
                 use crate::commands::build::{BuildArgs, execute_build};
+
+                warn_if_skip_feature_auto_mapping(skip_feature_auto_mapping);
 
                 // Mutual exclusivity check (mirrors devcontainers/cli).
                 if no_lockfile && frozen_lockfile {
@@ -1639,7 +1678,7 @@ impl Cli {
                     label,
                     push,
                     output,
-                    skip_feature_auto_mapping,
+                    ignore_additional_features,
                     no_lockfile,
                     frozen_lockfile,
                     host_ca_activation,
@@ -1709,6 +1748,7 @@ impl Cli {
                 id_label,
                 mount_workspace_git_root,
                 additional_features,
+                ignore_additional_features,
                 skip_feature_auto_mapping,
                 terminal_columns,
                 terminal_rows,
@@ -1717,6 +1757,8 @@ impl Cli {
                 use crate::commands::read_configuration::{
                     ReadConfigurationArgs, execute_read_configuration,
                 };
+
+                warn_if_skip_feature_auto_mapping(skip_feature_auto_mapping);
 
                 // Resolve the selected profile (017): ordered override fragments
                 // to layer beneath any `--override-config`. The subcommand-local
@@ -1736,7 +1778,7 @@ impl Cli {
                     id_label,
                     mount_workspace_git_root,
                     additional_features,
-                    skip_feature_auto_mapping,
+                    ignore_additional_features,
                     docker_path: self.docker_path.clone(),
                     docker_compose_path: self.docker_compose_path.clone(),
                     user_data_folder,

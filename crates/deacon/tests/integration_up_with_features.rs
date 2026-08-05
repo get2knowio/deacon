@@ -466,8 +466,11 @@ fn test_up_with_additional_features() {
     guard.register(container_id);
 }
 
+/// `--skip-feature-auto-mapping` is accepted and INERT (#498): `up` still runs and the
+/// configuration's Features are still installed, exactly as with no flag at all. This is
+/// the reference's own behavior — it parses the flag and never reads it.
 #[test]
-fn test_up_with_skip_feature_auto_mapping() {
+fn test_up_with_inert_skip_feature_auto_mapping() {
     if !docker_available() {
         eprintln!("Skipping: docker not available");
         return;

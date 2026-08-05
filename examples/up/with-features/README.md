@@ -41,13 +41,19 @@ deacon up --workspace-folder . \
   }'
 ```
 
-### Skip Feature Auto-Mapping
+### Ignore Command-Line Features
 
-To disable automatic feature dependency resolution:
+To resolve only the Features declared in `devcontainer.json`, dropping anything passed
+via `--additional-features`:
 
 ```bash
-deacon up --workspace-folder . --skip-feature-auto-mapping
+deacon up --workspace-folder . --ignore-additional-features
 ```
+
+> `--skip-feature-auto-mapping` is still accepted for command-line compatibility with the
+> reference CLI, but it has no effect on either implementation — deprecated Feature id
+> auto-mapping is always applied. It used to reach the behavior above; use
+> `--ignore-additional-features` instead.
 
 ## Expected Output
 

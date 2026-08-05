@@ -44,7 +44,10 @@ pub struct ReadConfigurationArgs {
     /// When false, uses the workspace folder path as-is.
     pub mount_workspace_git_root: bool,
     pub additional_features: Option<String>,
-    pub skip_feature_auto_mapping: bool,
+    /// Drop `additional_features` entirely, resolving only the Features the configuration
+    /// declared. A deacon extension (#498) with no counterpart in the reference CLI,
+    /// which honors `--additional-features` unconditionally.
+    pub ignore_additional_features: bool,
     /// Docker tooling path. Forwarded to the container runtime so `docker inspect` invocations
     /// honor the spec-defined `--docker-path` flag.
     pub docker_path: String,
@@ -397,7 +400,7 @@ fn resolve_workspace_configuration(
 async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     config: &deacon_core::config::DevContainerConfig,
     additional_features: Option<&str>,
-    skip_feature_auto_mapping: bool,
+    ignore_additional_features: bool,
     fetcher: &deacon_core::oci::FeatureFetcher<C>,
     config_dir: &Path,
     workspace_root: &Path,
@@ -426,9 +429,9 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
 
         let merge_config = FeatureMergeConfig::new(
             Some(additional_features_str.to_string()),
-            true,                      // CLI features take precedence over config features
-            None,                      // No install order override in this context
-            skip_feature_auto_mapping, // Respect CLI flag for auto-mapping behavior
+            true, // CLI features take precedence over config features
+            None, // No install order override in this context
+            ignore_additional_features,
         );
         config.features = Some(FeatureMerger::merge_features(
             config.features(),
@@ -548,8 +551,12 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
                     (k, option_value)
                 })
                 .collect(),
-            serde_json::Value::String(s) if !skip_feature_auto_mapping => {
-                // Auto-map top-level string value to "version" option
+            serde_json::Value::String(s) => {
+                // Auto-map the top-level string shorthand to the "version" option.
+                // UNCONDITIONAL, matching the reference: `--skip-feature-auto-mapping`
+                // used to suppress this, an invented gate the reference has no
+                // counterpart for — it expands `"features": {"x": "1.2"}` to
+                // `{version: "1.2"}` on every run (#498).
                 let mut map = HashMap::new();
                 map.insert("version".to_string(), OptionValue::String(s.clone()));
                 map
@@ -1963,7 +1970,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             resolve_features_configuration(
                 &config,
                 args.additional_features.as_deref(),
-                args.skip_feature_auto_mapping,
+                args.ignore_additional_features,
                 &fetcher,
                 &features_config_dir,
                 workspace_folder,
@@ -2299,7 +2306,7 @@ mod tests {
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2473,7 +2480,7 @@ API_KEY=another-secret
             id_label: vec!["invalid".to_string()], // Missing '='
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2520,7 +2527,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2560,7 +2567,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2611,7 +2618,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: false,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2638,7 +2645,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2678,7 +2685,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2729,7 +2736,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2770,7 +2777,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: false,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2811,7 +2818,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2868,7 +2875,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2915,7 +2922,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -2972,7 +2979,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -3778,7 +3785,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -3855,7 +3862,7 @@ API_KEY=another-secret
             additional_features: Some(
                 r#"{"ghcr.io/devcontainers/features/node:1": "lts"}"#.to_string(),
             ),
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -3895,7 +3902,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -3916,8 +3923,8 @@ API_KEY=another-secret
     }
 
     #[tokio::test]
-    async fn test_read_configuration_skip_feature_auto_mapping_flag() {
-        // Test that the skip_feature_auto_mapping flag is accepted
+    async fn test_read_configuration_ignore_additional_features_flag() {
+        // Test that the ignore_additional_features flag is accepted
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("devcontainer.json");
 
@@ -3935,7 +3942,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: true,
+            ignore_additional_features: true,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -3979,7 +3986,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4021,7 +4028,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: Some("{}".to_string()),
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4061,7 +4068,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: Some("not valid json".to_string()),
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4107,7 +4114,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: Some(r#"["not", "an", "object"]"#.to_string()),
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4225,7 +4232,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4269,7 +4276,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4317,7 +4324,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4365,7 +4372,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4401,7 +4408,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4434,7 +4441,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "/usr/local/bin/docker".to_string(),
             docker_compose_path: "/usr/local/bin/docker-compose".to_string(),
             user_data_folder: None,
@@ -4467,7 +4474,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4499,7 +4506,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: Some(data_folder.clone()),
@@ -4542,7 +4549,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4588,7 +4595,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,
@@ -4632,7 +4639,7 @@ API_KEY=another-secret
             id_label: vec![],
             mount_workspace_git_root: true,
             additional_features: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             docker_path: "docker".to_string(),
             docker_compose_path: "docker-compose".to_string(),
             user_data_folder: None,

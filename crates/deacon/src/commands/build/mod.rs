@@ -71,8 +71,10 @@ pub struct BuildArgs {
     pub push: bool,
     /// Export image to file or directory
     pub output: Option<String>,
-    /// Skip feature auto-mapping (hidden testing flag).
-    pub skip_feature_auto_mapping: bool,
+    /// Drop `additional_features` entirely, resolving only the Features the configuration
+    /// declared. A deacon extension (#498) with no counterpart in the reference CLI,
+    /// which honors `--additional-features` unconditionally.
+    pub ignore_additional_features: bool,
     /// Skip lockfile generation and verification (graduated 1.0).
     /// Currently not yet consumed by `build`'s lockfile-writing path —
     /// PR-4c (#41) hardcoded "always write when features present". Plumb
@@ -133,7 +135,7 @@ impl Default for BuildArgs {
             label: Vec::new(),
             push: false,
             output: None,
-            skip_feature_auto_mapping: false,
+            ignore_additional_features: false,
             no_lockfile: false,
             frozen_lockfile: false,
             host_ca_activation: deacon_core::host_ca::HostCaActivation::Off,
@@ -670,7 +672,7 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             args.additional_features.clone(),
             args.prefer_cli_features,
             args.feature_install_order.clone(),
-            args.skip_feature_auto_mapping,
+            args.ignore_additional_features,
         );
 
         // Merge features

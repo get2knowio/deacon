@@ -1,8 +1,8 @@
-//! Integration tests for skip-feature-auto-mapping and lockfile/frozen validation.
+//! Integration tests for the CLI feature-overlay controls and lockfile/frozen validation.
 //!
 //! Tests for User Story 2 (Deterministic feature selection) from
 //! specs/007-up-build-parity:
-//! - skip-feature-auto-mapping enforcement
+//! - --ignore-additional-features enforcement (formerly --skip-feature-auto-mapping, #498)
 //! - lockfile/frozen mode validation
 //!
 //! These tests verify the fail-fast validation behavior without requiring Docker,
@@ -70,100 +70,89 @@ fn block_on_async<F: std::future::Future>(fut: F) -> F::Output {
 }
 
 // =============================================================================
-// Skip-feature-auto-mapping Tests
+// Feature-overlay control tests (--ignore-additional-features)
 // =============================================================================
 
-/// Test: skip-feature-auto-mapping with additional-features should fail.
+/// Test: `--ignore-additional-features` alongside `--additional-features` is the
+/// combination that means something — the overlay is dropped, not rejected.
 ///
-/// Per spec (FR-004): skip-feature-auto-mapping prevents adding or modifying
-/// features beyond those explicitly requested in devcontainer.json.
+/// This pairing used to live on `--skip-feature-auto-mapping` (007 FR-004), a name
+/// borrowed from the reference CLI where it gates nothing at all (#498).
 #[test]
-fn test_skip_feature_auto_mapping_with_additional_features_fails() {
-    // Create UpArgs with both skip_feature_auto_mapping and additional_features set
+fn test_ignore_additional_features_with_additional_features_drops_overlay() {
     let args = UpArgs {
-        skip_feature_auto_mapping: true,
-        additional_features: Some("ghcr.io/devcontainers/features/node:1".to_string()),
+        ignore_additional_features: true,
+        additional_features: Some(r#"{"ghcr.io/devcontainers/features/node:1":{}}"#.to_string()),
         ..Default::default()
     };
 
-    // Verify the conflict is detected
-    // The actual validation happens in the up command, but we can verify
-    // the args represent a conflict that should fail
     assert!(
-        args.skip_feature_auto_mapping && args.additional_features.is_some(),
-        "Test setup: both flags should be set for conflict detection"
+        args.ignore_additional_features && args.additional_features.is_some(),
+        "Test setup: both flags should be set"
     );
 
-    // The expected error message when this conflict is detected:
-    let expected_error_fragment =
-        "Cannot add features via --additional-features when --skip-feature-auto-mapping is enabled";
-
-    // This test verifies the conditions that would trigger the error.
-    // The actual error is produced in the up command runtime.
-    // For now, we document the expected behavior.
+    // Both flags together are legal — `up` logs that the overlay was dropped rather
+    // than erroring, so the effective feature set is the configuration's alone.
+    let merge_config = FeatureMergeConfig::new(
+        args.additional_features.clone(),
+        false,
+        None,
+        args.ignore_additional_features,
+    );
+    let config_features = serde_json::json!({});
+    let merged = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
     assert!(
-        expected_error_fragment.contains("skip-feature-auto-mapping"),
-        "Error message should mention the conflicting flag"
+        merged.as_object().unwrap().is_empty(),
+        "the CLI overlay must be dropped when ignore_additional_features is set"
     );
 }
 
-/// Test: skip-feature-auto-mapping without additional-features should pass validation.
-///
-/// When skip_feature_auto_mapping is enabled but no additional features are
-/// specified via CLI, there's no conflict and validation should pass.
+/// Test: `--ignore-additional-features` without `--additional-features` is a no-op.
 #[test]
-fn test_skip_feature_auto_mapping_without_additional_features_passes() {
+fn test_ignore_additional_features_without_additional_features_passes() {
     let args = UpArgs {
-        skip_feature_auto_mapping: true,
+        ignore_additional_features: true,
         additional_features: None,
         ..Default::default()
     };
 
-    // No conflict should exist
     assert!(
-        args.skip_feature_auto_mapping,
-        "skip_feature_auto_mapping should be enabled"
+        args.ignore_additional_features,
+        "ignore_additional_features should be enabled"
     );
     assert!(
         args.additional_features.is_none(),
         "additional_features should be None"
     );
-
-    // This configuration is valid - no conflict between the flags
-    let has_conflict = args.skip_feature_auto_mapping && args.additional_features.is_some();
-    assert!(
-        !has_conflict,
-        "Should not have a conflict when no additional features"
-    );
 }
 
-/// Test: skip-feature-auto-mapping defaults to false.
+/// Test: `ignore_additional_features` defaults to false.
 #[test]
-fn test_skip_feature_auto_mapping_defaults_to_false() {
+fn test_ignore_additional_features_defaults_to_false() {
     let args = UpArgs::default();
     assert!(
-        !args.skip_feature_auto_mapping,
-        "skip_feature_auto_mapping should default to false"
+        !args.ignore_additional_features,
+        "ignore_additional_features should default to false"
     );
 }
 
-/// Test: skip-feature-auto-mapping blocks CLI features via FeatureMerger.
+/// Test: `ignore_additional_features` blocks CLI features via FeatureMerger.
 ///
-/// When skip_auto_mapping is true, additional CLI features should NOT be added
-/// to the config features - only explicitly declared config features remain.
+/// When it is true, additional CLI features should NOT be added to the config
+/// features - only explicitly declared config features remain.
 #[test]
-fn test_skip_feature_auto_mapping_blocks_cli_features() {
+fn test_ignore_additional_features_blocks_cli_features() {
     // Config with one feature declared
     let config_features = serde_json::json!({
         "ghcr.io/devcontainers/features/node:1": {"version": "18"}
     });
 
-    // Create merge config with skip_auto_mapping enabled and additional features
+    // Create merge config with ignore_additional_features enabled and additional features
     let merge_config = FeatureMergeConfig::new(
         Some(r#"{"ghcr.io/devcontainers/features/go:1": {}}"#.to_string()),
         false, // prefer_cli_features
         None,  // feature_install_order
-        true,  // skip_auto_mapping - this is the key flag
+        true,  // ignore_additional_features - this is the key flag
     );
 
     // Merge features - CLI features should be ignored
@@ -177,7 +166,7 @@ fn test_skip_feature_auto_mapping_blocks_cli_features() {
     );
     assert!(
         !merged_obj.contains_key("ghcr.io/devcontainers/features/go:1"),
-        "CLI feature should be blocked when skip_auto_mapping is enabled"
+        "CLI feature should be blocked when ignore_additional_features is enabled"
     );
     assert_eq!(
         merged_obj.len(),
@@ -186,24 +175,24 @@ fn test_skip_feature_auto_mapping_blocks_cli_features() {
     );
 }
 
-/// Test: skip-feature-auto-mapping with no CLI features preserves config features.
+/// Test: ignore_additional_features with no CLI features preserves config features.
 ///
-/// When skip_auto_mapping is enabled and no additional CLI features are provided,
+/// When ignore_additional_features is enabled and no additional CLI features are provided,
 /// the config features should be preserved exactly as declared.
 #[test]
-fn test_skip_feature_auto_mapping_with_no_cli_features() {
+fn test_ignore_additional_features_with_no_cli_features() {
     // Config with multiple features declared
     let config_features = serde_json::json!({
         "ghcr.io/devcontainers/features/node:1": {"version": "18"},
         "ghcr.io/devcontainers/features/python:1": {"version": "3.11"}
     });
 
-    // Create merge config with skip_auto_mapping but NO additional features
+    // Create merge config with ignore_additional_features but NO additional features
     let merge_config = FeatureMergeConfig::new(
         None,  // additional_features - none
         false, // prefer_cli_features
         None,  // feature_install_order
-        true,  // skip_auto_mapping
+        true,  // ignore_additional_features
     );
 
     // Merge features
@@ -572,22 +561,53 @@ fn test_lockfile_path_derivation_hidden_config() {
 }
 
 // =============================================================================
-// Error Message Content Tests
+// Flag-surface tests
 // =============================================================================
 
-/// Test: expected error message for skip-feature-auto-mapping conflict.
+/// Test: `--skip-feature-auto-mapping` stays ACCEPTED on every subcommand that used
+/// to carry it, and `--ignore-additional-features` is the flag that now carries the
+/// behavior (#498).
 ///
-/// Validates the exact error message content as specified.
+/// The reference CLI accepts its identically-named flag on all of these and does
+/// nothing with it, so deacon accepting-and-ignoring is the parity-preserving shape;
+/// rejecting it would break callers that pass it because the reference's docs mention
+/// it. What must NOT survive is deacon giving it a meaning of its own.
 #[test]
-fn test_skip_feature_auto_mapping_error_message_content() {
-    let expected_message = "Cannot add features via --additional-features when \
-        --skip-feature-auto-mapping is enabled. \
-        Only features explicitly declared in devcontainer.json are allowed.";
+fn test_both_flags_parse_on_every_feature_subcommand() {
+    use clap::Parser;
+    use deacon::cli::Cli;
 
-    // Verify message components
-    assert!(expected_message.contains("--additional-features"));
-    assert!(expected_message.contains("--skip-feature-auto-mapping"));
-    assert!(expected_message.contains("devcontainer.json"));
+    for subcommand in ["up", "build", "read-configuration"] {
+        Cli::try_parse_from(["deacon", subcommand, "--skip-feature-auto-mapping"])
+            .unwrap_or_else(|e| panic!("{subcommand} must still accept the compat flag: {e}"));
+        Cli::try_parse_from(["deacon", subcommand, "--ignore-additional-features"])
+            .unwrap_or_else(|e| panic!("{subcommand} must accept the renamed flag: {e}"));
+    }
+}
+
+/// Test: the compat flag is inert — it does not reach the merge behavior.
+///
+/// `UpArgs` no longer has a field for it at all, which is the structural proof: the
+/// only path from the command line to `FeatureMergeConfig` is
+/// `--ignore-additional-features`.
+#[test]
+fn test_compat_flag_does_not_drop_the_cli_overlay() {
+    let config_features = serde_json::json!({});
+    // What `--skip-feature-auto-mapping` alone now produces: the default (false).
+    let merge_config = FeatureMergeConfig::new(
+        Some(r#"{"ghcr.io/devcontainers/features/go:1": {}}"#.to_string()),
+        false,
+        None,
+        UpArgs::default().ignore_additional_features,
+    );
+    let merged = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
+    assert!(
+        merged
+            .as_object()
+            .unwrap()
+            .contains_key("ghcr.io/devcontainers/features/go:1"),
+        "the CLI overlay must survive when only the inert compat flag was passed"
+    );
 }
 
 /// Test: expected error message for missing lockfile in frozen mode.
@@ -706,8 +726,8 @@ fn test_frozen_mismatch_bidirectional_error_message_content() {
 fn test_up_args_feature_control_fields() {
     let args = UpArgs::default();
 
-    // skip_feature_auto_mapping should exist and default to false
-    assert!(!args.skip_feature_auto_mapping);
+    // ignore_additional_features should exist and default to false
+    assert!(!args.ignore_additional_features);
 
     // frozen_lockfile should default to false
     assert!(!args.frozen_lockfile);
@@ -720,15 +740,15 @@ fn test_up_args_feature_control_fields() {
 #[test]
 fn test_up_args_with_all_feature_options() {
     let args = UpArgs {
-        skip_feature_auto_mapping: true,
+        ignore_additional_features: true,
         frozen_lockfile: true,
-        additional_features: None, // Cannot have features when skip is enabled
+        additional_features: None,
         prefer_cli_features: false,
         feature_install_order: Some("feature-a,feature-b".to_string()),
         ..Default::default()
     };
 
-    assert!(args.skip_feature_auto_mapping);
+    assert!(args.ignore_additional_features);
     assert!(args.frozen_lockfile);
     assert!(args.additional_features.is_none());
     assert!(!args.prefer_cli_features);
@@ -742,13 +762,13 @@ fn test_up_args_with_all_feature_options() {
 // Combined Scenario Tests
 // =============================================================================
 
-/// Test: Both frozen lockfile AND skip-feature-auto-mapping can be enabled together.
+/// Test: Both frozen lockfile AND --ignore-additional-features can be enabled together.
 ///
 /// These are independent controls that work together for maximum determinism.
 #[test]
-fn test_frozen_lockfile_with_skip_auto_mapping() {
+fn test_frozen_lockfile_with_ignore_additional_features() {
     let args = UpArgs {
-        skip_feature_auto_mapping: true,
+        ignore_additional_features: true,
         frozen_lockfile: true,
         additional_features: None,
         ..Default::default()
@@ -756,8 +776,8 @@ fn test_frozen_lockfile_with_skip_auto_mapping() {
 
     // Both should be enabled without conflict
     assert!(
-        args.skip_feature_auto_mapping && args.frozen_lockfile,
-        "Both frozen lockfile and skip auto-mapping should be enableable together"
+        args.ignore_additional_features && args.frozen_lockfile,
+        "Both frozen lockfile and ignore-additional-features should be enableable together"
     );
 }
 

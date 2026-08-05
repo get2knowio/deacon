@@ -2058,8 +2058,14 @@ pub struct FeatureMergeConfig {
     pub prefer_cli_features: bool,
     /// Override for feature installation order
     pub feature_install_order: Option<String>,
-    /// Skip feature auto-mapping (blocks implicit feature additions from CLI)
-    pub skip_auto_mapping: bool,
+    /// Drop `additional_features` entirely, resolving only the Features the
+    /// configuration declared.
+    ///
+    /// This is a deacon extension with NO counterpart in the reference CLI, which
+    /// honors `--additional-features` unconditionally. It was reached through the
+    /// misnamed `--skip-feature-auto-mapping` until #498; the flag that reaches it now
+    /// is `--ignore-additional-features`, which says what it does.
+    pub ignore_additional_features: bool,
 }
 
 impl FeatureMergeConfig {
@@ -2068,13 +2074,13 @@ impl FeatureMergeConfig {
         additional_features: Option<String>,
         prefer_cli_features: bool,
         feature_install_order: Option<String>,
-        skip_auto_mapping: bool,
+        ignore_additional_features: bool,
     ) -> Self {
         Self {
             additional_features,
             prefer_cli_features,
             feature_install_order,
-            skip_auto_mapping,
+            ignore_additional_features,
         }
     }
 }
@@ -2173,9 +2179,9 @@ impl FeatureMerger {
 
     /// Merge config features with additional CLI features
     ///
-    /// When `skip_auto_mapping` is true in `merge_config`, additional CLI features
-    /// are NOT added to the config features. Only features explicitly declared in
-    /// devcontainer.json are used.
+    /// When `ignore_additional_features` is true in `merge_config`, additional CLI
+    /// features are NOT added to the config features. Only features explicitly declared
+    /// in devcontainer.json are used.
     #[instrument(level = "debug")]
     pub fn merge_features(
         config_features: &serde_json::Value,
@@ -2186,9 +2192,11 @@ impl FeatureMerger {
         // Start with config features
         let mut merged = config_features.clone();
 
-        // Skip adding CLI features when skip_auto_mapping is enabled
-        if merge_config.skip_auto_mapping {
-            debug!("skip_auto_mapping enabled: only using explicitly declared config features");
+        // Drop the CLI overlay entirely when the caller asked us to.
+        if merge_config.ignore_additional_features {
+            debug!(
+                "ignore_additional_features enabled: only using explicitly declared config features"
+            );
             return Ok(merged);
         }
 
@@ -4172,14 +4180,14 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_features_skip_auto_mapping() {
-        // Test that skip_auto_mapping blocks CLI features from being added
+    fn test_merge_features_ignore_additional_features() {
+        // Test that ignore_additional_features blocks CLI features from being added
         let config_features = serde_json::json!({"git": true, "node": "16"});
         let merge_config = FeatureMergeConfig::new(
             Some(r#"{"docker": true, "python": "3.9"}"#.to_string()),
             false,
             None,
-            true, // skip_auto_mapping enabled
+            true, // ignore_additional_features enabled
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
@@ -4194,14 +4202,14 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_features_skip_auto_mapping_preserves_config_features() {
-        // Test that skip_auto_mapping preserves config features even when CLI features exist
+    fn test_merge_features_ignore_additional_features_preserves_config_features() {
+        // Test that ignore_additional_features preserves config features even when CLI features exist
         let config_features = serde_json::json!({"git": {"version": "2.0"}});
         let merge_config = FeatureMergeConfig::new(
             Some(r#"{"git": {"version": "3.0"}, "docker": true}"#.to_string()),
             true, // CLI would normally win on conflicts
             None,
-            true, // skip_auto_mapping enabled
+            true, // ignore_additional_features enabled
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();
@@ -4217,12 +4225,12 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_features_skip_auto_mapping_empty_cli_features() {
-        // Test that skip_auto_mapping works correctly when no CLI features provided
+    fn test_merge_features_ignore_additional_features_empty_cli_features() {
+        // Test that ignore_additional_features works correctly when no CLI features provided
         let config_features = serde_json::json!({"git": true, "node": "16"});
         let merge_config = FeatureMergeConfig::new(
             None, // No CLI features
-            false, None, true, // skip_auto_mapping enabled
+            false, None, true, // ignore_additional_features enabled
         );
 
         let result = FeatureMerger::merge_features(&config_features, &merge_config).unwrap();

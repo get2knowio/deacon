@@ -463,11 +463,13 @@ pub(crate) async fn execute_up_with_runtime(
 
     // Apply feature merging if CLI features are provided
     if args.additional_features.is_some() || args.feature_install_order.is_some() {
-        // T013: Log info when skip-feature-auto-mapping is enabled so users know CLI features are ignored
-        if args.skip_feature_auto_mapping && args.additional_features.is_some() {
+        // Say plainly that the overlay was dropped, so a caller passing both flags is
+        // never left wondering where its Features went.
+        if args.ignore_additional_features && args.additional_features.is_some() {
             info!(
-                "Skip-feature-auto-mapping enabled: CLI-provided features (--additional-features) \
-                 will be ignored. Only features declared in devcontainer.json will be used."
+                "--ignore-additional-features enabled: CLI-provided features \
+                 (--additional-features) will be ignored. Only features declared in \
+                 devcontainer.json will be used."
             );
         }
 
@@ -475,7 +477,7 @@ pub(crate) async fn execute_up_with_runtime(
             args.additional_features.clone(),
             args.prefer_cli_features,
             args.feature_install_order.clone(),
-            args.skip_feature_auto_mapping,
+            args.ignore_additional_features,
         );
 
         // Merge features
