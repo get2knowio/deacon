@@ -1,0 +1,7 @@
+{
+	"image": "debian:bookworm-slim",
+	"features": {
+		"./app": {},
+		"./base": {}
+	}
+}

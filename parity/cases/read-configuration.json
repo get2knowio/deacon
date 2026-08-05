@@ -4311,6 +4311,78 @@
       "notes": "GREEN since #495 closed (2026-08-05). `devcontainer-features-distribution.md` §Locally Referenced Features: \"A local Feature may **not** be referenced by absolute path.\"\n\nThe fixture's Feature is otherwise perfectly legal — `.devcontainer/` folder present, Feature in a sub-folder of it, sub-folder name equal to the Feature's `id` — so the containment rule #488 implemented is satisfied and this case isolates the absolute-path clause from its neighbour, which `case-readconfig-upstream-local-feature-outside-devcontainer` owns. The pair is deliberate: #488's fix narrowed the divergence but left absolute paths landing INSIDE `.devcontainer/` accepted, and no case covered that gap, which is exactly why #488's differential run stayed green on it.\n\nMEASURED at oracle 0.87.0: the reference exits 1 with `An Absolute path to a local feature is not allowed.`; deacon used to exit 0 and resolve the Feature normally. Both sides now exit 1.\n\nThe absolute path is passed through `--additional-features` rather than written into `devcontainer.json`, and that is load-bearing rather than incidental. `${WORKSPACE}` is substituted in argv and never inside fixture file contents, so a config-declared absolute path could only name a directory absent from the temp workspace — and then BOTH sides exit 1 on the missing directory whether or not the rule is enforced. The first draft of this case did exactly that and AGREED with the rejection deliberately compiled out; it was rewritten rather than kept. In argv the path names a Feature that really exists and would resolve, so enforcement is the only thing between deacon and exit 0 — confirmed by removing the check and watching deacon return 0 against the reference's 1.\n\nThis REMOVES a capability deacon added deliberately in #126 (absolute paths accepted at every local-Feature dispatch site, for parity with `read-configuration`'s own dispatch). The rejection lives at the single ingress chokepoint `core::features::resolve_local_feature_dir`, alongside #488's containment predicate and ahead of it, so `up`, `build`, `read-configuration` and the `dependsOn` closure are covered by one branch. The other three surfaces that reference a local Feature — `dependsOn`, `installsAfter` and `overrideFeatureInstallOrder` — were measured separately and the reference rejects all three; `installsAfter` was the one deacon silently non-matched rather than erring, and is now covered by a unit test.\n\nA config author writing `${localWorkspaceFolder}/.devcontainer/localFeatureA` is NOT affected, also measured: neither side variable-substitutes `features` map keys, so the string stays literal, is not lexically absolute, and falls through to OCI parsing where both sides exit 1 on a fetch failure. The rejection therefore fires on the reference exactly as authored — substituting first would invent a rejection the reference does not perform."
     },
     {
+      "id": "case-readconfig-installsafter-bare-metadata-id",
+      "behaviors": [
+        "bhv-features-dependency-ref-bare-id-rejected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-installsafter-bare-metadata-id"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes [#505](https://github.com/get2knowio/deacon/issues/505). A local Feature naming its declared sibling by the sibling's bare METADATA id in `installsAfter` (`\"installsAfter\": [\"base\"]`, where the sibling is `./base`).\n\n`feature-dependencies.md` gives `installsAfter` \"the same syntax as the `features` object\", and `\"features\": { \"base\": {} }` does not name a local `./base` on either CLI: a bare single-segment id is the deprecated v1 (GitHub Release era) form, mapped only for the eighteen ids that survived into `ghcr.io/devcontainers/features` (#491's table). `base` is not one of them.\n\nMEASURED at oracle 0.87.0: the reference exits 1 with `Legacy feature 'base' not supported.`; deacon exited 0 and installed `base` before `app`. Both sides now exit 1.\n\nThe sibling being DECLARED is what makes this case able to fail. deacon's dependency matcher resolves a reference by canonical id, source **or metadata-id alias**, so with `./base` in the `features` map the illegal reference resolved and actively drove installation order — enforcement is the only thing between deacon and exit 0 here. With the target absent deacon would also have exited 0, but by soft-skipping an unmatched entry, which says nothing about the alias; `case-readconfig-installsafter-unmatched-bare-id` covers that second path deliberately. Watched to fail: with the ingress validation compiled out deacon returns 0 and a nine-line `featureSets` against the reference's 1.\n\n`dependsOn` needed no change and is the reason this is one rule rather than two — the same probe written as `\"dependsOn\": { \"base\": {} }` already exited 1 on both sides with the reference's own wording, because #491/#497 routed `dependsOn` keys through `canonicalize_user_feature_id` at ingress. #505 is that same call reaching the property it had been missing."
+    },
+    {
+      "id": "case-readconfig-installsafter-unmatched-bare-id",
+      "behaviors": [
+        "bhv-features-dependency-ref-bare-id-rejected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration"
+          ],
+          "fixtures": [
+            "fx-installsafter-unmatched-bare-id"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes [#505](https://github.com/get2knowio/deacon/issues/505), soft-skip half. The same illegal bare id in `installsAfter`, this time matching NOTHING — no Feature in the set, no directory on disk, no entry in the deprecated-v1 table.\n\nThis is the half that looks harmless, and it is why the divergence survived #488 and #495. `installsAfter` is the soft edge: `feature-dependencies.md` has it order a Feature \"if and only if a given Feature is already set to be installed\", so an unresolved entry is ordinary and extremely common. deacon logged it at debug and carried on, which made an ILLEGAL entry indistinguishable from a legitimate non-match.\n\nMEASURED at oracle 0.87.0: the reference exits 1 with `Legacy feature 'nope-not-here' not supported.` Its canonicalization runs at feature-set assembly and is unconditional, so it never reaches the question of whether the entry would have ordered anything. deacon exited 0. Both sides now exit 1.\n\nThe measurement that fixes the rule as \"canonicalize\" rather than \"reject every bare id\": `installsAfter: [\"terraform\"]` with no `terraform` in the set exits 0 on BOTH sides — `terraform` IS in the table, so it maps to `ghcr.io/devcontainers/features/terraform:1`, matches nothing, and is soft-skipped. That direction resolves nothing and would only add a registry fetch to the suite, so it is pinned hermetically by the `deprecated_v1_and_path_form_dependency_references_are_accepted` unit test instead of by a case."
+    },
+    {
       "id": "case-readconfig-upstream-dependson-local-with-options",
       "behaviors": [
         "bhv-features-local-dependency-instance-per-option-set"

@@ -177,6 +177,12 @@ pub(crate) async fn resolve_features_ordered<C: HttpClient>(
         idx += 1;
     }
 
+    // Every `dependsOn`/`installsAfter` reference is a `features`-object reference and
+    // gets the same ingress canonicalization the map keys got (#505). `dependsOn` already
+    // had it via `resolve_one_feature`; this closes `installsAfter`, where an illegal bare
+    // id used to look like an ordinary non-match and be silently skipped.
+    deacon_core::features::validate_feature_dependency_references(&resolved_features)?;
+
     // Apply dependency / install-order resolution (honors
     // overrideFeatureInstallOrder). Propagate cycle/ordering errors.
     let resolver = FeatureDependencyResolver::new(config.override_feature_install_order.clone());

@@ -880,6 +880,10 @@ async fn resolve_and_stage_features(
             })
             .collect::<Vec<_>>()
     });
+    // Same ingress rule as the `features` map keys, applied to the dependency
+    // references the resolved Features declare (#505).
+    deacon_core::features::validate_feature_dependency_references(&resolved_features)?;
+
     let resolver = FeatureDependencyResolver::new(override_order);
     let installation_plan = resolver.resolve(&resolved_features)?;
 
