@@ -582,8 +582,10 @@ impl TestCase {
 /// subcommands (`deacon outdated`, `deacon upgrade`) that resolve and rewrite the
 /// devcontainer **lockfile**, and `sdim-operation` already enumerates them as in-scope
 /// operations (FR-005). They were absent only because no case had exercised them, which
-/// is the hole this story exists to fill. Feature *authoring* (`features test|publish|…`)
-/// stays out, permanently.
+/// is the hole this story exists to fill. `set-up` joined for the same reason in #483: it is
+/// a shipped consumer subcommand the reference also implements (`devcontainer set-up`),
+/// invoked with the same argv on both sides, and its result document is a comparable
+/// observable. Feature *authoring* (`features test|publish|…`) stays out, permanently.
 pub const CONSUMER_SUBCOMMANDS: &[&str] = &[
     "up",
     "down",
@@ -591,6 +593,7 @@ pub const CONSUMER_SUBCOMMANDS: &[&str] = &[
     "build",
     "read-configuration",
     "run-user-commands",
+    "set-up",
     "outdated",
     "upgrade",
     "templates-apply",
@@ -660,7 +663,8 @@ pub fn differential_substitution(operation: &str) -> Option<&'static str> {
 ///
 /// `read-configuration`, `templates-apply` and `doctor` are absent deliberately — they
 /// read configuration and never create a container.
-pub const CONTAINER_SUBCOMMANDS: &[&str] = &["up", "down", "exec", "build", "run-user-commands"];
+pub const CONTAINER_SUBCOMMANDS: &[&str] =
+    &["up", "down", "exec", "build", "run-user-commands", "set-up"];
 
 /// The observable-channel ids whose expectations require an `fsAllowlist` (data-model
 /// §1 / contract observer-channel.md). Filesystem capture is allowlist-scoped, never a
@@ -1088,7 +1092,10 @@ pub fn phases_reachable_by(subcommand: &str) -> &'static [FailurePhase] {
             LifecyclePostAttach,
         ],
         // Hooks in an existing container; the invocation itself can also fail (no container).
-        "run-user-commands" => &[
+        // `set-up` is the same reachability: it resolves a configuration against a RUNNING
+        // container and then runs the five hooks in it. It creates nothing, so neither
+        // `build` nor `container-create` is reachable.
+        "run-user-commands" | "set-up" => &[
             ConfigResolution,
             LifecycleOnCreate,
             LifecycleUpdateContent,

@@ -169,7 +169,7 @@ pub fn infer_failure_phase(subcommand: &str) -> FailurePhase {
         "read-configuration" | "doctor" => FailurePhase::ConfigResolution,
         "build" => FailurePhase::Build,
         "up" => FailurePhase::ContainerCreate,
-        "exec" | "run-user-commands" | "templates-apply" => FailurePhase::Exec,
+        "exec" | "run-user-commands" | "set-up" | "templates-apply" => FailurePhase::Exec,
         // Any other (already validated to be in the consumer surface) op that fails
         // before it does anything meaningful is a config-resolution failure.
         _ => FailurePhase::ConfigResolution,

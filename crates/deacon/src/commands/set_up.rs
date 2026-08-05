@@ -115,9 +115,74 @@ enum SetUpResult {
         outcome: &'static str,
         #[serde(skip_serializing_if = "Option::is_none")]
         configuration: Option<serde_json::Value>,
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(
+            rename = "mergedConfiguration",
+            skip_serializing_if = "Option::is_none"
+        )]
         merged_configuration: Option<serde_json::Value>,
     },
+}
+
+/// Shape the merged configuration into upstream's `mergeConfiguration` OUTPUT form —
+/// the same document `read-configuration --include-merged-configuration` emits (#483).
+///
+/// deacon used to serialize the flat [`DevContainerConfig`] here, which got three things
+/// wrong at once: the key was snake_case, the content was the flat config rather than the
+/// merged shape, and the five lifecycle hooks appeared as SINGULAR fields instead of the
+/// collected plural arrays the reference reports. All three are fixed by routing this
+/// block through `read_configuration`'s existing pipeline rather than a second serializer.
+///
+/// The collected entries are ordered exactly as
+/// [`aggregate_lifecycle_commands`] replays them, which is what makes the reported arrays
+/// agree with what set-up actually RAN: the container label's fragments (carried on
+/// [`DevContainerConfig::metadata_lifecycle_layers`] since #477) first, in label order,
+/// then the `--config` file's own hooks last — "the devcontainer.json is considered last"
+/// (spec image-metadata Merge Logic).
+///
+/// `configFilePath` rides on the block for the same reason it rides on
+/// `read-configuration`'s (#376): the reference emits it and a consumer already knows how to
+/// unmarshal the VS Code URI shape. Its `scheme` is `file` here rather than
+/// `vscode-fileHost`, and that is not a special case — `config_file_path_value` already
+/// keys the scheme off whether the CALLER NAMED the file, and `set-up` only ever has a
+/// `--config` it was given. A `set-up` with no `--config` has no config file, and the
+/// reference emits no `configFilePath` for it either.
+fn merged_configuration_document(
+    merged: &DevContainerConfig,
+    config_path: Option<&std::path::Path>,
+) -> Result<serde_json::Value> {
+    use crate::commands::read_configuration::{
+        apply_upstream_merge_shape, collect_entry_from_config_json, insert_config_file_path,
+        normalize_merged_configuration_shape,
+    };
+
+    let merged_json =
+        serde_json::to_value(merged).context("Failed to serialize merged configuration")?;
+
+    let mut entries: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
+    for layer in &merged.metadata_lifecycle_layers {
+        // Round-trip the layer through a bare config so the entry is built by the SAME
+        // collector the base config uses — one definition of "which fields are collected".
+        let mut as_config = DevContainerConfig::default();
+        layer.clone().apply_to(&mut as_config);
+        let entry = collect_entry_from_config_json(
+            &serde_json::to_value(&as_config)
+                .context("Failed to serialize metadata lifecycle layer")?,
+        );
+        if !entry.is_empty() {
+            entries.push(entry);
+        }
+    }
+    let base_entry = collect_entry_from_config_json(&merged_json);
+    if !base_entry.is_empty() {
+        entries.push(base_entry);
+    }
+
+    let mut shaped = apply_upstream_merge_shape(merged_json, &entries);
+    normalize_merged_configuration_shape(&mut shaped);
+    if let Some(path) = config_path {
+        insert_config_file_path(&mut shaped, path, true);
+    }
+    Ok(shaped)
 }
 
 /// Execute the `set-up` command end-to-end.
@@ -218,7 +283,10 @@ pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Re
             .then(|| serde_json::to_value(&substituted_config).unwrap_or(serde_json::Value::Null)),
         merged_configuration: args
             .include_merged_configuration
-            .then(|| serde_json::to_value(&substituted_merged).unwrap_or(serde_json::Value::Null)),
+            .then(|| {
+                merged_configuration_document(&substituted_merged, args.config_path.as_deref())
+            })
+            .transpose()?,
     };
     let json = serde_json::to_string(&result).context("Failed to serialize set-up result")?;
     println!("{}", json);
@@ -677,6 +745,7 @@ fn build_dotfiles_config(args: &SetUpArgs) -> Option<DotfilesConfig> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::path::Path;
 
     fn empty_progress_tracker() -> Arc<Mutex<Option<deacon_core::progress::ProgressTracker>>> {
         Arc::new(Mutex::new(None))
@@ -928,6 +997,118 @@ mod tests {
         );
         assert!(phase_commands(LifecyclePhase::UpdateContent).is_empty());
         assert!(phase_commands(LifecyclePhase::PostAttach).is_empty());
+    }
+
+    /// The merged config of the test above — the container's three-entry label plus a
+    /// `--config` — so what `--include-merged-configuration` REPORTS is pinned against
+    /// what set-up actually RUNS. A report that disagreed with the execution would be the
+    /// worse defect of the two, and only building both from one input can see it.
+    fn merged_for_report() -> DevContainerConfig {
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            r#"[
+                {"onCreateCommand": "e0-onCreate", "postCreateCommand": "e0-postCreate"},
+                {"id": "ghcr.io/example/feat:1", "onCreateCommand": "feat-onCreate",
+                 "postStartCommand": "feat-postStart"},
+                {"onCreateCommand": "e2-onCreate", "postCreateCommand": "e2-postCreate"}
+            ]"#
+            .to_string(),
+        );
+        let container = make_container("abc", "alpine:3.18", labels);
+        let metadata = extract_image_metadata_config(&container).unwrap();
+        let file_cfg = DevContainerConfig {
+            on_create_command: Some(serde_json::json!("ws-onCreate")),
+            post_create_command: Some(serde_json::json!("ws-postCreate")),
+            ..DevContainerConfig::default()
+        };
+        merge_configs(&file_cfg, metadata.as_ref())
+    }
+
+    /// #483: the block carries the COLLECTED plural arrays, in the order the hooks run,
+    /// and no singular hook key survives.
+    ///
+    /// Equality over each whole array, never `contains`: the defect this replaced reported
+    /// one command per phase, and a containment assertion would have called that a pass.
+    #[test]
+    fn merged_configuration_reports_the_collected_plural_arrays() {
+        let doc = merged_configuration_document(&merged_for_report(), None).unwrap();
+
+        assert_eq!(
+            doc["onCreateCommands"],
+            serde_json::json!(["e0-onCreate", "feat-onCreate", "e2-onCreate", "ws-onCreate"]),
+            "every label entry contributes, the devcontainer.json last — the same order \
+             `aggregate_lifecycle_commands` replays"
+        );
+        assert_eq!(
+            doc["postCreateCommands"],
+            serde_json::json!(["e0-postCreate", "e2-postCreate", "ws-postCreate"])
+        );
+        assert_eq!(
+            doc["postStartCommands"],
+            serde_json::json!(["feat-postStart"]),
+            "a phase only one entry declares appears exactly once"
+        );
+        // The reference always reports the five hook slots, empty ones as `[]`.
+        assert_eq!(doc["updateContentCommands"], serde_json::json!([]));
+        assert_eq!(doc["postAttachCommands"], serde_json::json!([]));
+        // …and materializes these two as booleans rather than omitting them.
+        assert_eq!(doc["init"], serde_json::json!(false));
+        assert_eq!(doc["privileged"], serde_json::json!(false));
+
+        for singular in [
+            "onCreateCommand",
+            "updateContentCommand",
+            "postCreateCommand",
+            "postStartCommand",
+            "postAttachCommand",
+        ] {
+            assert!(
+                doc.get(singular).is_none(),
+                "the merged shape strips `{singular}`; leaving it beside the plural array \
+                 would report the same hook twice"
+            );
+        }
+    }
+
+    /// The other half of #483: the key itself. deacon emitted serde's default snake_case
+    /// `merged_configuration`, which no consumer of the reference's output looks for.
+    #[test]
+    fn merged_configuration_is_reported_under_the_camel_case_key() {
+        let result = SetUpResult::Success {
+            outcome: "success",
+            configuration: None,
+            merged_configuration: Some(serde_json::json!({ "name": "x" })),
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+
+        assert!(json.get("mergedConfiguration").is_some());
+        assert!(
+            json.get("merged_configuration").is_none(),
+            "the snake_case key is the pre-#483 shape and must not survive alongside it"
+        );
+    }
+
+    /// `configFilePath` rides on the block whenever a `--config` named a file, with the
+    /// `file` scheme the reference uses for a caller-named path — and is absent when
+    /// set-up ran against the container's label alone, which is what the reference does
+    /// too (measured at oracle 0.87.0 on both shapes).
+    #[test]
+    fn merged_configuration_reports_config_file_path_only_when_config_was_named() {
+        let merged = merged_for_report();
+
+        let named = merged_configuration_document(&merged, Some(Path::new("/ws/overlay.json")))
+            .expect("shaping a named config succeeds");
+        assert_eq!(named["configFilePath"]["scheme"], serde_json::json!("file"));
+        assert!(
+            named["configFilePath"]["fsPath"]
+                .as_str()
+                .is_some_and(|p| p.ends_with("overlay.json")),
+            "the reported path names the file the caller passed: {named:#}"
+        );
+
+        let unnamed = merged_configuration_document(&merged, None).unwrap();
+        assert!(unnamed.get("configFilePath").is_none());
     }
 
     #[test]

@@ -316,7 +316,7 @@ fn config_file_path_value(config_path: &Path, explicitly_named: bool) -> serde_j
 ///
 /// A non-object document is left alone rather than coerced: the only way it is not an
 /// object is a bug elsewhere, and quietly wrapping it would hide that.
-fn insert_config_file_path(
+pub(crate) fn insert_config_file_path(
     document: &mut serde_json::Value,
     config_path: &Path,
     explicitly_named: bool,
@@ -862,7 +862,7 @@ enum EmptyPlural {
 /// and emits the plural array at the same position, preserving entry declaration order. A
 /// property whose collection came up empty is emitted as `[]` or omitted according to its
 /// [`EmptyPlural`] flag.
-fn apply_upstream_merge_shape(
+pub(crate) fn apply_upstream_merge_shape(
     mut base: serde_json::Value,
     entries: &[serde_json::Map<String, serde_json::Value>],
 ) -> serde_json::Value {
@@ -899,7 +899,7 @@ fn apply_upstream_merge_shape(
 
 /// Extract collected-property fields (entrypoint + lifecycle hooks) from a config JSON object
 /// into a metadata entry suitable for [`apply_upstream_merge_shape`].
-fn collect_entry_from_config_json(
+pub(crate) fn collect_entry_from_config_json(
     value: &serde_json::Value,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut entry = serde_json::Map::new();
@@ -943,7 +943,7 @@ fn or_merge_bool(current: Option<bool>, new: Option<bool>) -> Option<bool> {
 ///   no config / image-metadata / feature entry sets them. Matches upstream's
 ///   `init: imageMetadata.some(e => e.init)` / `privileged: imageMetadata.some(e => e.privileged)`,
 ///   which always yields a boolean.
-fn normalize_merged_configuration_shape(value: &mut serde_json::Value) {
+pub(crate) fn normalize_merged_configuration_shape(value: &mut serde_json::Value) {
     let Some(obj) = value.as_object_mut() else {
         return;
     };

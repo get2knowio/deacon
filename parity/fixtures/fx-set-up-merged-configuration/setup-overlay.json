@@ -1,0 +1,5 @@
+{
+	"name": "ConformanceSetUpMergedConfigurationOverlay",
+	"onCreateCommand": "echo overlay-onCreate",
+	"postCreateCommand": "echo overlay-postCreate"
+}
