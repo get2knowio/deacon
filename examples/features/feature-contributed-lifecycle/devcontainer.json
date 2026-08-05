@@ -5,8 +5,8 @@
 	"workspaceFolder": "/workspace",
 	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"features": {
-		"./monitor": {},
-		"./tooling": {}
+		"./.devcontainer/monitor": {},
+		"./.devcontainer/tooling": {}
 	},
 	"postCreateCommand": "echo user-postcreate >> /tmp/lifecycle.log"
 }

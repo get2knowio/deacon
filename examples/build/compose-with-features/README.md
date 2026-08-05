@@ -2,6 +2,13 @@
 
 Builds only the targeted Compose service (`app`) and installs a local feature.
 
+Layout: the config is `.devcontainer.json` at the example root and the local
+Feature lives at `.devcontainer/features/hello/`, so the id is spelled
+`./.devcontainer/features/hello` — config-relative, and contained in
+`.devcontainer/` as `devcontainer-features-distribution.md` §Locally Referenced
+Features requires. (`dockerComposeFile` is unaffected: it resolves against the
+**workspace folder**, so `docker-compose.yml` stays at the root.)
+
 ## Usage
 ```sh
 cd examples/build/compose-with-features

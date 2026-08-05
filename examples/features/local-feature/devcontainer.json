@@ -5,7 +5,7 @@
 	"workspaceFolder": "/workspace",
 	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"features": {
-		"./hello-feature": {
+		"./.devcontainer/hello-feature": {
 			"greeting": "bonjour"
 		}
 	}

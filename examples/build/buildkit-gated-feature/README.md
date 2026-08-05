@@ -2,6 +2,12 @@
 
 Demonstrates a feature that should fail fast if BuildKit is not available.
 
+Layout: the config is `.devcontainer.json` at the example root and the local
+Feature lives at `.devcontainer/features/buildkit-only/`, so the id is spelled
+`./.devcontainer/features/buildkit-only` — config-relative, and contained in
+`.devcontainer/` as `devcontainer-features-distribution.md` §Locally Referenced
+Features requires.
+
 ## Usage
 ```sh
 cd examples/build/buildkit-gated-feature

@@ -25,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-chmod +x "$SCRIPT_DIR"/probe-feature/install.sh
+chmod +x "$SCRIPT_DIR"/.devcontainer/probe-feature/install.sh
 
 cd "$SCRIPT_DIR"
 

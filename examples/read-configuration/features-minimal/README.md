@@ -18,5 +18,5 @@ cargo run -p deacon -- read-configuration --workspace-folder "$(pwd)" \
 ```
 
 What to look for:
-- `featuresConfiguration` includes a plan referencing `./minimal-feature`
+- `featuresConfiguration` includes a plan referencing `./.devcontainer/minimal-feature`
 - When merged: `mergedConfiguration` reflects any feature-derived metadata available

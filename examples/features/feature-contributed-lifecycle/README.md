@@ -15,11 +15,15 @@ all three sources.
 
 ## Files
 
-- `devcontainer.json` — references both local features plus a user
+- `devcontainer.json` — references both local features
+  (`./.devcontainer/monitor`, `./.devcontainer/tooling`) plus a user
   `postCreateCommand`.
-- `monitor/` — feature contributing `postCreateCommand` and
+- `.devcontainer/monitor/` — feature contributing `postCreateCommand` and
   `postStartCommand`.
-- `tooling/` — feature contributing only `postCreateCommand`.
+- `.devcontainer/tooling/` — feature contributing only `postCreateCommand`.
+
+Both feature folders live under `.devcontainer/` per
+`devcontainer-features-distribution.md` §Locally Referenced Features.
 
 ## Scenarios exercised by `exec.sh`
 
@@ -32,7 +36,7 @@ all three sources.
 ## Manual usage
 
 ```sh
-deacon up --workspace-folder . --remove-existing-container
+deacon up --workspace-folder . --config ./devcontainer.json --remove-existing-container
 docker exec <cid> cat /tmp/lifecycle.log
 ```
 
@@ -41,7 +45,7 @@ docker exec <cid> cat /tmp/lifecycle.log
 - [#69](https://github.com/get2knowio/deacon/issues/69) — when this
   example is run via `--config <path>` (e.g. for verification outside
   the standard `.devcontainer/devcontainer.json` layout), local feature
-  paths of the form `./feature-X` are misinterpreted as OCI registry
+  paths of the form `./.devcontainer/feature-X` are misinterpreted as OCI registry
   refs (`registry: "."`).
 
 ## Spec references

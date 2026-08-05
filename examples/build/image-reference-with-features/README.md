@@ -1,6 +1,12 @@
 # Image Reference Build With Feature
 
-Extends a base image (`alpine:3.19`) by installing a local feature.
+Extends a base image by installing a local feature.
+
+Layout: the config is `.devcontainer.json` at the example root and the local
+Feature lives at `.devcontainer/features/hello/`, so the id is spelled
+`./.devcontainer/features/hello` — config-relative, and contained in
+`.devcontainer/` as `devcontainer-features-distribution.md` §Locally Referenced
+Features requires.
 
 ## Usage
 ```sh

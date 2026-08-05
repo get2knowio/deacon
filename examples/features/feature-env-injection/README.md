@@ -18,9 +18,15 @@ those four values to `/usr/local/share/feature-env/snapshot`. After
 
 ## Files
 
-- `devcontainer.json` — references the local `./capture-env` feature.
-- `capture-env/devcontainer-feature.json` — minimal feature metadata.
-- `capture-env/install.sh` — captures the four env vars.
+- `devcontainer.json` — references the local `./.devcontainer/capture-env`
+  feature.
+- `.devcontainer/capture-env/devcontainer-feature.json` — minimal feature
+  metadata.
+- `.devcontainer/capture-env/install.sh` — captures the four env vars.
+
+The feature's source lives under `.devcontainer/` because
+`devcontainer-features-distribution.md` §Locally Referenced Features requires
+it; the id stays config-relative, and the config sits at the example root.
 
 ## Scenarios exercised by `exec.sh`
 
@@ -34,7 +40,7 @@ those four values to `/usr/local/share/feature-env/snapshot`. After
 ## Manual usage
 
 ```sh
-deacon up --workspace-folder . --remove-existing-container
+deacon up --workspace-folder . --config ./devcontainer.json --remove-existing-container
 docker exec <cid> cat /usr/local/share/feature-env/snapshot
 ```
 
@@ -43,7 +49,7 @@ docker exec <cid> cat /usr/local/share/feature-env/snapshot
 - [#69](https://github.com/get2knowio/deacon/issues/69) — when this
   example is run via `--config <path>` (e.g. for verification outside
   the standard `.devcontainer/devcontainer.json` layout), local feature
-  paths of the form `./feature-X` are misinterpreted as OCI registry
+  paths of the form `./.devcontainer/feature-X` are misinterpreted as OCI registry
   refs (`registry: "."`).
 
 ## Spec references

@@ -23,11 +23,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-chmod +x "$SCRIPT_DIR"/feature-*/install.sh
+chmod +x "$SCRIPT_DIR"/.devcontainer/feature-*/install.sh
 
 cd "$SCRIPT_DIR"
 
-# Top-level devcontainer.json so the `./feature-*` paths resolve against the
+# Top-level devcontainer.json so the `./.devcontainer/feature-*` paths resolve against the
 # config dir; point deacon at it explicitly.
 echo "== Bring container up (no overrideFeatureInstallOrder; deps decide order) ==" >&2
 run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --config "$SCRIPT_DIR/devcontainer.json" --remove-existing-container "$@" >/dev/null

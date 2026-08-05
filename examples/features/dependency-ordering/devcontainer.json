@@ -5,8 +5,8 @@
 	"workspaceFolder": "/workspace",
 	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"features": {
-		"./feature-app": {},
-		"./feature-base": {},
-		"./feature-lib": {}
+		"./.devcontainer/feature-app": {},
+		"./.devcontainer/feature-base": {},
+		"./.devcontainer/feature-lib": {}
 	}
 }

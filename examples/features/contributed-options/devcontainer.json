@@ -5,6 +5,6 @@
 	"workspaceFolder": "/workspace",
 	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"features": {
-		"./probe-feature": {}
+		"./.devcontainer/probe-feature": {}
 	}
 }

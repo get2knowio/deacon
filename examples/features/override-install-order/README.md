@@ -14,10 +14,15 @@ This example wires three independent local features (`alpha`, `bravo`,
 ## Files
 
 - `devcontainer.json` — declares all three local features and the
-  override order.
-- `feature-alpha/`, `feature-bravo/`, `feature-charlie/` — each has a
-  minimal `devcontainer-feature.json` and an `install.sh` that appends
-  its name to the marker file.
+  override order. Both the `features` map and the
+  `overrideFeatureInstallOrder` array spell each id the same way,
+  `./.devcontainer/feature-<name>`.
+- `.devcontainer/feature-alpha/`, `.devcontainer/feature-bravo/`,
+  `.devcontainer/feature-charlie/` — each has a minimal
+  `devcontainer-feature.json` and an `install.sh` that appends its name
+  to the marker file. They live under `.devcontainer/` because
+  `devcontainer-features-distribution.md` §Locally Referenced Features
+  requires a local Feature's source to be contained there.
 
 ## Scenarios exercised by `exec.sh`
 
@@ -28,7 +33,7 @@ This example wires three independent local features (`alpha`, `bravo`,
 ## Manual usage
 
 ```sh
-deacon up --workspace-folder . --remove-existing-container
+deacon up --workspace-folder . --config ./devcontainer.json --remove-existing-container
 docker exec <cid> cat /tmp/feature-order/log
 # charlie
 # alpha
@@ -39,7 +44,7 @@ docker exec <cid> cat /tmp/feature-order/log
 
 - [#69](https://github.com/get2knowio/deacon/issues/69) — when
   `devcontainer.json` is loaded via `--config <path>`, local feature
-  paths of the form `./feature-X` are misinterpreted as OCI registry
+  paths of the form `./.devcontainer/feature-X` are misinterpreted as OCI registry
   refs (`registry: "."`). This example uses local features and so hits
   the bug when invoked outside the standard `.devcontainer/devcontainer.json`
   discovery location.

@@ -7,7 +7,11 @@ This example verifies four of them actually reach the running container (the
 existing `feature-env-injection/` and `feature-contributed-lifecycle/`
 canaries cover `containerEnv` and lifecycle hooks respectively).
 
-## The feature (`./probe-feature`)
+## The feature (`./.devcontainer/probe-feature`)
+
+Its source lives at `.devcontainer/probe-feature/`, as
+`devcontainer-features-distribution.md` §Locally Referenced Features requires;
+the id in `devcontainer.json` is config-relative to the example root.
 
 Declares:
 - `mounts` — a named volume mounted at `/contrib-data`
