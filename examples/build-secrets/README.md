@@ -128,7 +128,7 @@ Error: Build secret environment variable 'UNDEFINED_VAR' is not set
   "dockerFile": "Dockerfile",
   "build": {
     "context": ".",
-    "options": {
+    "args": {
       "BUILDKIT_INLINE_CACHE": "1"
     }
   }
