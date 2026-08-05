@@ -618,6 +618,10 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
         idx += 1;
     }
 
+    // Same ingress rule as the `features` map keys, applied to the dependency
+    // references the resolved Features declare (#505).
+    deacon_core::features::validate_feature_dependency_references(&resolved_features)?;
+
     // Create dependency resolver
     let override_order = config.override_feature_install_order.clone();
     let resolver = FeatureDependencyResolver::new(override_order);

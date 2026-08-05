@@ -541,6 +541,82 @@ pub fn reject_absolute_feature_reference(reference: &str) -> std::result::Result
     })
 }
 
+/// Apply the `features`-map ingress rule to every dependency reference the
+/// resolved Feature set declares — `dependsOn` keys and `installsAfter` entries.
+///
+/// `feature-dependencies.md` gives both properties "the same syntax as the
+/// `features` object", and the reference CLI enforces that literally: an entry
+/// that is not a local path is run through `getBackwardCompatibleFeatureId`
+/// during feature-set assembly, exactly like a `features` map key. So a bare
+/// single-segment id is the deprecated v1 (GitHub Release era) form — mapped
+/// when it is one of the eighteen ids that survived into the v2 collection, and
+/// a fatal error otherwise. A sibling local Feature's *metadata* id is not a
+/// reference form at all: `"features": { "base": {} }` does not name the local
+/// `./base`, and neither does `"installsAfter": ["base"]`.
+///
+/// MEASURED at oracle 0.87.0 on four minimal `.devcontainer/`-contained
+/// workspaces (#505):
+///
+/// | reference | reference CLI | deacon before |
+/// |---|---|---|
+/// | `dependsOn: { "base": {} }`, `./base` a sibling | exit 1, `Legacy feature 'base' not supported` | exit 1, same message |
+/// | `installsAfter: ["base"]`, `./base` a sibling AND declared | exit 1, same message | exit 0, ordered `base` before `app` |
+/// | `installsAfter: ["nope-not-here"]`, nothing matching | exit 1, same message | exit 0, soft-skipped |
+/// | `dependsOn: { "terraform": {} }` / `installsAfter: ["terraform"]` | exit 0, auto-mapped to `ghcr.io/devcontainers/features/terraform:1` | exit 0, same |
+///
+/// So `dependsOn` was already canonicalized at ingress (#491/#497) and
+/// `installsAfter` was not — the soft-ordering nature of `installsAfter` made an
+/// illegal reference look like an ordinary non-match and it was silently
+/// skipped, the same failure mode #495 found for absolute paths. There is ONE
+/// rule, not one per property: this runs both through
+/// [`canonicalize_user_feature_id`](crate::feature_ref::canonicalize_user_feature_id),
+/// the function the `features` map keys already use.
+///
+/// The canonical form is deliberately DISCARDED rather than written back: the
+/// matcher resolves an entry against the set by canonical id, source and
+/// metadata-id alias, and rewriting the authored string would change what
+/// `read-configuration` echoes. This is a validating pass, not a rewriting one.
+pub fn validate_feature_dependency_references(
+    features: &[ResolvedFeature],
+) -> std::result::Result<(), FeatureError> {
+    for feature in features {
+        let referrer = &feature.source;
+        for entry in &feature.metadata.installs_after {
+            validate_one_dependency_reference(entry, referrer, "installsAfter")?;
+        }
+        for entry in feature.metadata.depends_on.keys() {
+            validate_one_dependency_reference(entry, referrer, "dependsOn")?;
+        }
+    }
+    Ok(())
+}
+
+/// One `dependsOn`/`installsAfter` entry, validated the way a `features` map key is.
+///
+/// A local path (`./`, `../`) is not an OCI reference and passes through to the
+/// matcher untouched; an absolute one is rejected first so it names its real
+/// cause (#495) instead of falling through to an OCI parse.
+fn validate_one_dependency_reference(
+    entry: &str,
+    referrer: &str,
+    property: &str,
+) -> std::result::Result<(), FeatureError> {
+    reject_absolute_feature_reference(entry)?;
+    if entry.starts_with("./") || entry.starts_with("../") {
+        return Ok(());
+    }
+    crate::feature_ref::canonicalize_user_feature_id(entry).map_err(|e| {
+        FeatureError::Validation {
+            message: format!(
+                "Feature '{referrer}' lists '{entry}' in '{property}', which is not a valid \
+                 Feature reference. '{property}' entries use the same syntax as the 'features' \
+                 object (feature-dependencies.md), so a bare id is the deprecated v1 form. {e}"
+            ),
+        }
+    })?;
+    Ok(())
+}
+
 /// Resolve a locally-referenced Feature (`./…` or `../…`) to its directory on
 /// disk, enforcing the specification's two path rules.
 ///
@@ -1530,12 +1606,19 @@ impl FeatureDependencyResolver {
 
         // Per spec (https://containers.dev/implementors/features/#dependson and
         // #installation-order), `dependsOn`/`installsAfter` keys use "the same
-        // syntax as the `features` object": the canonical `id`, the metadata
-        // `id` alias (e.g. a local feature referenced by its sibling's short
-        // id), or the fetch-time `source` (local path or full/partial OCI ref,
-        // matched tag-insensitively). `FeatureIdResolver` encapsulates exactly
-        // those rules and is shared with `overrideFeatureInstallOrder`
-        // translation in `resolve()`.
+        // syntax as the `features` object": the canonical `id` or the fetch-time
+        // `source` (local path or full/partial OCI ref, matched
+        // tag-insensitively). `FeatureIdResolver` encapsulates exactly those
+        // rules and is shared with `overrideFeatureInstallOrder` translation in
+        // `resolve()`.
+        //
+        // Its metadata-`id` ALIAS is not one of those forms and is unreachable
+        // from here in production: a Feature's metadata id is a bare
+        // single-segment string, and `validate_feature_dependency_references`
+        // rejects a bare non-deprecated id at ingress ahead of this pass, the way
+        // the reference CLI does (#505). The alias survives for
+        // `overrideFeatureInstallOrder`, a separate surface, and for callers that
+        // assemble a Feature list themselves (the unit tests below).
         let id_resolver = FeatureIdResolver::new(features);
 
         // Initialize graph with every node
@@ -3631,11 +3714,17 @@ mod tests {
         );
     }
 
+    /// The MATCHER still resolves a bare metadata id to its Feature (#102), and that
+    /// stays true for `overrideFeatureInstallOrder` and for callers that assemble a
+    /// Feature list themselves. It is no longer reachable for
+    /// `dependsOn`/`installsAfter` from a real configuration: #505 measured that the
+    /// reference CLI rejects such a document at ingress, and
+    /// `validate_feature_dependency_references` — asserted directly by the four tests
+    /// below — now runs ahead of this pass on every path that builds a Feature set from
+    /// a config. This test therefore pins the matcher's rules, not deacon's answer to
+    /// the document.
     #[test]
-    fn test_local_feature_depends_on_resolves_by_metadata_id() {
-        // Local features get canonical IDs like `local:/abs/path/feature-a`,
-        // but dependsOn/installsAfter reference the metadata `id`
-        // (`feature-a`). Both must resolve. Per #102.
+    fn test_local_feature_depends_on_resolves_by_metadata_id_in_the_matcher() {
         let mut depends_on_c = HashMap::new();
         depends_on_c.insert("feature-a".to_string(), serde_json::Value::Bool(true));
         depends_on_c.insert("feature-b".to_string(), serde_json::Value::Bool(true));
@@ -3676,6 +3765,82 @@ mod tests {
         assert!(
             pos_b < pos_c,
             "feature-b must install before feature-c (dependsOn): {ids:?}"
+        );
+    }
+
+    /// #505, probe 2: a sibling local Feature named by its bare metadata `id` in
+    /// `installsAfter`. MEASURED at oracle 0.87.0 — the reference exits 1 with
+    /// `Legacy feature 'base' not supported`, deacon used to exit 0 and order by it.
+    #[test]
+    fn installs_after_bare_metadata_id_is_rejected_at_ingress() {
+        let base = create_local_feature("local:/tmp/base", "base", vec![], HashMap::new());
+        let mut app = create_local_feature("local:/tmp/app", "app", vec![], HashMap::new());
+        app.source = "./app".to_string();
+        app.metadata.installs_after = vec!["base".to_string()];
+
+        let err = validate_feature_dependency_references(&[base, app])
+            .expect_err("a bare metadata id in installsAfter must be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("./app"), "must name the referrer: {msg}");
+        assert!(
+            msg.contains("installsAfter"),
+            "must name the property: {msg}"
+        );
+        assert!(
+            msg.contains("Legacy feature 'base' not supported"),
+            "must carry the reference CLI's own diagnostic: {msg}"
+        );
+        assert!(
+            msg.contains("prepend your Feature name with \"./\""),
+            "must carry the copy-pasteable migration: {msg}"
+        );
+    }
+
+    /// #505, probe 3: the same rejection when NOTHING in the set matches — the reference
+    /// canonicalizes every entry unconditionally, so an unresolvable bare id is a fatal
+    /// error rather than the soft skip `installsAfter`'s ordering semantics suggest.
+    #[test]
+    fn installs_after_unmatched_bare_id_is_rejected_not_soft_skipped() {
+        let mut app = create_local_feature("local:/tmp/app", "app", vec![], HashMap::new());
+        app.metadata.installs_after = vec!["nope-not-here".to_string()];
+        assert!(
+            validate_feature_dependency_references(&[app]).is_err(),
+            "an illegal bare id must not be mistaken for an ordinary non-match"
+        );
+    }
+
+    /// #505, probe 4: a bare id that IS one of the eighteen deprecated v1 ids maps to the
+    /// v2 collection instead of being rejected — the mapping is unconditional on both
+    /// sides, so the rule is "canonicalize", not "reject every bare id". Path-form entries
+    /// are not OCI references at all and pass through untouched.
+    #[test]
+    fn deprecated_v1_and_path_form_dependency_references_are_accepted() {
+        let mut deps = HashMap::new();
+        deps.insert("terraform".to_string(), serde_json::Value::Bool(true));
+        deps.insert("./sibling".to_string(), serde_json::Value::Bool(true));
+        let mut app = create_local_feature("local:/tmp/app", "app", vec![], deps);
+        app.metadata.installs_after = vec![
+            "golang".to_string(),
+            "../elsewhere".to_string(),
+            "ghcr.io/devcontainers/features/common-utils".to_string(),
+        ];
+        validate_feature_dependency_references(&[app])
+            .expect("mapped v1 ids, path forms and OCI refs are all legal references");
+    }
+
+    /// An absolute path in either property keeps naming its real cause (#495) rather than
+    /// falling through to the bare-id diagnostic, which would send the author hunting for
+    /// a deprecated Feature that was never involved.
+    #[test]
+    fn absolute_dependency_reference_reports_the_absolute_path() {
+        let mut app = create_local_feature("local:/tmp/app", "app", vec![], HashMap::new());
+        app.metadata.installs_after = vec!["/abs/.devcontainer/base".to_string()];
+        let err = validate_feature_dependency_references(&[app])
+            .expect_err("an absolute reference must error");
+        assert!(
+            err.to_string()
+                .contains("Absolute path to a local Feature is not allowed"),
+            "unexpected error: {err}"
         );
     }
 
