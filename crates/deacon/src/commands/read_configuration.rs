@@ -191,10 +191,16 @@ pub struct FeatureRefInfo {
     pub resource: String,
     /// `namespace/name`, e.g. `devcontainers/features/node`.
     pub path: String,
-    /// Resolved version/tag, e.g. `1`.
+    /// Resolved version — a tag (`1`) or a manifest digest (`sha256:…`).
     pub version: String,
-    /// Tag as written, e.g. `1`.
-    pub tag: String,
+    /// Tag as written, e.g. `1`. Absent when the reference is digest-pinned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// Manifest digest as written, e.g. `sha256:…`. Absent for a tag reference.
+    /// The reference CLI emits exactly one of `tag` / `digest`, keyed on which
+    /// form the id used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
 }
 
 /// Source information for a resolved feature, matching the reference CLI's
@@ -462,6 +468,12 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     let mut authored_values: HashMap<String, serde_json::Value> =
         HashMap::with_capacity(features_map.len());
 
+    // Canonical id -> the id the configuration actually wrote, recorded only when
+    // canonicalization rewrote it (a bare deprecated v1 id, #491). Such an id
+    // carries no version component, so it is also its own
+    // `userFeatureIdWithoutVersion`.
+    let mut authored_user_ids: HashMap<String, String> = HashMap::new();
+
     for (feature_id, feature_value) in features_map {
         let is_local = feature_id.starts_with("./")
             || feature_id.starts_with("../")
@@ -493,8 +505,17 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             let canonical_id = format!("local:{}", canonical_path.display());
             (canonical_id, feature_id.clone(), metadata)
         } else {
-            let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)?;
+            // A bare id is the deprecated v1 form: map it onto the v2 collection
+            // (or reject it) before deriving a registry path (#491).
+            let canonical_ref = deacon_core::feature_ref::canonicalize_user_feature_id(feature_id)?;
+            let (registry_url, namespace, name, tag) = parse_registry_reference(&canonical_ref)?;
             let feature_ref = FeatureRef::new(registry_url, namespace, name, tag);
+            if canonical_ref != *feature_id {
+                // The reference CLI reports the id the CONFIGURATION wrote, not
+                // the one it resolved against — keep the original for the
+                // `userFeatureId` fields below.
+                authored_user_ids.insert(feature_ref.reference(), feature_id.clone());
+            }
             let downloaded = fetcher
                 .fetch_feature(&feature_ref)
                 .await
@@ -678,9 +699,23 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
                 })?;
             let repository = feature_ref.repository(); // namespace/name
             let resource = format!("{}/{}", registry_url, repository);
-            // userFeatureIdWithoutVersion == registry/namespace/name (no tag).
-            let user_feature_id_without_version = resource.clone();
+            // userFeatureIdWithoutVersion == registry/namespace/name (no tag),
+            // except for a bare deprecated v1 id, which the reference reports
+            // verbatim on both fields (#491).
+            let (user_feature_id, user_feature_id_without_version) =
+                match authored_user_ids.get(&resolved.id) {
+                    Some(authored) => (authored.clone(), authored.clone()),
+                    None => (resolved.source.clone(), resource.clone()),
+                };
             let version = feature_ref.tag().to_string();
+            // A digest-pinned reference carries `digest`; a tag reference carries
+            // `tag`. A tag cannot contain `:`, so the algorithm separator of a
+            // digest (`sha256:…`) is what distinguishes them.
+            let (tag, digest) = if version.contains(':') {
+                (None, Some(version.clone()))
+            } else {
+                (Some(version.clone()), None)
+            };
             let owner = namespace
                 .split('/')
                 .next()
@@ -696,10 +731,11 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
                     registry: registry_url,
                     resource,
                     path: repository,
-                    version: version.clone(),
-                    tag: version,
+                    version,
+                    tag,
+                    digest,
                 },
-                user_feature_id: resolved.source.clone(),
+                user_feature_id,
                 user_feature_id_without_version,
             }
         };
@@ -1279,8 +1315,14 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                     SourceInformation::Oci {
                         user_feature_id, ..
                     } => {
+                        // `userFeatureId` is reported as the configuration wrote
+                        // it, so a bare deprecated v1 id needs the same mapping
+                        // the resolution pass applied (#491).
+                        let canonical_ref = deacon_core::feature_ref::canonicalize_user_feature_id(
+                            user_feature_id,
+                        )?;
                         let (registry_url, namespace, name, tag) =
-                            parse_registry_reference(user_feature_id)?;
+                            parse_registry_reference(&canonical_ref)?;
 
                         // Use the provided fetcher with configured timeout and retries
                         let feature_ref = deacon_core::oci::FeatureRef::new(

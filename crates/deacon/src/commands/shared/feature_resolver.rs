@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 use deacon_core::config::DevContainerConfig;
+use deacon_core::feature_ref::canonicalize_user_feature_id;
 use deacon_core::features::{
     FeatureDependencyResolver, ResolvedFeature, canonical_feature_id, options_from_json,
     parse_feature_metadata, resolve_local_feature_dir,
@@ -56,7 +57,8 @@ pub(crate) async fn resolve_one_feature<C: HttpClient>(
         let canonical_id = format!("local:{}", canonical_path.display());
         (canonical_id, feature_id.to_string(), metadata)
     } else {
-        let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)?;
+        let canonical_ref = canonicalize_user_feature_id(feature_id)?;
+        let (registry_url, namespace, name, tag) = parse_registry_reference(&canonical_ref)?;
         let feature_ref = FeatureRef::new(registry_url, namespace, name, tag);
         let downloaded = fetcher
             .fetch_feature(&feature_ref)

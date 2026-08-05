@@ -341,7 +341,9 @@ async fn resolve_lockfile_from_config(config: &DevContainerConfig) -> Result<Loc
             continue;
         }
 
-        let (registry, namespace, name, tag) = parse_registry_reference(user_id)
+        let canonical_ref = deacon_core::feature_ref::canonicalize_user_feature_id(user_id)
+            .with_context(|| format!("Invalid feature ID '{}'", user_id))?;
+        let (registry, namespace, name, tag) = parse_registry_reference(&canonical_ref)
             .with_context(|| format!("Invalid feature ID '{}'", user_id))?;
         let feature_ref = FeatureRef::new(registry, namespace, name, tag);
 

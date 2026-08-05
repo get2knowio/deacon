@@ -16,6 +16,7 @@ use deacon_core::dockerfile_generator::{
     HOST_CA_MOUNT_TARGET,
 };
 use deacon_core::errors::DeaconError;
+use deacon_core::feature_ref::canonicalize_user_feature_id;
 use deacon_core::features::{
     FeatureDependencyResolver, InstallationPlan, OptionSetKey, OptionValue, ResolvedFeature,
 };
@@ -652,7 +653,10 @@ async fn resolve_and_stage_features(
             );
             (canonical_id, feature_ref)
         } else {
-            let (registry_url, namespace, name, tag) = parse_registry_reference(feature_id)
+            let canonical_ref = canonicalize_user_feature_id(feature_id).map_err(|e| {
+                DeaconError::Runtime(format!("Invalid feature ID '{}': {}", feature_id, e))
+            })?;
+            let (registry_url, namespace, name, tag) = parse_registry_reference(&canonical_ref)
                 .map_err(|e| {
                     DeaconError::Runtime(format!("Invalid feature ID '{}': {}", feature_id, e))
                 })?;
@@ -776,7 +780,13 @@ async fn resolve_and_stage_features(
                 );
                 (dep_canonical, dep_ref)
             } else {
-                let (registry_url, namespace, name, tag) = parse_registry_reference(&dep_key)
+                let canonical_dep = canonicalize_user_feature_id(&dep_key).map_err(|e| {
+                    DeaconError::Runtime(format!(
+                        "Invalid dependsOn feature ref '{}' (of '{}'): {}",
+                        dep_key, scan_id, e
+                    ))
+                })?;
+                let (registry_url, namespace, name, tag) = parse_registry_reference(&canonical_dep)
                     .map_err(|e| {
                         DeaconError::Runtime(format!(
                             "Invalid dependsOn feature ref '{}' (of '{}'): {}",
