@@ -360,8 +360,13 @@ pub struct BuildConfig {
     pub context_folder: PathBuf,
     /// Build target (optional)
     pub target: Option<String>,
-    /// Build options/args
-    pub options: HashMap<String, String>,
+    /// `build.args` — one `--build-arg K=V` pair each.
+    #[serde(default)]
+    pub build_args: HashMap<String, String>,
+    /// `build.options` — Docker CLI build options, forwarded verbatim as
+    /// discrete argv elements (#492).
+    #[serde(default)]
+    pub options: Vec<String>,
 }
 
 /// Build result summary
@@ -1042,7 +1047,8 @@ fn extract_build_config(config: &DevContainerConfig, config_path: &Path) -> Resu
             context: ".".to_string(),
             context_folder: config_folder.to_path_buf(),
             target: None,
-            options: HashMap::new(),
+            build_args: HashMap::new(),
+            options: Vec::new(),
         });
     }
 
@@ -1053,6 +1059,7 @@ fn extract_build_config(config: &DevContainerConfig, config_path: &Path) -> Resu
             context: resolved.context,
             context_folder: resolved.context_folder,
             target: resolved.target,
+            build_args: resolved.build_args,
             options: resolved.options,
         });
     }
@@ -1069,7 +1076,8 @@ fn extract_build_config(config: &DevContainerConfig, config_path: &Path) -> Resu
             context: ".".to_string(),
             context_folder: config_folder.to_path_buf(),
             target: None,
-            options: HashMap::new(),
+            build_args: HashMap::new(),
+            options: Vec::new(),
         })
     } else {
         // No dockerfile or image specified
@@ -1095,12 +1103,18 @@ fn calculate_config_hash(build_config: &BuildConfig, _workspace_folder: &Path) -
         hasher.update(target.as_bytes());
     }
 
-    // Hash the options in a deterministic order
-    let mut options: Vec<_> = build_config.options.iter().collect();
-    options.sort_by_key(|(k, _)| *k);
-    for (key, value) in options {
+    // Hash the build args in a deterministic order
+    let mut build_args: Vec<_> = build_config.build_args.iter().collect();
+    build_args.sort_by_key(|(k, _)| *k);
+    for (key, value) in build_args {
         hasher.update(key.as_bytes());
         hasher.update(value.as_bytes());
+    }
+
+    // Hash `build.options` in AUTHORED order — they are positional argv
+    // elements, so reordering them is a different build.
+    for option in &build_config.options {
+        hasher.update(option.as_bytes());
     }
 
     // Hash dockerfile content
@@ -1387,7 +1401,8 @@ fn create_build_inputs(result: &BuildResult) -> Result<BuildInputs> {
             context: ".".to_string(),
             context_folder: PathBuf::from("."),
             target: None,
-            options: HashMap::new(),
+            build_args: HashMap::new(),
+            options: Vec::new(),
         },
     })
 }
@@ -1757,7 +1772,8 @@ async fn execute_image_reference_build(
         context: ".".to_string(),
         context_folder: temp_dir.to_path_buf(),
         target: None,
-        options: HashMap::new(),
+        build_args: HashMap::new(),
+        options: Vec::new(),
     };
 
     // Generate config hash for this image reference build
@@ -2295,10 +2311,20 @@ async fn execute_docker_build(
         }
 
         // Add build args from config
-        for (key, value) in &build_config.options {
+        for (key, value) in &build_config.build_args {
             let build_arg_str = format!("{}={}", key, value);
             build_args.push("--build-arg".to_string());
             build_args.push(build_arg_str);
+        }
+
+        // Add `build.options` verbatim, right after the build args — the
+        // position and pass-through semantics the reference CLI uses (measured
+        // at 0.87.0: `options?.length && argv.push(...options)`; no filtering).
+        // Each entry is its own argv element, never concatenated into a shell
+        // line (#492).
+        if !build_config.options.is_empty() {
+            debug!("Adding config build.options: {:?}", build_config.options);
+            build_args.extend(build_config.options.iter().cloned());
         }
 
         // Add build args from CLI
@@ -3102,13 +3128,13 @@ mod tests {
         assert_eq!(build_config.dockerfile, "Dockerfile");
         assert_eq!(build_config.context, ".");
 
-        // Test with build configuration
+        // Test with build configuration. `build.options` is an ARRAY of Docker
+        // CLI build options (#492) — kept in authored order, distinct from the
+        // `build.args` map.
         config.build = Some(serde_json::json!({
             "context": "docker",
             "target": "development",
-            "options": {
-                "BUILDKIT_INLINE_CACHE": "1"
-            }
+            "options": [ "--label", "test_build_options=success" ]
         }));
 
         let result = extract_build_config(&config, &config_path);
@@ -3117,9 +3143,10 @@ mod tests {
         assert_eq!(build_config.context, "docker");
         assert_eq!(build_config.target, Some("development".to_string()));
         assert_eq!(
-            build_config.options.get("BUILDKIT_INLINE_CACHE"),
-            Some(&"1".to_string())
+            build_config.options,
+            vec!["--label", "test_build_options=success"]
         );
+        assert!(build_config.build_args.is_empty());
     }
 
     #[test]
@@ -3152,7 +3179,7 @@ mod tests {
         let build_config = result.unwrap();
         assert_eq!(build_config.dockerfile, "Dockerfile");
         assert_eq!(build_config.context, ".");
-        assert_eq!(build_config.options.get("FOO"), Some(&"bar".to_string()));
+        assert_eq!(build_config.build_args.get("FOO"), Some(&"bar".to_string()));
     }
 
     #[test]
@@ -3208,12 +3235,13 @@ mod tests {
             context: ".".to_string(),
             context_folder: temp_dir.path().to_path_buf(),
             target: Some("dev".to_string()),
-            options: {
+            build_args: {
                 let mut map = HashMap::new();
                 map.insert("ARG1".to_string(), "value1".to_string());
                 map.insert("ARG2".to_string(), "value2".to_string());
                 map
             },
+            options: vec!["--label".to_string(), "x=y".to_string()],
         };
 
         let dockerfile_path = temp_dir.path().join("Dockerfile");
@@ -3681,7 +3709,8 @@ mod tests {
             context: ".".to_string(),
             context_folder: temp_dir.path().to_path_buf(),
             target: None,
-            options: HashMap::new(),
+            build_args: HashMap::new(),
+            options: Vec::new(),
         };
 
         // Create Dockerfile
@@ -3723,7 +3752,8 @@ mod tests {
             context: ".".to_string(),
             context_folder: temp_dir.path().to_path_buf(),
             target: None,
-            options: HashMap::new(),
+            build_args: HashMap::new(),
+            options: Vec::new(),
         };
 
         // Create Dockerfile
@@ -3763,7 +3793,8 @@ mod tests {
             context: ".".to_string(),
             context_folder: temp_dir.path().to_path_buf(),
             target: None,
-            options: HashMap::new(),
+            build_args: HashMap::new(),
+            options: Vec::new(),
         };
 
         // Create Dockerfile
@@ -3838,7 +3869,8 @@ mod tests {
                 context: ".".to_string(),
                 context_folder: PathBuf::from("."),
                 target: None,
-                options: HashMap::new(),
+                build_args: HashMap::new(),
+                options: Vec::new(),
             },
         };
 

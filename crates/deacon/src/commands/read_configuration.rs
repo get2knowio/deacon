@@ -2085,7 +2085,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                             Ok(Some(rb)) => match std::fs::read_to_string(&rb.dockerfile_path) {
                                 Ok(content) => resolve_dockerfile_base_image(
                                     &content,
-                                    &rb.options,
+                                    &rb.build_args,
                                     rb.target.as_deref(),
                                 ),
                                 Err(_) => None,

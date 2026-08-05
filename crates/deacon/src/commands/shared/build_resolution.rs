@@ -14,7 +14,13 @@ pub(crate) struct ResolvedBuildConfig {
     pub context: String,
     pub context_folder: PathBuf,
     pub target: Option<String>,
-    pub options: HashMap<String, String>,
+    /// `build.args` — each entry becomes one `--build-arg K=V` pair.
+    pub build_args: HashMap<String, String>,
+    /// `build.options` — Docker CLI build options passed through to the builder
+    /// verbatim, as discrete argv elements (never a shell line). Spec:
+    /// "an array of Docker image build options that should be passed to the
+    /// build command when building a Dockerfile".
+    pub options: Vec<String>,
 }
 
 /// Resolve a devcontainer Dockerfile build configuration.
@@ -33,7 +39,8 @@ pub(crate) fn resolve_devcontainer_build_config(
     let config_folder = config_path.parent().unwrap_or_else(|| Path::new("."));
     let mut context = ".".to_string();
     let mut target = None;
-    let mut options = HashMap::new();
+    let mut build_args = HashMap::new();
+    let mut options: Vec<String> = Vec::new();
 
     let build_dockerfile = if let Some(build_value) = &config.build {
         let build_obj = build_value.as_object().ok_or_else(|| {
@@ -50,12 +57,27 @@ pub(crate) fn resolve_devcontainer_build_config(
             target = Some(build_target.to_string());
         }
 
-        if let Some(options_obj) = build_obj.get("options").and_then(|v| v.as_object()) {
-            insert_stringified_values(&mut options, options_obj);
+        // `build.options` is an ARRAY of Docker CLI build options, not a map of
+        // build args. It is a modelled field, so a wrong shape is the
+        // developer's mistake and fails fast rather than being dropped (#492).
+        if let Some(options_value) = build_obj.get("options") {
+            let entries = options_value.as_array().ok_or_else(|| {
+                DeaconError::Config(ConfigError::Validation {
+                    message: "build.options must be an array of Docker build options".to_string(),
+                })
+            })?;
+            for entry in entries {
+                let option = entry.as_str().ok_or_else(|| {
+                    DeaconError::Config(ConfigError::Validation {
+                        message: format!("build.options entries must be strings, found {}", entry),
+                    })
+                })?;
+                options.push(option.to_string());
+            }
         }
 
         if let Some(args_obj) = build_obj.get("args").and_then(|v| v.as_object()) {
-            insert_stringified_values(&mut options, args_obj);
+            insert_stringified_values(&mut build_args, args_obj);
         }
 
         build_obj
@@ -84,6 +106,7 @@ pub(crate) fn resolve_devcontainer_build_config(
                 context,
                 context_folder: config_folder.to_path_buf(),
                 target,
+                build_args,
                 options,
             }))
         }
@@ -310,7 +333,7 @@ mod tests {
             "context": "..",
             "target": "dev",
             "args": { "FOO": "bar" },
-            "options": { "BUILDKIT_INLINE_CACHE": "1" }
+            "options": [ "--label", "x=y" ]
         }));
 
         let resolved = resolve_devcontainer_build_config(&config, &config_path)
@@ -320,10 +343,30 @@ mod tests {
         assert_eq!(resolved.dockerfile_path, config_dir.join("Containerfile"));
         assert_eq!(resolved.context, "..");
         assert_eq!(resolved.target, Some("dev".to_string()));
-        assert_eq!(resolved.options.get("FOO"), Some(&"bar".to_string()));
-        assert_eq!(
-            resolved.options.get("BUILDKIT_INLINE_CACHE"),
-            Some(&"1".to_string())
+        assert_eq!(resolved.build_args.get("FOO"), Some(&"bar".to_string()));
+        // Preserved in authored order, as discrete argv elements.
+        assert_eq!(resolved.options, vec!["--label", "x=y"]);
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn rejects_non_array_build_options() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_dir = temp_dir.path().join(".devcontainer");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(config_dir.join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+        let config_path = config_dir.join("devcontainer.json");
+
+        let mut config = DevContainerConfig::default();
+        config.build = Some(serde_json::json!({
+            "dockerfile": "Dockerfile",
+            "options": { "BUILDKIT_INLINE_CACHE": "1" }
+        }));
+
+        let err = resolve_devcontainer_build_config(&config, &config_path).unwrap_err();
+        assert!(
+            err.to_string().contains("build.options must be an array"),
+            "unexpected error: {err}"
         );
     }
 

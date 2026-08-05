@@ -31,9 +31,10 @@ RUN echo "Building test image"
     "dockerFile": "Dockerfile",
     "build": {
         "context": ".",
-        "options": {
+        "args": {
             "BUILDKIT_INLINE_CACHE": "1"
-        }
+        },
+        "options": [ "--label", "integration_build_options=ok" ]
     }
 }
 "#;
@@ -394,7 +395,7 @@ RUN echo "Building with cache test"
     "dockerFile": "Dockerfile",
     "build": {
         "context": ".",
-        "options": {}
+        "options": []
     }
 }
 "#;
@@ -552,7 +553,7 @@ RUN echo "Testing force flag"
             "dockerfile": "Dockerfile",
             "context": ".",
             "target": null,
-            "options": {}
+            "options": []
         }
     },
     "created_at": 1234567890
