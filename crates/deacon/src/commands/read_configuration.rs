@@ -395,6 +395,7 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     skip_feature_auto_mapping: bool,
     fetcher: &deacon_core::oci::FeatureFetcher<C>,
     config_dir: &Path,
+    workspace_root: &Path,
     dst_folder: &Path,
 ) -> Result<FeaturesConfiguration> {
     use anyhow::Context;
@@ -464,16 +465,11 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
             || feature_id.starts_with('/');
 
         let (canonical_id, source_string, downloaded_metadata) = if is_local {
-            let resolved = config_dir.join(feature_id);
-            let canonical_path = resolved.canonicalize().map_err(|e| {
-                anyhow::anyhow!(
-                    "Local feature path '{}' (resolved to '{}' relative to {}) is not accessible: {}",
-                    feature_id,
-                    resolved.display(),
-                    config_dir.display(),
-                    e
-                )
-            })?;
+            let canonical_path = deacon_core::features::resolve_local_feature_dir(
+                feature_id,
+                config_dir,
+                workspace_root,
+            )?;
             let metadata_path = canonical_path.join("devcontainer-feature.json");
             if !metadata_path.exists() {
                 anyhow::bail!(
@@ -567,7 +563,11 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
         deps.sort_by(|a, b| a.0.cmp(&b.0));
         for (dep_key, dep_value) in deps {
             let dep = crate::commands::shared::feature_resolver::resolve_one_feature(
-                &dep_key, &dep_value, config_dir, fetcher,
+                &dep_key,
+                &dep_value,
+                config_dir,
+                workspace_root,
+                fetcher,
             )
             .await?;
             // Resource-name match, mirroring `resolve_features_ordered`: an unpinned
@@ -1912,6 +1912,7 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                 args.skip_feature_auto_mapping,
                 &fetcher,
                 &features_config_dir,
+                workspace_folder,
                 &features_dst_folder,
             )
             .await?,
@@ -2787,8 +2788,11 @@ API_KEY=another-secret
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path();
         let config_path = workspace.join("devcontainer.json");
-        let feature_dir = workspace.join("local-feature");
-        std::fs::create_dir(&feature_dir).unwrap();
+        // Under `.devcontainer/` because #488 requires it there; the id below is
+        // spelled relative to the CONFIG's directory (the workspace root), which
+        // is what makes it a local path rather than an OCI ref.
+        let feature_dir = workspace.join(".devcontainer").join("local-feature");
+        std::fs::create_dir_all(&feature_dir).unwrap();
         std::fs::write(
             feature_dir.join("devcontainer-feature.json"),
             r#"{ "id": "local-feature", "version": "1.0.0", "name": "Local Feature" }"#,
@@ -2799,7 +2803,7 @@ API_KEY=another-secret
         let config_content = r#"{
             "name": "local-feat-test",
             "image": "mcr.microsoft.com/devcontainers/base:debian",
-            "features": { "./local-feature": {} }
+            "features": { "./.devcontainer/local-feature": {} }
         }"#;
         std::fs::write(&config_path, config_content).unwrap();
 

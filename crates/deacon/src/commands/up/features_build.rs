@@ -523,6 +523,18 @@ async fn resolve_and_stage_features(
         })?
         .to_path_buf();
 
+    // Anchor for the spec's `.devcontainer/` containment rule (#488): the
+    // workspace folder, which `ContainerIdentity` already carries canonicalized
+    // as the `devcontainer.local_folder` label. It is `None` only when the
+    // workspace path could not be canonicalized — a workspace that does not
+    // exist, which every other step here would fail on anyway — so fail fast
+    // rather than skip the check.
+    let workspace_root = identity.local_folder.clone().ok_or_else(|| {
+        DeaconError::Runtime(
+            "Cannot determine the workspace folder for local feature path validation".to_string(),
+        )
+    })?;
+
     // Create feature fetcher (used for OCI refs only)
     let fetcher = default_fetcher()?;
 
@@ -559,17 +571,13 @@ async fn resolve_and_stage_features(
         let (canonical_id, feature_ref) = if is_local {
             // Resolve `./foo` and `../shared/foo` against the config file's
             // directory (spec contract — *not* the workspace folder, *not*
-            // the CWD, regardless of how the config was loaded).
-            let resolved = config_dir.join(feature_id);
-            let canonical_path = resolved.canonicalize().map_err(|e| {
-                DeaconError::Runtime(format!(
-                    "Local feature path '{}' (resolved to '{}' relative to {}) is not accessible: {}",
-                    feature_id,
-                    resolved.display(),
-                    config_dir.display(),
-                    e
-                ))
-            })?;
+            // the CWD, regardless of how the config was loaded), then enforce
+            // the spec's `.devcontainer/` containment rule (#488).
+            let canonical_path = deacon_core::features::resolve_local_feature_dir(
+                feature_id,
+                &config_dir,
+                &workspace_root,
+            )?;
 
             let metadata_path = canonical_path.join("devcontainer-feature.json");
             if !metadata_path.exists() {
@@ -692,11 +700,15 @@ async fn resolve_and_stage_features(
                 dep_key.starts_with("./") || dep_key.starts_with("../") || dep_key.starts_with('/');
 
             let (dep_canonical, dep_ref) = if is_local {
-                let resolved = config_dir.join(&dep_key);
-                let canonical_path = resolved.canonicalize().map_err(|e| {
+                let canonical_path = deacon_core::features::resolve_local_feature_dir(
+                    &dep_key,
+                    &config_dir,
+                    &workspace_root,
+                )
+                .map_err(|e| {
                     DeaconError::Runtime(format!(
-                        "dependsOn local feature '{}' (of '{}', resolved to '{}') is not accessible: {}",
-                        dep_key, scan_id, resolved.display(), e
+                        "dependsOn local feature '{}' (of '{}'): {}",
+                        dep_key, scan_id, e
                     ))
                 })?;
                 let dep_canonical = format!("local:{}", canonical_path.display());
@@ -1343,15 +1355,21 @@ mod local_feature_resolution_tests {
 
     /// Build a temp tree like the upstream reproduction:
     ///   <root>/
-    ///     example/
-    ///       devcontainer.json     ← references "./feature-alpha"
-    ///       feature-alpha/
-    ///         devcontainer-feature.json
-    ///         install.sh
+    ///     .devcontainer/
+    ///       example/
+    ///         devcontainer.json     ← references "./feature-alpha"
+    ///         feature-alpha/
+    ///           devcontainer-feature.json
+    ///           install.sh
+    ///
+    /// The config sits one level BELOW `.devcontainer/` deliberately: it keeps
+    /// the config-relative claim sharp (a workspace-relative resolver would look
+    /// in `<root>/feature-alpha` and find nothing) while satisfying the
+    /// `.devcontainer/` containment rule #488 added.
     fn build_local_feature_workspace() -> TempDir {
         let temp = TempDir::new().unwrap();
         let root = temp.path();
-        let example = root.join("example");
+        let example = root.join(".devcontainer").join("example");
         std::fs::create_dir_all(&example).unwrap();
 
         std::fs::write(
@@ -1384,7 +1402,11 @@ mod local_feature_resolution_tests {
     #[tokio::test]
     async fn local_feature_resolves_relative_to_config_dir() {
         let temp = build_local_feature_workspace();
-        let config_path = temp.path().join("example").join("devcontainer.json");
+        let config_path = temp
+            .path()
+            .join(".devcontainer")
+            .join("example")
+            .join("devcontainer.json");
         let raw = std::fs::read_to_string(&config_path).unwrap();
         let config: DevContainerConfig = serde_json::from_str(&raw).unwrap();
 
@@ -1432,7 +1454,7 @@ mod local_feature_resolution_tests {
         // naming both the user-provided reference and the resolution base,
         // rather than the cryptic `registry: "."` OCI failure.
         let temp = TempDir::new().unwrap();
-        let example = temp.path().join("example");
+        let example = temp.path().join(".devcontainer").join("example");
         std::fs::create_dir_all(&example).unwrap();
         let config_path = example.join("devcontainer.json");
         std::fs::write(
