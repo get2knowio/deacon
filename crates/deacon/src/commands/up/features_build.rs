@@ -582,8 +582,10 @@ async fn resolve_and_stage_features(
     let mut downloaded_features: HashMap<String, DownloadedFeature> = HashMap::new();
 
     for (feature_id, feature_options) in features_obj.iter() {
-        // Per #126: absolute paths are also valid local-feature locations
-        // (parity with read_configuration's local dispatch added in #109).
+        // An absolute path is classified LOCAL even though the spec forbids it
+        // (#495 reversed the #126 capability): `resolve_local_feature_dir`
+        // rejects it with the accurate diagnostic and the migration, where
+        // falling through to OCI parsing would report a registry 404 instead.
         let is_local = feature_id.starts_with("./")
             || feature_id.starts_with("../")
             || feature_id.starts_with('/');
@@ -729,6 +731,8 @@ async fn resolve_and_stage_features(
 
         for (dep_key, dep_options_value) in deps {
             let dep_options = parse_feature_options(&dep_options_value);
+            // Absolute stays classified local so `resolve_local_feature_dir`
+            // rejects it per #495 — see the declared-features loop above.
             let is_local =
                 dep_key.starts_with("./") || dep_key.starts_with("../") || dep_key.starts_with('/');
 

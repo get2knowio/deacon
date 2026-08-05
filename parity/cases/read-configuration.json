@@ -4213,6 +4213,44 @@
       "notes": "GREEN since #488 closed (2026-08-05) — was a deacon-side divergence, and the one in this batch with the most direct spec text behind it. The workspace has no `.devcontainer` FOLDER at all: the config is `.devcontainer.json` at the root and the two local Features live under `./local-features/`. Upstream files this fixture under `invalid-configs/`.\n\n`devcontainer-features-distribution.md` §Locally Referenced Features: \"A local Feature's source code **must** be contained within a sub-folder of the `.devcontainer/ folder`.\"\n\nMEASURED at oracle 0.87.0: the reference exits 1 with `Local file path parse error. Resolved path must be a child of the .devcontainer/ folder.` and names the resolved path; deacon used to exit 0 and resolve both Features happily, accepting a document the specification forbids. Both sides now exit 1. The containment predicate lives in `core::features::resolve_local_feature_dir` and is anchored on `<workspace folder>/.devcontainer` — the reference's own anchor, and NOT the active config's folder, which is what keeps a config nested at `.devcontainer/<subfolder>/devcontainer.json` legal. The two sibling cases pin that the fix did not over-correct.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
     },
     {
+      "id": "case-readconfig-local-feature-absolute-path",
+      "behaviors": [
+        "bhv-features-local-path-absolute-rejected"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-features-configuration",
+            "--additional-features",
+            "{\"${WORKSPACE}/.devcontainer/localFeatureA\": {}}"
+          ],
+          "fixtures": [
+            "fx-local-feature-absolute-path"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "GREEN since #495 closed (2026-08-05). `devcontainer-features-distribution.md` §Locally Referenced Features: \"A local Feature may **not** be referenced by absolute path.\"\n\nThe fixture's Feature is otherwise perfectly legal — `.devcontainer/` folder present, Feature in a sub-folder of it, sub-folder name equal to the Feature's `id` — so the containment rule #488 implemented is satisfied and this case isolates the absolute-path clause from its neighbour, which `case-readconfig-upstream-local-feature-outside-devcontainer` owns. The pair is deliberate: #488's fix narrowed the divergence but left absolute paths landing INSIDE `.devcontainer/` accepted, and no case covered that gap, which is exactly why #488's differential run stayed green on it.\n\nMEASURED at oracle 0.87.0: the reference exits 1 with `An Absolute path to a local feature is not allowed.`; deacon used to exit 0 and resolve the Feature normally. Both sides now exit 1.\n\nThe absolute path is passed through `--additional-features` rather than written into `devcontainer.json`, and that is load-bearing rather than incidental. `${WORKSPACE}` is substituted in argv and never inside fixture file contents, so a config-declared absolute path could only name a directory absent from the temp workspace — and then BOTH sides exit 1 on the missing directory whether or not the rule is enforced. The first draft of this case did exactly that and AGREED with the rejection deliberately compiled out; it was rewritten rather than kept. In argv the path names a Feature that really exists and would resolve, so enforcement is the only thing between deacon and exit 0 — confirmed by removing the check and watching deacon return 0 against the reference's 1.\n\nThis REMOVES a capability deacon added deliberately in #126 (absolute paths accepted at every local-Feature dispatch site, for parity with `read-configuration`'s own dispatch). The rejection lives at the single ingress chokepoint `core::features::resolve_local_feature_dir`, alongside #488's containment predicate and ahead of it, so `up`, `build`, `read-configuration` and the `dependsOn` closure are covered by one branch. The other three surfaces that reference a local Feature — `dependsOn`, `installsAfter` and `overrideFeatureInstallOrder` — were measured separately and the reference rejects all three; `installsAfter` was the one deacon silently non-matched rather than erring, and is now covered by a unit test.\n\nA config author writing `${localWorkspaceFolder}/.devcontainer/localFeatureA` is NOT affected, also measured: neither side variable-substitutes `features` map keys, so the string stays literal, is not lexically absolute, and falls through to OCI parsing where both sides exit 1 on a fetch failure. The rejection therefore fires on the reference exactly as authored — substituting first would invent a rejection the reference does not perform."
+    },
+    {
       "id": "case-readconfig-upstream-dependson-local-with-options",
       "behaviors": [
         "bhv-features-local-dependency-instance-per-option-set"

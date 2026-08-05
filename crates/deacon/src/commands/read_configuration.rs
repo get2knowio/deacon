@@ -451,9 +451,10 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
     let features_map = features_map_opt.unwrap();
 
     // Use provided fetcher to resolve features from registries.
-    // Local feature paths (`./`, `../`, or absolute) bypass the OCI fetch
-    // path and are read directly from disk — parity with the up flow
-    // (`features_build.rs`). Per #106.
+    // Local feature paths (`./`, `../`) bypass the OCI fetch path and are read
+    // directly from disk — parity with the up flow (`features_build.rs`). Per
+    // #106. An absolute path is classified local too, but only so that
+    // `resolve_local_feature_dir` can reject it per #495.
     let mut resolved_features = Vec::with_capacity(features_map.len());
 
     // The option values the configuration wrote for each feature, keyed by the

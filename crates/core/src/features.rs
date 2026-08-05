@@ -476,8 +476,73 @@ pub fn feature_mount_to_string(mount: &serde_json::Value) -> Result<String> {
     }
 }
 
-/// Resolve a locally-referenced Feature (`./…`, `../…`, or an absolute path) to
-/// its directory on disk, enforcing the specification's containment rule.
+/// Is this Feature reference written as an absolute filesystem path?
+///
+/// Mirrors Node's `path.isAbsolute`, which the reference CLI calls on the RAW
+/// `userFeatureId`: a POSIX root (`/…`), a Windows root (`\…`) or a Windows
+/// drive/UNC prefix (`C:\…`, `C:/…`). The reference's `path.isAbsolute` is
+/// platform-dependent; deacon tests all three forms on every platform so a
+/// config rejected on Linux is rejected on Windows too.
+///
+/// A single leading letter before `:` is what distinguishes a drive prefix from
+/// a registry host with a port — `localhost:5000/ns/feat` has five characters
+/// before the colon, and the canonical local id `local:/…` has five as well.
+fn is_absolute_feature_reference(reference: &str) -> bool {
+    if reference.starts_with('/') || reference.starts_with('\\') {
+        return true;
+    }
+    let mut chars = reference.chars();
+    matches!(
+        (chars.next(), chars.next(), chars.next()),
+        (Some(drive), Some(':'), Some('/' | '\\')) if drive.is_ascii_alphabetic()
+    )
+}
+
+/// Reject a Feature reference written as an absolute path.
+///
+/// `devcontainer-features-distribution.md` §Locally Referenced Features: "A
+/// local Feature may **not** be referenced by absolute path." The reference CLI
+/// enforces this unconditionally — its check fires before it ever computes the
+/// containment root, so no absolute path is legal regardless of where it points,
+/// and it exits 1 with "An Absolute path to a local feature is not allowed."
+///
+/// deacon accepted absolute local-Feature paths deliberately (#126, for parity
+/// with `read-configuration`'s own local dispatch); #495 removed that capability
+/// on spec authority. The message therefore carries the migration, not just the
+/// refusal: a `./`-relative path under `.devcontainer/` names the same directory
+/// and is the only spelling the specification allows.
+///
+/// The check runs on the reference EXACTLY as the author wrote it — no variable
+/// substitution happens first. That is measured, not assumed: neither deacon nor
+/// the reference substitutes `features` map keys, so `${localWorkspaceFolder}/…`
+/// stays literal on both sides, is not lexically absolute, and falls through to
+/// OCI parsing (both exit 1 there, on a fetch failure). Substituting first would
+/// invent a rejection the reference does not perform.
+pub fn reject_absolute_feature_reference(reference: &str) -> std::result::Result<(), FeatureError> {
+    if !is_absolute_feature_reference(reference) {
+        return Ok(());
+    }
+    // Suggest the leaf directory, which is what a `.devcontainer/`-contained
+    // Feature is spelled as. A trailing-separator or root-only path has no leaf;
+    // fall back to the generic form rather than emitting `./`.
+    let suggestion = Path::new(reference)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("'./{name}'"))
+        .unwrap_or_else(|| "a './'-prefixed path".to_string());
+    Err(FeatureError::Validation {
+        message: format!(
+            "Absolute path to a local Feature is not allowed: '{reference}'. \
+             Use {suggestion} instead — a relative path under the '.devcontainer/' folder, \
+             resolved against the directory containing devcontainer.json \
+             (devcontainer-features-distribution.md, Locally Referenced Features: \
+             \"A local Feature may not be referenced by absolute path.\")"
+        ),
+    })
+}
+
+/// Resolve a locally-referenced Feature (`./…` or `../…`) to its directory on
+/// disk, enforcing the specification's two path rules.
 ///
 /// `config_dir` is the folder holding the ACTIVE `devcontainer.json`: local
 /// Feature paths are config-relative, never workspace-relative, so
@@ -486,16 +551,25 @@ pub fn feature_mount_to_string(mount: &serde_json::Value) -> Result<String> {
 /// directory. `workspace_root` anchors the containment rule independently of
 /// where that config file sits.
 ///
-/// `devcontainer-features-distribution.md` §Locally Referenced Features: "A
-/// local Feature's source code **must** be contained within a sub-folder of the
-/// `.devcontainer/ folder`." deacon used to resolve any path the author wrote and
-/// exit 0 on a document the specification forbids (#488); the reference CLI
-/// rejects it against the same anchor, `<workspace root>/.devcontainer`.
+/// Two clauses of `devcontainer-features-distribution.md` §Locally Referenced
+/// Features are enforced here, in the reference CLI's own order:
+///
+/// 1. "A local Feature may **not** be referenced by absolute path" (#495) —
+///    unconditional, before any path resolution.
+/// 2. "A local Feature's source code **must** be contained within a sub-folder
+///    of the `.devcontainer/ folder`" (#488) — against the anchor the reference
+///    uses, `<workspace root>/.devcontainer`.
+///
+/// Callers still CLASSIFY an absolute id as local (rather than letting it fall
+/// through to OCI parsing) precisely so it arrives here and earns the accurate
+/// diagnostic instead of a misleading registry 404.
 pub fn resolve_local_feature_dir(
     feature_id: &str,
     config_dir: &Path,
     workspace_root: &Path,
 ) -> Result<PathBuf> {
+    reject_absolute_feature_reference(feature_id)?;
+
     let resolved = config_dir.join(feature_id);
     let canonical_path = resolved
         .canonicalize()
@@ -1347,6 +1421,15 @@ impl FeatureDependencyResolver {
 
         // Validate all features exist in override order
         if let Some(ref override_order) = override_order {
+            // An absolute entry already failed the existence check below — no
+            // authored id ever equals one now that ingress rejects them — but it
+            // failed with "does not exist in feature set", which sends the author
+            // hunting for a missing Feature rather than fixing the spelling. The
+            // reference exits 1 naming the real cause (measured), so deacon does
+            // too (#495).
+            for entry in override_order {
+                reject_absolute_feature_reference(entry)?;
+            }
             self.validate_override_order(features, override_order)?;
         }
 
@@ -1453,6 +1536,13 @@ impl FeatureDependencyResolver {
             // (`feature-dependencies.md` §installsAfter: "can not provide options"), so it
             // names the RESOURCE and orders after every instance of it.
             for after_id in &feature.metadata.installs_after {
+                // An absolute path is rejected BEFORE the soft-skip below. The
+                // spec's "may not be referenced by absolute path" governs every
+                // reference to a local Feature, not just the `features` map, and
+                // the reference CLI exits 1 on an absolute `installsAfter` entry
+                // (measured, oracle 0.87.0). Letting it fall into the soft skip
+                // would turn an illegal document into silent non-matching (#495).
+                reject_absolute_feature_reference(after_id)?;
                 let instances = id_resolver.instances(after_id);
                 if instances.is_empty() {
                     // `installsAfter` is a soft ordering hint, not a dependency:
@@ -2486,6 +2576,80 @@ mod tests {
         );
     }
 
+    /// #495: `devcontainer-features-distribution.md` §Locally Referenced
+    /// Features — "A local Feature may **not** be referenced by absolute path."
+    /// The reference CLI's check is unconditional and fires BEFORE it computes
+    /// the containment root, so a path squarely inside `.devcontainer/` — which
+    /// passes #488's containment rule — is still rejected.
+    #[test]
+    fn test_resolve_local_feature_dir_rejects_absolute_path_inside_devcontainer() {
+        let ws = tempfile::tempdir().unwrap();
+        let feature = ws.path().join(".devcontainer/localFeatureA");
+        std::fs::create_dir_all(&feature).unwrap();
+
+        let err = resolve_local_feature_dir(
+            &feature.display().to_string(),
+            &ws.path().join(".devcontainer"),
+            ws.path(),
+        )
+        .expect_err("an absolute local-Feature path must be rejected");
+        let message = err.to_string();
+        assert!(
+            message.contains("Absolute path to a local Feature is not allowed"),
+            "unexpected error: {message}"
+        );
+        // The migration must be copy-pasteable, not merely described.
+        assert!(
+            message.contains("Use './localFeatureA' instead"),
+            "error must name the relative spelling: {message}"
+        );
+    }
+
+    /// The rejection precedes resolution, so a nonexistent absolute path
+    /// reports the spelling mistake rather than "is not accessible".
+    #[test]
+    fn test_resolve_local_feature_dir_rejects_absolute_path_before_touching_disk() {
+        let ws = tempfile::tempdir().unwrap();
+        let err = resolve_local_feature_dir("/nope/does-not-exist", ws.path(), ws.path())
+            .expect_err("absolute is rejected regardless of what it points at");
+        assert!(
+            err.to_string()
+                .contains("Absolute path to a local Feature is not allowed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Every absolute spelling Node's `path.isAbsolute` recognizes is rejected on
+    /// every platform, and nothing that merely LOOKS path-like is.
+    #[test]
+    fn test_absolute_feature_reference_detection() {
+        for absolute in [
+            "/abs/localFeatureA",
+            "\\abs\\localFeatureA",
+            "C:\\features\\localFeatureA",
+            "c:/features/localFeatureA",
+        ] {
+            assert!(
+                reject_absolute_feature_reference(absolute).is_err(),
+                "{absolute} must be rejected as absolute"
+            );
+        }
+        for relative in [
+            "./localFeatureA",
+            "../shared/localFeatureA",
+            "ghcr.io/devcontainers/features/common-utils:2",
+            // A registry host with a port is not a drive prefix, and neither is
+            // the canonical local id deacon assigns after resolution.
+            "localhost:5000/ns/feat",
+            "local:/abs/localFeatureA",
+        ] {
+            assert!(
+                reject_absolute_feature_reference(relative).is_ok(),
+                "{relative} must not be treated as an absolute path"
+            );
+        }
+    }
+
     #[test]
     fn test_option_value_all_types() {
         // Test Boolean
@@ -3385,6 +3549,54 @@ mod tests {
         assert!(
             deps.is_empty(),
             "expected no edge for skipped installsAfter"
+        );
+    }
+
+    /// #495: an ABSOLUTE `installsAfter` entry is rejected rather than falling
+    /// into the soft skip above. The spec's "may not be referenced by absolute
+    /// path" governs every reference to a local Feature, and the reference CLI
+    /// exits 1 on this exact document (measured, oracle 0.87.0) — silently
+    /// non-matching would let an illegal config through.
+    #[test]
+    fn test_absolute_installs_after_is_rejected_not_soft_skipped() {
+        let app = ResolvedFeature {
+            id: "local:/abs/feature-app".to_string(),
+            source: "./feature-app".to_string(),
+            metadata: FeatureMetadata {
+                id: "app".to_string(),
+                installs_after: vec!["/abs/.devcontainer/feature-dep".to_string()],
+                ..Default::default()
+            },
+            options: HashMap::new(),
+        };
+
+        let resolver = FeatureDependencyResolver::new(None);
+        let err = resolver
+            .build_dependency_graph(&[app])
+            .expect_err("an absolute installsAfter entry must error");
+        assert!(
+            err.to_string()
+                .contains("Absolute path to a local Feature is not allowed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// #495: an ABSOLUTE `overrideFeatureInstallOrder` entry already failed the
+    /// existence check, but with a message that sent the author hunting for a
+    /// missing Feature. It now names the real cause, as the reference does.
+    #[test]
+    fn test_absolute_override_order_entry_reports_the_absolute_path() {
+        let app = create_local_feature("local:/abs/feature-app", "app", vec![], HashMap::new());
+        let resolver = FeatureDependencyResolver::new(Some(vec![
+            "/abs/.devcontainer/feature-app".to_string(),
+        ]));
+        let err = resolver
+            .resolve(&[app])
+            .expect_err("an absolute overrideFeatureInstallOrder entry must error");
+        assert!(
+            err.to_string()
+                .contains("Absolute path to a local Feature is not allowed"),
+            "unexpected error: {err}"
         );
     }
 

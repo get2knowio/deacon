@@ -162,7 +162,10 @@ Pattern axes worth re-running periodically:
 - Stdio contract (any `silent: false` `ExecConfig` on the `up` flow should set
   `stdout_to_stderr: true`).
 - Local-feature dispatch (any code iterating feature IDs should handle `./`, `../`,
-  `/abs/path` prefixes before falling through to OCI parsing).
+  `/abs/path` prefixes before falling through to OCI parsing). An absolute path is
+  classified LOCAL on purpose but is then REJECTED, not resolved (#495 reversed the #126
+  capability on spec authority): keeping the classification is what routes it to
+  `resolve_local_feature_dir`'s accurate diagnostic instead of a misleading registry 404.
 - Feature resolution (any subcommand that needs resolved features should reuse
   `commands/shared/feature_resolver::resolve_features_ordered` rather than re-implementing
   the local/OCI + dependency-order loop; `read-configuration` keeps its own richer variant
