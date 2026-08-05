@@ -123,6 +123,34 @@ enum SetUpResult {
     },
 }
 
+/// Shape the `configuration` block: the `--config` document the caller supplied, AS
+/// AUTHORED (after variable substitution), plus its `configFilePath` (#502).
+///
+/// The authored-vs-resolved split is the whole point. `configuration` answers "what did
+/// the caller hand me?" and `mergedConfiguration` answers "what did I end up running?" —
+/// the same contract `up`'s and `read-configuration`'s blocks keep (#490/#407). deacon used
+/// to pass the metadata-merged config here, so a `remoteUser` or `containerEnv` that lived
+/// only on the container's `devcontainer.metadata` label appeared in the block as though
+/// the caller had written it, and the `configFilePath` the reference emits was missing
+/// entirely.
+///
+/// `configFilePath`'s scheme is `file`, and that falls out of the existing rule rather than
+/// being a special case: `read_configuration::config_file_path_value` keys the scheme off
+/// whether the CALLER NAMED the file, and a `set-up` config is only ever one it was given.
+/// With no `--config` there is no config file, so no `configFilePath` — and the block is the
+/// empty document, which is exactly what the reference emits there (`"configuration": {}`).
+fn configuration_document(
+    config: &DevContainerConfig,
+    config_path: Option<&std::path::Path>,
+) -> Result<serde_json::Value> {
+    let mut document =
+        serde_json::to_value(config).context("Failed to serialize set-up configuration")?;
+    if let Some(path) = config_path {
+        crate::commands::read_configuration::insert_config_file_path(&mut document, path, true);
+    }
+    Ok(document)
+}
+
 /// Shape the merged configuration into upstream's `mergeConfiguration` OUTPUT form —
 /// the same document `read-configuration --include-merged-configuration` emits (#483).
 ///
@@ -231,23 +259,22 @@ pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Re
     // wins over image metadata on scalar fields, lists are concatenated.
     let merged_config = merge_configs(&base_config, metadata_config.as_ref());
 
-    // Phase 5: Pick the effective config for lifecycle execution. If
-    // `--config` was provided, layer image-metadata on top; otherwise just
-    // use the image-metadata config (or a default).
-    let effective_config = merged_config.clone();
-
-    // Phase 6: Variable substitution. Without a workspace we still need a
+    // Phase 5: Variable substitution. Without a workspace we still need a
     // substitution context — use the current working directory as a
     // best-effort stand-in (spec §4 notes workspace placeholders are
     // typically not applicable to set-up).
     let cwd = std::env::current_dir().context("Failed to get current working directory")?;
     let substitution_context = SubstitutionContext::new(&cwd)?;
 
-    let (substituted_config, _) =
-        effective_config.apply_variable_substitution(&substitution_context);
+    // The `configuration` block reports what the CALLER SUPPLIED — the `--config`
+    // document alone, substituted, never folded with the container's image metadata.
+    // The merge belongs to `mergedConfiguration` (#483/#501), and this is the same
+    // authored-vs-resolved contract `up`'s and `read-configuration`'s blocks keep
+    // (#490/#407). Measured at oracle 0.87.0 (#502).
+    let (substituted_config, _) = base_config.apply_variable_substitution(&substitution_context);
     let (substituted_merged, _) = merged_config.apply_variable_substitution(&substitution_context);
 
-    // Phase 7: System patches (spec §5 phase 3a). Best-effort per spec §9
+    // Phase 6: System patches (spec §5 phase 3a). Best-effort per spec §9
     // — failure to write either /etc patch logs a WARN but does NOT abort
     // set-up. The shell scripts are guarded by per-file markers under
     // `--container-system-data-folder` (default `/var/devcontainer`) so
@@ -260,7 +287,7 @@ pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Re
         apply_etc_patches(&args, &docker, &container, &substituted_merged).await;
     }
 
-    // Phase 8: Lifecycle hook execution. Skipped entirely when
+    // Phase 7: Lifecycle hook execution. Skipped entirely when
     // `--skip-post-create` is set (spec §2: "Skip all lifecycle hooks").
     if !args.skip_post_create {
         execute_lifecycle_hooks(
@@ -280,7 +307,8 @@ pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Re
         outcome: "success",
         configuration: args
             .include_configuration
-            .then(|| serde_json::to_value(&substituted_config).unwrap_or(serde_json::Value::Null)),
+            .then(|| configuration_document(&substituted_config, args.config_path.as_deref()))
+            .transpose()?,
         merged_configuration: args
             .include_merged_configuration
             .then(|| {
@@ -1109,6 +1137,90 @@ mod tests {
 
         let unnamed = merged_configuration_document(&merged, None).unwrap();
         assert!(unnamed.get("configFilePath").is_none());
+    }
+
+    /// A `--config` document and the metadata-merged config that set-up RUNS, so the two
+    /// candidate inputs to the `configuration` block are distinguishable. #502's defect
+    /// was passing the second where the reference reports the first.
+    fn authored_and_merged() -> (DevContainerConfig, DevContainerConfig) {
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            r#"[{"remoteUser": "root", "containerEnv": {"FROM_LABEL": "1"}}]"#.to_string(),
+        );
+        let container = make_container("abc", "alpine:3.18", labels);
+        let metadata = extract_image_metadata_config(&container).unwrap();
+        let authored = DevContainerConfig {
+            name: Some("Overlay".to_string()),
+            post_create_command: Some(serde_json::json!("echo overlay-postCreate")),
+            ..DevContainerConfig::default()
+        };
+        let merged = merge_configs(&authored, metadata.as_ref());
+        (authored, merged)
+    }
+
+    /// #502: the `configuration` block echoes the `--config` document AS AUTHORED. A
+    /// property that lives only on the container's `devcontainer.metadata` label belongs
+    /// to `mergedConfiguration`, never here — reporting it in this block claims the caller
+    /// wrote something they did not.
+    ///
+    /// The merged config is asserted to CARRY those properties in the same test: without
+    /// that half, a `configuration_document` that dropped them for some unrelated reason
+    /// would look like a pass.
+    #[test]
+    fn configuration_reports_the_authored_document_not_the_metadata_merge() {
+        let (authored, merged) = authored_and_merged();
+
+        let block = configuration_document(&authored, None).expect("shaping the authored config");
+        assert_eq!(block["name"], serde_json::json!("Overlay"));
+        assert_eq!(
+            block["postCreateCommand"],
+            serde_json::json!("echo overlay-postCreate")
+        );
+        for folded in ["remoteUser", "containerEnv"] {
+            assert!(
+                block.get(folded).is_none(),
+                "`{folded}` came from the container label, not the caller's --config: {block:#}"
+            );
+        }
+
+        let merged_block = configuration_document(&merged, None).expect("shaping the merged one");
+        assert_eq!(
+            merged_block["remoteUser"],
+            serde_json::json!("root"),
+            "the merge genuinely folds the label in — which is why passing it here was the bug"
+        );
+        assert_eq!(
+            merged_block["containerEnv"]["FROM_LABEL"],
+            serde_json::json!("1")
+        );
+    }
+
+    /// `configFilePath` rides on the `configuration` block under the same caller-named
+    /// rule as the merged one, and is absent with no `--config` — where the reference
+    /// emits a bare `"configuration": {}` (measured at oracle 0.87.0 on both shapes).
+    #[test]
+    fn configuration_reports_config_file_path_only_when_config_was_named() {
+        let (authored, _) = authored_and_merged();
+
+        let named = configuration_document(&authored, Some(Path::new("/ws/overlay.json")))
+            .expect("shaping a named config succeeds");
+        assert_eq!(named["configFilePath"]["scheme"], serde_json::json!("file"));
+        assert!(
+            named["configFilePath"]["fsPath"]
+                .as_str()
+                .is_some_and(|p| p.ends_with("overlay.json")),
+            "the reported path names the file the caller passed: {named:#}"
+        );
+
+        let empty = configuration_document(&DevContainerConfig::default(), None)
+            .expect("shaping an empty config succeeds");
+        assert!(empty.get("configFilePath").is_none());
+        assert_eq!(
+            empty,
+            serde_json::json!({}),
+            "no --config means the empty document the reference emits, not a skeleton"
+        );
     }
 
     #[test]
