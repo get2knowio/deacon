@@ -131,3 +131,94 @@ fn test_doctor_bundle_contains_enhanced_details() {
     assert!(env_json.get("shell").is_some());
     assert!(env_json.get("home").is_some());
 }
+
+/// Stand up a directory holding a fake `docker` whose `info` fails, so the
+/// daemon-counters probe is exercised end to end without a real daemon.
+///
+/// Unix-only: it relies on a shebang script and the executable bit.
+#[cfg(unix)]
+fn fake_docker_dir(temp_dir: &TempDir) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = temp_dir.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("docker");
+    fs::write(
+        &script,
+        r#"#!/bin/sh
+case "$1" in
+  --version) echo "Docker version 99.9.9, build deadbeef"; exit 0 ;;
+  version)   echo '{"Client":{"Version":"99.9.9"}}'; exit 0 ;;
+  info)      echo "the daemon is wedged" >&2; exit 1 ;;
+  *)         exit 1 ;;
+esac
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    bin_dir
+}
+
+/// PATH with the fake runtime ahead of the real one.
+#[cfg(unix)]
+fn path_with(bin_dir: &std::path::Path) -> String {
+    format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
+}
+
+/// A probe that produces nothing is *stated* in the human report — regression
+/// cover for #507, where an unbounded `docker system df` could only ever hang
+/// or vanish silently.
+#[cfg(unix)]
+#[test]
+fn test_doctor_text_reports_skipped_probe() {
+    let temp_dir = TempDir::new().unwrap();
+    let bin_dir = fake_docker_dir(&temp_dir);
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.env("PATH", path_with(&bin_dir)).arg("doctor");
+
+    cmd.assert()
+        .success()
+        // The fake runtime was the one probed…
+        .stdout(predicate::str::contains("99.9.9"))
+        // …and its failure is reported, with the cause.
+        .stdout(predicate::str::contains("Probe docker_info: skipped"))
+        .stdout(predicate::str::contains("the daemon is wedged"));
+}
+
+/// The same fact in `--json`: a skip is data, not a silent omission.
+#[cfg(unix)]
+#[test]
+fn test_doctor_json_reports_skipped_probe() {
+    let temp_dir = TempDir::new().unwrap();
+    let bin_dir = fake_docker_dir(&temp_dir);
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.env("PATH", path_with(&bin_dir))
+        .arg("doctor")
+        .arg("--json");
+
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+
+    let skipped = json["docker_info"]["skipped_probes"]
+        .as_array()
+        .expect("a failing probe must appear in skipped_probes");
+    let entry = skipped
+        .iter()
+        .find(|e| e["probe"] == "docker_info")
+        .expect("the info probe must be named");
+
+    assert_eq!(entry["status"], "skipped");
+    assert!(
+        entry["reason"].as_str().unwrap().contains("exited with"),
+        "the reason must say why: {}",
+        entry["reason"]
+    );
+    // Never a fabricated stand-in for the value that could not be read.
+    assert!(json["docker_info"]["info_summary"].is_null());
+}
