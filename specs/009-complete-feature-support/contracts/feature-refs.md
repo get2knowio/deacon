@@ -14,7 +14,7 @@ Defines the contract for detecting and parsing different types of feature refere
 | Type | Pattern | Example |
 |------|---------|---------|
 | OCI Registry | No special prefix | `ghcr.io/devcontainers/features/node:18` |
-| Local Path | Starts with `./` or `../` | `./local-feature`, `../shared/feature` |
+| Local Path | Starts with `./` or `../` | `./local-feature`, `./nested/local-feature` |
 | HTTPS Tarball | Starts with `https://` | `https://example.com/feature.tgz` |
 
 ---
@@ -72,12 +72,38 @@ THEN FeatureRefType::LocalPath
 
 **Valid Examples**:
 - `./local-feature` → `LocalPath("./local-feature")`
-- `../shared/feature` → `LocalPath("../shared/feature")`
 - `./deeply/nested/feature` → `LocalPath("./deeply/nested/feature")`
+- `../sibling-feature` → `LocalPath("../sibling-feature")` (detected as local; see the
+  containment rule below — it only resolves when it still lands inside
+  `<workspace>/.devcontainer/`)
 
 **Invalid (NOT local paths)**:
-- `/absolute/path` → Error (not relative)
+- `/absolute/path` → Error: a local Feature may **not** be referenced by absolute path
 - `feature` → OCI reference (no prefix)
+
+### Rule 1a: Containment
+
+Detection classifies the reference; resolution then enforces the two path clauses of
+`devcontainer-features-distribution.md` §Locally Referenced Features, in the reference
+CLI's order:
+
+1. **No absolute paths.** "A local Feature may **not** be referenced by absolute path."
+   Checked unconditionally, before any path resolution.
+2. **Must be contained.** "A local Feature's source code **must** be contained within a
+   sub-folder of the `.devcontainer/` folder." The containment anchor is
+   `<workspace root>/.devcontainer`, independent of where the active config file sits.
+
+Local paths are **config-dir-relative**, not workspace-relative: they resolve against the
+directory holding the active `devcontainer.json`. The two spellings below name the same
+directory, and both are contained:
+
+| Config location | Reference | Resolves to |
+|---|---|---|
+| `<workspace>/.devcontainer/devcontainer.json` | `./my-feature` | `<workspace>/.devcontainer/my-feature` |
+| `<workspace>/.devcontainer.json` (root) | `./.devcontainer/my-feature` | `<workspace>/.devcontainer/my-feature` |
+
+A `../` that escapes `<workspace>/.devcontainer/` (e.g. `../shared-features/common`) is
+rejected.
 
 ### Rule 2: HTTPS URL Detection
 
@@ -217,6 +243,8 @@ async fn fetch_https_feature(
 | Check | Error |
 |-------|-------|
 | Path is relative (starts with ./ or ../) | Enforced by detection |
+| Path is not absolute | `"Absolute path to a local Feature is not allowed: {path}"` |
+| Resolved path is a child of `<workspace>/.devcontainer/` | `"Local file path parse error. Resolved path must be a child of the .devcontainer/ folder."` |
 | Resolved path exists | `"Local feature not found: {path}"` |
 | devcontainer-feature.json exists | `"Missing devcontainer-feature.json in: {path}"` |
 | JSON is valid | `"Failed to parse feature metadata: {path}: {error}"` |
@@ -267,12 +295,33 @@ Uses existing validation from `parse_registry_reference()`.
 ### Example 2: Local Path Resolution
 
 **Config Location**: `/workspace/.devcontainer/devcontainer.json`
-**Reference**: `../shared-features/my-feature`
+**Reference**: `./shared/my-feature`
 
 **Resolution**:
-1. Join: `/workspace/.devcontainer/../shared-features/my-feature`
-2. Canonicalize: `/workspace/shared-features/my-feature`
-3. Read: `/workspace/shared-features/my-feature/devcontainer-feature.json`
+1. Join against the config directory: `/workspace/.devcontainer/./shared/my-feature`
+2. Canonicalize: `/workspace/.devcontainer/shared/my-feature`
+3. Check containment against `/workspace/.devcontainer` → contained, accepted
+4. Read: `/workspace/.devcontainer/shared/my-feature/devcontainer-feature.json`
+
+### Example 2b: Local Path Resolution from a Root-Level Config
+
+**Config Location**: `/workspace/.devcontainer.json`
+**Reference**: `./.devcontainer/my-feature`
+
+**Resolution**:
+1. Join against the config directory: `/workspace/./.devcontainer/my-feature`
+2. Canonicalize: `/workspace/.devcontainer/my-feature`
+3. Check containment against `/workspace/.devcontainer` → contained, accepted
+4. Read: `/workspace/.devcontainer/my-feature/devcontainer-feature.json`
+
+### Example 2c: Rejected — Escapes Containment
+
+**Config Location**: `/workspace/.devcontainer/devcontainer.json`
+**Reference**: `../shared-features/my-feature`
+
+Resolves to `/workspace/shared-features/my-feature`, which is outside
+`/workspace/.devcontainer` → rejected with "Local file path parse error. Resolved path
+must be a child of the .devcontainer/ folder."
 
 ---
 
@@ -281,7 +330,8 @@ Uses existing validation from `parse_registry_reference()`.
 | Input | Error |
 |-------|-------|
 | `http://example.com/f.tgz` | "HTTP not supported, use HTTPS: http://..." |
-| `/absolute/path/feature` | "Invalid feature reference: /absolute/path/feature" |
+| `/absolute/path/feature` | "Absolute path to a local Feature is not allowed: /absolute/path/feature" |
+| `../outside-feature` (escaping `.devcontainer/`) | "Local file path parse error. Resolved path must be a child of the .devcontainer/ folder." |
 | `./missing-feature` | "Local feature not found: ./missing-feature" |
 | `./no-metadata-feature` | "Missing devcontainer-feature.json in: ./no-metadata-feature" |
 | `https://example.com/404.tgz` | "Feature not found: https://example.com/404.tgz" |

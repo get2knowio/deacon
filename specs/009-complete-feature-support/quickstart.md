@@ -176,32 +176,61 @@ Reference features from your repository using relative paths.
 
 ### Path Format
 
-- `./feature-name` - Relative to devcontainer.json directory
-- `../shared/feature` - Can reference parent directories
+- `./feature-name` - Relative to the **directory containing devcontainer.json**
+- Paths are config-dir-relative, never workspace-relative
+- Absolute paths are **not allowed**
+
+### Containment Rule
+
+A local feature's source **must** live in a sub-folder of `<workspace>/.devcontainer/`
+(`devcontainer-features-distribution.md` §Locally Referenced Features). Since local paths
+resolve against the config directory, the spelling depends on where your config file sits:
+
+| Config location | Reference to `<workspace>/.devcontainer/my-feature` |
+|---|---|
+| `.devcontainer/devcontainer.json` | `./my-feature` |
+| `.devcontainer.json` (workspace root) | `./.devcontainer/my-feature` |
+
+A `../` path that escapes `<workspace>/.devcontainer/` (for example
+`../shared-features/common`) is rejected.
 
 ### Directory Structure
 
 ```
 project/
-├── .devcontainer/
-│   ├── devcontainer.json
-│   └── my-feature/
-│       ├── devcontainer-feature.json
-│       └── install.sh
-└── shared-features/
-    └── common/
-        ├── devcontainer-feature.json
-        └── install.sh
+└── .devcontainer/
+    ├── devcontainer.json
+    ├── my-feature/
+    │   ├── devcontainer-feature.json
+    │   └── install.sh
+    └── shared/
+        └── common/
+            ├── devcontainer-feature.json
+            └── install.sh
 ```
 
 ### Configuration
+
+With the config at `.devcontainer/devcontainer.json`:
 
 ```json
 {
     "image": "ubuntu",
     "features": {
         "./my-feature": {},
-        "../shared-features/common": {"version": "1.0"}
+        "./shared/common": {"version": "1.0"}
+    }
+}
+```
+
+The equivalent from a root-level `.devcontainer.json`:
+
+```json
+{
+    "image": "ubuntu",
+    "features": {
+        "./.devcontainer/my-feature": {},
+        "./.devcontainer/shared/common": {"version": "1.0"}
     }
 }
 ```
@@ -254,6 +283,24 @@ Error: Local feature not found: ./missing-feature
 ```
 
 **Fix**: Check the path is correct relative to devcontainer.json.
+
+### Outside the `.devcontainer/` Folder
+
+```
+Error: Local file path parse error. Resolved path must be a child of the .devcontainer/ folder.
+```
+
+**Fix**: Move the feature under `<workspace>/.devcontainer/` and reference it from there
+(`./my-feature` from `.devcontainer/devcontainer.json`, or `./.devcontainer/my-feature`
+from a root-level `.devcontainer.json`).
+
+### Absolute Path
+
+```
+Error: Absolute path to a local Feature is not allowed: /workspace/.devcontainer/my-feature
+```
+
+**Fix**: Use the `./`-relative spelling instead — `./my-feature`.
 
 ### Missing Metadata
 
@@ -308,7 +355,8 @@ docker inspect <container_id> | jq '.[0].HostConfig.CapAdd'
 ## Best Practices
 
 1. **Pin feature versions**: Use tags like `:1` or `:1.0.0` instead of `:latest`
-2. **Test features locally first**: Develop features in `./` before publishing
+2. **Test features locally first**: Develop features in a sub-folder of `.devcontainer/`
+   before publishing
 3. **Keep lifecycle commands idempotent**: They may run on container rebuild
 4. **Document security requirements**: If your feature needs `privileged`, explain why
 5. **Use entrypoints sparingly**: Only when environment setup is truly needed at startup
