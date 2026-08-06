@@ -2013,6 +2013,10 @@ impl Cli {
                 let context = deacon_core::doctor::DoctorContext {
                     workspace_folder: self.workspace_folder.clone(),
                     config: self.config.clone(),
+                    // The global `--runtime` (already resolved against
+                    // DEACON_CONTAINER_RUNTIME by clap) selects which runtime
+                    // doctor probes — same threading as up/exec/down (#516).
+                    runtime: self.runtime.map(|r| r.into()),
                 };
 
                 // Execute doctor command with redaction config
