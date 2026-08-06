@@ -247,20 +247,19 @@ async fn execute_lifecycle_commands(
         .map(|info| info.mounts.clone())
         .unwrap_or_default();
 
-    // #405: fold the running container's image `devcontainer.metadata` into the
+    // #405: fold the running container's `devcontainer.metadata` label into the
     // workspace config, exactly as `exec` does — otherwise a `remoteUser`,
-    // `remoteEnv` or lifecycle hook contributed only by image metadata is
+    // `remoteEnv` or lifecycle hook contributed only by that metadata is
     // silently ignored here while `up` and `exec` honor it. The reference CLI
     // 0.87.0 runs its user commands with all three applied (measured).
+    // The label is read off the CONTAINER inspect, not the image (#527).
     let merged_config = match container_info.as_ref() {
         Some(info) => {
             crate::commands::shared::container_metadata::resolve_config_against_container(
-                cli,
                 info,
                 config.clone(),
                 workspace_folder,
             )
-            .await
         }
         None => config.clone(),
     };

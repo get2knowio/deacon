@@ -8,14 +8,15 @@
 //!
 //! The module also owns the other direction — resolving a config the caller
 //! already loaded from the workspace AGAINST a running container, which folds in
-//! the container's IMAGE metadata. `exec` and `run-user-commands` share it (#405).
+//! the CONTAINER's metadata label at lower precedence. `exec` and
+//! `run-user-commands` share it (#405, source corrected in #527).
 
 use std::path::Path;
 
 use anyhow::{Context, Result};
 
 use deacon_core::config::{ConfigMerger, DevContainerConfig, LifecycleHookLayer};
-use deacon_core::docker::{ContainerInfo, Docker};
+use deacon_core::docker::ContainerInfo;
 
 /// Extract a merged [`DevContainerConfig`] from a container's
 /// `devcontainer.metadata` label.
@@ -100,7 +101,7 @@ pub fn config_from_metadata_label(container: &ContainerInfo) -> Result<Option<De
 }
 
 /// Resolve a workspace-loaded config against a RUNNING container: fold the
-/// container's image `devcontainer.metadata` label in at lower precedence, then
+/// CONTAINER's `devcontainer.metadata` label in at lower precedence, then
 /// resolve the effective configuration against the container's own labels.
 ///
 /// Why this is shared (#405): `up` merges image metadata while creating the
@@ -112,22 +113,38 @@ pub fn config_from_metadata_label(container: &ContainerInfo) -> Result<Option<De
 /// CLI 0.87.0, whose `run-user-commands` honors all three. This is the single
 /// implementation both share (CLAUDE.md principle 6).
 ///
-/// Best-effort by construction: an image that cannot be inspected, an absent
-/// label, or a label that fails to parse all leave the caller's config
-/// unchanged (see `merge_image_metadata_after_image_ready`), and a failed
-/// effective-config resolution warns and returns the merged base.
-pub async fn resolve_config_against_container<D: Docker>(
-    docker: &D,
+/// # The label comes from the CONTAINER inspect, never the image (#527)
+///
+/// This function used to inspect the container's IMAGE and read the label off
+/// *that*. That is the wrong source, for two independent reasons:
+///
+/// 1. **The reference does not do it.** `Tr(container, …)` in the pinned 0.87.0
+///    bundle reads `container.Config.Labels["devcontainer.metadata"]`, and both
+///    `exec` and `run-user-commands` reach it with a container inspect.
+/// 2. **It reads a staler source than deacon's own `up` wrote.** `up` stamps the
+///    accumulated superset (image entries + Feature entries + the config entry)
+///    on the CONTAINER only; nothing stamps the image except `deacon build`
+///    (#436). Reading the image therefore drops every config- and
+///    Feature-derived entry from a container deacon itself created.
+///
+/// Reading the container loses nothing: Docker folds an image's labels into a
+/// container's `Config.Labels` at create time, with a run-time `--label`
+/// winning. So the container inspect already *contains* the image's label when
+/// no one overrode it. One rule everywhere — always read the container.
+///
+/// Best-effort by construction: an absent label or a label that fails to parse
+/// leaves the caller's config unchanged (see `apply_metadata_label`), and a
+/// failed effective-config resolution warns and returns the merged base.
+pub fn resolve_config_against_container(
     container: &ContainerInfo,
     config: DevContainerConfig,
     workspace_folder: &Path,
 ) -> DevContainerConfig {
-    let base = crate::commands::up::merged_config::merge_image_metadata_after_image_ready(
-        docker,
-        &container.image,
+    let base = crate::commands::up::merged_config::apply_metadata_label(
+        &format!("Container '{}'", container.id),
+        container.labels.get("devcontainer.metadata"),
         config,
-    )
-    .await;
+    );
 
     match ConfigMerger::resolve_effective_config(&base, Some(&container.labels), workspace_folder) {
         Ok((resolved, _report)) => resolved,
@@ -267,5 +284,104 @@ mod tests {
         let cfg = config_from_metadata_label(&container).unwrap().unwrap();
         assert!(cfg.metadata_lifecycle_layers.is_empty());
         assert_eq!(cfg.remote_user.as_deref(), Some("vscode"));
+    }
+
+    /// #527: the metadata folded under a workspace config comes from the
+    /// CONTAINER's own label, not from an inspect of `container.image`.
+    ///
+    /// The `image` field below names a reference that does not exist anywhere —
+    /// no daemon, no registry. Before the fix this function inspected exactly
+    /// that reference and read the label off the *image*, so on this fixture the
+    /// fold contributed nothing at all. Now the label on the container is the
+    /// only source, which is both what the reference CLI 0.87.0 reads
+    /// (`Tr(container, …)` → `container.Config.Labels["devcontainer.metadata"]`)
+    /// and where deacon's own `up` stamps its accumulated superset.
+    #[test]
+    fn resolve_folds_the_container_label_not_the_image() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut container = container_with_metadata(
+            r#"[{"remoteUser": "from-container", "remoteEnv": {"SRC": "container"},
+                 "postCreateCommand": "container-postCreate"}]"#,
+        );
+        container.image = "this-image-does-not-exist:never-pulled".to_string();
+
+        let resolved = resolve_config_against_container(
+            &container,
+            DevContainerConfig::default(),
+            workspace.path(),
+        );
+
+        assert_eq!(
+            resolved.remote_user.as_deref(),
+            Some("from-container"),
+            "remoteUser must come from the CONTAINER's devcontainer.metadata label"
+        );
+        assert_eq!(
+            resolved.remote_env().get("SRC"),
+            Some(&Some("container".to_string()))
+        );
+        assert_eq!(
+            resolved.metadata_lifecycle_layers.len(),
+            1,
+            "the container label's lifecycle hook must be collected as a layer"
+        );
+        assert_eq!(
+            resolved.metadata_lifecycle_layers[0].post_create_command,
+            Some(serde_json::json!("container-postCreate"))
+        );
+    }
+
+    /// The container label is the LOWER-precedence layer: the workspace
+    /// devcontainer.json still wins on the last-wins rows of the Merge Logic
+    /// table, and its own hook is kept out of the layer list so it is not
+    /// queued twice.
+    #[test]
+    fn workspace_config_outranks_the_container_label() {
+        let workspace = tempfile::tempdir().unwrap();
+        let container = container_with_metadata(
+            r#"[{"remoteUser": "from-container", "postCreateCommand": "container-postCreate"}]"#,
+        );
+        let user_config = DevContainerConfig {
+            remote_user: Some("from-config".to_string()),
+            post_create_command: Some(serde_json::json!("config-postCreate")),
+            ..Default::default()
+        };
+
+        let resolved = resolve_config_against_container(&container, user_config, workspace.path());
+
+        assert_eq!(resolved.remote_user.as_deref(), Some("from-config"));
+        assert_eq!(
+            resolved.post_create_command,
+            Some(serde_json::json!("config-postCreate")),
+            "the config's own hook stays in the singular field"
+        );
+        assert_eq!(
+            resolved.metadata_lifecycle_layers.len(),
+            1,
+            "only the container label's hook becomes a layer"
+        );
+        assert_eq!(
+            resolved.metadata_lifecycle_layers[0].post_create_command,
+            Some(serde_json::json!("container-postCreate"))
+        );
+    }
+
+    /// A container with no `devcontainer.metadata` label at all leaves the
+    /// caller's config untouched — the common case for a container nobody
+    /// stamped.
+    #[test]
+    fn absent_container_label_leaves_config_unchanged() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut container = container_with_metadata("[]");
+        container.labels.clear();
+        let user_config = DevContainerConfig {
+            remote_user: Some("from-config".to_string()),
+            ..Default::default()
+        };
+
+        let resolved = resolve_config_against_container(&container, user_config, workspace.path());
+
+        assert_eq!(resolved.remote_user.as_deref(), Some("from-config"));
+        assert!(resolved.metadata_lifecycle_layers.is_empty());
     }
 }
