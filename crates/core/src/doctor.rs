@@ -3,8 +3,8 @@
 //! This module provides functionality to collect system information, Docker details,
 //! configuration discovery results, and create support bundles for troubleshooting.
 
-use crate::docker::CliDocker;
 use crate::errors::{DeaconError, Result};
+use crate::runtime::{RuntimeFactory, RuntimeKind};
 use bytesize::ByteSize;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,13 @@ pub struct DoctorContext {
     pub workspace_folder: Option<PathBuf>,
     /// Configuration file path
     pub config: Option<PathBuf>,
+    /// Container runtime selected by the global `--runtime` flag (already
+    /// resolved against `DEACON_CONTAINER_RUNTIME` by clap's `env=` at the CLI
+    /// tier), or `None` for the default.
+    ///
+    /// `doctor` probes THIS runtime. Reporting one runtime while probing
+    /// another is the defect this field exists to prevent (#516).
+    pub runtime: Option<RuntimeKind>,
 }
 
 /// Doctor information collected from the system
@@ -88,6 +95,15 @@ pub struct PlatformInfo {
 /// Docker diagnostics information
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DockerDiagnostics {
+    /// The runtime CLI these facts were probed from, e.g. `docker` or `podman`.
+    ///
+    /// The JSON key of the block itself stays `docker_info` (renaming it would
+    /// break every consumer of `doctor --json`), so this field is what makes
+    /// the block self-describing when `--runtime podman` selected something
+    /// else. It always agrees with `runtime_config.container_runtime` — both
+    /// come from the one runtime the CLI resolved.
+    #[serde(default)]
+    pub runtime: String,
     pub installed: bool,
     pub version: Option<String>,
     pub daemon_running: bool,
@@ -452,17 +468,25 @@ pub async fn run_doctor(
 async fn collect_diagnostics(context: &DoctorContext) -> Result<DoctorInfo> {
     debug!("Collecting diagnostic information");
 
+    // One runtime decision, used for BOTH the probes and the reported name.
+    // `create_runtime(...).cli_docker()` reuses the single kind → binary
+    // mapping that `runtime.rs` already owns, rather than restringing
+    // "docker"/"podman" here.
+    let runtime_kind = RuntimeFactory::detect_runtime(context.runtime);
+    let runtime_cli = RuntimeFactory::create_runtime(runtime_kind)?.cli_docker();
+    let runtime_path = runtime_cli.runtime_path();
+
     let cli_version = crate::version().to_string();
     let host_os = collect_host_os_info();
     let platform = collect_platform_info();
-    let docker_info = collect_docker_info(PROBE_TIMEOUT).await;
+    let docker_info = collect_docker_info(runtime_path, PROBE_TIMEOUT).await;
     let disk_space = collect_disk_space_info();
     let config_discovery = collect_config_discovery_info(context);
     let features = collect_features_info();
     let last_build_hash = collect_last_build_hash();
     let cache_stats = collect_cache_stats().await;
     let environment = collect_environment_info();
-    let runtime_config = collect_runtime_config();
+    let runtime_config = collect_runtime_config(runtime_kind);
     let resources = collect_resource_info();
 
     Ok(DoctorInfo {
@@ -534,23 +558,25 @@ fn collect_platform_info() -> PlatformInfo {
     }
 }
 
-/// Collect Docker diagnostics information.
+/// Collect container runtime diagnostics information.
+///
+/// `runtime` is the CLI binary the caller selected (`docker`, `podman`, …) —
+/// every probe below targets THAT binary, so the facts reported here can never
+/// come from a runtime other than the one `doctor` says it inspected (#516).
 ///
 /// Every call into the container runtime here is bounded by `timeout` (see
 /// [`PROBE_TIMEOUT`]), and every bounded-out or failed probe is reported in
 /// `skipped_probes` rather than dropped.
-async fn collect_docker_info(timeout: Duration) -> DockerDiagnostics {
-    debug!("Collecting Docker information");
+async fn collect_docker_info(runtime: &str, timeout: Duration) -> DockerDiagnostics {
+    debug!(runtime = %runtime, "Collecting container runtime information");
 
-    let docker_client = CliDocker::new();
-    let runtime = docker_client.runtime_path().to_string();
     let mut skipped_probes = Vec::new();
 
     // Probe 1 — the CLI binary itself. A launch failure here IS the "not
     // installed" signal, so this one bounded async call replaces the previous
     // pairing of a *blocking* `check_docker_installed()` (a `std::process`
     // call inside an async fn) with a second, duplicate `--version` exec.
-    let version = match probe_stdout("runtime_version", &runtime, &["--version"], timeout).await {
+    let version = match probe_stdout("runtime_version", runtime, &["--version"], timeout).await {
         Probed::Value(out) => Some(String::from_utf8_lossy(&out).trim().to_string()),
         Probed::Skipped(skip) => {
             skipped_probes.push(skip);
@@ -559,6 +585,7 @@ async fn collect_docker_info(timeout: Duration) -> DockerDiagnostics {
         Probed::NotLaunched(reason) => {
             debug!("Container runtime not installed: {}", reason);
             return DockerDiagnostics {
+                runtime: runtime.to_string(),
                 installed: false,
                 version: None,
                 daemon_running: false,
@@ -572,7 +599,7 @@ async fn collect_docker_info(timeout: Duration) -> DockerDiagnostics {
     // round-trips to the daemon, so it is the ping.
     let daemon_running = match probe_stdout(
         "daemon_ping",
-        &runtime,
+        runtime,
         &["version", "--format", "json"],
         timeout,
     )
@@ -601,7 +628,7 @@ async fn collect_docker_info(timeout: Duration) -> DockerDiagnostics {
     let info_summary = if daemon_running {
         match probe_stdout(
             "docker_info",
-            &runtime,
+            runtime,
             &["info", "--format", "json"],
             timeout,
         )
@@ -635,6 +662,7 @@ async fn collect_docker_info(timeout: Duration) -> DockerDiagnostics {
     };
 
     DockerDiagnostics {
+        runtime: runtime.to_string(),
         installed: true,
         version,
         daemon_running,
@@ -877,8 +905,14 @@ fn collect_environment_info() -> EnvironmentInfo {
     }
 }
 
-/// Collect runtime configuration details
-fn collect_runtime_config() -> RuntimeConfig {
+/// Collect runtime configuration details.
+///
+/// `runtime` is the runtime the CLI resolved — the same one
+/// [`collect_docker_info`] probed. It is NOT re-read from
+/// `DEACON_CONTAINER_RUNTIME` here: that variable backs the `--runtime` flag
+/// and clap owns its precedence (flag > env > default), so reading it again
+/// below the CLI layer would ignore an explicit `--runtime docker` (#516).
+fn collect_runtime_config(runtime: RuntimeKind) -> RuntimeConfig {
     debug!("Collecting runtime configuration");
 
     let log_level = std::env::var("DEACON_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
@@ -889,9 +923,7 @@ fn collect_runtime_config() -> RuntimeConfig {
         .map(|v| v != "1" && v.to_lowercase() != "true")
         .unwrap_or(true);
 
-    // Container runtime - default to docker
-    let container_runtime =
-        std::env::var("DEACON_CONTAINER_RUNTIME").unwrap_or_else(|_| "docker".to_string());
+    let container_runtime = runtime.as_str().to_string();
 
     RuntimeConfig {
         log_level,
@@ -973,7 +1005,14 @@ fn print_text_output_with_redaction(
     );
     println!();
 
-    println_redacted!(redaction_config, "Docker:");
+    // The heading names the runtime that was actually probed. A fixed "Docker:"
+    // here read as a docker report even when `--runtime podman` was in force
+    // (#516) — the one thing this section must never do.
+    println_redacted!(
+        redaction_config,
+        "Container Runtime ({}):",
+        info.docker_info.runtime
+    );
     println_redacted!(
         redaction_config,
         "  Installed: {}",
@@ -1570,6 +1609,7 @@ mod tests {
     #[test]
     fn test_json_mode_carries_skipped_probe_shape() {
         let diagnostics = DockerDiagnostics {
+            runtime: "docker".to_string(),
             installed: true,
             version: Some("Docker version 29.6.2".to_string()),
             daemon_running: true,
@@ -1596,6 +1636,7 @@ mod tests {
     #[test]
     fn test_json_mode_omits_empty_skipped_probes() {
         let diagnostics = DockerDiagnostics {
+            runtime: "docker".to_string(),
             installed: true,
             version: None,
             daemon_running: true,
@@ -1627,6 +1668,35 @@ mod tests {
     #[test]
     fn test_text_mode_says_nothing_when_nothing_skipped() {
         assert!(skipped_probe_lines(&[]).is_empty());
+    }
+
+    /// The reported runtime name comes from the resolved CLI selection, not
+    /// from a second, hand-rolled read of `DEACON_CONTAINER_RUNTIME` — which is
+    /// what let `--runtime podman` be reported while docker was probed (#516).
+    #[test]
+    fn test_runtime_config_reports_the_selected_runtime() {
+        assert_eq!(
+            collect_runtime_config(RuntimeKind::Docker).container_runtime,
+            "docker"
+        );
+        assert_eq!(
+            collect_runtime_config(RuntimeKind::Podman).container_runtime,
+            "podman"
+        );
+    }
+
+    /// An absent runtime binary is reported as absent *for the runtime that was
+    /// asked for* — never backfilled from whatever else is installed.
+    #[tokio::test]
+    async fn test_collect_docker_info_names_the_probed_runtime() {
+        let diagnostics =
+            collect_docker_info("deacon-no-such-runtime-binary", Duration::from_secs(5)).await;
+
+        assert_eq!(diagnostics.runtime, "deacon-no-such-runtime-binary");
+        assert!(!diagnostics.installed);
+        assert!(diagnostics.version.is_none());
+        assert!(!diagnostics.daemon_running);
+        assert!(diagnostics.info_summary.is_none());
     }
 
     #[test]

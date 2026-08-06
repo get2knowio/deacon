@@ -686,6 +686,7 @@ fn test_doctor_output_redaction() {
     let _context = DoctorContext {
         workspace_folder: Some(workspace_path),
         config: None,
+        runtime: None,
     };
 
     // Add some secrets to test redaction

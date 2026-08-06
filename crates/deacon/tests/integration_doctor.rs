@@ -5,9 +5,21 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
+/// A `deacon` invocation with the runtime selection under the test's control.
+///
+/// `DEACON_CONTAINER_RUNTIME` backs the global `--runtime` flag, and the Podman
+/// CI lane exports it job-wide — so a doctor test that says nothing about the
+/// runtime is asserting against whichever runtime that lane happens to select.
+/// Every test here states its runtime, by flag or by removing the variable.
+fn deacon() -> Command {
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.env_remove("DEACON_CONTAINER_RUNTIME");
+    cmd
+}
+
 #[test]
 fn test_doctor_command_basic() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = deacon();
     cmd.arg("doctor");
 
     cmd.assert()
@@ -15,12 +27,13 @@ fn test_doctor_command_basic() {
         .stdout(predicate::str::contains("Deacon Doctor Diagnostics"))
         .stdout(predicate::str::contains("CLI Version:"))
         .stdout(predicate::str::contains("Host OS:"))
-        .stdout(predicate::str::contains("Docker:"));
+        // The section names the runtime it was probed from (#516).
+        .stdout(predicate::str::contains("Container Runtime (docker):"));
 }
 
 #[test]
 fn test_doctor_command_json() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = deacon();
     cmd.arg("doctor").arg("--json");
 
     cmd.assert()
@@ -35,7 +48,7 @@ fn test_doctor_command_bundle_creation() {
     let temp_dir = TempDir::new().unwrap();
     let bundle_path = temp_dir.path().join("test-bundle.zip");
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = deacon();
     // Explicitly enable info logging so the support bundle log message is emitted
     cmd.arg("--log-level")
         .arg("info")
@@ -66,7 +79,7 @@ fn test_doctor_command_bundle_creation() {
 
 #[test]
 fn test_doctor_command_exits_successfully() {
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = deacon();
     cmd.arg("doctor");
 
     cmd.assert().success().code(0);
@@ -77,7 +90,7 @@ fn test_doctor_bundle_contains_enhanced_details() {
     let temp_dir = TempDir::new().unwrap();
     let bundle_path = temp_dir.path().join("enhanced-bundle.zip");
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = deacon();
     cmd.arg("--log-level")
         .arg("info")
         .arg("doctor")
@@ -132,30 +145,40 @@ fn test_doctor_bundle_contains_enhanced_details() {
     assert!(env_json.get("home").is_some());
 }
 
-/// Stand up a directory holding a fake `docker` whose `info` fails, so the
-/// daemon-counters probe is exercised end to end without a real daemon.
+/// Write a fake runtime CLI named `name` into `bin_dir`, reporting `version`
+/// and failing `info`, so the probes are exercised end to end without a real
+/// daemon. The version string is the marker that says WHICH binary was probed.
 ///
 /// Unix-only: it relies on a shebang script and the executable bit.
 #[cfg(unix)]
-fn fake_docker_dir(temp_dir: &TempDir) -> std::path::PathBuf {
+fn write_fake_runtime(bin_dir: &std::path::Path, name: &str, version: &str) {
     use std::os::unix::fs::PermissionsExt;
 
-    let bin_dir = temp_dir.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let script = bin_dir.join("docker");
+    fs::create_dir_all(bin_dir).unwrap();
+    let script = bin_dir.join(name);
     fs::write(
         &script,
-        r#"#!/bin/sh
+        format!(
+            r#"#!/bin/sh
 case "$1" in
-  --version) echo "Docker version 99.9.9, build deadbeef"; exit 0 ;;
-  version)   echo '{"Client":{"Version":"99.9.9"}}'; exit 0 ;;
+  --version) echo "{name} version {version}, build deadbeef"; exit 0 ;;
+  version)   echo '{{"Client":{{"Version":"{version}"}}}}'; exit 0 ;;
   info)      echo "the daemon is wedged" >&2; exit 1 ;;
   *)         exit 1 ;;
 esac
-"#,
+"#
+        ),
     )
     .unwrap();
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// Stand up a directory holding a fake `docker` whose `info` fails, so the
+/// daemon-counters probe is exercised end to end without a real daemon.
+#[cfg(unix)]
+fn fake_docker_dir(temp_dir: &TempDir) -> std::path::PathBuf {
+    let bin_dir = temp_dir.path().join("bin");
+    write_fake_runtime(&bin_dir, "docker", "99.9.9");
     bin_dir
 }
 
@@ -178,7 +201,7 @@ fn test_doctor_text_reports_skipped_probe() {
     let temp_dir = TempDir::new().unwrap();
     let bin_dir = fake_docker_dir(&temp_dir);
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = deacon();
     cmd.env("PATH", path_with(&bin_dir)).arg("doctor");
 
     cmd.assert()
@@ -197,7 +220,7 @@ fn test_doctor_json_reports_skipped_probe() {
     let temp_dir = TempDir::new().unwrap();
     let bin_dir = fake_docker_dir(&temp_dir);
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    let mut cmd = deacon();
     cmd.env("PATH", path_with(&bin_dir))
         .arg("doctor")
         .arg("--json");
@@ -221,4 +244,166 @@ fn test_doctor_json_reports_skipped_probe() {
     );
     // Never a fabricated stand-in for the value that could not be read.
     assert!(json["docker_info"]["info_summary"].is_null());
+}
+
+// ---------------------------------------------------------------------------
+// #516 — `doctor` probes the runtime `--runtime` selected.
+//
+// Two fake runtimes with different version markers sit on PATH, so the reported
+// version says unambiguously WHICH binary answered. Hermetic: no daemon, no
+// Docker, no Podman needed.
+// ---------------------------------------------------------------------------
+
+/// A bin dir holding both fakes, each with its own version marker.
+#[cfg(unix)]
+fn fake_both_runtimes_dir(temp_dir: &TempDir) -> std::path::PathBuf {
+    let bin_dir = temp_dir.path().join("bin");
+    write_fake_runtime(&bin_dir, "docker", "11.1.1");
+    write_fake_runtime(&bin_dir, "podman", "22.2.2");
+    bin_dir
+}
+
+/// Run `doctor --json` with the fakes on PATH and return the parsed report.
+#[cfg(unix)]
+fn doctor_json_with(
+    bin_dir: &std::path::Path,
+    configure: impl FnOnce(&mut Command),
+) -> serde_json::Value {
+    let mut cmd = deacon();
+    cmd.env("PATH", path_with(bin_dir));
+    configure(&mut cmd);
+    cmd.arg("doctor").arg("--json");
+
+    let output = cmd.assert().success().get_output().stdout.clone();
+    serde_json::from_slice(&output).expect("doctor --json must emit one JSON document")
+}
+
+/// Assert the report was probed from `expected` — the probed binary and the
+/// reported runtime name have to be the same runtime, which is the whole of
+/// #516.
+#[cfg(unix)]
+fn assert_probed(json: &serde_json::Value, expected: &str, version_marker: &str) {
+    assert_eq!(
+        json["docker_info"]["runtime"], expected,
+        "the diagnostics block must name the runtime it was probed from"
+    );
+    assert_eq!(
+        json["runtime_config"]["container_runtime"], expected,
+        "the reported runtime must be the one that was probed"
+    );
+    let version = json["docker_info"]["version"]
+        .as_str()
+        .expect("the fake runtime reports a version");
+    assert!(
+        version.contains(version_marker),
+        "expected {expected}'s version marker {version_marker}, got: {version}"
+    );
+}
+
+/// No selection: docker, as before.
+#[cfg(unix)]
+#[test]
+fn test_doctor_defaults_to_docker() {
+    let temp_dir = TempDir::new().unwrap();
+    let bin_dir = fake_both_runtimes_dir(&temp_dir);
+
+    let json = doctor_json_with(&bin_dir, |_| {});
+    assert_probed(&json, "docker", "11.1.1");
+}
+
+/// `--runtime podman` probes podman. Before #516 this reported
+/// `container_runtime: "podman"` beside docker-probed facts.
+#[cfg(unix)]
+#[test]
+fn test_doctor_probes_runtime_selected_by_flag() {
+    let temp_dir = TempDir::new().unwrap();
+    let bin_dir = fake_both_runtimes_dir(&temp_dir);
+
+    let json = doctor_json_with(&bin_dir, |cmd| {
+        cmd.arg("--runtime").arg("podman");
+    });
+    assert_probed(&json, "podman", "22.2.2");
+}
+
+/// The env var backing the flag selects it too — clap resolves it, so doctor
+/// needs no read of its own.
+#[cfg(unix)]
+#[test]
+fn test_doctor_probes_runtime_selected_by_env() {
+    let temp_dir = TempDir::new().unwrap();
+    let bin_dir = fake_both_runtimes_dir(&temp_dir);
+
+    let json = doctor_json_with(&bin_dir, |cmd| {
+        cmd.env("DEACON_CONTAINER_RUNTIME", "podman");
+    });
+    assert_probed(&json, "podman", "22.2.2");
+}
+
+/// Flag beats env, exactly as clap's precedence says — a hand-rolled env read
+/// below the CLI layer would report podman here.
+#[cfg(unix)]
+#[test]
+fn test_doctor_runtime_flag_beats_env() {
+    let temp_dir = TempDir::new().unwrap();
+    let bin_dir = fake_both_runtimes_dir(&temp_dir);
+
+    let json = doctor_json_with(&bin_dir, |cmd| {
+        cmd.env("DEACON_CONTAINER_RUNTIME", "podman")
+            .arg("--runtime")
+            .arg("docker");
+    });
+    assert_probed(&json, "docker", "11.1.1");
+}
+
+/// The text report names the probed runtime in its heading, so a human reading
+/// it cannot mistake podman diagnostics for docker ones.
+#[cfg(unix)]
+#[test]
+fn test_doctor_text_names_the_probed_runtime() {
+    let temp_dir = TempDir::new().unwrap();
+    let bin_dir = fake_both_runtimes_dir(&temp_dir);
+
+    let mut cmd = deacon();
+    cmd.env("PATH", path_with(&bin_dir))
+        .arg("--runtime")
+        .arg("podman")
+        .arg("doctor");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Container Runtime (podman):"))
+        .stdout(predicate::str::contains("22.2.2"))
+        .stdout(predicate::str::contains("11.1.1").not());
+}
+
+/// A selected runtime that is not installed is reported absent — never
+/// backfilled from the other runtime that happens to be on PATH. PATH holds
+/// ONLY the docker fake, so a regression would show docker's version here.
+#[cfg(unix)]
+#[test]
+fn test_doctor_reports_selected_runtime_absent() {
+    let temp_dir = TempDir::new().unwrap();
+    let bin_dir = temp_dir.path().join("bin");
+    write_fake_runtime(&bin_dir, "docker", "11.1.1");
+
+    let mut cmd = deacon();
+    // Not `path_with`: the real PATH may carry a real podman.
+    cmd.env("PATH", bin_dir.display().to_string())
+        .arg("--runtime")
+        .arg("podman")
+        .arg("doctor")
+        .arg("--json");
+
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+
+    assert_eq!(json["docker_info"]["runtime"], "podman");
+    assert_eq!(json["runtime_config"]["container_runtime"], "podman");
+    assert_eq!(json["docker_info"]["installed"], false);
+    assert_eq!(json["docker_info"]["daemon_running"], false);
+    assert!(
+        json["docker_info"]["version"].is_null(),
+        "an absent podman must not be reported with another runtime's version: {}",
+        json["docker_info"]["version"]
+    );
 }
