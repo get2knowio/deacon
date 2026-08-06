@@ -232,6 +232,178 @@
         "tempdir": true
       },
       "notes": "Closes #510, the one difference `case-set-up-configuration-authored` measured on this surface and left without a scenario. The claim is the SCOPE of variable substitution: `set-up` takes no `--workspace-folder`, so `${localWorkspaceFolder}`, `${localWorkspaceFolderBasename}` and `${devcontainerId}` have no answer and the reference leaves all three LITERAL, while `${localEnv:*}` still resolves. deacon anchored its `SubstitutionContext` at the process cwd and substituted an invented workspace into both. The case observes the two surfaces the defect actually reaches. `chan-structured-output` pins the reported blocks — the same three tokens must survive verbatim in BOTH `configuration` and `mergedConfiguration`, because the two blocks are shaped by different code paths and an earlier fix to one has already left the other behind here (#483/#502). `chan-file-content` pins what set-up RAN, which is the half no assertion on the JSON can see: the overlay's `postCreateCommand` writes the three tokens to a file, and the reference's literal tokens reach the container shell as unset names and expand to empty, so the artifact is `ws=[] base=[] id=[]` — where deacon wrote the cwd, its basename and a computed id into the command string host-side. The artifact is host-visible because the BASE fixture pins `workspaceFolder: /work` with a matching `workspaceMount`, giving the hook a bind-mounted absolute path instead of the per-side random `/workspaces/<basename>`; the hook writes to that absolute path, so the exec cwd (which the two CLIs need not agree on) cannot affect the result. `--container-data-folder` is NOT incidental: `op-up` leaves the reference's lifecycle markers in the default folder and a marked phase does not re-run, so without a fresh folder the hook is silently skipped and the execution channel would pass while proving nothing. The overlay deliberately authors NO `${containerWorkspaceFolder}`: that variable diverges on this surface in a different way (deacon never resolves it in the reported blocks and invents `/` at exec time when unauthored), which is a different defect in kind, filed as #513 — including it would have coupled this case to an unsettled question instead of pinning the three variables it is about. `${localEnv:HOME}` is authored but NOT asserted absolutely, because its value is host-specific; the differential covers it, and it is the control that shows the fix gated the workspace variables rather than the whole pass. `chan-stdout` is deliberately NOT declared, for the same key-ordering reason as the sibling cases. Measured against oracle 0.87.0 on this fixture; the two sides agree on every declared channel after normalization, and the case declares no tolerance. Image pinned to alpine:3.19. One assertion is written in POST-NORMALIZATION vocabulary and must stay that way: the `devcontainer_id_token` rule rewrites the literal `${devcontainerId}` to `<ID>` everywhere in `configuration`/`mergedConfiguration`, so the absolute claim on `PROBE_DEVCONTAINER_ID` is `<ID>`, not the raw token. That rule is also why the DIFFERENTIAL on this key cannot be the thing that pins it — both a literal token and a substituted 12-char hex id normalize into that field's `<ID>` — which is exactly why the case carries the absolute assertion and the execution channel as well. The two `localWorkspaceFolder*` keys are NOT rewritten by any rule, so they are asserted as the raw tokens and are the sharpest claim in the case."
+    },
+    {
+      "id": "case-set-up-container-workspace-folder-authored",
+      "behaviors": [
+        "bhv-setup-container-workspace-folder-from-config"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-set-up-container-workspace-folder-authored"
+          ]
+        },
+        {
+          "id": "op-set-up",
+          "subcommand": "set-up",
+          "argv": [
+            "--container-id",
+            "${CONTAINER_ID}",
+            "--config",
+            "${WORKSPACE}/setup-overlay.json",
+            "--container-data-folder",
+            "/tmp/conformance-set-up-cwf-authored",
+            "--include-configuration",
+            "--include-merged-configuration"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-set-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-set-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "configuration": {
+                "remoteEnv": {
+                  "PROBE_CONTAINER_WS": "/work",
+                  "PROBE_CONTAINER_WS_BASENAME": "work"
+                }
+              },
+              "mergedConfiguration": {
+                "remoteEnv": {
+                  "PROBE_CONTAINER_WS": "/work",
+                  "PROBE_CONTAINER_WS_BASENAME": "work"
+                }
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-set-up",
+          "assertion": {
+            "jsonSubset": {
+              "setup-container-workspace-folder.txt": "cwf=[/work] base=[work]\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "setup-container-workspace-folder.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes #513, one half of it. The claim is where `${containerWorkspaceFolder}` and `${containerWorkspaceFolderBasename}` get their value in `set-up`: the `--config` document's OWN `workspaceFolder`. Here the overlay authors it, and both tokens resolve on both surfaces. The sibling case `case-set-up-container-workspace-folder-unauthored` carries the negative and is what makes this one a rule rather than a coincidence — read them as a pair. deacon had this wrong in BOTH directions and disagreed with itself: the reported blocks never resolved the token (the `SubstitutionContext` #510 introduced carried `container_workspace_folder: None`), while the exec path folded `merged_config.workspace_folder.unwrap_or(\"/\")` into the command text. So on THIS shape deacon's hook already wrote `/work` while its reported blocks said `${containerWorkspaceFolder}` — one cell wrong out of two, which is why the case declares both channels. `chan-structured-output` pins the two reported blocks; `chan-file-content` pins what set-up RAN, the half no assertion on the JSON can see. The artifact is host-visible because the BASE fixture pins `workspaceFolder: /work` with a matching `workspaceMount`, so the hook writes to a bind-mounted absolute path and the exec cwd (which the two CLIs need not agree on) cannot affect the result. The overlay authors the SAME `/work` deliberately: an overlay naming a path that does not exist in the container would be substituted correctly and then fail as `docker exec -w`, testing the wrong thing. `--container-data-folder` is NOT incidental — same trap #510 documented: `op-up` leaves the reference's lifecycle markers in the default folder and a marked phase does not re-run, so without a fresh folder the hook is silently skipped and the execution channel proves nothing. `chan-stdout` is deliberately NOT declared, for the same key-ordering reason as every sibling set-up case. Measured against oracle 0.87.0 on this fixture; the two sides agree on every declared channel after normalization and the case declares no tolerance. Image pinned to alpine:3.19."
+    },
+    {
+      "id": "case-set-up-container-workspace-folder-unauthored",
+      "behaviors": [
+        "bhv-setup-container-workspace-folder-from-config"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-set-up-container-workspace-folder-unauthored"
+          ]
+        },
+        {
+          "id": "op-set-up",
+          "subcommand": "set-up",
+          "argv": [
+            "--container-id",
+            "${CONTAINER_ID}",
+            "--config",
+            "${WORKSPACE}/setup-overlay.json",
+            "--container-data-folder",
+            "/tmp/conformance-set-up-cwf-unauthored",
+            "--include-configuration",
+            "--include-merged-configuration"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-set-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-set-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "configuration": {
+                "remoteEnv": {
+                  "PROBE_CONTAINER_WS": "${containerWorkspaceFolder}",
+                  "PROBE_CONTAINER_WS_BASENAME": "${containerWorkspaceFolderBasename}"
+                }
+              },
+              "mergedConfiguration": {
+                "remoteEnv": {
+                  "PROBE_CONTAINER_WS": "${containerWorkspaceFolder}",
+                  "PROBE_CONTAINER_WS_BASENAME": "${containerWorkspaceFolderBasename}"
+                }
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-set-up",
+          "assertion": {
+            "jsonSubset": {
+              "setup-container-workspace-folder.txt": "cwf=[] base=[]\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "setup-container-workspace-folder.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes #513, the other half — and the half that makes the rule falsifiable. The overlay authors NO `workspaceFolder`, so both tokens must stay LITERAL: the reference hands them to the container shell, which expands the unset names to empty, and the artifact is `cwf=[] base=[]`. deacon wrote `cwf=[/] base=[]` — an invented `/` coming from `merged_config.workspace_folder.unwrap_or(\"/\")`, a DEFAULT for the exec cwd leaking into the command text. The fix separates the two uses (`substitution_workspace_folder: Option<String>` alongside the cwd `String`), so the cwd still falls back to `/` — `docker exec -w` needs a path — while the substitution value is simply absent. The base fixture DOES author `workspaceFolder: /work`, and that is the sharp part of this case rather than fixture noise: `op-up` stamps it into the container's `devcontainer.metadata`, so a value IS reachable through the merge, and the expectation is still literal. That pins the source as the `--config` document alone, not the merged configuration — measured against oracle 0.87.0 on a hand-built container whose metadata label authored `workspaceFolder` with an overlay that did not: the reference left both tokens literal, and its `FG` helper feeds `containerWorkspaceFolder` from the config document's raw `workspaceFolder` (undefined when the document omits it). It also means a naive fix reading the MERGED config passes the sibling case and fails this one. `--container-data-folder`, the bind-mounted `/work` artifact path and the omitted `chan-stdout` are all here for the reasons the sibling's notes give. Image pinned to alpine:3.19."
     }
   ]
 }

@@ -519,8 +519,23 @@ pub struct ContainerLifecycleConfig {
     pub container_id: String,
     /// User to run commands as (defaults to root)
     pub user: Option<String>,
-    /// Container workspace folder path
+    /// Container workspace folder path — the working directory every lifecycle
+    /// command is exec'd in. Always a path, because `docker exec -w` needs one.
     pub container_workspace_folder: String,
+    /// The value `${containerWorkspaceFolder}` / `${containerWorkspaceFolderBasename}`
+    /// resolve to when lifecycle COMMAND STRINGS are substituted. Authoritative:
+    /// `Some` sets it on the substitution context, `None` clears it so the two
+    /// tokens stay LITERAL and reach the container shell as unset names.
+    ///
+    /// Deliberately separate from `container_workspace_folder` (#513): the exec
+    /// cwd must always be a path, but the substitution value must be able to be
+    /// ABSENT. `set-up` adopts a running container and takes no
+    /// `--workspace-folder`, so it has an answer only when its `--config`
+    /// authors `workspaceFolder`; defaulting the cwd to `/` there had been
+    /// leaking an invented `/` into the command text. Callers that do have a
+    /// real workspace (`up`, `run-user-commands`) pass `Some` of the same value
+    /// they pass for the cwd.
+    pub substitution_workspace_folder: Option<String>,
     /// Container environment variables
     pub container_env: HashMap<String, String>,
     /// Skip post-create lifecycle phase
@@ -829,9 +844,14 @@ where
     // hazard the reference structurally avoids (a value like `x; rm -rf /` would
     // execute). The command PROCESS still receives the full container env via
     // `updated_config.container_env` below; only textual substitution is dropped.
-    let container_context = substitution_context
-        .clone()
-        .with_container_workspace_folder(config.container_workspace_folder.clone());
+    //
+    // `${containerWorkspaceFolder}` comes from `substitution_workspace_folder`,
+    // NOT from the exec cwd: the two are different uses of the same path and
+    // only the cwd is guaranteed to exist (#513). Assigning the field rather
+    // than folding it in makes the config AUTHORITATIVE — `None` clears any
+    // value the caller's context carried, leaving both tokens literal.
+    let mut container_context = substitution_context.clone();
+    container_context.container_workspace_folder = config.substitution_workspace_folder.clone();
 
     // Create an updated config with the merged environment (probe additions
     // included) so lifecycle command *processes* inherit the probed shell env.
@@ -2956,6 +2976,7 @@ mod tests {
             container_id: "test-container".to_string(),
             user: Some("root".to_string()),
             container_workspace_folder: "/workspaces/test".to_string(),
+            substitution_workspace_folder: Some("/workspaces/test".to_string()),
             container_env: HashMap::new(),
             skip_post_create: false,
             skip_non_blocking_commands: false,
@@ -3108,6 +3129,7 @@ mod tests {
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
+                substitution_workspace_folder: Some("/workspace".to_string()),
                 container_env: HashMap::new(),
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
@@ -3174,6 +3196,7 @@ mod tests {
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
+                substitution_workspace_folder: Some("/workspace".to_string()),
                 container_env: HashMap::new(),
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
@@ -3254,6 +3277,7 @@ mod tests {
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
+                substitution_workspace_folder: Some("/workspace".to_string()),
                 container_env: HashMap::new(),
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
@@ -3321,6 +3345,7 @@ mod tests {
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
+                substitution_workspace_folder: Some("/workspace".to_string()),
                 container_env: HashMap::new(),
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
@@ -3410,6 +3435,7 @@ mod tests {
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
+                substitution_workspace_folder: Some("/workspace".to_string()),
                 container_env: HashMap::new(),
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
@@ -3437,6 +3463,7 @@ mod tests {
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
+                substitution_workspace_folder: Some("/workspace".to_string()),
                 container_env: HashMap::new(),
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
@@ -3516,6 +3543,7 @@ mod tests {
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
+                substitution_workspace_folder: Some("/workspace".to_string()),
                 container_env: HashMap::new(),
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
@@ -3601,6 +3629,7 @@ mod tests {
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
+                substitution_workspace_folder: Some("/workspace".to_string()),
                 container_env: HashMap::new(),
                 skip_post_create: false,
                 skip_non_blocking_commands: false,
@@ -3628,6 +3657,7 @@ mod tests {
                 container_id: "test".to_string(),
                 user: None,
                 container_workspace_folder: "/workspace".to_string(),
+                substitution_workspace_folder: Some("/workspace".to_string()),
                 container_env: HashMap::new(),
                 skip_post_create: false,
                 skip_non_blocking_commands: false,

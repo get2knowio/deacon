@@ -1,0 +1,8 @@
+{
+	"name": "ConformanceSetUpContainerWorkspaceFolderUnauthoredOverlay",
+	"remoteEnv": {
+		"PROBE_CONTAINER_WS": "${containerWorkspaceFolder}",
+		"PROBE_CONTAINER_WS_BASENAME": "${containerWorkspaceFolderBasename}"
+	},
+	"postCreateCommand": "printf 'cwf=[%s] base=[%s]\\n' \"${containerWorkspaceFolder}\" \"${containerWorkspaceFolderBasename}\" > /work/setup-container-workspace-folder.txt"
+}

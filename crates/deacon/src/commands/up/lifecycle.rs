@@ -249,6 +249,9 @@ pub(crate) async fn execute_lifecycle_commands(
         capture_output: args.build_output_mode == deacon_core::build::BuildOutputMode::Compact,
         container_id: container_id.to_string(),
         user: effective_user,
+        // `up` always has a real workspace, so the exec cwd and the substitution
+        // value are the same path (#513 changed only who may leave it absent).
+        substitution_workspace_folder: Some(container_workspace_folder.clone()),
         container_workspace_folder,
         container_env: effective_env,
         skip_post_create: args.skip_post_create,
@@ -595,6 +598,7 @@ pub(crate) async fn execute_initialize_command(
         container_id: "<host-only-no-container>".to_string(),
         user: None,
         container_workspace_folder: "<host-only-no-container>".to_string(),
+        substitution_workspace_folder: Some("<host-only-no-container>".to_string()),
         container_env: std::collections::HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: false,

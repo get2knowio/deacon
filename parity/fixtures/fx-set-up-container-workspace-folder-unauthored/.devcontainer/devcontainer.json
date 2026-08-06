@@ -1,0 +1,7 @@
+{
+	"name": "ConformanceSetUpContainerWorkspaceFolderUnauthoredBase",
+	"image": "alpine:3.19",
+	"remoteUser": "root",
+	"workspaceFolder": "/work",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/work,type=bind"
+}
