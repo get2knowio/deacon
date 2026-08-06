@@ -256,8 +256,10 @@ pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Re
 
     // Phase 4: Build the merged configuration. Per spec §4 the merge order is
     // `mergeConfiguration(config, imageMetadata)` — the in-file `--config`
-    // wins over image metadata on scalar fields, lists are concatenated.
-    let merged_config = merge_configs(&base_config, metadata_config.as_ref());
+    // wins over image metadata on scalar fields, lists are concatenated. The
+    // metadata side contributes only `METADATA_MERGE_PROPERTIES`, the enumerated
+    // list upstream's `mergeConfiguration` reads off a metadata entry (#526).
+    let merged_config = merge_configs(&base_config, metadata_config.as_ref())?;
 
     // Phase 5: Variable substitution. `set-up` adopts a running container and takes no
     // `--workspace-folder`, so the workspace-derived variables have no answer:
@@ -400,6 +402,99 @@ fn extract_image_metadata_config(container: &ContainerInfo) -> Result<Option<Dev
     crate::commands::shared::container_metadata::config_from_metadata_label(container)
 }
 
+/// The properties a `devcontainer.metadata` entry may contribute to the merged
+/// configuration — upstream's `mergeConfiguration` property list, transcribed (#526).
+///
+/// The reference's merge is not "fold two configurations". It is `{...config minus the
+/// collected properties}` PLUS an explicitly ENUMERATED set of properties read off the
+/// metadata entries, one expression per property (bundle `Xi` at
+/// `dist/spec-node/devContainersSpecCLI.js`, `mergeConfiguration` in
+/// `devcontainers/cli/src/spec-node/imageMetadata.ts`). A property with no expression is
+/// simply never read from metadata, so it cannot reach the merged configuration from a
+/// label no matter what the label says — the base config is its only source.
+///
+/// deacon folded EVERYTHING instead, so a container label could contribute
+/// `workspaceFolder`, `name`, `runArgs`, `appPort`, `workspaceMount`, `features`,
+/// `overrideFeatureInstallOrder` — and, since the label is arbitrary JSON, any other
+/// property a base image happened to write. Measured at oracle 0.87.0 on a raw-labeled
+/// container carrying all of them, deacon's `mergedConfiguration` reported eleven keys the
+/// reference omitted. It is not only a reporting defect: `workspaceFolder` is what
+/// `execute_lifecycle_hooks` uses for the exec CWD, so a label naming a directory that does
+/// not exist in the container made every hook fail with exit 127 where the reference ran
+/// them.
+///
+/// The list is exactly the union of the properties `Xi` reads from an entry. That is
+/// upstream's `pickConfigProperties` list (bundle `SV`) plus `entrypoint`, which is a
+/// FEATURE property (bundle `RV`) and therefore never picked off a configuration, but which
+/// `Xi` does read off metadata entries and report as the collected `entrypoints` array.
+///
+/// Names are the ON-THE-WIRE (camelCase) spellings, because the restriction is applied to
+/// the serialized document rather than field-by-field: a property added to
+/// [`DevContainerConfig`] tomorrow is absent from this list and is therefore NOT folded,
+/// which is the safe default and matches the reference (whose list is likewise explicit).
+/// `entrypoint` is unmodeled on `DevContainerConfig` and rides in
+/// [`DevContainerConfig::extra`]; retaining the key here is what keeps it reaching the
+/// collected `entrypoints` array.
+const METADATA_MERGE_PROPERTIES: &[&str] = &[
+    "onCreateCommand",
+    "updateContentCommand",
+    "postCreateCommand",
+    "postStartCommand",
+    "postAttachCommand",
+    "waitFor",
+    "customizations",
+    "mounts",
+    "containerEnv",
+    "containerUser",
+    "init",
+    "privileged",
+    "capAdd",
+    "securityOpt",
+    "remoteUser",
+    "userEnvProbe",
+    "remoteEnv",
+    "overrideCommand",
+    "portsAttributes",
+    "otherPortsAttributes",
+    "forwardPorts",
+    "shutdownAction",
+    "updateRemoteUserUID",
+    "hostRequirements",
+    "entrypoint",
+];
+
+/// Project a container-metadata configuration down to [`METADATA_MERGE_PROPERTIES`].
+///
+/// Applied to the already-folded label config rather than to each fragment, which is
+/// equivalent: [`deacon_core::config::ConfigMerger`] folds field-wise, so projecting after
+/// the fold drops exactly the fields projecting before it would have.
+///
+/// The round-trip is through JSON on purpose. The property list is upstream's, written in
+/// upstream's spelling, and checking it against the serialized document is the only form in
+/// which the two can be compared by eye. It also disposes of
+/// [`DevContainerConfig::extra`] for free: an unmodeled key a base image wrote into its
+/// label is not on the list, so it does not survive — where a field-by-field copy would
+/// have carried `extra` through untouched.
+///
+/// [`DevContainerConfig::metadata_lifecycle_layers`] is re-attached after the round-trip
+/// because it is `#[serde(skip)]` merge provenance, not an authored property: the five
+/// singular hook fields were already lifted onto it by
+/// [`container_metadata::config_from_metadata_label`], and losing it here would silently
+/// stop every label-contributed hook from running (#475/#477).
+fn restrict_to_metadata_properties(metadata: &DevContainerConfig) -> Result<DevContainerConfig> {
+    let mut value = serde_json::to_value(metadata)
+        .context("Failed to serialize container metadata configuration")?;
+    if let Some(object) = value.as_object_mut() {
+        object.retain(|key, _| METADATA_MERGE_PROPERTIES.contains(&key.as_str()));
+    }
+    let mut restricted: DevContainerConfig = serde_json::from_value(value)
+        .context("Failed to re-read the restricted container metadata configuration")?;
+    restricted
+        .metadata_lifecycle_layers
+        .clone_from(&metadata.metadata_lifecycle_layers);
+    Ok(restricted)
+}
+
 /// Merge `--config` (if any) on top of image metadata config (if any).
 ///
 /// Order matters: per spec §4 `mergeConfiguration(config.config, imageMetadata)`
@@ -407,15 +502,24 @@ fn extract_image_metadata_config(container: &ContainerInfo) -> Result<Option<Dev
 /// before image-metadata lists. `ConfigMerger::merge_configs` folds left to
 /// right with later entries winning, so we pass `[metadata, file_config]` to
 /// preserve that semantics.
+///
+/// The metadata side is first projected through [`restrict_to_metadata_properties`], so
+/// only the properties upstream's `mergeConfiguration` reads off a metadata entry can
+/// reach the result. The file config is NOT restricted — it is the base of the merge and
+/// every property it authors belongs in the output (#526).
 fn merge_configs(
     file_config: &DevContainerConfig,
     metadata_config: Option<&DevContainerConfig>,
-) -> DevContainerConfig {
+) -> Result<DevContainerConfig> {
     match metadata_config {
         Some(meta) => {
-            deacon_core::config::ConfigMerger::merge_configs(&[meta.clone(), file_config.clone()])
+            let restricted = restrict_to_metadata_properties(meta)?;
+            Ok(deacon_core::config::ConfigMerger::merge_configs(&[
+                restricted,
+                file_config.clone(),
+            ]))
         }
-        None => file_config.clone(),
+        None => Ok(file_config.clone()),
     }
 }
 
@@ -960,7 +1064,7 @@ mod tests {
             .insert("META_VAR".to_string(), "meta".to_string());
 
         // Per spec §4: file config wins over metadata on scalar fields.
-        let merged = merge_configs(&file_cfg, Some(&meta_cfg));
+        let merged = merge_configs(&file_cfg, Some(&meta_cfg)).unwrap();
         assert_eq!(merged.remote_user.as_deref(), Some("file-user"));
         // Metadata env still flows through via the merger's map overlay.
         assert_eq!(
@@ -975,8 +1079,114 @@ mod tests {
             name: Some("only-file".to_string()),
             ..DevContainerConfig::default()
         };
-        let merged = merge_configs(&file_cfg, None);
+        let merged = merge_configs(&file_cfg, None).unwrap();
         assert_eq!(merged.name.as_deref(), Some("only-file"));
+    }
+
+    /// #526: a container's `devcontainer.metadata` label contributes ONLY the
+    /// properties upstream's `mergeConfiguration` reads off a metadata entry.
+    ///
+    /// The label below authors every property in the leak census plus a handful the
+    /// census did not name (`image`, `service`, `runServices`, `initializeCommand`) and an
+    /// unmodeled key, alongside enumerated properties that MUST survive. Measured at
+    /// oracle 0.87.0 on a raw-labeled container carrying exactly this document: the
+    /// reference's `mergedConfiguration` reports the enumerated half and none of the rest.
+    ///
+    /// Asserting both halves is the point. A restriction that dropped too much would be
+    /// just as wrong as the fold that dropped nothing, and only the positive half can see
+    /// it — which is why `remoteUser`, `containerEnv`, `forwardPorts` and `userEnvProbe`
+    /// are checked rather than assumed.
+    #[test]
+    fn merge_configs_folds_only_the_enumerated_metadata_properties() {
+        let metadata: DevContainerConfig = serde_json::from_value(serde_json::json!({
+            // NOT on upstream's list — none of these may reach the merged config.
+            "workspaceFolder": "/meta-ws",
+            "name": "meta-name",
+            "runArgs": ["--meta-arg"],
+            "appPort": [9999],
+            "workspaceMount": "source=/m,target=/m,type=bind",
+            "features": { "ghcr.io/x/y:1": {} },
+            "overrideFeatureInstallOrder": ["ghcr.io/x/y"],
+            "image": "should-not-leak",
+            "service": "nope",
+            "runServices": ["nope"],
+            "initializeCommand": "echo nope",
+            "someFutureProperty": "unmodeled, rides in `extra`",
+            // ON upstream's list — all of these must survive.
+            "remoteUser": "meta-user",
+            "containerEnv": { "META": "1" },
+            "forwardPorts": [3000],
+            "userEnvProbe": "none",
+        }))
+        .expect("the metadata document should deserialize");
+
+        let merged = merge_configs(&DevContainerConfig::default(), Some(&metadata)).unwrap();
+
+        assert_eq!(
+            merged.workspace_folder, None,
+            "workspaceFolder must not fold"
+        );
+        assert_eq!(merged.name, None, "name must not fold");
+        assert_eq!(merged.run_args, None, "runArgs must not fold");
+        assert_eq!(merged.app_port, None, "appPort must not fold");
+        assert_eq!(merged.workspace_mount, None, "workspaceMount must not fold");
+        assert_eq!(merged.features, None, "features must not fold");
+        assert_eq!(
+            merged.override_feature_install_order, None,
+            "overrideFeatureInstallOrder must not fold"
+        );
+        assert_eq!(merged.image, None, "image must not fold");
+        assert_eq!(merged.service, None, "service must not fold");
+        assert_eq!(merged.run_services, None, "runServices must not fold");
+        assert_eq!(
+            merged.initialize_command, None,
+            "initializeCommand must not fold"
+        );
+        assert!(
+            merged.extra.is_empty(),
+            "an unmodeled label key is not on upstream's list either, so it must not \
+             survive in `extra`: {:?}",
+            merged.extra
+        );
+
+        assert_eq!(merged.remote_user.as_deref(), Some("meta-user"));
+        assert_eq!(
+            merged.container_env().get("META").map(String::as_str),
+            Some("1")
+        );
+        assert!(merged.forward_ports.is_some(), "forwardPorts must fold");
+        assert!(merged.user_env_probe.is_some(), "userEnvProbe must fold");
+    }
+
+    /// #526 must not undo #475/#477: the hook layers lifted off the label survive the
+    /// property restriction.
+    ///
+    /// `metadata_lifecycle_layers` is `#[serde(skip)]`, so the JSON round-trip the
+    /// restriction performs erases it unless it is re-attached — and the failure would be
+    /// silent, because the five singular hook fields are already empty by then. Every
+    /// label-contributed hook would simply stop running.
+    #[test]
+    fn restricting_metadata_properties_preserves_the_lifecycle_layers() {
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            serde_json::json!([
+                { "workspaceFolder": "/meta-ws", "onCreateCommand": "echo one" },
+                { "onCreateCommand": "echo two" },
+            ])
+            .to_string(),
+        );
+        let container = make_container("abc", "alpine:3.18", labels);
+        let metadata = extract_image_metadata_config(&container).unwrap().unwrap();
+
+        let restricted = restrict_to_metadata_properties(&metadata).unwrap();
+
+        assert_eq!(
+            restricted.metadata_lifecycle_layers.len(),
+            2,
+            "both label fragments' hooks must still be carried as layers"
+        );
+        assert_eq!(restricted.workspace_folder, None);
     }
 
     /// #477, hermetically: the whole set-up path from the container's stamped
@@ -1017,7 +1227,7 @@ mod tests {
             post_create_command: Some(serde_json::json!("ws-postCreate")),
             ..DevContainerConfig::default()
         };
-        let merged = merge_configs(&file_cfg, metadata.as_ref());
+        let merged = merge_configs(&file_cfg, metadata.as_ref()).unwrap();
 
         let phase_commands = |phase: LifecyclePhase| {
             aggregate_lifecycle_commands(phase, &[], &merged)
@@ -1081,7 +1291,7 @@ mod tests {
             post_create_command: Some(serde_json::json!("ws-postCreate")),
             ..DevContainerConfig::default()
         };
-        merge_configs(&file_cfg, metadata.as_ref())
+        merge_configs(&file_cfg, metadata.as_ref()).unwrap()
     }
 
     /// #483: the block carries the COLLECTED plural arrays, in the order the hooks run,
@@ -1297,7 +1507,7 @@ mod tests {
             post_create_command: Some(serde_json::json!("echo overlay-postCreate")),
             ..DevContainerConfig::default()
         };
-        let merged = merge_configs(&authored, metadata.as_ref());
+        let merged = merge_configs(&authored, metadata.as_ref()).unwrap();
         (authored, merged)
     }
 

@@ -1651,3 +1651,215 @@ fn test_set_up_collects_container_label_hooks_alongside_the_config_hook() {
          instead of the label's (#477)"
     );
 }
+
+/// #526 (`set-up` surface): a container's `devcontainer.metadata` label contributes ONLY
+/// the properties upstream's `mergeConfiguration` reads off a metadata entry.
+///
+/// The reference's merge is not a fold of two configurations. It is the base config minus
+/// the collected properties, PLUS one expression per ENUMERATED metadata property (bundle
+/// `Xi`, `mergeConfiguration` in `devcontainers/cli/src/spec-node/imageMetadata.ts`). A
+/// property with no expression is never read from a label at all. deacon folded
+/// everything, so a label could contribute any property a base image happened to write.
+///
+/// A **raw-labeled** container is the whole point, and it is why no parity case reaches
+/// this through `op-up` alone: `deacon up` already picks the CONFIGURATION down to
+/// upstream's list before stamping it (#322/#373), so the only leakable entries on an
+/// `up`-created container are the ones it copied verbatim off the base image's own label.
+/// `docker run --label` puts an arbitrary metadata document on the container directly,
+/// which is the shape a hand-written base-image `LABEL` produces.
+///
+/// Both halves are asserted. Absence alone would pass for a restriction that dropped
+/// everything, so the enumerated properties are checked to have survived — including the
+/// collected hook arrays, which is the #475/#477 invariant this change must not undo.
+///
+/// The EXECUTION is asserted too, because the leak was never only a reporting defect:
+/// `workspaceFolder` is what `execute_lifecycle_hooks` passes as the `docker exec` CWD, so
+/// the label's `/meta-ws` — a directory that does not exist in the container — made every
+/// hook fail with exit 127 and `set-up` exit non-zero. Measured at oracle 0.87.0 on this
+/// exact label: the reference runs all four hooks and its log reads exactly the vector
+/// asserted below.
+#[test]
+fn test_set_up_folds_only_the_enumerated_metadata_properties() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_set_up_folds_only_the_enumerated_metadata_properties: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let guard = ContainerGuard::new();
+
+    let unique = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+
+    // Every key here is either in the leak census (#526) or on upstream's list. The two
+    // fragments also declare the same phase, which is the #475/#477 collection invariant.
+    let label = json!([
+        {
+            "id": "frag1",
+            "workspaceFolder": "/meta-ws",
+            "name": "meta-name",
+            "runArgs": ["--meta-arg"],
+            "appPort": [9999],
+            "workspaceMount": "source=/m,target=/m,type=bind",
+            "features": { "ghcr.io/x/y:1": {} },
+            "overrideFeatureInstallOrder": ["ghcr.io/x/y"],
+            "image": "should-not-leak",
+            "service": "nope",
+            "runServices": ["nope"],
+            "initializeCommand": "echo nope",
+            "remoteUser": "root",
+            "containerEnv": { "META": "1" },
+            "forwardPorts": [3000],
+            "userEnvProbe": "none",
+            "onCreateCommand": "echo frag1-onCreate >> /tmp/setup526.log",
+            "postCreateCommand": "echo frag1-postCreate >> /tmp/setup526.log",
+        },
+        {
+            "id": "frag2",
+            "postCreateCommand": "echo frag2-postCreate >> /tmp/setup526.log",
+        },
+    ])
+    .to_string();
+
+    let name = format!("deacon-test-setup-526-{}", unique);
+    let out = StdCommand::new("docker")
+        .args(["run", "-d", "--name", &name, "--label"])
+        .arg(format!("devcontainer.metadata={}", label))
+        .args(["alpine:3.19", "sleep", "infinity"])
+        .output()
+        .expect("docker run should execute");
+    assert!(
+        out.status.success(),
+        "docker run failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let container_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    guard.register(container_id.clone());
+
+    let config_path = temp_dir.path().join("set-up-config.json");
+    fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&json!({
+            "postCreateCommand": "echo config-postCreate >> /tmp/setup526.log",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("deacon")
+        .expect("deacon binary")
+        .env("DEACON_LOG", "warn")
+        .args([
+            "set-up",
+            "--container-id",
+            &container_id,
+            "--config",
+            config_path.to_str().unwrap(),
+            "--include-merged-configuration",
+        ])
+        .assert();
+    let output = assert.get_output();
+    assert!(
+        output.status.success(),
+        "deacon set-up failed — a `workspaceFolder` reaching the exec CWD from the label \
+         is one way this happens (#526):\nSTDOUT:\n{}\nSTDERR:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let document: Value = serde_json::from_slice(&output.stdout)
+        .expect("set-up must emit a single JSON document on stdout");
+    let merged = document
+        .get("mergedConfiguration")
+        .and_then(Value::as_object)
+        .expect("--include-merged-configuration must produce the block");
+
+    for key in [
+        "workspaceFolder",
+        "name",
+        "runArgs",
+        "appPort",
+        "workspaceMount",
+        "features",
+        "overrideFeatureInstallOrder",
+        "image",
+        "service",
+        "runServices",
+        "initializeCommand",
+    ] {
+        assert!(
+            !merged.contains_key(key),
+            "`{}` is not on upstream's metadata property list, so a container label must \
+             not be able to put it in mergedConfiguration (#526). Got: {}",
+            key,
+            serde_json::to_string_pretty(merged).unwrap()
+        );
+    }
+
+    assert_eq!(
+        merged.get("remoteUser").and_then(Value::as_str),
+        Some("root"),
+        "`remoteUser` IS on upstream's list and must still fold"
+    );
+    assert_eq!(
+        merged
+            .get("containerEnv")
+            .and_then(Value::as_object)
+            .and_then(|m| m.get("META"))
+            .and_then(Value::as_str),
+        Some("1"),
+        "`containerEnv` IS on upstream's list and must still fold"
+    );
+    assert_eq!(
+        merged.get("userEnvProbe").and_then(Value::as_str),
+        Some("none"),
+        "`userEnvProbe` IS on upstream's list and must still fold"
+    );
+    assert_eq!(
+        merged.get("forwardPorts"),
+        Some(&json!([3000])),
+        "`forwardPorts` IS on upstream's list and must still fold"
+    );
+    assert_eq!(
+        merged.get("onCreateCommands"),
+        Some(&json!(["echo frag1-onCreate >> /tmp/setup526.log"])),
+        "the collected hook arrays must survive the restriction (#475/#477)"
+    );
+    assert_eq!(
+        merged.get("postCreateCommands"),
+        Some(&json!([
+            "echo frag1-postCreate >> /tmp/setup526.log",
+            "echo frag2-postCreate >> /tmp/setup526.log",
+            "echo config-postCreate >> /tmp/setup526.log",
+        ])),
+        "every fragment declaring a phase contributes a hook, devcontainer.json last \
+         (#475/#477)"
+    );
+
+    let log: Vec<String> = read_container_file(&container_id, "/tmp/setup526.log")
+        .expect("the lifecycle hooks should have written /tmp/setup526.log")
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        log,
+        vec![
+            "frag1-onCreate",
+            "frag1-postCreate",
+            "frag2-postCreate",
+            "config-postCreate",
+        ],
+        "the hooks must RUN — a `workspaceFolder` folded off the label used to become the \
+         exec CWD and fail every one of them with exit 127 (#526)"
+    );
+}
