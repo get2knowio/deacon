@@ -114,13 +114,24 @@ fn prune_dead(registry: &mut RegistryFile) -> bool {
     registry.entries.len() != before
 }
 
-/// Try to reserve `port` on loopback: fail if already in the registry or not
-/// bindable. On success returns the held listener.
-fn try_reserve(registry: &RegistryFile, port: u16) -> Option<TcpListener> {
+/// The real bind probe: take `port` on loopback, or `None` if someone else has
+/// it. Binding **is** the atomic check-and-take — the returned listener keeps
+/// holding the port, so there is no check/use window inside the allocator.
+fn bind_loopback(port: u16) -> Option<TcpListener> {
+    TcpListener::bind(("127.0.0.1", port)).ok()
+}
+
+/// Try to reserve `port`: fail if already in the registry or `bind` refuses it.
+/// On success returns the held listener.
+fn try_reserve(
+    registry: &RegistryFile,
+    port: u16,
+    bind: &impl Fn(u16) -> Option<TcpListener>,
+) -> Option<TcpListener> {
     if registry.entries.iter().any(|e| e.host_port == port) {
         return None;
     }
-    TcpListener::bind(("127.0.0.1", port)).ok()
+    bind(port)
 }
 
 /// Allocate (and bind) a collision-free loopback host port for a forward.
@@ -137,6 +148,30 @@ pub fn allocate(
     workspace: &str,
     label: Option<&str>,
 ) -> Result<Allocation> {
+    allocate_with(
+        user_data_folder,
+        container_id,
+        container_port,
+        workspace,
+        label,
+        bind_loopback,
+    )
+}
+
+/// [`allocate`] with the host-port bind probe injected.
+///
+/// Production always passes [`bind_loopback`], so behavior is identical to
+/// `allocate`. The seam exists so the tests can drive the preference/scan logic
+/// against a controlled availability oracle instead of the host-global OS port
+/// space, which no test can hold still (#482).
+fn allocate_with(
+    user_data_folder: Option<&Path>,
+    container_id: &str,
+    container_port: u16,
+    workspace: &str,
+    label: Option<&str>,
+    bind: impl Fn(u16) -> Option<TcpListener>,
+) -> Result<Allocation> {
     let _guard = lock(user_data_folder)?;
     let mut registry = load(user_data_folder)?;
     let dirty = prune_dead(&mut registry);
@@ -144,7 +179,7 @@ pub fn allocate(
     // Prefer the same number when unprivileged and free.
     let mut chosen: Option<(u16, TcpListener)> = None;
     if container_port >= MIN_HOST_PORT {
-        if let Some(listener) = try_reserve(&registry, container_port) {
+        if let Some(listener) = try_reserve(&registry, container_port, &bind) {
             chosen = Some((container_port, listener));
         }
     }
@@ -155,7 +190,7 @@ pub fn allocate(
             if candidate < MIN_HOST_PORT {
                 continue;
             }
-            if let Some(listener) = try_reserve(&registry, candidate) {
+            if let Some(listener) = try_reserve(&registry, candidate, &bind) {
                 chosen = Some((candidate, listener));
                 break;
             }
@@ -242,27 +277,55 @@ mod tests {
         Some(dir.path())
     }
 
-    /// An ephemeral port that is currently free (the listener is dropped
-    /// immediately, so `allocate` can re-bind the same number).
-    fn free_port() -> u16 {
-        TcpListener::bind(("127.0.0.1", 0))
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
+    /// A fixed, arbitrary unprivileged container port. Nothing is ever bound on
+    /// the host at this number: every test below drives `allocate_with` through
+    /// an injected availability oracle, so the host's real port space is not
+    /// consulted and cannot change the answer.
+    const PORT: u16 = 5000;
+
+    /// Availability oracle: every port is bindable.
+    ///
+    /// The listener handed back is a throwaway ephemeral socket — these tests
+    /// assert which host port *number* the allocator chooses, and the number is
+    /// decided before any bind. The previous helper (`free_port`) instead
+    /// bound 127.0.0.1:0, read the number, and **dropped** the listener, then
+    /// expected `allocate` to re-bind it; between the drop and the re-bind the
+    /// kernel is free to hand that ephemeral number to anyone else, which is
+    /// exactly the flake in #482 (observed: probe got 41245, allocator had to
+    /// take 41246).
+    fn all_free(_port: u16) -> Option<TcpListener> {
+        TcpListener::bind(("127.0.0.1", 0)).ok()
     }
 
     #[test]
     fn prefers_same_number_when_free() {
         let dir = TempDir::new().unwrap();
-        let port = free_port();
-        let alloc = allocate(udf(&dir), "c1", port, "/ws/a", Some("web")).unwrap();
-        assert_eq!(alloc.host_port, port);
+        let alloc = allocate_with(udf(&dir), "c1", PORT, "/ws/a", Some("web"), all_free).unwrap();
+        assert_eq!(alloc.host_port, PORT);
         assert!(!alloc.remapped);
         let entries = entries(udf(&dir)).unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].host_port, port);
+        assert_eq!(entries[0].host_port, PORT);
         assert_eq!(entries[0].label.as_deref(), Some("web"));
+    }
+
+    /// The preference is a real preference, not a coincidence: when the natural
+    /// number is held by a process the registry knows nothing about, the
+    /// allocator scans upward to the first port that binds.
+    #[test]
+    fn unbindable_same_number_scans_upward() {
+        let dir = TempDir::new().unwrap();
+        let taken = [PORT, PORT + 1];
+        let alloc = allocate_with(udf(&dir), "c1", PORT, "/ws/a", None, |p| {
+            if taken.contains(&p) {
+                None
+            } else {
+                all_free(p)
+            }
+        })
+        .unwrap();
+        assert_eq!(alloc.host_port, PORT + 2);
+        assert!(alloc.remapped);
     }
 
     // Unix-only: collision/remap depends on `pid_alive` to tell a live owner
@@ -273,13 +336,14 @@ mod tests {
     #[test]
     fn collision_triggers_next_free_remap() {
         let dir = TempDir::new().unwrap();
-        let port = free_port();
         // First container takes the natural port.
-        let a = allocate(udf(&dir), "c1", port, "/ws/a", None).unwrap();
-        assert_eq!(a.host_port, port);
-        // Second container also wants it → remapped to next free.
-        let b = allocate(udf(&dir), "c2", port, "/ws/b", None).unwrap();
-        assert_ne!(b.host_port, port);
+        let a = allocate_with(udf(&dir), "c1", PORT, "/ws/a", None, all_free).unwrap();
+        assert_eq!(a.host_port, PORT);
+        // Second container also wants it. Even though the oracle says every
+        // port binds, the live registry entry owned by this (alive) pid forces
+        // the remap to the next free number.
+        let b = allocate_with(udf(&dir), "c2", PORT, "/ws/b", None, all_free).unwrap();
+        assert_eq!(b.host_port, PORT + 1);
         assert!(b.remapped);
         assert!(b.host_port >= MIN_HOST_PORT);
         // Both registered, host ports unique.
@@ -294,15 +358,16 @@ mod tests {
     #[test]
     fn privileged_port_is_remapped() {
         let dir = TempDir::new().unwrap();
-        let a = allocate(udf(&dir), "c1", 80, "/ws/a", None).unwrap();
-        assert!(a.host_port >= MIN_HOST_PORT);
+        let a = allocate_with(udf(&dir), "c1", 80, "/ws/a", None, all_free).unwrap();
+        assert!(a.host_port >= MIN_HOST_PORT); // FR-009a: never require host root
+        assert_eq!(a.host_port, MIN_HOST_PORT); // scan starts at the floor
         assert!(a.remapped);
     }
 
     #[test]
     fn release_removes_entries() {
         let dir = TempDir::new().unwrap();
-        let a = allocate(udf(&dir), "c1", free_port(), "/ws/a", None).unwrap();
+        let a = allocate_with(udf(&dir), "c1", PORT, "/ws/a", None, all_free).unwrap();
         drop(a); // free the listener so the port is reusable
         release_container(udf(&dir), "c1").unwrap();
         assert!(entries(udf(&dir)).unwrap().is_empty());
@@ -311,15 +376,14 @@ mod tests {
     #[test]
     fn stale_dead_pid_entries_are_pruned_on_allocate() {
         let dir = TempDir::new().unwrap();
-        let port = free_port();
         // Seed a registry with an entry owned by a definitely-dead pid, holding
         // the natural port.
         let stale = RegistryFile {
             version: 1,
             entries: vec![RegistryEntry {
-                host_port: port,
+                host_port: PORT,
                 container_id: "ghost".to_string(),
-                container_port: port,
+                container_port: PORT,
                 workspace: "/ws/ghost".to_string(),
                 pid: 2_000_000_000, // not a live pid
                 label: None,
@@ -328,8 +392,8 @@ mod tests {
         save(udf(&dir), &stale).unwrap();
         // Allocating the same container port should prune the stale entry and
         // reuse the natural port.
-        let a = allocate(udf(&dir), "c1", port, "/ws/a", None).unwrap();
-        assert_eq!(a.host_port, port);
+        let a = allocate_with(udf(&dir), "c1", PORT, "/ws/a", None, all_free).unwrap();
+        assert_eq!(a.host_port, PORT);
         let entries = entries(udf(&dir)).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].container_id, "c1");
@@ -338,7 +402,7 @@ mod tests {
     #[test]
     fn prune_drops_missing_containers() {
         let dir = TempDir::new().unwrap();
-        let a = allocate(udf(&dir), "alive", free_port(), "/ws/a", None).unwrap();
+        let a = allocate_with(udf(&dir), "alive", PORT, "/ws/a", None, all_free).unwrap();
         // Prune treating the container as gone → entry removed.
         prune(udf(&dir), |_| false).unwrap();
         assert!(entries(udf(&dir)).unwrap().is_empty());
