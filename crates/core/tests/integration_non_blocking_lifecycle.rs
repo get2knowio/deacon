@@ -37,6 +37,7 @@ async fn test_non_blocking_phases_are_deferred() {
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
+        substitution_workspace_folder: Some("/workspace".to_string()),
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: false, // Enable non-blocking commands
@@ -146,6 +147,7 @@ async fn test_skip_non_blocking_commands_behavior() {
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
+        substitution_workspace_folder: Some("/workspace".to_string()),
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: true, // Disable non-blocking commands
@@ -222,6 +224,7 @@ async fn test_non_blocking_phases_sync_execution() {
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
+        substitution_workspace_folder: Some("/workspace".to_string()),
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: false, // Enable non-blocking commands
@@ -348,6 +351,7 @@ async fn test_non_blocking_phase_command_failures_are_handled() {
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
+        substitution_workspace_folder: Some("/workspace".to_string()),
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: false,
@@ -469,6 +473,7 @@ async fn test_non_blocking_phase_timeout_handling() {
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
+        substitution_workspace_folder: Some("/workspace".to_string()),
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: false,
@@ -552,6 +557,7 @@ async fn test_non_blocking_phases_with_progress_streaming() {
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
+        substitution_workspace_folder: Some("/workspace".to_string()),
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: false,

@@ -271,8 +271,18 @@ pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Re
     // absence of a workspace explicit, so no variable can observe it. Anchoring with
     // `SubstitutionContext::new` instead silently substituted the cwd for a workspace
     // the caller never named.
+    //
+    // `${containerWorkspaceFolder}` is the one workspace-shaped variable that CAN
+    // have an answer here, and it comes from the `--config` document's own
+    // `workspaceFolder` — the reference builds its context with exactly that
+    // (`containerWorkspaceFolder: <the config's raw workspaceFolder>`, undefined
+    // when the document omits it), and leaves the token literal otherwise.
+    // Measured at oracle 0.87.0 on all four cells (#513), including the negative:
+    // a `workspaceFolder` reaching only through the container's image metadata
+    // does NOT resolve it, so this reads `base_config`, not the merged config.
     let cwd = std::env::current_dir().context("Failed to get current working directory")?;
-    let substitution_context = SubstitutionContext::without_workspace(&cwd)?;
+    let mut substitution_context = SubstitutionContext::without_workspace(&cwd)?;
+    substitution_context.container_workspace_folder = base_config.workspace_folder.clone();
 
     // The `configuration` block reports what the CALLER SUPPLIED — the `--config`
     // document alone, substituted, never folded with the container's image metadata.
@@ -439,10 +449,22 @@ async fn execute_lifecycle_hooks(
         container_env.insert(k.clone(), v.clone());
     }
 
+    // Two different uses of one path, split by #513.
+    //
+    // The exec CWD must always be a path — `docker exec -w` needs one — so an
+    // unauthored `workspaceFolder` still falls back to `/`, unchanged.
+    //
+    // The SUBSTITUTION value must be able to be absent, and is whatever the
+    // caller's context resolved (the `--config`'s own `workspaceFolder`, or
+    // `None`). Reading it from the context rather than recomputing it is what
+    // makes the reported blocks and the commands set-up actually runs agree by
+    // construction: before, the report left `${containerWorkspaceFolder}` literal
+    // while the exec substituted an invented `/`.
     let container_workspace_folder = merged_config
         .workspace_folder
         .clone()
         .unwrap_or_else(|| "/".to_string());
+    let substitution_workspace_folder = substitution_context.container_workspace_folder.clone();
 
     let lifecycle_config = ContainerLifecycleConfig {
         capture_output: false,
@@ -452,6 +474,7 @@ async fn execute_lifecycle_hooks(
             .clone()
             .or_else(|| merged_config.container_user.clone()),
         container_workspace_folder,
+        substitution_workspace_folder,
         container_env,
         // We've already gated all-skip in the caller; pass false here so the
         // lifecycle helper runs the individual phases it would normally run.
@@ -1201,6 +1224,60 @@ mod tests {
                 .to_string()
                 .contains(anchor.as_ref()),
             "the mechanical cwd anchor must never leak into a substituted value"
+        );
+    }
+
+    /// `${containerWorkspaceFolder}` is the one workspace-shaped variable set-up CAN
+    /// answer, and its source is the `--config` document's own `workspaceFolder`:
+    /// resolved when authored, literal when not — on the reported blocks AND on the
+    /// command strings set-up execs, which are built from this one context. Measured
+    /// at oracle 0.87.0 on all four cells (#513); deacon used to leave the token
+    /// literal in the report while substituting an invented `/` into the command.
+    #[test]
+    fn set_up_substitution_answers_container_workspace_folder_only_when_authored() {
+        let probe = "cwf=${containerWorkspaceFolder} base=${containerWorkspaceFolderBasename}";
+        let config_with = |workspace_folder: Option<&str>| DevContainerConfig {
+            workspace_folder: workspace_folder.map(str::to_string),
+            remote_env: Some(
+                [("PROBE".to_string(), Some(probe.to_string()))]
+                    .into_iter()
+                    .collect(),
+            ),
+            post_create_command: Some(serde_json::json!(probe)),
+            ..Default::default()
+        };
+        // Exactly what `execute_set_up` builds: `without_workspace` anchored at the cwd,
+        // with the token's value taken from the AUTHORED `--config` document.
+        let anchor = std::env::current_dir().expect("cwd is readable");
+        let substitute = |config: &DevContainerConfig| {
+            let mut context = SubstitutionContext::without_workspace(&anchor)
+                .expect("context builds from the cwd");
+            context.container_workspace_folder = config.workspace_folder.clone();
+            config.apply_variable_substitution(&context).0
+        };
+
+        let authored = substitute(&config_with(Some("/work")));
+        assert_eq!(
+            authored.remote_env.as_ref().unwrap()["PROBE"].as_deref(),
+            Some("cwf=/work base=work"),
+            "an authored workspaceFolder answers both tokens in the reported block"
+        );
+        assert_eq!(
+            authored.post_create_command.as_ref().unwrap(),
+            &serde_json::json!("cwf=/work base=work"),
+            "and in the command set-up EXECS, from the same context"
+        );
+
+        let unauthored = substitute(&config_with(None));
+        assert_eq!(
+            unauthored.remote_env.as_ref().unwrap()["PROBE"].as_deref(),
+            Some(probe),
+            "with no authored workspaceFolder the tokens stay literal in the report"
+        );
+        assert_eq!(
+            unauthored.post_create_command.as_ref().unwrap(),
+            &serde_json::json!(probe),
+            "and in the command, where an invented `/` used to appear instead"
         );
     }
 

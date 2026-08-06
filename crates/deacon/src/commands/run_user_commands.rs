@@ -256,6 +256,10 @@ async fn execute_lifecycle_commands(
             .remote_user
             .clone()
             .or_else(|| config.container_user.clone()),
+        // `run-user-commands` takes `--workspace-folder`, so it always resolves a
+        // real container cwd and the substitution value is that same path (#513
+        // changed only who may leave it absent).
+        substitution_workspace_folder: Some(container_workspace_folder.clone()),
         container_workspace_folder,
         // Where the authored-order map (#394) stops, deliberately: the lifecycle
         // environment becomes `docker exec -e K=V` flags — order carries no meaning

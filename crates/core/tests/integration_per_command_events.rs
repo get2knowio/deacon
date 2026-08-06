@@ -68,6 +68,7 @@ async fn test_per_command_events_emitted() {
         container_id: "test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspaces/test".to_string(),
+        substitution_workspace_folder: Some("/workspaces/test".to_string()),
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: false,

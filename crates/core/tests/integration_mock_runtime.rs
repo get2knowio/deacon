@@ -335,6 +335,7 @@ async fn test_lifecycle_execution_with_mock_docker() -> Result<()> {
         container_id: "lifecycle-test-container".to_string(),
         user: Some("node".to_string()),
         container_workspace_folder: "/workspace/app".to_string(),
+        substitution_workspace_folder: Some("/workspace/app".to_string()),
         container_env: {
             let mut env = HashMap::new();
             env.insert("NODE_ENV".to_string(), "development".to_string());
@@ -440,6 +441,7 @@ async fn test_lifecycle_execution_with_skip_flags() -> Result<()> {
         container_id: "skip-test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
+        substitution_workspace_folder: Some("/workspace".to_string()),
         container_env: HashMap::new(),
         skip_post_create: true,           // Skip postCreate
         skip_non_blocking_commands: true, // Skip postStart and postAttach
@@ -510,6 +512,7 @@ async fn test_lifecycle_execution_with_command_failure() -> Result<()> {
         container_id: "failure-test-container".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
+        substitution_workspace_folder: Some("/workspace".to_string()),
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: true, // Skip postStart/postAttach to focus on failure
@@ -620,6 +623,7 @@ async fn test_non_blocking_command_skip_behavior() -> Result<()> {
         container_id: "non-blocking-test".to_string(),
         user: Some("root".to_string()),
         container_workspace_folder: "/workspace".to_string(),
+        substitution_workspace_folder: Some("/workspace".to_string()),
         container_env: HashMap::new(),
         skip_post_create: false,
         skip_non_blocking_commands: true, // This should skip postStart and postAttach
@@ -667,6 +671,78 @@ async fn test_non_blocking_command_skip_behavior() -> Result<()> {
     assert!(command_strings.contains(&"sh -c echo 'postCreate'".to_string()));
     assert!(!command_strings.contains(&"sh -c echo 'postStart'".to_string()));
     assert!(!command_strings.contains(&"sh -c echo 'postAttach'".to_string()));
+
+    Ok(())
+}
+
+/// The `${containerWorkspaceFolder}` substitution value is a SEPARATE seam from
+/// the exec cwd (#513). `substitution_workspace_folder` is authoritative over the
+/// caller's context: `Some` resolves the token, `None` clears it so the token
+/// reaches the container shell literally — and neither affects `working_dir`,
+/// which stays the `container_workspace_folder` path in both runs.
+#[tokio::test]
+async fn test_substitution_workspace_folder_is_independent_of_exec_cwd() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    // The context arrives already carrying a value, so a passing `None` run
+    // proves the config field CLEARS it rather than merely failing to set it.
+    let substitution_context = SubstitutionContext::new(temp_dir.path())?
+        .with_container_workspace_folder("/from-the-context".to_string());
+
+    let base = |substitution_workspace_folder| ContainerLifecycleConfig {
+        capture_output: false,
+        container_id: "seam-test-container".to_string(),
+        user: None,
+        // The exec cwd is always a path, in both runs.
+        container_workspace_folder: "/".to_string(),
+        substitution_workspace_folder,
+        container_env: HashMap::new(),
+        skip_post_create: false,
+        skip_non_blocking_commands: true,
+        non_blocking_timeout: Duration::from_secs(300),
+        use_login_shell: false,
+        user_env_probe: deacon_core::container_env_probe::ContainerProbeMode::None,
+        cache_folder: None,
+        user_data_folder: None,
+        force_pty: false,
+        dotfiles: None,
+        is_prebuild: false,
+        config_hash: None,
+    };
+    let commands =
+        ContainerLifecycleCommands::new().with_post_create(common::make_shell_command_list(&[
+            "echo ${containerWorkspaceFolder}",
+        ]));
+
+    // Absent: the token survives verbatim into the command the container runs.
+    let literal_docker = MockDocker::new();
+    execute_container_lifecycle_with_docker(
+        &base(None),
+        &commands,
+        &substitution_context,
+        &literal_docker,
+    )
+    .await?;
+    let literal = literal_docker.get_exec_history();
+    assert_eq!(literal.len(), 1);
+    assert_eq!(
+        literal[0].command,
+        vec!["sh", "-c", "echo ${containerWorkspaceFolder}"]
+    );
+    assert_eq!(literal[0].config.working_dir, Some("/".to_string()));
+
+    // Present: the token resolves to the supplied value, cwd unchanged.
+    let resolved_docker = MockDocker::new();
+    execute_container_lifecycle_with_docker(
+        &base(Some("/work".to_string())),
+        &commands,
+        &substitution_context,
+        &resolved_docker,
+    )
+    .await?;
+    let resolved = resolved_docker.get_exec_history();
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].command, vec!["sh", "-c", "echo /work"]);
+    assert_eq!(resolved[0].config.working_dir, Some("/".to_string()));
 
     Ok(())
 }
