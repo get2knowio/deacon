@@ -21,7 +21,7 @@ Represents the type of feature reference used in devcontainer.json.
 pub enum FeatureRefType {
     /// OCI registry reference: ghcr.io/devcontainers/features/node:18
     Oci(OciFeatureRef),
-    /// Local path reference: ./local-feature, ../shared-feature
+    /// Local path reference: ./local-feature, ./shared/local-feature
     LocalPath(PathBuf),
     /// HTTPS tarball URL: https://example.com/feature.tgz
     HttpsTarball(Url),
@@ -39,6 +39,9 @@ pub struct OciFeatureRef {
 
 **Validation Rules**:
 - Local paths MUST start with `./` or `../`
+- Local paths MUST NOT be absolute (a local Feature may not be referenced by absolute path)
+- Local paths resolve against the **config directory** and MUST resolve inside
+  `<workspace root>/.devcontainer/`; a `../` that escapes it is rejected
 - HTTPS URLs MUST start with `https://`
 - OCI references MUST NOT start with `./`, `../`, or `https://`
 

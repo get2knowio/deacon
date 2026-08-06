@@ -85,8 +85,9 @@ As a developer with custom features in my repository, I need to reference them v
 **Acceptance Scenarios**:
 
 1. **Given** a feature reference `"./local-feature"` and directory `.devcontainer/local-feature/devcontainer-feature.json`, **When** `deacon up` runs, **Then** the local feature is installed correctly
-2. **Given** a feature reference `"../shared-feature"` resolving outside the .devcontainer directory, **When** `deacon up` runs, **Then** the path is resolved correctly relative to devcontainer.json
-3. **Given** a local feature reference to a non-existent path, **When** `deacon up` runs, **Then** a clear error message indicates the missing path
+2. **Given** a root-level `.devcontainer.json` and a feature reference `"./.devcontainer/local-feature"`, **When** `deacon up` runs, **Then** the path is resolved relative to the config directory and installs the same feature
+3. **Given** a feature reference `"../shared-feature"` resolving outside the `.devcontainer/` directory, **When** `deacon up` runs, **Then** it is rejected — a local Feature's source must be contained within a sub-folder of `.devcontainer/`
+4. **Given** a local feature reference to a non-existent path, **When** `deacon up` runs, **Then** a clear error message indicates the missing path
 
 ---
 
@@ -134,7 +135,7 @@ As a developer referencing features via direct HTTPS URLs to tarballs, I need th
 - **FR-012**: System MUST extract and chain feature entrypoints in feature installation order
 - **FR-013**: System MUST ensure user commands execute through the entrypoint chain
 - **FR-014**: System MUST detect feature references starting with `./` or `../` as local path references
-- **FR-015**: System MUST resolve local feature paths relative to devcontainer.json location
+- **FR-015**: System MUST resolve local feature paths relative to the directory containing the active devcontainer.json, MUST reject absolute local-Feature paths, and MUST reject any path that resolves outside `<workspace root>/.devcontainer/`
 - **FR-016**: System MUST parse `devcontainer-feature.json` from local feature directories
 - **FR-017**: System MUST report clear errors for missing local feature paths
 - **FR-018**: System MUST detect feature references starting with `https://` as direct tarball URLs
