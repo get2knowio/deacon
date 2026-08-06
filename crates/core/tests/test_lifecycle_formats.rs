@@ -341,38 +341,63 @@ fn test_format_detection_null_returns_none() {
 // futures::future::join_all for container-side) achieves actual
 // concurrency rather than sequential execution.
 
-/// Verifies that parallel execution via JoinSet (the host-side pattern)
-/// completes two 500ms tasks in roughly 500ms wall-clock time, not 1000ms.
-/// This proves the JoinSet::spawn_blocking pattern achieves true concurrency.
+/// Both concurrency tests below rendezvous instead of racing a stopwatch.
+///
+/// They used to sleep 500ms per task and assert the pair finished under 900ms,
+/// inferring concurrency from the gap between ~500ms (concurrent) and ~1000ms
+/// (sequential). That bound is intrinsically under 2x, so a loaded box can breach
+/// it without any regression — the same disease as the redaction perf assertions
+/// in #517, and unfixable by widening, since widening past 1000ms would stop
+/// distinguishing concurrent from sequential at all.
+///
+/// A rendezvous tests the property directly: each task announces its arrival and
+/// then waits for the other's. Under genuine concurrency both arrive and both
+/// proceed, however slow the machine is. Under sequential execution the first
+/// task waits for a partner that has not been started yet and never will be, so
+/// it gives up after the guard below and the test fails. The guard is orders of
+/// magnitude above any scheduling delay: reachable by the regression, never by
+/// load.
+///
+/// Every wait is *bounded* rather than infinite. An unbounded rendezvous turns
+/// the regression into a hung test instead of a failing one — a blocking task
+/// parked forever also blocks tokio's runtime shutdown, so the test never even
+/// reaches its assertion.
+const RENDEZVOUS_GUARD: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Verifies that parallel execution via JoinSet (the host-side pattern) really
+/// runs both tasks at once. This proves the JoinSet::spawn_blocking pattern
+/// achieves true concurrency rather than serializing the entries.
 #[tokio::test]
 async fn test_parallel_execution_is_concurrent() {
-    use std::time::{Duration, Instant};
+    use std::sync::mpsc;
     use tokio::task::JoinSet;
 
-    let start = Instant::now();
     let mut set = JoinSet::new();
 
-    // Spawn two blocking tasks that each sleep for 500ms,
-    // mirroring the host-side parallel execution pattern in
-    // execute_host_lifecycle_phase (JoinSet::spawn_blocking).
-    for _ in 0..2 {
-        set.spawn_blocking(|| {
-            std::thread::sleep(Duration::from_millis(500));
+    // Spawn two blocking tasks that each announce their arrival and then wait
+    // for the other's, mirroring the host-side parallel execution pattern in
+    // execute_host_lifecycle_phase (JoinSet::spawn_blocking). Only tasks that
+    // are genuinely in flight together can both observe a peer.
+    let (tx_a, rx_a) = mpsc::channel::<()>();
+    let (tx_b, rx_b) = mpsc::channel::<()>();
+    for (tx, rx) in [(tx_a, rx_b), (tx_b, rx_a)] {
+        set.spawn_blocking(move || {
+            tx.send(()).expect("peer task should still be alive");
+            rx.recv_timeout(RENDEZVOUS_GUARD).is_ok()
         });
     }
 
     // Collect all results (mirrors "wait for ALL" pattern)
+    let mut observed_peer = Vec::new();
     while let Some(result) = set.join_next().await {
-        result.expect("spawned task should not panic");
+        observed_peer.push(result.expect("spawned task should not panic"));
     }
 
-    let elapsed = start.elapsed();
-    // If concurrent: ~500ms. If sequential: ~1000ms.
-    // Use 900ms as threshold to allow generous margin for CI.
-    assert!(
-        elapsed < Duration::from_millis(900),
-        "Parallel execution took {:?}, expected < 900ms (should be ~500ms if concurrent)",
-        elapsed
+    assert_eq!(
+        observed_peer,
+        vec![true, true],
+        "spawn_blocking entries did not run concurrently: a task waited out the \
+         full {RENDEZVOUS_GUARD:?} without its peer ever starting"
     );
 }
 
@@ -380,26 +405,37 @@ async fn test_parallel_execution_is_concurrent() {
 /// also achieves true concurrency with async tasks.
 #[tokio::test]
 async fn test_parallel_execution_is_concurrent_async() {
-    use std::time::{Duration, Instant};
+    use futures::channel::oneshot;
 
-    let start = Instant::now();
+    // Each future signals its own arrival, then awaits the other's. join_all
+    // polls both before either completes, so both resolve; awaiting them one at
+    // a time would leave the first waiting forever. tokio::sync is not enabled
+    // for this workspace, so the rendezvous uses futures' oneshot channels.
+    let (tx_a, rx_a) = oneshot::channel::<()>();
+    let (tx_b, rx_b) = oneshot::channel::<()>();
 
-    // Build futures for two async tasks that each sleep 500ms,
-    // mirroring the container-side parallel execution pattern
-    // in execute_container_lifecycle_phase (join_all).
-    let futures: Vec<_> = (0..2)
-        .map(|_| async {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        })
-        .collect();
+    let first = async move {
+        tx_a.send(()).expect("peer future should still be alive");
+        rx_b.await.expect("peer future should signal arrival");
+    };
+    let second = async move {
+        tx_b.send(()).expect("peer future should still be alive");
+        rx_a.await.expect("peer future should signal arrival");
+    };
 
-    futures::future::join_all(futures).await;
+    let joined = tokio::time::timeout(
+        RENDEZVOUS_GUARD,
+        futures::future::join_all(vec![
+            Box::pin(first) as std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>,
+            Box::pin(second),
+        ]),
+    )
+    .await;
 
-    let elapsed = start.elapsed();
     assert!(
-        elapsed < Duration::from_millis(900),
-        "Async parallel execution took {:?}, expected < 900ms (should be ~500ms if concurrent)",
-        elapsed
+        joined.is_ok(),
+        "join_all did not drive the futures concurrently: neither future observed \
+         the other's arrival within {RENDEZVOUS_GUARD:?}"
     );
 }
 

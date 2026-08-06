@@ -1123,15 +1123,34 @@ mod tests {
         assert!(redacted.contains("data"));
     }
 
+    /// Hash redaction must not cost an order of magnitude more than the scan it
+    /// performs. Asserted against a calibration loop rather than a fixed
+    /// wall-clock bound (#517): the previous "100 operations under 50ms" failed
+    /// roughly one run in six on an only lightly loaded box, because it measured
+    /// the machine rather than the code. The same calibrated-budget shape is used
+    /// by the throughput assertions in `tests/integration_redaction.rs`, where the
+    /// rationale is written out in full.
     #[test]
     fn test_hash_redaction_performance() {
-        use std::time::Instant;
+        use std::time::{Duration, Instant};
+
+        // 100 iterations — the original count — samples only a few milliseconds,
+        // which one scheduler preemption is enough to dominate. Iterate enough
+        // that a sample is real work and the ratio between the two loops means
+        // something.
+        const ITERATIONS: usize = 1000;
+        const MAX_RATIO: u32 = 10;
+        // Small on purpose: max(ratio * reference, floor), so a large floor would
+        // swallow the ratio. Load raises ratio * reference, never the floor.
+        const FLOOR: Duration = Duration::from_millis(100);
+        const ATTEMPTS: usize = 3;
 
         let registry = SecretRegistry::new();
 
         // Add 50 secrets
-        for i in 0..50 {
-            registry.add_secret(&format!("test-secret-{:03}", i));
+        let secrets: Vec<String> = (0..50).map(|i| format!("test-secret-{:03}", i)).collect();
+        for secret in &secrets {
+            registry.add_secret(secret);
         }
 
         let config = RedactionConfig::with_custom_registry(registry.clone());
@@ -1141,18 +1160,56 @@ mod tests {
         let hash2 = sha256_hash("test-secret-020");
         let test_text = format!("Hashes: {} and {} in logs", hash1, hash2);
 
-        // Measure performance
-        let start = Instant::now();
-        for _ in 0..100 {
-            let _result = redact_if_enabled(&test_text, &config);
-        }
-        let duration = start.elapsed();
+        // The registry scans both the exact secrets and their hashes, so the
+        // calibration loop does the same by hand: that is the irreducible work.
+        let needles: Vec<String> = secrets
+            .iter()
+            .cloned()
+            .chain(secrets.iter().map(|s| sha256_hash(s)))
+            .collect();
 
-        // Should be fast - less than 50ms for 100 operations with 50 secrets
-        assert!(
-            duration.as_millis() < 50,
-            "Hash redaction took too long: {:?}",
-            duration
+        let reference = || {
+            let start = Instant::now();
+            for _ in 0..ITERATIONS {
+                let mut owned = test_text.clone();
+                for needle in &needles {
+                    if owned.contains(needle.as_str()) {
+                        owned = owned.replace(needle.as_str(), REDACTION_PLACEHOLDER);
+                    }
+                }
+                std::hint::black_box(&owned);
+            }
+            start.elapsed()
+        };
+        let measured = || {
+            let start = Instant::now();
+            for _ in 0..ITERATIONS {
+                std::hint::black_box(redact_if_enabled(&test_text, &config));
+            }
+            start.elapsed()
+        };
+
+        // Warm up both paths so allocator growth is not billed to whichever runs first.
+        reference();
+        measured();
+
+        let mut attempts = Vec::with_capacity(ATTEMPTS);
+        for _ in 0..ATTEMPTS {
+            let baseline = reference();
+            let cost = measured();
+            let budget = std::cmp::max(baseline * MAX_RATIO, FLOOR);
+            if cost <= budget {
+                return;
+            }
+            attempts.push(format!(
+                "reference={baseline:?} measured={cost:?} budget={budget:?}"
+            ));
+        }
+
+        panic!(
+            "hash redaction exceeded {MAX_RATIO}x the calibration loop (floor {FLOOR:?}) \
+             on all {ATTEMPTS} attempts: {}",
+            attempts.join("; ")
         );
     }
 }
