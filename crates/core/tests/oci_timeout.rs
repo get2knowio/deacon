@@ -350,3 +350,233 @@ async fn test_pagination_timeout_accumulation() {
     // May succeed with partial results or fail, but shouldn't hang
     let _ = result;
 }
+
+// --- #525: transient-failure recovery on the config-resolution fetch path ---
+
+/// Mock that fails the first `failures` calls with a transient, timeout-shaped
+/// error and then serves `body`. Records how many calls it received so a test
+/// can assert the retry budget is both used and bounded.
+#[derive(Debug, Clone)]
+struct FlakyMockHttpClient {
+    failures_remaining: Arc<Mutex<usize>>,
+    calls: Arc<Mutex<usize>>,
+    body: Bytes,
+}
+
+impl FlakyMockHttpClient {
+    fn new(failures: usize, body: Bytes) -> Self {
+        Self {
+            failures_remaining: Arc::new(Mutex::new(failures)),
+            calls: Arc::new(Mutex::new(0)),
+            body,
+        }
+    }
+
+    async fn call_count(&self) -> usize {
+        *self.calls.lock().await
+    }
+
+    async fn next(
+        &self,
+        url: &str,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        *self.calls.lock().await += 1;
+        let mut remaining = self.failures_remaining.lock().await;
+        if *remaining > 0 {
+            *remaining -= 1;
+            // Mirrors ReqwestClient's phrasing for a timed-out request, which is
+            // what the #525 nightly actually hit against ghcr.io.
+            return Err(format!(
+                "Request timeout for URL: {}. Check network connectivity.",
+                url
+            )
+            .into());
+        }
+        Ok(self.body.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl HttpClient for FlakyMockHttpClient {
+    async fn get(
+        &self,
+        url: &str,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        self.next(url).await
+    }
+
+    async fn get_with_headers(
+        &self,
+        url: &str,
+        _headers: HashMap<String, String>,
+    ) -> std::result::Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+        self.next(url).await
+    }
+
+    async fn get_with_headers_and_response(
+        &self,
+        url: &str,
+        _headers: HashMap<String, String>,
+    ) -> std::result::Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let body = self.next(url).await?;
+        Ok(HttpResponse {
+            status: 200,
+            headers: HashMap::new(),
+            body,
+        })
+    }
+
+    async fn head(
+        &self,
+        url: &str,
+        _headers: HashMap<String, String>,
+    ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+        self.next(url).await.map(|_| 200)
+    }
+}
+
+fn valid_manifest_bytes() -> Bytes {
+    Bytes::from(
+        serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "layers": [{
+                "mediaType": "application/vnd.devcontainers.layer.v1+tar",
+                "size": 1024,
+                "digest": "sha256:abc123"
+            }]
+        })
+        .to_string(),
+    )
+}
+
+fn flaky_feature_ref() -> FeatureRef {
+    FeatureRef::new(
+        "test.registry".to_string(),
+        "test".to_string(),
+        "feature".to_string(),
+        Some("latest".to_string()),
+    )
+}
+
+/// A single transient failure must NOT surface to the caller: the FR-023 policy
+/// grants one retry, and the second attempt succeeds. This is the exact shape of
+/// the #525 false divergence, where deacon reported a hard failure on a manifest
+/// fetch that the reference CLI completed.
+#[tokio::test]
+async fn test_transient_manifest_failure_recovers_on_retry() {
+    let client = FlakyMockHttpClient::new(1, valid_manifest_bytes());
+    let cache = tempfile::TempDir::new().unwrap();
+    let fetcher = FeatureFetcher::with_retry_config(
+        client.clone(),
+        cache.path().to_path_buf(),
+        deacon_core::oci::feature_fetch_retry_config(),
+    );
+
+    let manifest = fetcher
+        .get_manifest(&flaky_feature_ref())
+        .await
+        .expect("one transient failure must be absorbed by the single retry");
+
+    assert_eq!(
+        manifest.layers.len(),
+        1,
+        "manifest should parse after retry"
+    );
+    assert_eq!(
+        client.call_count().await,
+        2,
+        "should have taken exactly the initial attempt plus one retry"
+    );
+}
+
+/// Retries stay bounded and the underlying cause is propagated verbatim rather
+/// than being flattened into a generic message — a persistent outage must still
+/// fail, and fail legibly.
+#[tokio::test]
+async fn test_persistent_failure_exhausts_retries_and_propagates_cause() {
+    // More failures than the budget can absorb.
+    let client = FlakyMockHttpClient::new(5, valid_manifest_bytes());
+    let cache = tempfile::TempDir::new().unwrap();
+    let fetcher = FeatureFetcher::with_retry_config(
+        client.clone(),
+        cache.path().to_path_buf(),
+        deacon_core::oci::feature_fetch_retry_config(),
+    );
+
+    let err = fetcher
+        .get_manifest(&flaky_feature_ref())
+        .await
+        .expect_err("a persistent failure must still fail");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Request timeout for URL"),
+        "the real transport error must survive to the caller, got: {msg}"
+    );
+    assert_eq!(
+        client.call_count().await,
+        2,
+        "retries must stay bounded at the initial attempt plus one retry"
+    );
+}
+
+/// The behavioral regression test for #525: one healthy-but-slow registry
+/// response, served twice from the same server. The FR-023 budget in force today
+/// absorbs it; the 2s cap it replaced does not. This is the difference that made
+/// the nightly red while the reference CLI — which sets no timeout at all —
+/// succeeded against the same endpoint.
+#[tokio::test]
+async fn test_fr023_budget_tolerates_slow_registry_that_two_second_cap_killed() {
+    use deacon_core::oci::ReqwestClient;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/test/feature/manifests/latest"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(valid_manifest_bytes().to_vec())
+                .set_delay(Duration::from_secs(3)),
+        )
+        .mount(&server)
+        .await;
+
+    let url = format!("{}/v2/test/feature/manifests/latest", server.uri());
+
+    let current = ReqwestClient::with_timeout(Some(deacon_core::oci::FEATURE_FETCH_TIMEOUT))
+        .expect("client construction");
+    current
+        .get(&url)
+        .await
+        .expect("FR-023's 30s budget must tolerate a 3s registry response");
+
+    let old_cap =
+        ReqwestClient::with_timeout(Some(Duration::from_secs(2))).expect("client construction");
+    let err = old_cap
+        .get(&url)
+        .await
+        .expect_err("the replaced 2s cap must fail on this very same response");
+    assert!(
+        err.to_string().contains("Request timeout"),
+        "the 2s cap should fail as a timeout, got: {err}"
+    );
+}
+
+/// Guards the FR-023 policy values themselves. The 2s timeout this replaced was
+/// shorter than a real ghcr.io round-trip and produced #525's false divergence;
+/// re-tightening it should be a deliberate act, not a silent edit.
+#[test]
+fn test_feature_fetch_policy_matches_fr_023() {
+    assert_eq!(
+        deacon_core::oci::FEATURE_FETCH_TIMEOUT,
+        Duration::from_secs(30),
+        "FR-023 mandates a 30-second timeout for HTTPS feature downloads"
+    );
+    assert_eq!(
+        deacon_core::oci::feature_fetch_retry_config().max_attempts,
+        1,
+        "FR-023 mandates a single retry on transient network errors"
+    );
+}

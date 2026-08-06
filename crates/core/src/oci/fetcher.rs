@@ -941,6 +941,35 @@ impl<C: HttpClient> FeatureFetcher<C> {
     }
 }
 
+/// Per-request timeout for feature manifest/blob fetches during configuration
+/// resolution, per spec FR-023 ("30-second timeout for HTTPS feature downloads
+/// with a single retry on transient network errors").
+///
+/// This bounds the *total* request; the connect phase is separately bounded by
+/// [`ReqwestClient`]'s connect timeout, so an unreachable registry still fails
+/// fast instead of burning the full budget. Only a registry that accepts the
+/// connection and then responds slowly consumes it.
+///
+/// Do not tighten this to "make config resolution feel fast". A budget shorter
+/// than a real registry round-trip turns ordinary registry latency into a hard
+/// failure — a 2s cap here made `read-configuration` fail against `ghcr.io`
+/// where the reference CLI (which sets no timeout at all) succeeded (#525).
+pub const FEATURE_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Retry policy for feature fetches during configuration resolution, per spec
+/// FR-023: exactly one retry on a transient network error, with a small
+/// jittered backoff. The reference CLI performs no transient retry at all, so a
+/// single retry is strictly more forgiving while keeping the worst case bounded
+/// at two attempts.
+pub fn feature_fetch_retry_config() -> RetryConfig {
+    RetryConfig::new(
+        1,                                        // one retry after the initial attempt
+        std::time::Duration::from_millis(100),    // base backoff
+        std::time::Duration::from_secs(1),        // backoff cap
+        crate::retry::JitterStrategy::FullJitter, // spread concurrent retries
+    )
+}
+
 /// Convenience function to create a default feature fetcher
 pub fn default_fetcher() -> Result<FeatureFetcher<ReqwestClient>> {
     let client = ReqwestClient::new().map_err(|e| FeatureError::Authentication {
@@ -951,29 +980,24 @@ pub fn default_fetcher() -> Result<FeatureFetcher<ReqwestClient>> {
 
 /// Create a feature fetcher with custom timeout and retry configuration
 ///
-/// This function is useful for operations that need predictable performance guarantees,
-/// such as the read-configuration command which should minimize latency.
+/// Prefer [`FEATURE_FETCH_TIMEOUT`] + [`feature_fetch_retry_config`] for
+/// configuration-resolution paths; they encode the FR-023 policy. Pass a custom
+/// bound only when a caller genuinely needs a different one.
 ///
 /// # Arguments
-/// * `timeout` - Timeout for each HTTP request (e.g., 2 seconds)
+/// * `timeout` - Total timeout for each HTTP request
 /// * `retry_config` - Retry configuration (max attempts, backoff delays)
 ///
 /// # Examples
 /// ```
-/// use deacon_core::oci::default_fetcher_with_config;
-/// use deacon_core::retry::RetryConfig;
-/// use std::time::Duration;
+/// use deacon_core::oci::{
+///     FEATURE_FETCH_TIMEOUT, default_fetcher_with_config, feature_fetch_retry_config,
+/// };
 ///
-/// // Create fetcher with 2s timeout and 1 retry
-/// let retry_config = RetryConfig::new(
-///     1, // max_attempts (1 retry after initial attempt)
-///     Duration::from_millis(100), // base_delay
-///     Duration::from_secs(1), // max_delay
-///     deacon_core::retry::JitterStrategy::FullJitter,
-/// );
+/// // The FR-023 policy: 30s per request, a single retry on transient errors.
 /// let fetcher = default_fetcher_with_config(
-///     Some(Duration::from_secs(2)),
-///     retry_config,
+///     Some(FEATURE_FETCH_TIMEOUT),
+///     feature_fetch_retry_config(),
 /// );
 /// ```
 pub fn default_fetcher_with_config(

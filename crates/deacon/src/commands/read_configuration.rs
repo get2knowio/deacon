@@ -1924,20 +1924,19 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         None
     };
 
-    // Create fetcher with tight timeouts for features resolution
-    // Per FR-009: Use 2s timeout and exactly 1 retry for predictable performance
-    use deacon_core::retry::{JitterStrategy, RetryConfig};
-    use std::time::Duration;
-
-    let retry_config = RetryConfig::new(
-        1,                          // max_attempts: exactly 1 retry
-        Duration::from_millis(100), // base_delay: small backoff
-        Duration::from_secs(1),     // max_delay
-        JitterStrategy::FullJitter,
-    );
-
-    let fetcher = default_fetcher_with_config(Some(Duration::from_secs(2)), retry_config)
-        .map_err(|e| anyhow::anyhow!("Failed to create OCI fetcher: {}", e))?;
+    // Create the fetcher for features resolution using the shared FR-023 policy
+    // (30s per request, a single retry on transient network errors).
+    //
+    // This deliberately does NOT use a tighter bound. Config resolution fetches
+    // feature manifests from a live registry, and a budget shorter than a real
+    // registry round-trip converts ordinary latency into a hard failure: a
+    // previous 2s cap made this path fail against `ghcr.io` while the reference
+    // CLI — which sets no timeout at all — succeeded (#525).
+    let fetcher = default_fetcher_with_config(
+        Some(deacon_core::oci::FEATURE_FETCH_TIMEOUT),
+        deacon_core::oci::feature_fetch_retry_config(),
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to create OCI fetcher: {}", e))?;
 
     // Resolve features if requested or needed for merged config
     // Per spec: Features are needed for:
