@@ -11,6 +11,10 @@
 //! `run-user-commands` and asserts BOTH the feature's and the config's
 //! postCreate markers appear.
 //!
+//! The binary also carries the two `devcontainer.metadata` cases for the same
+//! subcommand: that the label's hooks run at all (#405) and that the label is
+//! read off the CONTAINER inspect rather than the image (#527).
+//!
 //! Requires Docker; self-skips when unavailable.
 #![cfg(unix)]
 
@@ -285,5 +289,109 @@ fn run_user_commands_honors_image_metadata_user_env_and_hook() {
         "metauser from-image-metadata",
         "the hook must run as the image-metadata remoteUser with the image-metadata remoteEnv \
          applied (#405)"
+    );
+}
+
+/// #527: the `devcontainer.metadata` that `run-user-commands` folds in comes
+/// from the CONTAINER inspect, not from an inspect of the container's image.
+///
+/// The two sources are made to DISAGREE, which is the only way to tell them
+/// apart: the fixture image's label declares a `postCreateCommand` writing
+/// `image`, and the container is created with a run-time
+/// `--label devcontainer.metadata=…` declaring one that writes `container`.
+/// Docker merges an image's labels into a container's `Config.Labels` at create
+/// time with the run-time `--label` winning outright, so a container inspect
+/// sees ONLY the `container` entry while an image inspect sees ONLY the `image`
+/// one.
+///
+/// Measured against the pinned oracle `@devcontainers/cli@0.87.0` on this exact
+/// fixture: the reference writes `container`. deacon wrote `image` until this
+/// fix. Beyond parity it also mattered for deacon's own containers: `up` stamps
+/// its accumulated superset (image + Feature + config entries) on the CONTAINER
+/// only, so the image read was strictly staler than what `up` had written.
+///
+/// The container is created with a plain `docker run`, NOT `deacon up`, on
+/// purpose — `up` stamps both locations consistently and would mask the bug.
+#[test]
+fn run_user_commands_reads_metadata_from_the_container_not_the_image() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping run_user_commands_reads_metadata_from_the_container_not_the_image: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    // Fixture image: its metadata label's hook writes `image`.
+    let image_dir = root.join("image");
+    fs::create_dir_all(&image_dir).unwrap();
+    fs::write(
+        image_dir.join("Dockerfile"),
+        "FROM debian:bookworm-slim\n\
+         LABEL devcontainer.metadata='[{\"postCreateCommand\":\
+         \"echo image > /tmp/ruc-527.flag\"}]'\n",
+    )
+    .unwrap();
+
+    let tag = format!("deacon-ruc-527-test-{}:latest", std::process::id());
+    let built = std::process::Command::new("docker")
+        .args(["build", "-q", "-t", &tag])
+        .arg(&image_dir)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(built, "the metadata-carrying fixture image must build");
+    let _image_guard = ImageGuard(tag.clone());
+
+    fs::create_dir_all(root.join(".devcontainer")).unwrap();
+    // No lifecycle hook of its own: whichever hook runs came from a label, and
+    // the marker's contents name which label it came from.
+    fs::write(
+        root.join(".devcontainer/devcontainer.json"),
+        format!(r#"{{ "image": "{tag}", "workspaceFolder": "/" }}"#),
+    )
+    .unwrap();
+
+    // A RAW container: the run-time label overrides the image's inherited one.
+    let container_name = format!("deacon-ruc-527-{}", std::process::id());
+    let _guard = ContainerGuard(container_name.clone());
+    let started = std::process::Command::new("docker")
+        .args([
+            "run",
+            "-d",
+            "--name",
+            &container_name,
+            "--label",
+            "devcontainer.metadata=[{\"postCreateCommand\":\"echo container > /tmp/ruc-527.flag\"}]",
+            &tag,
+            "sleep",
+            "600",
+        ])
+        .stdout(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(started, "the raw-labeled fixture container must start");
+
+    Command::cargo_bin("deacon")
+        .unwrap()
+        .current_dir(root)
+        .arg("run-user-commands")
+        .arg("--workspace-folder")
+        .arg(root)
+        .arg("--container-id")
+        .arg(&container_name)
+        .assert()
+        .success();
+
+    let marker = read_marker(&container_name, "/tmp/ruc-527.flag")
+        .expect("run-user-commands must execute the label-contributed postCreateCommand");
+    assert_eq!(
+        marker.trim_end(),
+        "container",
+        "the metadata must be read off the CONTAINER inspect, not the image (#527); \
+         `image` here means the pre-#527 image-inspect read is back"
     );
 }

@@ -247,22 +247,31 @@ async fn execute_lifecycle_commands(
         .map(|info| info.mounts.clone())
         .unwrap_or_default();
 
-    // #405: fold the running container's image `devcontainer.metadata` into the
+    // #405: fold the running container's `devcontainer.metadata` label into the
     // workspace config, exactly as `exec` does — otherwise a `remoteUser`,
-    // `remoteEnv` or lifecycle hook contributed only by image metadata is
+    // `remoteEnv` or lifecycle hook contributed only by that metadata is
     // silently ignored here while `up` and `exec` honor it. The reference CLI
     // 0.87.0 runs its user commands with all three applied (measured).
-    let merged_config = match container_info.as_ref() {
+    //
+    // The label is read off the CONTAINER inspect, not the image (#527), and
+    // the composition it reports decides who owns the lifecycle record: on a
+    // container carrying this workspace's identity labels the label IS the
+    // record (image + Feature + config entries), so this pass must not also
+    // resolve the Features itself.
+    let (merged_config, metadata_composition) = match container_info.as_ref() {
         Some(info) => {
-            crate::commands::shared::container_metadata::resolve_config_against_container(
-                cli,
-                info,
-                config.clone(),
-                workspace_folder,
-            )
-            .await
+            let resolved =
+                crate::commands::shared::container_metadata::resolve_config_against_container(
+                    info,
+                    config.clone(),
+                    workspace_folder,
+                );
+            (resolved.config, resolved.composition)
         }
-        None => config.clone(),
+        None => (
+            config.clone(),
+            crate::commands::shared::container_metadata::MetadataComposition::Layered,
+        ),
     };
     let config = &merged_config;
 
@@ -322,6 +331,15 @@ async fn execute_lifecycle_commands(
     // directory. If a declared feature cannot be resolved (missing local path,
     // OCI fetch error, dependency cycle), we propagate the error rather than
     // silently running a partial set of hooks.
+    //
+    // SKIPPED entirely on a container whose metadata label is the complete
+    // record (#527): that label already carries one entry per INSTALLED
+    // Feature, so resolving the declared set here would queue every Feature
+    // hook a second time. The reference skips it for the same reason — its
+    // complete-record branch never touches `featuresConfig`. Skipping the
+    // resolution also skips its fail-fast, which is correct on this path: the
+    // Features are already installed, so what the config declares NOW cannot
+    // change what runs.
     let config_dir = if let Some(cfg) = args.config_path.as_deref() {
         if cfg.is_dir() {
             cfg.to_path_buf()
@@ -336,22 +354,31 @@ async fn execute_lifecycle_commands(
             workspace_folder.to_path_buf()
         }
     };
-    let fetcher =
-        deacon_core::oci::default_fetcher().context("Failed to initialize OCI feature fetcher")?;
-    let resolved_features = crate::commands::shared::feature_resolver::resolve_features_ordered(
-        config,
-        &config_dir,
-        workspace_folder,
-        &fetcher,
-    )
-    .await
-    .context("Failed to resolve features for lifecycle command aggregation")?;
-    if !resolved_features.is_empty() {
+    let resolved_features = if metadata_composition.suppresses_caller_features() {
         debug!(
-            feature_count = resolved_features.len(),
-            "Aggregating feature-contributed lifecycle commands"
+            "Container metadata label is the complete lifecycle record; \
+             skipping Feature resolution so its hooks are not queued twice (#527)"
         );
-    }
+        Vec::new()
+    } else {
+        let fetcher = deacon_core::oci::default_fetcher()
+            .context("Failed to initialize OCI feature fetcher")?;
+        let resolved = crate::commands::shared::feature_resolver::resolve_features_ordered(
+            config,
+            &config_dir,
+            workspace_folder,
+            &fetcher,
+        )
+        .await
+        .context("Failed to resolve features for lifecycle command aggregation")?;
+        if !resolved.is_empty() {
+            debug!(
+                feature_count = resolved.len(),
+                "Aggregating feature-contributed lifecycle commands"
+            );
+        }
+        resolved
+    };
 
     // Build lifecycle commands: feature-contributed commands (in install order)
     // first, then the config's command, per `aggregate_lifecycle_commands` —

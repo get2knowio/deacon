@@ -276,8 +276,8 @@ pub(crate) async fn merge_image_metadata_after_image_ready(
         }
     };
 
-    apply_image_metadata_label(
-        image_ref,
+    apply_metadata_label(
+        &format!("Image '{}'", image_ref),
         info.labels.get("devcontainer.metadata"),
         user_config,
     )
@@ -308,7 +308,7 @@ pub(crate) async fn merge_image_metadata_after_image_ready(
 /// base's `devcontainer.metadata` LABEL verbatim (deacon emits no LABEL of its
 /// own), so merging here *and* post-build would fold the same entries twice and
 /// duplicate concatenated fields like `runArgs`. Sharing
-/// [`apply_image_metadata_label`] keeps this resolution byte-identical to the
+/// [`apply_metadata_label`] keeps this resolution byte-identical to the
 /// post-build merge.
 ///
 /// Best-effort: if the image can't be inspected or pulled we warn and fall back
@@ -370,7 +370,7 @@ pub(crate) async fn resolve_feature_install_env(
 
 /// Pure helper behind [`resolve_feature_install_env`]. Extracted so the
 /// precedence rules can be unit-tested without a Docker mock (mirrors
-/// [`apply_image_metadata_label`]).
+/// [`apply_metadata_label`]).
 ///
 /// `image_user` is `None` when the image could not be inspected at all — in
 /// which case there is no metadata label either and resolution degrades to the
@@ -383,7 +383,7 @@ fn resolve_feature_install_env_from_image(
 ) -> FeatureInstallEnv {
     // Fold the image's metadata in at lower precedence than the user config,
     // then read the effective users back off the result.
-    let effective = apply_image_metadata_label(base_image, label, config.clone());
+    let effective = apply_metadata_label(&format!("Image '{}'", base_image), label, config.clone());
 
     FeatureInstallEnv::resolve(
         effective.remote_user.as_deref(),
@@ -392,11 +392,17 @@ fn resolve_feature_install_env_from_image(
     )
 }
 
-/// Pure helper: merge the given image-metadata label (raw JSON string) into
-/// `user_config`. Extracted from [`merge_image_metadata_after_image_ready`]
+/// Pure helper: merge the given `devcontainer.metadata` label (raw JSON string)
+/// into `user_config`. Extracted from [`merge_image_metadata_after_image_ready`]
 /// so the parse + merge logic can be unit-tested without a Docker mock (#70).
-fn apply_image_metadata_label(
-    image_ref: &str,
+///
+/// `source` is a human-readable descriptor of where the label came from (e.g.
+/// `image 'alpine:3.18'`, `container 'c0ffee'`) and is used only for
+/// diagnostics. The fold itself is source-agnostic: `container_metadata::
+/// resolve_config_against_container` feeds it a CONTAINER inspect's label
+/// (#527), which is the same array shape.
+pub(crate) fn apply_metadata_label(
+    source: &str,
     label_value: Option<&String>,
     user_config: DevContainerConfig,
 ) -> DevContainerConfig {
@@ -404,8 +410,8 @@ fn apply_image_metadata_label(
 
     let Some(label_json) = label_value else {
         debug!(
-            "Image '{}' has no devcontainer.metadata label; nothing to merge (#70)",
-            image_ref
+            "{} has no devcontainer.metadata label; nothing to merge (#70)",
+            source
         );
         return user_config;
     };
@@ -417,9 +423,9 @@ fn apply_image_metadata_label(
             Ok(v) => v,
             Err(e) => {
                 tracing::warn!(
-                    "Image '{}' has a devcontainer.metadata label that is not a valid \
+                    "{} has a devcontainer.metadata label that is not a valid \
                      devcontainer metadata object/array; proceeding without merge: {}",
-                    image_ref,
+                    source,
                     e
                 );
                 return user_config;
@@ -431,10 +437,10 @@ fn apply_image_metadata_label(
     }
 
     debug!(
-        "Merging {} entry(ies) from image '{}' devcontainer.metadata label as the \
+        "Merging {} entry(ies) from {} devcontainer.metadata label as the \
          lower-precedence layer (#70)",
         entries.len(),
-        image_ref
+        source
     );
 
     // The five lifecycle hooks do NOT last-win: the spec's image-metadata Merge
@@ -1121,7 +1127,7 @@ mod image_metadata_merge_tests {
     //! the user's devcontainer.json as the *lower-precedence* layer (user
     //! config wins on conflict).
 
-    use super::apply_image_metadata_label;
+    use super::apply_metadata_label;
     use deacon_core::config::DevContainerConfig;
 
     /// #467: a hook the image declares for a phase the config ALSO declares
@@ -1141,7 +1147,7 @@ mod image_metadata_merge_tests {
             ..DevContainerConfig::default()
         };
 
-        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        let merged = apply_metadata_label("alpine:3.18", Some(&label), user);
 
         assert_eq!(
             merged.metadata_lifecycle_layers.len(),
@@ -1179,7 +1185,7 @@ mod image_metadata_merge_tests {
         let label = r#"[{ "postStartCommand": "img-postStart" }]"#.to_string();
 
         let merged =
-            apply_image_metadata_label("alpine:3.18", Some(&label), DevContainerConfig::default());
+            apply_metadata_label("alpine:3.18", Some(&label), DevContainerConfig::default());
 
         assert_eq!(
             merged.metadata_lifecycle_layers.len(),
@@ -1214,7 +1220,7 @@ mod image_metadata_merge_tests {
             ..DevContainerConfig::default()
         };
 
-        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        let merged = apply_metadata_label("alpine:3.18", Some(&label), user);
 
         assert_eq!(
             merged.remote_user.as_deref(),
@@ -1236,7 +1242,7 @@ mod image_metadata_merge_tests {
         .to_string();
 
         let merged =
-            apply_image_metadata_label("alpine:3.18", Some(&label), DevContainerConfig::default());
+            apply_metadata_label("alpine:3.18", Some(&label), DevContainerConfig::default());
 
         assert_eq!(
             merged.metadata_lifecycle_layers.len(),
@@ -1283,7 +1289,7 @@ mod image_metadata_merge_tests {
         let user =
             user_config_with_env(&[("CONFIG_LAYER", "from-user"), ("MERGED_LAYER", "user-wins")]);
 
-        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        let merged = apply_metadata_label("alpine:3.18", Some(&label), user);
 
         assert_eq!(
             merged.container_env().get("IMAGE_LAYER"),
@@ -1308,7 +1314,7 @@ mod image_metadata_merge_tests {
         // After merge, remoteUser should be "root" from the image layer.
         let label = r#"[{ "remoteUser": "root" }]"#.to_string();
         let user = DevContainerConfig::default();
-        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        let merged = apply_metadata_label("alpine:3.18", Some(&label), user);
         assert_eq!(merged.remote_user.as_deref(), Some("root"));
 
         // When the user explicitly sets remoteUser, the user wins.
@@ -1316,7 +1322,7 @@ mod image_metadata_merge_tests {
             remote_user: Some("devuser".to_string()),
             ..DevContainerConfig::default()
         };
-        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        let merged = apply_metadata_label("alpine:3.18", Some(&label), user);
         assert_eq!(merged.remote_user.as_deref(), Some("devuser"));
     }
 
@@ -1333,7 +1339,7 @@ mod image_metadata_merge_tests {
         }"#
         .to_string();
         let user = DevContainerConfig::default();
-        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        let merged = apply_metadata_label("alpine:3.18", Some(&label), user);
 
         assert_eq!(
             merged.container_env().get("R4_PREBUILT"),
@@ -1353,7 +1359,7 @@ mod image_metadata_merge_tests {
     fn missing_label_is_a_noop() {
         let user = user_config_with_env(&[("X", "1")]);
         let user_clone = user.clone();
-        let merged = apply_image_metadata_label("alpine:3.18", None, user);
+        let merged = apply_metadata_label("alpine:3.18", None, user);
         assert_eq!(merged.container_env, user_clone.container_env);
     }
 
@@ -1365,14 +1371,14 @@ mod image_metadata_merge_tests {
         let user = user_config_with_env(&[("X", "1")]);
         let user_clone = user.clone();
         let label = r#"this is not JSON"#.to_string();
-        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        let merged = apply_metadata_label("alpine:3.18", Some(&label), user);
         assert_eq!(merged.container_env, user_clone.container_env);
 
         // Also handle "valid JSON but not a devcontainer config object/array".
         let user = user_config_with_env(&[("X", "1")]);
         let user_clone = user.clone();
         let label = r#"true"#.to_string();
-        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        let merged = apply_metadata_label("alpine:3.18", Some(&label), user);
         assert_eq!(merged.container_env, user_clone.container_env);
     }
 
@@ -1381,7 +1387,7 @@ mod image_metadata_merge_tests {
         let user = user_config_with_env(&[("X", "1")]);
         let user_clone = user.clone();
         let label = r#"[]"#.to_string();
-        let merged = apply_image_metadata_label("alpine:3.18", Some(&label), user);
+        let merged = apply_metadata_label("alpine:3.18", Some(&label), user);
         assert_eq!(merged.container_env, user_clone.container_env);
     }
 }

@@ -631,21 +631,24 @@ where
                         resolved_container_mounts = container_info.mounts.clone();
                     }
                     // #223: `up` resolves `remoteUser` (and other fields) from the
-                    // image's `devcontainer.metadata` LABEL as a lower-precedence
-                    // layer. `exec` only loads the raw devcontainer.json, so a
-                    // remoteUser that lives solely in image metadata (e.g.
-                    // vscode-remote-try-node's `node`) would be lost and exec would
-                    // fall back to `root`. Re-apply that same image-metadata merge
-                    // against the running container's image before resolving the
-                    // effective config, so exec runs as the same user `up` reported.
+                    // `devcontainer.metadata` LABEL as a lower-precedence layer.
+                    // `exec` only loads the raw devcontainer.json, so a remoteUser
+                    // that lives solely in that metadata (e.g. vscode-remote-try-node's
+                    // `node`) would be lost and exec would fall back to `root`.
+                    // Re-apply that same merge from the RUNNING CONTAINER's label
+                    // (#527 — Docker folds the image's labels in, and `up` stamps its
+                    // accumulated superset there) before resolving the effective
+                    // config, so exec runs as the same user `up` reported.
                     // Shared with `run-user-commands` (#405).
+                    // `exec` runs no lifecycle phase, so the composition the
+                    // helper reports is irrelevant here — it reads only the
+                    // last-wins `remoteUser` / `remoteEnv` off the result.
                     crate::commands::shared::container_metadata::resolve_config_against_container(
-                        docker_client,
                         &container_info,
                         config_ctx.config.clone(),
                         config_ctx.workspace_folder.as_path(),
                     )
-                    .await
+                    .config
                 }
                 Ok(None) => config_ctx.config.clone(),
                 Err(e) => {
