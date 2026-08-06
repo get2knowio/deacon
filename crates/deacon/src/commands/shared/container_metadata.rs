@@ -100,9 +100,65 @@ pub fn config_from_metadata_label(container: &ContainerInfo) -> Result<Option<De
     Ok(Some(merged))
 }
 
+/// Which composition the target container selects for its
+/// `devcontainer.metadata` label (#527).
+///
+/// This is the reference's branch, not an invention — `Tr` in the pinned 0.87.0
+/// bundle picks between exactly these two shapes. See
+/// [`resolve_config_against_container`] for the derivation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetadataComposition {
+    /// The container carries this workspace's identity labels AND a
+    /// `devcontainer.metadata` label, so that label is the COMPLETE lifecycle
+    /// record — it already holds the image entries, one entry per installed
+    /// Feature, and the configuration's own entry. The caller must contribute
+    /// neither its own Feature-resolved hooks nor its own singular hooks, or
+    /// every hook runs twice.
+    CompleteRecord,
+    /// A foreign container, a raw-labeled one, or one carrying no metadata
+    /// label at all. The label (if any) is extra layers BENEATH the caller's
+    /// configuration, and the caller's own hooks and resolved Features stand.
+    Layered,
+}
+
+impl MetadataComposition {
+    /// True when the caller must skip its own Feature resolution because the
+    /// container's label already carries one entry per installed Feature.
+    pub fn suppresses_caller_features(self) -> bool {
+        matches!(self, MetadataComposition::CompleteRecord)
+    }
+}
+
+/// The outcome of [`resolve_config_against_container`]: the resolved config and
+/// the composition that produced it, which the caller needs in order to know
+/// whether to contribute its own Feature-derived hooks.
+pub struct ContainerResolvedConfig {
+    pub config: DevContainerConfig,
+    pub composition: MetadataComposition,
+}
+
+/// Does this container carry the workspace identity labels that make its
+/// metadata label the complete record?
+///
+/// Derived from the reference rather than chosen. `bg` in the pinned bundle
+/// builds `idLabels` as `[devcontainer.local_folder]`, plus
+/// `devcontainer.config_file` **only when the container already carries that
+/// key**; `Tr` then requires `Object.keys(pt(idLabels)).every(k => labels[k])`.
+/// Because `config_file` is added to the list precisely when it is present, it
+/// can never fail the test — so the condition reduces to a non-empty
+/// `devcontainer.local_folder`. Values are NOT compared: with `--container-id`
+/// the reference never compares them either (measured), and when discovery went
+/// by label they matched by construction.
+fn carries_workspace_identity_labels(container: &ContainerInfo) -> bool {
+    container
+        .labels
+        .get(deacon_core::container::LABEL_LOCAL_FOLDER)
+        .is_some_and(|v| !v.is_empty())
+}
+
 /// Resolve a workspace-loaded config against a RUNNING container: fold the
-/// CONTAINER's `devcontainer.metadata` label in at lower precedence, then
-/// resolve the effective configuration against the container's own labels.
+/// CONTAINER's `devcontainer.metadata` label in, then resolve the effective
+/// configuration against the container's own labels.
 ///
 /// Why this is shared (#405): `up` merges image metadata while creating the
 /// container, so any subcommand that later attaches to that container has to
@@ -132,6 +188,37 @@ pub fn config_from_metadata_label(container: &ContainerInfo) -> Result<Option<De
 /// winning. So the container inspect already *contains* the image's label when
 /// no one overrode it. One rule everywhere — always read the container.
 ///
+/// # Two compositions, selected by the identity labels (#527)
+///
+/// Swapping the source alone would double every lifecycle hook, because `up`
+/// stamps the container label as `[…image entries, …one entry per Feature, the
+/// config entry]` while the caller ALSO holds the config and can resolve the
+/// Features itself. The reference does not collide, because it does not run one
+/// composition — `Tr` picks between two, on whether the container carries the
+/// workspace identity labels:
+///
+/// | branch | reference | deacon |
+/// |---|---|---|
+/// | identity labels + a metadata label | `[…labelEntries, pick(config, ["remoteUser","userEnvProbe","remoteEnv"])]` | [`MetadataComposition::CompleteRecord`] |
+/// | otherwise | `Tt` → `[…labelEntries, …featureEntries, pick(config, SV)]` | [`MetadataComposition::Layered`] |
+///
+/// The complete-record pick carries NO lifecycle command (`rG` is exactly those
+/// three names), which is what makes the label the sole source of hooks there.
+/// deacon renders that by clearing the caller config's five singular hooks
+/// before the fold — they are already present as the label's config entry — and
+/// by reporting [`MetadataComposition::suppresses_caller_features`] so the
+/// caller skips its own Feature resolution.
+///
+/// A container with NO metadata label takes the layered branch whatever its
+/// identity labels say (the reference's first line: `if (!labels[RI]) return
+/// Tt(…)`). That is what keeps a deacon-created container whose label is absent
+/// from losing its hooks entirely.
+///
+/// Measured at oracle 0.87.0 on `fx-ruc-image-feature`: a container `up`
+/// created runs each hook exactly ONCE even when addressed by `--container-id`,
+/// while a raw `docker run --label devcontainer.metadata=…` container runs the
+/// label's hook AND the config's own, label first.
+///
 /// Best-effort by construction: an absent label or a label that fails to parse
 /// leaves the caller's config unchanged (see `apply_metadata_label`), and a
 /// failed effective-config resolution warns and returns the merged base.
@@ -139,19 +226,47 @@ pub fn resolve_config_against_container(
     container: &ContainerInfo,
     config: DevContainerConfig,
     workspace_folder: &Path,
-) -> DevContainerConfig {
+) -> ContainerResolvedConfig {
+    let label = container.labels.get("devcontainer.metadata");
+
+    // A missing label takes the layered branch regardless of identity labels —
+    // otherwise clearing the caller's hooks below would leave nothing to run.
+    let composition = match label {
+        Some(_) if carries_workspace_identity_labels(container) => {
+            MetadataComposition::CompleteRecord
+        }
+        _ => MetadataComposition::Layered,
+    };
+
+    let mut config = config;
+    if composition == MetadataComposition::CompleteRecord {
+        // The label's own config entry carries these five, so leaving them here
+        // as well would queue each twice — the one-home-per-hook invariant #467
+        // and #477 established, applied to the other direction.
+        LifecycleHookLayer::default().apply_to(&mut config);
+    }
+
     let base = crate::commands::up::merged_config::apply_metadata_label(
         &format!("Container '{}'", container.id),
-        container.labels.get("devcontainer.metadata"),
+        label,
         config,
     );
 
-    match ConfigMerger::resolve_effective_config(&base, Some(&container.labels), workspace_folder) {
+    let config = match ConfigMerger::resolve_effective_config(
+        &base,
+        Some(&container.labels),
+        workspace_folder,
+    ) {
         Ok((resolved, _report)) => resolved,
         Err(e) => {
             tracing::warn!("Failed to resolve effective config with labels: {}", e);
             base
         }
+    };
+
+    ContainerResolvedConfig {
+        config,
+        composition,
     }
 }
 
@@ -312,29 +427,36 @@ mod tests {
         );
 
         assert_eq!(
-            resolved.remote_user.as_deref(),
+            resolved.composition,
+            MetadataComposition::Layered,
+            "a container with no identity labels is foreign — the layered branch"
+        );
+        let cfg = resolved.config;
+        assert_eq!(
+            cfg.remote_user.as_deref(),
             Some("from-container"),
             "remoteUser must come from the CONTAINER's devcontainer.metadata label"
         );
         assert_eq!(
-            resolved.remote_env().get("SRC"),
+            cfg.remote_env().get("SRC"),
             Some(&Some("container".to_string()))
         );
         assert_eq!(
-            resolved.metadata_lifecycle_layers.len(),
+            cfg.metadata_lifecycle_layers.len(),
             1,
             "the container label's lifecycle hook must be collected as a layer"
         );
         assert_eq!(
-            resolved.metadata_lifecycle_layers[0].post_create_command,
+            cfg.metadata_lifecycle_layers[0].post_create_command,
             Some(serde_json::json!("container-postCreate"))
         );
     }
 
-    /// The container label is the LOWER-precedence layer: the workspace
-    /// devcontainer.json still wins on the last-wins rows of the Merge Logic
-    /// table, and its own hook is kept out of the layer list so it is not
-    /// queued twice.
+    /// On the LAYERED branch the container label is the lower-precedence layer:
+    /// the workspace devcontainer.json still wins on the last-wins rows of the
+    /// Merge Logic table, and its own hook stays in the singular field so both
+    /// contributors run — measured on the reference with a raw-labeled
+    /// container, which writes `label-postCreate` then `config-postCreate`.
     #[test]
     fn workspace_config_outranks_the_container_label() {
         let workspace = tempfile::tempdir().unwrap();
@@ -349,19 +471,21 @@ mod tests {
 
         let resolved = resolve_config_against_container(&container, user_config, workspace.path());
 
-        assert_eq!(resolved.remote_user.as_deref(), Some("from-config"));
+        assert_eq!(resolved.composition, MetadataComposition::Layered);
+        let cfg = resolved.config;
+        assert_eq!(cfg.remote_user.as_deref(), Some("from-config"));
         assert_eq!(
-            resolved.post_create_command,
+            cfg.post_create_command,
             Some(serde_json::json!("config-postCreate")),
             "the config's own hook stays in the singular field"
         );
         assert_eq!(
-            resolved.metadata_lifecycle_layers.len(),
+            cfg.metadata_lifecycle_layers.len(),
             1,
             "only the container label's hook becomes a layer"
         );
         assert_eq!(
-            resolved.metadata_lifecycle_layers[0].post_create_command,
+            cfg.metadata_lifecycle_layers[0].post_create_command,
             Some(serde_json::json!("container-postCreate"))
         );
     }
@@ -381,7 +505,125 @@ mod tests {
 
         let resolved = resolve_config_against_container(&container, user_config, workspace.path());
 
-        assert_eq!(resolved.remote_user.as_deref(), Some("from-config"));
-        assert!(resolved.metadata_lifecycle_layers.is_empty());
+        assert_eq!(resolved.composition, MetadataComposition::Layered);
+        assert_eq!(resolved.config.remote_user.as_deref(), Some("from-config"));
+        assert!(resolved.config.metadata_lifecycle_layers.is_empty());
+    }
+
+    /// Stamp the workspace identity label `deacon up` writes, making this the
+    /// dev container FOR this workspace.
+    fn with_identity_labels(mut container: ContainerInfo) -> ContainerInfo {
+        container.labels.insert(
+            deacon_core::container::LABEL_LOCAL_FOLDER.to_string(),
+            "/work/project".to_string(),
+        );
+        container.labels.insert(
+            deacon_core::container::LABEL_CONFIG_FILE.to_string(),
+            "/work/project/.devcontainer/devcontainer.json".to_string(),
+        );
+        container
+    }
+
+    /// #527, the complete-record branch. `up` stamps
+    /// `[…image entries, …one entry per Feature, the config entry]` on the
+    /// CONTAINER, so on a container carrying this workspace's identity labels
+    /// that label already holds the configuration's own hooks. Leaving them in
+    /// the singular fields too would run each twice — the exact regression the
+    /// naive source swap caused, measured as two of every hook where the
+    /// reference writes one.
+    #[test]
+    fn complete_record_clears_the_config_hooks_the_label_already_carries() {
+        let workspace = tempfile::tempdir().unwrap();
+        let container = with_identity_labels(container_with_metadata(
+            r#"[{"id": "./features/hooked", "postCreateCommand": "feature-postCreate"},
+                {"postCreateCommand": "config-postCreate", "onCreateCommand": "config-onCreate"}]"#,
+        ));
+        // The same document `up` stamped as that trailing entry.
+        let user_config = DevContainerConfig {
+            post_create_command: Some(serde_json::json!("config-postCreate")),
+            on_create_command: Some(serde_json::json!("config-onCreate")),
+            ..Default::default()
+        };
+
+        let resolved = resolve_config_against_container(&container, user_config, workspace.path());
+
+        assert_eq!(resolved.composition, MetadataComposition::CompleteRecord);
+        assert!(
+            resolved.composition.suppresses_caller_features(),
+            "the label carries one entry per installed Feature, so the caller must not \
+             resolve them again"
+        );
+        let cfg = resolved.config;
+        assert_eq!(
+            cfg.post_create_command, None,
+            "the config's own postCreate must have EXACTLY ONE home — the label's entry"
+        );
+        assert_eq!(cfg.on_create_command, None);
+        assert_eq!(
+            cfg.metadata_lifecycle_layers.len(),
+            2,
+            "both label entries contribute a layer, in label order"
+        );
+        assert_eq!(
+            cfg.metadata_lifecycle_layers[0].post_create_command,
+            Some(serde_json::json!("feature-postCreate"))
+        );
+        assert_eq!(
+            cfg.metadata_lifecycle_layers[1].post_create_command,
+            Some(serde_json::json!("config-postCreate"))
+        );
+    }
+
+    /// The complete-record branch still lets the workspace config win the
+    /// last-wins rows — upstream appends `pick(config, ["remoteUser",
+    /// "userEnvProbe", "remoteEnv"])` as the final metadata entry, and deacon
+    /// gets the same outcome because the caller's config is the higher-
+    /// precedence side of the fold. Only the five HOOKS are surrendered.
+    #[test]
+    fn complete_record_still_lets_the_config_win_the_scalars() {
+        let workspace = tempfile::tempdir().unwrap();
+        let container = with_identity_labels(container_with_metadata(
+            r#"[{"remoteUser": "from-label", "remoteEnv": {"SRC": "label"}}]"#,
+        ));
+        let user_config = DevContainerConfig {
+            remote_user: Some("from-config".to_string()),
+            ..Default::default()
+        };
+
+        let resolved = resolve_config_against_container(&container, user_config, workspace.path());
+
+        assert_eq!(resolved.composition, MetadataComposition::CompleteRecord);
+        assert_eq!(resolved.config.remote_user.as_deref(), Some("from-config"));
+        assert_eq!(
+            resolved.config.remote_env().get("SRC"),
+            Some(&Some("label".to_string())),
+            "a property the config never authored still comes from the label"
+        );
+    }
+
+    /// The reference's first line: `if (!labels["devcontainer.metadata"])
+    /// return Tt(…)`. A container carrying the identity labels but NO metadata
+    /// label takes the LAYERED branch, so its caller keeps its own hooks and
+    /// its own Features. Without this, clearing the hooks would leave a
+    /// deacon-created container whose label is absent with nothing to run.
+    #[test]
+    fn identity_labels_without_a_metadata_label_stay_layered() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut container = with_identity_labels(container_with_metadata("[]"));
+        container.labels.remove("devcontainer.metadata");
+        let user_config = DevContainerConfig {
+            post_create_command: Some(serde_json::json!("config-postCreate")),
+            ..Default::default()
+        };
+
+        let resolved = resolve_config_against_container(&container, user_config, workspace.path());
+
+        assert_eq!(resolved.composition, MetadataComposition::Layered);
+        assert!(!resolved.composition.suppresses_caller_features());
+        assert_eq!(
+            resolved.config.post_create_command,
+            Some(serde_json::json!("config-postCreate")),
+            "with no label to carry it, the config's own hook must survive"
+        );
     }
 }
