@@ -174,12 +174,6 @@ pub struct BuildRequest {
 
     /// Cache destination for BuildKit
     pub cache_to: Option<String>,
-
-    /// Skip automatic feature-to-service mapping
-    pub skip_feature_auto_mapping: bool,
-
-    /// Skip persisting customizations in metadata
-    pub skip_persist_customizations: bool,
 }
 
 impl BuildRequest {
@@ -416,8 +410,6 @@ mod tests {
             platform: None,
             cache_from: vec![],
             cache_to: None,
-            skip_feature_auto_mapping: false,
-            skip_persist_customizations: false,
         };
 
         assert!(request.validate().is_ok());
@@ -446,8 +438,6 @@ mod tests {
             platform: None,
             cache_from: vec![],
             cache_to: None,
-            skip_feature_auto_mapping: false,
-            skip_persist_customizations: false,
         };
 
         // Both push and output set - should fail
