@@ -43,7 +43,10 @@ mod utils;
 // Re-export public types
 pub use auth::{RegistryAuth, RegistryCredentials};
 pub use client::{HttpClient, MockHttpClient, ReqwestClient};
-pub use fetcher::{FeatureFetcher, default_fetcher, default_fetcher_with_config};
+pub use fetcher::{
+    FEATURE_FETCH_TIMEOUT, FeatureFetcher, default_fetcher, default_fetcher_with_config,
+    feature_fetch_retry_config,
+};
 pub use types::{
     CollectionFeature, CollectionMetadata, CollectionSourceInfo, CollectionTemplate,
     DownloadedFeature, DownloadedTemplate, FeatureRef, HttpResponse, Layer, Manifest, TagList,
