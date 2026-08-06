@@ -570,6 +570,23 @@ async fn execute_lifecycle_hooks(
         .unwrap_or_else(|| "/".to_string());
     let substitution_workspace_folder = substitution_context.container_workspace_folder.clone();
 
+    // #372: every lifecycle-marker writer stamps the hash of the config it actually
+    // ran, so `up`'s config-drift detection stays meaningful. Markers key on the
+    // workspace hash of the marker anchor, and `set-up`'s anchor is the process cwd
+    // — which walks to the same git root as an `up --workspace-folder <same repo>`,
+    // so these markers DO land in `up`'s directory and a `None` here would stamp
+    // them "legacy, compatible with any config" and make a later `up` skip hooks it
+    // must re-run.
+    //
+    // This hash deliberately will NOT equal `up`'s: `set-up` adopts a container it
+    // did not create, folds in the container's image metadata, and substitutes
+    // without a workspace (`${localWorkspaceFolder}` stays literal). The honest
+    // consequence is that a following `up` sees drift and RE-RUNS — the fail-safe
+    // direction, and strictly better than silently skipping.
+    let marker_anchor = std::path::Path::new(&substitution_context.local_workspace_folder);
+    let config_hash =
+        deacon_core::container::ContainerIdentity::new(marker_anchor, merged_config).config_hash;
+
     let lifecycle_config = ContainerLifecycleConfig {
         capture_output: false,
         container_id: container.id.clone(),
@@ -592,7 +609,7 @@ async fn execute_lifecycle_hooks(
         force_pty: false,
         dotfiles: build_dotfiles_config(args),
         is_prebuild: false,
-        config_hash: None,
+        config_hash: Some(config_hash),
     };
 
     let mut commands = ContainerLifecycleCommands::new();

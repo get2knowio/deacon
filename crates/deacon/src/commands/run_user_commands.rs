@@ -3,7 +3,9 @@
 //! This module provides execution of lifecycle commands in an existing container
 //! without going through the full `up` workflow.
 
-use crate::commands::shared::{ConfigLoadArgs, ConfigLoadResult, load_config, resolve_runtime};
+use crate::commands::shared::{
+    ConfigLoadArgs, ConfigLoadResult, canonical_reconnect_identity, load_config, resolve_runtime,
+};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container_lifecycle::{
@@ -79,6 +81,28 @@ pub async fn execute_run_user_commands(
     .await?;
 
     debug!("Loaded configuration with overrides and secrets support");
+
+    // Lifecycle phase markers are keyed on the WORKSPACE hash alone, so `up` and
+    // `run-user-commands` write into the same directory. Writing `None` here
+    // stamped the markers as "legacy, no recorded hash" — which
+    // `read_all_markers_for_config` treats as compatible with any config — and
+    // silently erased `up`'s config-drift detection: a later
+    // `up --override-config <changed>` created a fresh container and then SKIPPED
+    // `postCreate` because the clobbered marker still claimed it had run (#372).
+    //
+    // The hash must be computed from the configuration **as loaded**, via the same
+    // `canonical_reconnect_identity` contract that makes this command's container
+    // lookup agree with `up`'s labels (#187) — i.e. BEFORE the host-CA
+    // `containerEnv` injection below and BEFORE the image-metadata fold inside
+    // `execute_lifecycle_commands`. Hashing a mutated config would produce a value
+    // `up` can never reproduce, turning the erased-drift bug into a permanent
+    // false-positive drift instead.
+    let config_hash =
+        canonical_reconnect_identity(workspace_folder.as_path(), &config, None, None).config_hash;
+    debug!(
+        config_hash = %config_hash,
+        "Resolved config hash for lifecycle markers"
+    );
 
     let container_id = {
         let docker_client = cli.clone();
@@ -177,6 +201,7 @@ pub async fn execute_run_user_commands(
         workspace_folder.as_path(),
         &args,
         &cli,
+        &config_hash,
     )
     .await?;
 
@@ -185,6 +210,10 @@ pub async fn execute_run_user_commands(
 }
 
 /// Execute lifecycle commands in the container
+///
+/// `config_hash` is the hash of the configuration **as loaded** (see the call
+/// site): it is stamped on every lifecycle marker this run writes so `up`'s
+/// config-drift detection survives a `run-user-commands` invocation (#372).
 #[instrument(skip(config, workspace_folder, args))]
 async fn execute_lifecycle_commands(
     container_id: &str,
@@ -192,6 +221,7 @@ async fn execute_lifecycle_commands(
     workspace_folder: &Path,
     args: &RunUserCommandsArgs,
     cli: &CliRuntime,
+    config_hash: &str,
 ) -> Result<()> {
     info!("Executing lifecycle commands in container");
 
@@ -281,7 +311,9 @@ async fn execute_lifecycle_commands(
         // run-user-commands does not install dotfiles - that is handled by `up` command
         dotfiles: None,
         is_prebuild: args.prebuild,
-        config_hash: None,
+        // #372: stamp the SAME hash `up` records. Markers are shared (keyed on the
+        // workspace hash only), so a `None` here would erase `up`'s drift detection.
+        config_hash: Some(config_hash.to_string()),
     };
 
     // Resolve declared features (fail-fast) so feature-contributed lifecycle

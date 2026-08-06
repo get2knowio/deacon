@@ -91,4 +91,36 @@ mod tests {
         assert_eq!(bare.label_selector(), decorated.label_selector());
         assert_eq!(decorated.custom_name.as_deref(), Some("my-name"));
     }
+
+    #[test]
+    fn config_hash_is_shared_between_up_and_the_marker_writers() {
+        // Lifecycle phase markers key on the workspace hash alone, so `up` and
+        // `run-user-commands` write the SAME files and must stamp the SAME
+        // `config_hash` or one erases the other's config-drift detection (#372).
+        //
+        // `up` builds its identity WITH a container name and a config-file path;
+        // `run-user-commands` builds its own with neither. This pins the property
+        // that makes the two hashes equal by construction, so the fix cannot be
+        // undone by a future call site that starts passing (or stops passing)
+        // those decorations.
+        let ws = Path::new("/tmp/demo-ws");
+        let config = sample_config();
+
+        let up_side = canonical_reconnect_identity(
+            ws,
+            &config,
+            Some("deacon-demo".to_string()),
+            Some(Path::new("/tmp/demo-ws/.devcontainer/devcontainer.json")),
+        );
+        let run_user_commands_side = canonical_reconnect_identity(ws, &config, None, None);
+
+        assert_eq!(up_side.config_hash, run_user_commands_side.config_hash);
+
+        // ...and a genuinely different config must produce a different hash, or
+        // the drift detection the markers feed would be vacuous.
+        let drifted: DevContainerConfig =
+            serde_json::from_str(r#"{ "name": "demo", "image": "alpine:3.19" }"#).unwrap();
+        let drifted_side = canonical_reconnect_identity(ws, &drifted, None, None);
+        assert_ne!(up_side.config_hash, drifted_side.config_hash);
+    }
 }
