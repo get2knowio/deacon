@@ -13,7 +13,7 @@ use deacon_core::{
 };
 use serde_json::json;
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[test]
 fn test_redaction_in_lifecycle_execution() {
@@ -163,14 +163,117 @@ fn test_no_redact_cli_flag() {
     cmd.assert().success();
 }
 
+/// How many times the measured cost may exceed the calibration loop.
+///
+/// The honest ratio measured 0.5x-1.6x across back-to-back samples, so 10x leaves
+/// ~6x of headroom for sampling noise while still catching the order-of-magnitude
+/// blowups these tests exist to guard against.
+const REDACTION_MAX_RATIO: u32 = 10;
+
+/// Never assert a budget tighter than this, however fast the calibration loop
+/// happens to sample.
+///
+/// Kept deliberately small: `max(ratio * reference, floor)` means a large floor
+/// would swallow the ratio and blunt the assertion on the smaller registries. The
+/// floor exists only so an anomalously quick reference sample cannot collapse the
+/// budget to nothing, and it can never cause a load-induced failure — load raises
+/// `ratio * reference`, at which point the floor stops binding entirely.
+const REDACTION_BUDGET_FLOOR: Duration = Duration::from_millis(100);
+
+/// Assert a CPU-bound cost stays within a *calibrated* budget instead of a fixed
+/// wall-clock bound (#517).
+///
+/// A fixed bound like "5000 redactions in under 500ms" measures the machine, not
+/// the code: on a box at load ~20, byte-identical code failed at 605ms and passed
+/// at 331ms and 398ms in three back-to-back runs.
+///
+/// `reference` performs the irreducible work the operation cannot avoid — for
+/// redaction, scanning every line for every registered secret — and `measured`
+/// performs the real thing over the same inputs. Both are pure-CPU loops in the
+/// same process timed back to back, so whatever slows the box (CPU contention,
+/// frequency scaling, cgroup throttling) slows both by the same factor and the
+/// ratio between them holds. Only a regression in redaction itself — recompiling
+/// a pattern per call, quadratic allocation, rebuilding the registry per line —
+/// inflates the numerator alone.
+///
+/// Sampling noise is absorbed by retrying: a spurious slow sample has to recur on
+/// every attempt to fail the test, while a real regression fails all of them.
+fn assert_cost_within_calibrated_budget(
+    label: &str,
+    max_ratio: u32,
+    floor: Duration,
+    reference: impl Fn() -> Duration,
+    measured: impl Fn() -> Duration,
+) {
+    const ATTEMPTS: usize = 3;
+
+    // Warm up both paths so allocator growth and first-touch page faults are not
+    // billed to whichever loop happens to run first.
+    reference();
+    measured();
+
+    let mut attempts = Vec::with_capacity(ATTEMPTS);
+    for _ in 0..ATTEMPTS {
+        let baseline = reference();
+        let cost = measured();
+        let budget = std::cmp::max(baseline * max_ratio, floor);
+        if cost <= budget {
+            return;
+        }
+        attempts.push(format!(
+            "reference={baseline:?} measured={cost:?} budget={budget:?}"
+        ));
+    }
+
+    panic!(
+        "{label}: cost exceeded {max_ratio}x the calibration loop (floor {floor:?}) \
+         on all {ATTEMPTS} attempts: {}",
+        attempts.join("; ")
+    );
+}
+
+/// Time the irreducible scan-every-line-for-every-secret work that redaction
+/// cannot do without. Used as the calibration baseline, never asserted on.
+///
+/// `iterations` is sized per test so a single sample is hundreds of milliseconds
+/// of real work: a sample small enough to be dominated by one scheduler
+/// preemption makes the ratio noisy no matter how the budget is drawn.
+fn time_reference_scan(iterations: usize, lines: &[&str], secrets: &[String]) -> Duration {
+    let start = Instant::now();
+    for _ in 0..iterations {
+        for line in lines {
+            let mut owned = line.to_string();
+            for secret in secrets {
+                if owned.contains(secret.as_str()) {
+                    owned = owned.replace(secret.as_str(), "****");
+                }
+            }
+            std::hint::black_box(&owned);
+        }
+    }
+    start.elapsed()
+}
+
+/// Time the real redaction path over the same inputs as [`time_reference_scan`].
+fn time_redaction(iterations: usize, lines: &[&str], config: &RedactionConfig) -> Duration {
+    let start = Instant::now();
+    for _ in 0..iterations {
+        for line in lines {
+            std::hint::black_box(redact_if_enabled(line, config));
+        }
+    }
+    start.elapsed()
+}
+
 #[test]
 fn test_redaction_performance_short_lines() {
     // Clear any existing secrets
     global_registry().clear();
 
     // Add some secrets to the global registry
-    for i in 0..100 {
-        add_global_secret(&format!("secret-{:03}", i));
+    let secrets: Vec<String> = (0..100).map(|i| format!("secret-{:03}", i)).collect();
+    for secret in &secrets {
+        add_global_secret(secret);
     }
 
     let config = RedactionConfig::default();
@@ -182,21 +285,15 @@ fn test_redaction_performance_short_lines() {
         "INFO: operation completed successfully",
     ];
 
-    // Measure performance for short lines
-    let start = Instant::now();
-    for _ in 0..1000 {
-        for line in &test_lines {
-            let _result = redact_if_enabled(line, &config);
-        }
-    }
-    let duration = start.elapsed();
-
-    // Performance should be reasonable - less than 500ms for 5000 operations with 100 secrets
-    // This is a rough benchmark to ensure redaction doesn't add excessive overhead
-    assert!(
-        duration.as_millis() < 500,
-        "Redaction took too long: {:?}",
-        duration
+    // 5000 redactions against 100 secrets must stay within a generous multiple of
+    // the same scan done by hand — see assert_cost_within_calibrated_budget.
+    const ITERATIONS: usize = 1000;
+    assert_cost_within_calibrated_budget(
+        "redaction of 5000 short lines against 100 secrets",
+        REDACTION_MAX_RATIO,
+        REDACTION_BUDGET_FLOOR,
+        || time_reference_scan(ITERATIONS, &test_lines, &secrets),
+        || time_redaction(ITERATIONS, &test_lines, &config),
     );
 
     // Clean up
@@ -209,9 +306,12 @@ fn test_redaction_performance_with_secrets() {
     global_registry().clear();
 
     // Add some secrets
-    add_global_secret("performance-secret-1");
-    add_global_secret("performance-secret-2");
-    add_global_secret("performance-secret-3");
+    let secrets: Vec<String> = (1..=3)
+        .map(|i| format!("performance-secret-{}", i))
+        .collect();
+    for secret in &secrets {
+        add_global_secret(secret);
+    }
 
     let config = RedactionConfig::default();
     let test_lines = vec![
@@ -222,20 +322,17 @@ fn test_redaction_performance_with_secrets() {
         "Another normal line",
     ];
 
-    // Measure performance when secrets are present
-    let start = Instant::now();
-    for _ in 0..1000 {
-        for line in &test_lines {
-            let _result = redact_if_enabled(line, &config);
-        }
-    }
-    let duration = start.elapsed();
-
-    // Performance should still be reasonable even with secret redaction
-    assert!(
-        duration.as_millis() < 200,
-        "Redaction with secrets took too long: {:?}",
-        duration
+    // Same calibrated budget, now with lines that actually match — the replace
+    // path must not cost an order of magnitude more than the scan it replaces.
+    // Only three secrets are registered, so each pass is far cheaper than the
+    // 100-secret case above; iterate more to keep a sample big enough to measure.
+    const ITERATIONS: usize = 5000;
+    assert_cost_within_calibrated_budget(
+        "redaction of 25000 lines that match registered secrets",
+        REDACTION_MAX_RATIO,
+        REDACTION_BUDGET_FLOOR,
+        || time_reference_scan(ITERATIONS, &test_lines, &secrets),
+        || time_redaction(ITERATIONS, &test_lines, &config),
     );
 
     // Clean up
