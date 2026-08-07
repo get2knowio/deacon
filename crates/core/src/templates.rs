@@ -538,10 +538,15 @@ mod tests {
         }
         "#;
 
-        let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(invalid_template.as_bytes()).unwrap();
+        // A test-owned TempDir, not NamedTempFile::new(): `.tmpXXXXXX` names in
+        // the shared %TEMP% root can collide with a sibling test's delete-pending
+        // file on Windows, which surfaces as PermissionDenied (os error 5) that
+        // the tempfile crate does not retry (#540).
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let temp_path = temp_dir.path().join("devcontainer-template.json");
+        std::fs::write(&temp_path, invalid_template).unwrap();
 
-        let result = parse_template_metadata(temp_file.path());
+        let result = parse_template_metadata(&temp_path);
         assert!(result.is_err());
     }
 
