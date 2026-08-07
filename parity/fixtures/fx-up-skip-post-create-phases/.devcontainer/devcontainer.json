@@ -1,0 +1,11 @@
+{
+	"name": "ConformanceUpSkipPostCreatePhases",
+	"image": "alpine:3.19",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"onCreateCommand": "echo onCreate >> /workspace/lifecycle-phases.txt",
+	"updateContentCommand": "echo updateContent >> /workspace/lifecycle-phases.txt",
+	"postCreateCommand": "echo postCreate >> /workspace/lifecycle-phases.txt",
+	"postStartCommand": "echo postStart >> /workspace/lifecycle-phases.txt",
+	"postAttachCommand": "echo postAttach >> /workspace/lifecycle-phases.txt"
+}

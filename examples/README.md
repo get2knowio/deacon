@@ -218,8 +218,9 @@ deacon up --id-label project=myapp --id-label environment=dev --expect-existing-
 Start with skip flags for faster iteration:
 ```sh
 cd examples/container-lifecycle/basic
-deacon up --workspace-folder . --skip-post-create --skip-post-attach
-# Skips lifecycle hooks for faster startup
+deacon up --workspace-folder . --skip-post-create
+# Defers every lifecycle hook for faster startup; run them later with
+# `deacon run-user-commands --workspace-folder .`
 ```
 
 Start with included merged configuration:

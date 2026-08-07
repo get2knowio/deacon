@@ -2759,6 +2759,117 @@
         "tempdir": true
       },
       "notes": "The cross-CLI half of the ordering claim (#417). `bhv-up-feature-install-order` reads \"matches the reference\", and until now the only differential behind it observed a single-Feature `up`'s exit code — which agrees for any install order whatsoever. This one compares the marker sequence the installs wrote INSIDE the container, so a deacon that resolved `installsAfter`/`dependsOn` differently from the reference reports a `chan-stdout` divergence instead of two green exit codes.\n\nThe declared assertion is carried in addition to the comparison on purpose: a differential alone cannot fail when both sides are equally wrong, and the sequence here is one the spec pins (§Round Stable Sort) rather than one only the reference knows. Measured at oracle 0.87.0 on `fx-up-feature-multi-dependency-order`: both sides write `early\\npulled\\nlate\\n` and both exit 0.\n\nOnly the dependency fixture gets a differential. The declared-order (`overrideFeatureInstallOrder`) rule already has two `live-differential` cases at the resolution level (`bhv-features-override-order-*`), so a second install-level differential over the same rule would buy a container build per nightly and no new information."
+    },
+    {
+      "id": "case-up-skip-post-create-defers-every-phase",
+      "behaviors": [
+        "bhv-up-skip-post-create-defers-every-phase"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-up-skip-post-create-phases"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-up",
+          "assertion": {
+            "absent": "lifecycle-phases.txt"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "#476. `up --skip-post-create` defers the WHOLE lifecycle — `onCreate` and `updateContent` included — not just `postCreate` onward. deacon ran the two base phases, reading the flag off its NAME and off its own 008 FR-005. The flag is spec-silent (a CLI surface; `grep -r skip-post-create parity/spec/113500f4/` finds nothing), so the reference is the authority, and the reference is unambiguous in two independent places: its help text reads \"Do not run onCreateCommand, updateContentCommand, postCreateCommand, postStartCommand or postAttachCommand and do not install dotfiles\", and its bundle sets `postCreateEnabled: !skipPostCreate`, turns that into `lifecycleHook.enabled`, and invokes the ENTIRE lifecycle chain only as `params.lifecycleHook.enabled && await runPostCreateCommands(…)`.\n\nMeasured at oracle 0.87.0 on this fixture, whose five hooks all append their phase name to one file: the reference leaves no file at all; deacon's held `onCreate\\nupdateContent\\n`. Both sides exit 0, so the file's ABSENCE is the entire observation — which is why this asserts the `chan-filesystem` `absent` predicate rather than an exit code.\n\nONE operation, deliberately. `chan-filesystem` and `chan-file-content` are captured once, after ALL of a case's operations have run (`runner::execute_ops` then the `capture_channel` loop) — the `operation` field on a filesystem expectation labels the evidence, it does not choose a point in time. A second operation here would therefore observe the state AFTER it, and an `absent` predicate that a later `run-user-commands` invalidates would have looked like coverage while asserting nothing about `up`. The `run-user-commands` half — that deferral postpones the work rather than losing it — is `case-up-skip-post-create-run-user-commands-resume-differential`, where the end-of-case capture is exactly the right instant.\n\nSpec-expectation, so it needs no oracle and runs on the `parity_docker` lane that gates pull requests and the release, which is where a regression in a lifecycle gate should be caught."
+    },
+    {
+      "id": "case-up-skip-post-create-run-user-commands-resume-differential",
+      "behaviors": [
+        "bhv-up-skip-post-create-defers-every-phase"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-up-skip-post-create-phases"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-ruc",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-phases.txt": "onCreate\nupdateContent\npostCreate\npostStart\npostAttach\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "#476, the half that makes deferral safe: the deferred hooks must still RUN, and run exactly once. After `up --skip-post-create`, `run-user-commands` executes all five phases, so the append-only log holds exactly five lines in phase order. Both CLIs produce that, and their marker mechanisms differ without changing it — deacon's completion markers are host-side (`{user_data_folder}/state/<workspace-hash>/`), the reference's are container-side (`{containerDataFolder}/.<phase>CommandMarker`, keyed on the container's `createdAt`) — because neither writes a marker for a phase that never ran.\n\nThe line COUNT is what carries the regression, which is why this case can assert the deferral through a channel captured only at the end of the run: before the fix deacon wrote SEVEN lines here (`onCreate`, `updateContent` from `up`, then all five again from `run-user-commands`) against the reference's five. `jsonSubset` on the whole file content is an exact-content match for that one key, so the two extra leading lines fail it.\n\nIt carries that assertion in ADDITION to the comparison for the reason FR-043 gives: a differential alone would stay green if BOTH sides started running the base phases, and the record meant to say which side is right would then say nothing. Deliberately NOT asserted here: what a plain (non-deferred) `up` followed by `run-user-commands` produces — deacon re-runs every completed hook where the reference skips it, which is the separately characterized `wvr-ruc-completed-hooks-not-rerun` and is untouched by this fix."
     }
   ]
 }

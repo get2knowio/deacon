@@ -651,9 +651,11 @@ pub(crate) async fn execute_compose_up(
     // it, not a second implementation.
     //
     // The `--skip-post-create` guard that used to wrap this call is deliberately
-    // gone: that flag skips postCreate ONWARD, not onCreate/updateContent, and
-    // `InvocationContext::should_skip_phase` is what encodes that — gating the
-    // whole call on it skipped the base setup the flag is specified to perform.
+    // gone even though that flag now defers EVERY phase (#476): the decision belongs
+    // to `InvocationContext::should_skip_phase`, so compose and the single-container
+    // path answer it the same way, and a second copy here could only drift. It also
+    // keeps the flag from suppressing the compose-side work that is not a hook
+    // (state save, port forwarding) the way a call-site gate would.
     execute_compose_lifecycle(
         &primary_container_id,
         config,

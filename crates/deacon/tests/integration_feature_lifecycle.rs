@@ -88,7 +88,14 @@ impl Drop for ContainerGuard {
     }
 }
 
-/// Run `deacon up` and return the container ID
+/// Run `deacon up` and return the container ID.
+///
+/// The `onCreate`-focused tests below pass `--skip-non-blocking-commands` to stop
+/// the run at the default `waitFor` (`updateContentCommand`), which keeps them
+/// cheap without touching what they assert. They used to pass
+/// `--skip-post-create`, which had the same effect only while that flag meant
+/// "postCreate onward"; #476 corrected it to defer the WHOLE lifecycle, which
+/// would leave these tests with no `onCreate` to observe at all.
 fn run_deacon_up(
     temp_dir: &TempDir,
     guard: &ContainerGuard,
@@ -229,7 +236,7 @@ fn test_feature_lifecycle_commands_execute_before_config() {
     .unwrap();
 
     let guard = ContainerGuard::new();
-    let container_id = run_deacon_up(&temp_dir, &guard, &["--skip-post-create"])
+    let container_id = run_deacon_up(&temp_dir, &guard, &["--skip-non-blocking-commands"])
         .expect("deacon up should succeed");
 
     // Read the lifecycle order file from the container
@@ -319,7 +326,7 @@ fn test_feature_lifecycle_commands_in_installation_order() {
     .unwrap();
 
     let guard = ContainerGuard::new();
-    let container_id = run_deacon_up(&temp_dir, &guard, &["--skip-post-create"])
+    let container_id = run_deacon_up(&temp_dir, &guard, &["--skip-non-blocking-commands"])
         .expect("deacon up should succeed");
 
     let content = read_container_file(&container_id, "/tmp/install_order.txt")
@@ -489,7 +496,7 @@ fn test_empty_feature_lifecycle_commands_filtered() {
     .unwrap();
 
     let guard = ContainerGuard::new();
-    let container_id = run_deacon_up(&temp_dir, &guard, &["--skip-post-create"])
+    let container_id = run_deacon_up(&temp_dir, &guard, &["--skip-non-blocking-commands"])
         .expect("deacon up should succeed");
 
     // Verify only the real feature command and config command ran
@@ -543,7 +550,7 @@ fn test_array_format_feature_lifecycle_commands() {
     .unwrap();
 
     let guard = ContainerGuard::new();
-    let container_id = run_deacon_up(&temp_dir, &guard, &["--skip-post-create"])
+    let container_id = run_deacon_up(&temp_dir, &guard, &["--skip-non-blocking-commands"])
         .expect("deacon up should succeed");
 
     // Verify array command executed
@@ -601,7 +608,7 @@ fn test_object_format_feature_lifecycle_commands() {
     .unwrap();
 
     let guard = ContainerGuard::new();
-    let container_id = run_deacon_up(&temp_dir, &guard, &["--skip-post-create"])
+    let container_id = run_deacon_up(&temp_dir, &guard, &["--skip-non-blocking-commands"])
         .expect("deacon up should succeed");
 
     // Verify both commands executed (object format runs in parallel)

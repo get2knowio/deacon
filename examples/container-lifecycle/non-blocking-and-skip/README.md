@@ -4,8 +4,8 @@
 
 This example shows how to use skip flags to control which lifecycle commands execute during container creation:
 
-- **`--skip-post-create`**: Skip the postCreate phase
-- **`--skip-non-blocking-commands`**: Skip postStart and postAttach phases (non-blocking commands)
+- **`--skip-post-create`**: Defer **every** lifecycle phase (onCreate through postAttach) plus dotfiles
+- **`--skip-non-blocking-commands`**: Stop after the configured `waitFor` phase (default `updateContentCommand`)
 
 ## Lifecycle Phases Overview
 
@@ -19,10 +19,13 @@ According to the [Up SPEC](https://containers.dev/implementors/spec/), lifecycle
 ## Skip Flags Behavior
 
 ### `--skip-post-create`
-Skips the postCreate phase entirely. Useful when:
-- Iterating on onCreate commands
+Despite its name, this defers the **whole** lifecycle — `onCreate`, `updateContent`,
+`postCreate`, `postStart`, `postAttach` and dotfiles — matching the reference
+DevContainers CLI. The container is still created and Features are still installed;
+only the hooks wait. Run them later with `deacon run-user-commands`. Useful when:
+- You want a container quickly and will run the setup yourself
 - Testing without running expensive dependency installation
-- Debugging early lifecycle phases
+- Building a container in CI whose hooks belong to a later step
 
 ### `--skip-non-blocking-commands`
 Skips both postStart and postAttach phases. Useful when:
@@ -53,21 +56,23 @@ Expected output shows all four lifecycle phases configured.
 # deacon up --skip-post-create --workspace-folder .
 #
 # What happens:
-# - onCreate runs: creates /tmp/markers/ directory and onCreate marker
-# - postCreate skipped: no postCreate marker created
-# - postStart runs: creates postStart marker
-# - postAttach runs: creates postAttach marker
+# - every phase is deferred; no marker is created at all
 #
-# Verify markers created:
+# Verify (the directory the onCreate hook would have made does not exist):
 # docker exec <container-id> ls -1 /tmp/markers/
-# Expected: onCreate, postStart, postAttach (NO postCreate)
+# Expected: no such file or directory
+#
+# Then run the deferred hooks:
+# deacon run-user-commands --workspace-folder .
+# docker exec <container-id> ls -1 /tmp/markers/
+# Expected: onCreate, postCreate, postStart, postAttach
 ```
 
 When using `--skip-post-create`:
-- onCreate marker: ✅ Created
-- postCreate marker: ❌ **Skipped**
-- postStart marker: ✅ Created
-- postAttach marker: ✅ Created
+- onCreate marker: ❌ **Deferred**
+- postCreate marker: ❌ **Deferred**
+- postStart marker: ❌ **Deferred**
+- postAttach marker: ❌ **Deferred**
 
 ### 3. With --skip-non-blocking-commands Flag
 
@@ -99,28 +104,25 @@ When using `--skip-non-blocking-commands`:
 # deacon up --skip-post-create --skip-non-blocking-commands --workspace-folder .
 #
 # What happens:
-# - onCreate runs: creates /tmp/markers/ directory and onCreate marker
-# - postCreate skipped
-# - postStart skipped
-# - postAttach skipped
+# - --skip-post-create already defers everything, so the second flag adds nothing
 #
 # Verify markers created:
 # docker exec <container-id> ls -1 /tmp/markers/
-# Expected: onCreate only
+# Expected: no such file or directory
 ```
 
 When combining both skip flags:
-- onCreate marker: ✅ Created
-- postCreate marker: ❌ **Skipped**
-- postStart marker: ❌ **Skipped**
-- postAttach marker: ❌ **Skipped**
+- onCreate marker: ❌ **Deferred**
+- postCreate marker: ❌ **Deferred**
+- postStart marker: ❌ **Deferred**
+- postAttach marker: ❌ **Deferred**
 
 ## Use Cases
 
 ### Development Iteration
-When modifying onCreate commands, skip later phases for faster testing:
+When modifying onCreate commands, stop at `waitFor` so the later phases don't run:
 ```bash
-deacon up --skip-post-create --skip-non-blocking-commands
+deacon up --skip-non-blocking-commands
 ```
 
 ### Pre-build Scenarios
@@ -132,11 +134,12 @@ deacon up --skip-non-blocking-commands --prebuild
 ### Debugging
 Isolate specific phases by skipping others:
 ```bash
-# Test only onCreate and postCreate
+# Test only onCreate and updateContent (the default waitFor cutoff)
 deacon up --skip-non-blocking-commands
 
-# Test only onCreate
-deacon up --skip-post-create --skip-non-blocking-commands
+# Run no hook at all, then run them on demand
+deacon up --skip-post-create
+deacon run-user-commands
 ```
 
 ## Verification Strategy
@@ -149,9 +152,11 @@ This example creates marker files in `/tmp/markers/` to demonstrate which phases
 
 ## Key Takeaways
 
-- **onCreate always runs** - Cannot be skipped (fundamental container setup)
-- **postCreate is blocking** - Skip with `--skip-post-create` when not needed
-- **postStart/postAttach are non-blocking** - Skip together with `--skip-non-blocking-commands`
+- **`--skip-post-create` defers everything** - the flag's name is narrower than its
+  effect; it gates the entire lifecycle runner, exactly as the reference CLI's does
+- **Deferred is not lost** - `deacon run-user-commands` runs the deferred phases
+- **`--skip-non-blocking-commands` is a different rule** - it stops at the configured
+  `waitFor` phase (default `updateContentCommand`), so onCreate and updateContent still run
 - **Skip flags enable faster iteration** - Essential for development workflows
 - **Marker files provide evidence** - Simple way to verify which phases executed
 

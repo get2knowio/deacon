@@ -268,7 +268,9 @@ pub enum Commands {
         /// Stop after updateContentCommand (prebuild mode)
         #[arg(long)]
         prebuild: bool,
-        /// Skip postCreate lifecycle phase
+        /// Do not run onCreateCommand, updateContentCommand, postCreateCommand,
+        /// postStartCommand or postAttachCommand and do not install dotfiles.
+        /// The deferred hooks run on a later `run-user-commands` (#476).
         #[arg(long)]
         skip_post_create: bool,
         /// Skip postAttach lifecycle phase

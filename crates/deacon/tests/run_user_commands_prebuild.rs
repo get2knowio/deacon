@@ -108,8 +108,8 @@ fn test_run_user_commands_prebuild_stops_after_update_content() {
     )
     .unwrap();
 
-    // Bring the container up with postCreate+ suppressed so only onCreate and
-    // updateContent fire during `up`.
+    // Bring the container up with the whole lifecycle deferred (#476), so every
+    // marker below is written by the `run-user-commands --prebuild` under test.
     Command::cargo_bin("deacon")
         .unwrap()
         .current_dir(&temp_dir)
