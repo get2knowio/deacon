@@ -316,6 +316,74 @@
       "notes": "Covers the high-risk triple `hrt-build-dockerfile-cli-overlay-single-feature`. A Dockerfile build, a Feature layered on top of it, and a user-supplied `--image-name` — the exact combination in which this project once shipped a tag pointing at the PRE-Feature base. The assertion pins both halves in one ordered match: the reported image is the FEATURE-EXTENDED one (`deacon-devcontainer-features:…`), and the user's tag is among the tags applied to it. The stronger observation — running the tag and reading the Feature's marker — needs a `docker run` the declarative runner does not model, so the ordering constraint stands in for it and this note records the difference."
     },
     {
+      "id": "case-build-dockerfile-feature-multi-order-label",
+      "behaviors": [
+        "bhv-build-image-metadata-label",
+        "bhv-build-features-extended-image"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-feature-multi-order"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "devcontainer.metadata": "[{\"id\":\"./features/early\"},{\"id\":\"./features/pulled\"},{\"id\":\"./features/late\"},{\"containerEnv\":{\"PARITY_BUILD_MULTI_ORDER\":\"authored-in-config\"},\"remoteUser\":\"root\"}]"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes #536, the coverage gap #417 left behind. `build` installs Features through the same resolver and the same layering pass as `up` (`commands/shared/feature_resolver::resolve_features_ordered`, `apply_features_and_lockfile`), and until now every `build` fixture declaring a Feature declared exactly ONE — so nothing would have reported the day `build`'s install order stopped matching `up`'s. The `devcontainer.metadata` label is where that order becomes a consumer's problem: it records one entry per installed Feature IN INSTALL ORDER, and a later `up`, VS Code or envbuilder reads the built image's label to learn what is in it.\n\nThe fixture separates the two ordering rules the way its `up` sibling `fx-up-feature-multi-dependency-order` does, on a Dockerfile base rather than an image reference so the case exercises `build`'s Dockerfile shape. The `features` map declares `./features/late` first and `./features/early` second; `late` carries `installsAfter: [\"./features/early\"]` (a soft edge) and `dependsOn: {\"./features/pulled\": {}}` (a hard edge to a Feature the configuration never names). Resolution must therefore INVERT the declaration and pull in a third Feature: `early` and `pulled` are both eligible in round one and commit in the §Round Stable Sort lexicographic order, then `late` commits in round two. Declaration order (`late, early`) and lexicographic order over the declared set (`early, late`) are both different sequences and neither contains `pulled` at all, so an implementation applying either rule fails here rather than passing by coincidence.\n\nThe assertion is POSITIONAL because it has to be. `jsonSubset` over an ARRAY is order-INSENSITIVE (`compare.rs::is_json_subset`), so an assertion over parsed label entries would pass for any permutation and would reproduce #417's vacuous claim one layer down. The label's value is a STRING, and pinning the whole string with `equals`-by-value inside the subset makes position the only thing it can match — the same reason `case-readconfig-dockerfile-declared-order-overlay` pins its array by index rather than by membership. The trailing config-pick entry is pinned alongside the three Feature entries, so the case also holds the entries' relative precedence (every installed Feature, then the configuration, lowest precedence first), and `--image-name ${IMAGE_TAG}` means the label is read off the image the USER's tag names — a tag left pointing at the pre-Feature base carries no Feature entries at all.\n\nMEASURED at oracle 0.87.0 on this fixture, both CLIs, no divergence. deacon: `[{\"id\":\"./features/early\"},{\"id\":\"./features/pulled\"},{\"id\":\"./features/late\"},{\"containerEnv\":{…},\"remoteUser\":\"root\"}]`. Reference: the same four entries in the same order, differing only in JSON whitespace (`[ {…}, {…} ]`), which is the documented choice `bhv-container-metadata-label-serialization`. Both produced images were run and both report `early\\npulled\\nlate` from `/usr/local/share/conformance/install-order`, so the label's order is the order the installs actually ran in rather than only what a resolver reported.\n\nSPEC-EXPECTATION RATHER THAN DIFFERENTIAL, deliberately. A `chan-image` differential over this label would need `wvr-container-metadata-label-serialization` to absorb the whitespace, and a tolerance is scoped to an observable PATH — tolerating `chan-image.labels.devcontainer.metadata` would excuse an ORDER difference on the same path, which is precisely the claim this case exists to make. A tolerance that blanks the thing being asserted is worse than no differential. The cross-CLI half of the ordering claim is carried where the tolerance does not reach: `case-up-feature-multi-dependency-order-differential` compares the marker sequence the same three Features write inside the container, through the same resolver `build` uses. One case rather than two for the same reason — the DECLARED-order rule (`overrideFeatureInstallOrder`) is already pinned at the install level by `case-up-feature-multi-declared-order` and at the resolution level by two `bhv-features-override-order-*` differentials, so a second `build` fixture would buy an image build on every gating run and no new information."
+    },
+    {
       "id": "case-build-failure-reported",
       "behaviors": [
         "bhv-build-failure-reported"
