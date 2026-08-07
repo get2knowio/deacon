@@ -6,8 +6,7 @@ use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::security::SecurityOptions;
 use serde_json::json;
 use std::collections::HashMap;
-use std::io::Write;
-use tempfile::NamedTempFile;
+use tempfile::TempDir;
 
 #[tokio::test]
 async fn test_security_options_in_config_parsing() -> anyhow::Result<()> {
@@ -19,11 +18,16 @@ async fn test_security_options_in_config_parsing() -> anyhow::Result<()> {
         "securityOpt": ["seccomp=unconfined", "apparmor=unconfined"]
     });
 
-    let mut temp_file = NamedTempFile::new()?;
-    temp_file.write_all(config_content.to_string().as_bytes())?;
+    // A test-owned TempDir, not NamedTempFile::new(): `.tmpXXXXXX` names in the
+    // shared %TEMP% root can collide with a sibling test's delete-pending file on
+    // Windows, which surfaces as PermissionDenied (os error 5) that the tempfile
+    // crate does not retry (#540).
+    let temp_dir = TempDir::new()?;
+    let config_path = temp_dir.path().join("devcontainer.json");
+    std::fs::write(&config_path, config_content.to_string())?;
 
     // Load and parse the configuration
-    let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+    let config = ConfigLoader::load_from_path(&config_path).await?;
 
     // Verify security options are parsed correctly
     assert_eq!(config.privileged, Some(true));

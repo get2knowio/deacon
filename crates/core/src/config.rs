@@ -3601,8 +3601,19 @@ impl ConfigLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use tempfile::{NamedTempFile, TempDir};
+    use tempfile::TempDir;
+
+    /// A test-owned TempDir, not `NamedTempFile::new()`: `.tmpXXXXXX` names in
+    /// the shared %TEMP% root can collide with a sibling test's delete-pending
+    /// file on Windows, which surfaces as PermissionDenied (os error 5) that the
+    /// tempfile crate does not retry (#540). The returned `TempDir` must be bound
+    /// for as long as the path is used — dropping it deletes the directory.
+    fn write_devcontainer_json(contents: &str) -> (TempDir, std::path::PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("devcontainer.json");
+        std::fs::write(&path, contents).unwrap();
+        (dir, path)
+    }
 
     #[test]
     fn test_config_default() {
@@ -3811,10 +3822,9 @@ mod tests {
             "runArgs": ["--init"], // trailing comma
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
 
         assert_eq!(config.name, Some("Test Container".to_string()));
         assert_eq!(config.image, Some("ubuntu:20.04".to_string()));
@@ -3848,10 +3858,9 @@ mod tests {
             "invalid": json syntax
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let result = ConfigLoader::load_from_path(temp_file.path()).await;
+        let result = ConfigLoader::load_from_path(&config_path).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Parsing { message }) => {
@@ -3875,10 +3884,9 @@ mod tests {
             "dockerFile": "Dockerfile"
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let result = ConfigLoader::load_from_path(temp_file.path()).await;
+        let result = ConfigLoader::load_from_path(&config_path).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -3898,10 +3906,9 @@ mod tests {
             "shutdownAction": "invalid"
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let result = ConfigLoader::load_from_path(temp_file.path()).await;
+        let result = ConfigLoader::load_from_path(&config_path).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -3921,10 +3928,9 @@ mod tests {
             "extends": "../base/devcontainer.json"
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let result = ConfigLoader::load_from_path(temp_file.path()).await;
+        let result = ConfigLoader::load_from_path(&config_path).await;
         assert!(result.is_ok());
         let config = result.unwrap();
         assert_eq!(
@@ -3938,10 +3944,9 @@ mod tests {
             "extends": ["../base1/devcontainer.json", "../base2/devcontainer.json"]
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let result = ConfigLoader::load_from_path(temp_file.path()).await;
+        let result = ConfigLoader::load_from_path(&config_path).await;
         assert!(result.is_ok());
         let config = result.unwrap();
         assert_eq!(
@@ -4114,11 +4119,10 @@ mod tests {
             "anotherUnknown": 42
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
         // This should succeed despite unknown keys
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
         assert_eq!(config.name, Some("Test".to_string()));
         assert_eq!(config.image, Some("ubuntu:20.04".to_string()));
 
@@ -4139,10 +4143,9 @@ mod tests {
             "extensions": [ "dbaeumer.vscode-eslint" ],
             "devPort": 1234
         }"#;
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
         let customizations = config.customizations.expect("migrated customizations");
         assert_eq!(
             customizations.pointer("/vscode"),
@@ -4183,10 +4186,9 @@ mod tests {
                 "codespaces": { "kept": true }
             }
         }"#;
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
         let customizations = config.customizations.clone().expect("customizations");
         assert_eq!(
             customizations.pointer("/vscode/extensions"),
@@ -4218,9 +4220,8 @@ mod tests {
     #[tokio::test]
     async fn test_load_without_legacy_properties_leaves_customizations_absent() -> anyhow::Result<()>
     {
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(br#"{ "image": "ubuntu:20.04" }"#)?;
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let (_temp_dir, config_path) = write_devcontainer_json(r#"{ "image": "ubuntu:20.04" }"#);
+        let config = ConfigLoader::load_from_path(&config_path).await?;
         assert!(config.customizations.is_none());
         Ok(())
     }
@@ -4232,10 +4233,9 @@ mod tests {
             "image": "ubuntu:20.04"
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
 
         // Arrays should default to empty
         assert_eq!(config.mounts().len(), 0);
@@ -4620,11 +4620,10 @@ mod tests {
             "postCreateCommand": "echo 'Workspace: ${localWorkspaceFolder}'"
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
         let (config, report) =
-            ConfigLoader::load_with_substitution(temp_file.path(), workspace).await?;
+            ConfigLoader::load_with_substitution(&config_path, workspace).await?;
 
         // Check that substitution was applied
         assert!(report.has_substitutions());
@@ -5186,10 +5185,9 @@ mod tests {
             "appPort": [3000, "8080:80"]
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
 
         assert_eq!(
             config.app_port,
@@ -5226,10 +5224,9 @@ mod tests {
             }
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
 
         assert_eq!(config.name, Some("Test Container".to_string()));
         assert_eq!(config.forward_ports().len(), 2);
@@ -5301,11 +5298,10 @@ mod tests {
             }
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
         // This should not fail validation
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
         assert_eq!(config.ports_attributes().len(), 3);
 
         Ok(())
@@ -5323,10 +5319,9 @@ mod tests {
             }
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
         assert_eq!(config.ports_attributes().len(), 2);
 
         Ok(())
@@ -5344,11 +5339,10 @@ mod tests {
             }
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
         // This should load but log warnings about missing port 8080
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
         assert_eq!(config.ports_attributes().len(), 2);
 
         Ok(())
@@ -5376,10 +5370,9 @@ mod tests {
             "updateRemoteUserUID": true
         }"#;
 
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(config_content.as_bytes())?;
+        let (_temp_dir, config_path) = write_devcontainer_json(config_content);
 
-        let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+        let config = ConfigLoader::load_from_path(&config_path).await?;
 
         assert_eq!(
             config.name,
@@ -5422,10 +5415,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_root_is_array() -> anyhow::Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(b"[]")?;
+        let (_temp_dir, config_path) = write_devcontainer_json("[]");
 
-        let result = ConfigLoader::load_from_path(temp_file.path()).await;
+        let result = ConfigLoader::load_from_path(&config_path).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -5433,7 +5425,7 @@ mod tests {
                     message,
                     format!(
                         "Dev container config ({}) must contain a JSON object literal.",
-                        temp_file.path().display()
+                        config_path.display()
                     )
                 );
             }
@@ -5444,10 +5436,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_root_is_null() -> anyhow::Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(b"null")?;
+        let (_temp_dir, config_path) = write_devcontainer_json("null");
 
-        let result = ConfigLoader::load_from_path(temp_file.path()).await;
+        let result = ConfigLoader::load_from_path(&config_path).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -5455,7 +5446,7 @@ mod tests {
                     message,
                     format!(
                         "Dev container config ({}) must contain a JSON object literal.",
-                        temp_file.path().display()
+                        config_path.display()
                     )
                 );
             }
@@ -5466,10 +5457,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_root_is_number() -> anyhow::Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(b"123")?;
+        let (_temp_dir, config_path) = write_devcontainer_json("123");
 
-        let result = ConfigLoader::load_from_path(temp_file.path()).await;
+        let result = ConfigLoader::load_from_path(&config_path).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -5477,7 +5467,7 @@ mod tests {
                     message,
                     format!(
                         "Dev container config ({}) must contain a JSON object literal.",
-                        temp_file.path().display()
+                        config_path.display()
                     )
                 );
             }
@@ -5488,10 +5478,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_root_is_string() -> anyhow::Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(br#""hello""#)?;
+        let (_temp_dir, config_path) = write_devcontainer_json(r#""hello""#);
 
-        let result = ConfigLoader::load_from_path(temp_file.path()).await;
+        let result = ConfigLoader::load_from_path(&config_path).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             DeaconError::Config(ConfigError::Validation { message }) => {
@@ -5499,7 +5488,7 @@ mod tests {
                     message,
                     format!(
                         "Dev container config ({}) must contain a JSON object literal.",
-                        temp_file.path().display()
+                        config_path.display()
                     )
                 );
             }

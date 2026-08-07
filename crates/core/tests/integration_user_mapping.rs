@@ -6,8 +6,7 @@
 
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::user_mapping::{UserInfo, UserMappingConfig};
-use std::io::Write;
-use tempfile::NamedTempFile;
+use tempfile::TempDir;
 
 #[tokio::test]
 async fn test_user_mapping_config_parsing() -> anyhow::Result<()> {
@@ -20,10 +19,15 @@ async fn test_user_mapping_config_parsing() -> anyhow::Result<()> {
         "workspaceFolder": "/workspace"
     }"#;
 
-    let mut temp_file = NamedTempFile::new()?;
-    temp_file.write_all(config_content.as_bytes())?;
+    // A test-owned TempDir, not NamedTempFile::new(): `.tmpXXXXXX` names in the
+    // shared %TEMP% root can collide with a sibling test's delete-pending file on
+    // Windows, which surfaces as PermissionDenied (os error 5) that the tempfile
+    // crate does not retry (#540).
+    let temp_dir = TempDir::new()?;
+    let config_path = temp_dir.path().join("devcontainer.json");
+    std::fs::write(&config_path, config_content)?;
 
-    let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+    let config = ConfigLoader::load_from_path(&config_path).await?;
 
     assert_eq!(config.name, Some("User Mapping Test".to_string()));
     assert_eq!(config.image, Some("alpine:3.19".to_string()));
@@ -91,10 +95,11 @@ async fn test_config_with_minimal_user_mapping() -> anyhow::Result<()> {
         "remoteUser": "vscode"
     }"#;
 
-    let mut temp_file = NamedTempFile::new()?;
-    temp_file.write_all(config_content.as_bytes())?;
+    let temp_dir = TempDir::new()?;
+    let config_path = temp_dir.path().join("devcontainer.json");
+    std::fs::write(&config_path, config_content)?;
 
-    let config = ConfigLoader::load_from_path(temp_file.path()).await?;
+    let config = ConfigLoader::load_from_path(&config_path).await?;
 
     assert_eq!(config.name, Some("Minimal User Test".to_string()));
     assert_eq!(config.remote_user, Some("vscode".to_string()));

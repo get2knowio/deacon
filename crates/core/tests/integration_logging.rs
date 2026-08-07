@@ -6,8 +6,7 @@
 
 use assert_cmd::Command;
 use deacon_core::{config::ConfigLoader, logging};
-use std::io::Write;
-use tempfile::NamedTempFile;
+use tempfile::TempDir;
 
 #[tokio::test]
 async fn test_debug_logging_from_config_loader() {
@@ -23,13 +22,16 @@ async fn test_debug_logging_from_config_loader() {
         "features": {}
     }"#;
 
-    let mut temp_file = NamedTempFile::new().expect("Should create temp file");
-    temp_file
-        .write_all(config_content.as_bytes())
-        .expect("Should write config content");
+    // A test-owned TempDir, not NamedTempFile::new(): `.tmpXXXXXX` names in the
+    // shared %TEMP% root can collide with a sibling test's delete-pending file on
+    // Windows, which surfaces as PermissionDenied (os error 5) that the tempfile
+    // crate does not retry (#540).
+    let temp_dir = TempDir::new().expect("Should create temp dir");
+    let config_path = temp_dir.path().join("devcontainer.json");
+    std::fs::write(&config_path, config_content).expect("Should write config content");
 
     // Load the configuration - this should trigger debug logs about unknown keys
-    let result = ConfigLoader::load_from_path(temp_file.path()).await;
+    let result = ConfigLoader::load_from_path(&config_path).await;
     assert!(result.is_ok());
 
     // We can't easily capture the debug output in unit tests, but we can
