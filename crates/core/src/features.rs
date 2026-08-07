@@ -2508,8 +2508,18 @@ mod merge_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
+    use tempfile::TempDir;
+
+    /// A test-owned TempDir, not NamedTempFile::new(): `.tmpXXXXXX` names in the
+    /// shared %TEMP% root can collide with a sibling test's delete-pending file
+    /// on Windows, which surfaces as PermissionDenied (os error 5) that the
+    /// tempfile crate does not retry (#540).
+    fn write_feature_metadata(contents: &str) -> (TempDir, std::path::PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("devcontainer-feature.json");
+        std::fs::write(&path, contents).unwrap();
+        (dir, path)
+    }
 
     #[test]
     fn test_option_value_conversions() {
@@ -2524,23 +2534,20 @@ mod tests {
 
     #[test]
     fn test_parse_feature_metadata_preserves_customizations() {
-        let mut file = NamedTempFile::new().unwrap();
-        write!(
-            file,
-            r#"{{
+        let (_dir, path) = write_feature_metadata(
+            r#"{
                 "id": "feature-with-customizations",
                 "version": "1.0.0",
                 "name": "Feature With Customizations",
-                "customizations": {{
-                    "vscode": {{
+                "customizations": {
+                    "vscode": {
                         "extensions": ["ms-vscode.cpptools"]
-                    }}
-                }}
-            }}"#
-        )
-        .unwrap();
+                    }
+                }
+            }"#,
+        );
 
-        let metadata = parse_feature_metadata(file.path()).unwrap();
+        let metadata = parse_feature_metadata(&path).unwrap();
 
         assert_eq!(
             metadata
@@ -2556,19 +2563,16 @@ mod tests {
     /// models neither key, so before this they were dropped outright.
     #[test]
     fn test_parse_feature_metadata_migrates_legacy_vscode_properties() {
-        let mut file = NamedTempFile::new().unwrap();
-        write!(
-            file,
-            r#"{{
+        let (_dir, path) = write_feature_metadata(
+            r#"{
                 "id": "localFeatureB",
                 "version": "1.0.0",
                 "extensions": ["ms-dotnettools.csharp"],
-                "settings": {{ "files.watcherExclude": {{ "**/test/**": true }} }}
-            }}"#
-        )
-        .unwrap();
+                "settings": { "files.watcherExclude": { "**/test/**": true } }
+            }"#,
+        );
 
-        let metadata = parse_feature_metadata(file.path()).unwrap();
+        let metadata = parse_feature_metadata(&path).unwrap();
         let customizations = metadata.customizations.expect("migrated customizations");
         assert_eq!(
             customizations.pointer("/vscode/extensions"),
@@ -2585,25 +2589,22 @@ mod tests {
     /// UNDER them (the authored `customizations.vscode.settings` key wins).
     #[test]
     fn test_legacy_vscode_properties_merge_with_authored_customizations() {
-        let mut file = NamedTempFile::new().unwrap();
-        write!(
-            file,
-            r#"{{
+        let (_dir, path) = write_feature_metadata(
+            r#"{
                 "id": "both",
                 "extensions": ["legacy.ext"],
-                "settings": {{ "shared": "legacy", "only.legacy": 1 }},
-                "customizations": {{
-                    "vscode": {{
+                "settings": { "shared": "legacy", "only.legacy": 1 },
+                "customizations": {
+                    "vscode": {
                         "extensions": ["authored.ext"],
-                        "settings": {{ "shared": "authored" }}
-                    }},
-                    "codespaces": {{ "kept": true }}
-                }}
-            }}"#
-        )
-        .unwrap();
+                        "settings": { "shared": "authored" }
+                    },
+                    "codespaces": { "kept": true }
+                }
+            }"#,
+        );
 
-        let metadata = parse_feature_metadata(file.path()).unwrap();
+        let metadata = parse_feature_metadata(&path).unwrap();
         let customizations = metadata.customizations.expect("customizations");
         assert_eq!(
             customizations.pointer("/vscode/extensions"),
@@ -2626,9 +2627,8 @@ mod tests {
     /// `customizations` block — the migration is a rewrite, not an injection.
     #[test]
     fn test_no_legacy_properties_leaves_customizations_absent() {
-        let mut file = NamedTempFile::new().unwrap();
-        write!(file, r#"{{ "id": "plain", "version": "1.0.0" }}"#).unwrap();
-        let metadata = parse_feature_metadata(file.path()).unwrap();
+        let (_dir, path) = write_feature_metadata(r#"{ "id": "plain", "version": "1.0.0" }"#);
+        let metadata = parse_feature_metadata(&path).unwrap();
         assert!(metadata.customizations.is_none());
     }
 
@@ -3033,10 +3033,9 @@ mod tests {
         }
         "#;
 
-        let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(minimal_feature.as_bytes()).unwrap();
+        let (_dir, path) = write_feature_metadata(minimal_feature);
 
-        let metadata = parse_feature_metadata(temp_file.path()).unwrap();
+        let metadata = parse_feature_metadata(&path).unwrap();
         assert_eq!(metadata.id, "test-feature");
         assert_eq!(metadata.name, None);
         assert_eq!(metadata.options.len(), 0);
@@ -3067,12 +3066,9 @@ mod tests {
         }
         "#;
 
-        let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file
-            .write_all(feature_with_options.as_bytes())
-            .unwrap();
+        let (_dir, path) = write_feature_metadata(feature_with_options);
 
-        let metadata = parse_feature_metadata(temp_file.path()).unwrap();
+        let metadata = parse_feature_metadata(&path).unwrap();
         assert_eq!(metadata.id, "test-feature");
         assert_eq!(metadata.name, Some("Test Feature".to_string()));
         assert_eq!(metadata.options.len(), 2);
@@ -3117,10 +3113,9 @@ mod tests {
         }
         "#;
 
-        let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(feature_with_mounts.as_bytes()).unwrap();
+        let (_dir, path) = write_feature_metadata(feature_with_mounts);
 
-        let metadata = parse_feature_metadata(temp_file.path()).unwrap();
+        let metadata = parse_feature_metadata(&path).unwrap();
         assert_eq!(metadata.id, "mounty");
         assert_eq!(metadata.mounts.len(), 2);
         assert_eq!(
@@ -3148,10 +3143,9 @@ mod tests {
         }
         "#;
 
-        let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(invalid_feature.as_bytes()).unwrap();
+        let (_dir, path) = write_feature_metadata(invalid_feature);
 
-        let result = parse_feature_metadata(temp_file.path());
+        let result = parse_feature_metadata(&path);
         assert!(result.is_ok()); // Parsing should succeed
 
         let metadata = result.unwrap();
@@ -3186,10 +3180,9 @@ mod tests {
         }
         "#;
 
-        let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(invalid_json.as_bytes()).unwrap();
+        let (_dir, path) = write_feature_metadata(invalid_json);
 
-        let result = parse_feature_metadata(temp_file.path());
+        let result = parse_feature_metadata(&path);
         assert!(result.is_err());
 
         if let Err(crate::errors::DeaconError::Feature(FeatureError::Parsing { .. })) = result {

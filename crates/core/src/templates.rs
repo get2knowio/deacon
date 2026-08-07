@@ -440,8 +440,7 @@ fn should_apply_substitution(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use tempfile::{NamedTempFile, TempDir};
+    use tempfile::TempDir;
 
     #[test]
     fn test_parse_minimal_template_metadata() {
@@ -451,10 +450,11 @@ mod tests {
         }
         "#;
 
-        let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(minimal_template.as_bytes()).unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path().join("devcontainer-template.json");
+        std::fs::write(&temp_path, minimal_template).unwrap();
 
-        let metadata = parse_template_metadata(temp_file.path()).unwrap();
+        let metadata = parse_template_metadata(&temp_path).unwrap();
         assert_eq!(metadata.id, "test-template");
         assert_eq!(metadata.name, None);
         assert_eq!(metadata.options.len(), 0);
@@ -489,12 +489,11 @@ mod tests {
         }
         "#;
 
-        let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file
-            .write_all(template_with_options.as_bytes())
-            .unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path().join("devcontainer-template.json");
+        std::fs::write(&temp_path, template_with_options).unwrap();
 
-        let metadata = parse_template_metadata(temp_file.path()).unwrap();
+        let metadata = parse_template_metadata(&temp_path).unwrap();
         assert_eq!(metadata.id, "test-template");
         assert_eq!(metadata.name, Some("Test Template".to_string()));
         assert_eq!(metadata.options.len(), 2);
