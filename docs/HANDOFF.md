@@ -1,14 +1,15 @@
 # Session Handoff — Differential Parity Steady State
 
-Last updated: 2026-08-07, `main` at `4582692`. This document is the cross-session
+Last updated: 2026-08-07, `main` at `8dbeb2c` (v0.3.0 release cut from the commit
+after it). This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
 changes, update this file in the same PR.
 
 ## Where things stand
 
-- **Zero open nonconformances.** `parity/SPEC_STATUS.md` records **122 behaviors**:
-  0 open nonconformance, 9 follows-spec, 11 documented choice, 19 extension,
+- **Zero open nonconformances.** `parity/SPEC_STATUS.md` records **123 behaviors**:
+  0 open nonconformance, 9 follows-spec, 11 documented choice, 20 extension,
   83 conformant-and-matching. The header census is CI-guarded
   (`check_spec_status_census` in `crates/parity-harness/src/registry.rs`) — rows and
   header must change together.
@@ -39,6 +40,9 @@ changes, update this file in the same PR.
 
 | PR | What | Issues |
 |---|---|---|
+| #550 `8dbeb2c` | `up` stops (never removes, per the maintainer ruling) every superseded container for the workspace when a changed config forces a new one — daemon-side label query (`devcontainer.source` ∧ `devcontainer.local_folder`), current excluded by id+project, superseded compose PROJECTS expanded so label-less sidecars stop too; not gated on `!reused` (edit-and-edit-back measured). Reattach-on-return verified — the recovery the stop ruling buys. New `deacon extension` row; `case-up-stale-config-reentry` asserts `{total: 2, running: 1}` (both numbers load-bearing). Review follow-up: cross-shape compose→single sidecar stranding → #551 | #371 fixed, #551 filed |
+| #548 `d063073` | hermetic lane portable + ungated from Linux: doctor `host_os` pinned-runner-OS fix (shape assertion + a deacon-decided replacement claim), `parity/fixtures/** -text` (renormalize: zero diff), `path_spellings` registers as-given/canonical/verbatim-stripped → one token (also fixes latent macOS `/var`), mode predicate kept exercised by unit test. Hermetic binary PROVEN executed on macOS+Windows (per-group timings). Guardrail held: no per-platform expectation machinery | #441 fixed |
+| #549 `75da7b7` | `build`'s feature install order pinned via the `devcontainer.metadata` label: whole-string label pin (positional by construction, sidesteps `jsonSubset` array order-insensitivity); spec-expectation because the serialization tolerance is path-scoped and would blank the order claim. Measured both CLIs: same four entries, same order | #536 fixed |
 | #545 `05d9282` + #546 `4582692` | `up --skip-post-create` defers ALL five lifecycle phases + dotfiles, matching the reference (spec-silent flag → reference is authority; transcribed `postCreateEnabled: !skipPostCreate` gating the whole runner, measured full matrix at 0.87.0). One exhaustive-match classifier; two new parity cases (one-op `absent` + a run-user-commands-resume differential; filesystem channels capture once, after ALL ops — recorded in the SPEC_STATUS row). #546 is the compensating-review catch: `Initialize` was misclassified as deferred; the reference runs initializeCommand under the flag (its executor is outside the gate) — inert but corrected, with a pinned negative | #476 fixed |
 | #543 `e4e50f4` | the hermetic lane's one merged-config case is actually hermetic: local feature replaces the ghcr fetch, `--docker-path /nonexistent/…` turns the base-image label pull into a no-runtime degradation assertion. Watched-to-fail via `unshare -rn` reproducing the exact CI flake; 165 ms, byte-identical with and without network. The no-network run exposed six MORE registry-reaching hermetic cases → #544 (lane-contract ruling needed) | #454 fixed, #544 filed |
 | #542 `5be7282` | 37 remaining test `NamedTempFile::new()` sites moved onto test-owned TempDirs (Windows delete-pending flake class); production fallible sites untouched; per-shape faithfulness breaks; zero dropped-TempDir patterns | #540 fixed |
@@ -61,24 +65,23 @@ defects it concealed were filed as #526 and #527, both now fixed.
 Sharpest first. Every item below already has a measurement or a precise claim in
 its issue — read the issue before briefing an agent.
 
-1. **#371** — `up` leaves the previous container RUNNING when a changed config
-   forces a new one. **Maintainer ruling recorded on the issue (2026-08-07):
-   STOP the superseded container, don't remove** — ready for an end-to-end agent.
-2. **#536** — `build` installs Features too and no case declares more than one,
-   so its install order is unverified. Not the same defect as #417 (no `build`
-   behavior CLAIMS an order, so nothing there is vacuous) — a coverage gap.
-3. **#544** — six more hermetic-lane cases reach a registry (found by #454's
+1. **#551** — cross-shape supersede (compose → single-container) strands compose
+   sidecars: `stop_superseded_containers`' project expansion is gated on the
+   CURRENT config being compose. Found in #550's compensating review; fix shape
+   (drop the gate, always inspect candidates for a project) and evidence shape
+   are in the issue. Strictly narrower than what #550 fixed — not a regression.
+2. **#544** — six more hermetic-lane cases reach a registry (found by #454's
    no-network run); shape (b) does not extend to them (version-pinned OCI refs,
    `upgrade --dry-run` digest resolution). **Needs a maintainer ruling on the
    lane contract**: widened `parity_hermetic` promise vs a registry axis on
    `lane_of` vs cache pre-seeding — plus the proposed `unshare -rn` guard that
    would make the "no network" promise true by construction.
-4. **#402** — discovery: no-longer-reproducing is unreachable — nothing retires a
-   finding.
-5. **#441** — hermetic case data is Linux-pinned; lane gated to Linux pending
-   portability.
-6. **#480 batch-2** — mine the reference's remaining ~40 e2e fixtures into
+3. **#480 batch-2** — mine the reference's remaining ~40 e2e fixtures into
    declarative parity cases (grouped by blocker in the issue).
+
+Retired without work: **#402** closed obsolete 2026-08-07 — its subject (the
+discovery findings queue) was deleted with the conformance crate, and the parity
+nightly's fresh-enumeration model cannot develop the stale-queue failure mode.
 
 Unmeasured probe candidate (not yet filed): `overrideFeatureInstallOrder`'s
 metadata-id alias surface, noted during #505.
