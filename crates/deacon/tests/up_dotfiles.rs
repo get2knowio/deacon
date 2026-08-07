@@ -571,30 +571,27 @@ fn test_dotfiles_ordering_between_post_create_and_post_start() {
     );
 }
 
-/// Test SC-003: --skip-post-create flag skips post* hooks and dotfiles with reasons
+/// #476: `--skip-post-create` defers EVERY lifecycle hook and dotfiles.
 ///
-/// This test verifies the skip-flag behavior from specs/008-up-lifecycle-hooks/:
-/// When --skip-post-create is supplied, base phases (onCreate, updateContent) run,
-/// but postCreate, postStart, postAttach, and dotfiles are all skipped.
-///
-/// Spec reference: specs/008-up-lifecycle-hooks/spec.md SC-003
-/// "With --skip-post-create, 100% of runs complete required base setup while
-///  skipping postCreate, postStart, postAttach, and dotfiles, with clear
-///  reporting of skipped phases."
+/// Supersedes specs/008-up-lifecycle-hooks/ SC-003, which read the flag off its
+/// NAME and claimed the base setup (onCreate, updateContent) still runs. Measured
+/// at the pinned oracle 0.87.0: `devcontainer up --skip-post-create` runs no hook
+/// at all — it sets `postCreateEnabled: false`, and the reference's entire
+/// lifecycle runner is gated on that. The flag is spec-silent (a CLI surface, not
+/// in containers.dev at `113500f4`), so the reference is the authority.
 ///
 /// Test strategy:
 /// 1. Set up a devcontainer with all lifecycle hooks that write marker files
 /// 2. Configure dotfiles with an install script that also writes a marker
 /// 3. Run `up` with --skip-post-create flag
-/// 4. Verify onCreate and updateContent ran (markers present)
-/// 5. Verify postCreate, postStart, postAttach, and dotfiles did NOT run (no markers)
-/// 6. Verify command succeeded (exit code 0)
+/// 4. Verify NO marker exists — every hook, and dotfiles, was deferred
+/// 5. Verify command succeeded (exit code 0)
 #[test]
 #[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
-fn test_skip_post_create_skips_post_hooks_and_dotfiles_sc003() {
+fn test_skip_post_create_defers_every_hook_and_dotfiles() {
     if !can_run_dotfiles_tests() {
         eprintln!(
-            "Skipping test_skip_post_create_skips_post_hooks_and_dotfiles_sc003: Docker or network not available"
+            "Skipping test_skip_post_create_defers_every_hook_and_dotfiles: Docker or network not available"
         );
         return;
     }
@@ -669,51 +666,20 @@ fn test_skip_post_create_skips_post_hooks_and_dotfiles_sc003() {
         exec_output.map(|o| o.status.success()).unwrap_or(false)
     };
 
-    // SC-003 Verification Part 1: Base phases SHOULD have run
-    // onCreate should have executed (marker present)
-    assert!(
-        marker_exists("onCreate"),
-        "SC-003 violation: onCreate should have executed with --skip-post-create"
-    );
-
-    // updateContent should have executed (marker present)
-    assert!(
-        marker_exists("updateContent"),
-        "SC-003 violation: updateContent should have executed with --skip-post-create"
-    );
-
-    // SC-003 Verification Part 2: Post* phases and dotfiles should NOT have run
-    // postCreate should be skipped (no marker)
-    assert!(
-        !marker_exists("postCreate"),
-        "SC-003 violation: postCreate should be SKIPPED with --skip-post-create, but marker exists"
-    );
-
-    // postStart should be skipped (no marker)
-    assert!(
-        !marker_exists("postStart"),
-        "SC-003 violation: postStart should be SKIPPED with --skip-post-create, but marker exists"
-    );
-
-    // postAttach should be skipped (no marker)
-    assert!(
-        !marker_exists("postAttach"),
-        "SC-003 violation: postAttach should be SKIPPED with --skip-post-create, but marker exists"
-    );
-
-    // dotfiles should be skipped (no marker)
-    assert!(
-        !marker_exists("dotfiles"),
-        "SC-003 violation: dotfiles should be SKIPPED with --skip-post-create, but marker exists"
-    );
-
-    eprintln!("SC-003 verification passed:");
-    eprintln!("  - onCreate: executed (marker present)");
-    eprintln!("  - updateContent: executed (marker present)");
-    eprintln!("  - postCreate: SKIPPED (no marker)");
-    eprintln!("  - postStart: SKIPPED (no marker)");
-    eprintln!("  - postAttach: SKIPPED (no marker)");
-    eprintln!("  - dotfiles: SKIPPED (no marker)");
+    // #476: every hook is deferred, `onCreate` and `updateContent` included.
+    for marker in [
+        "onCreate",
+        "updateContent",
+        "postCreate",
+        "postStart",
+        "postAttach",
+        "dotfiles",
+    ] {
+        assert!(
+            !marker_exists(marker),
+            "#476 violation: {marker} must be DEFERRED by --skip-post-create, but its marker exists"
+        );
+    }
 }
 
 /// Test SC-003 with JSON output: Verify skipped phases have skip reasons in JSON
@@ -795,16 +761,15 @@ fn test_skip_post_create_reports_skip_reasons_in_output_sc003() {
     eprintln!("stdout: {}", stdout);
 }
 
-/// Test SC-003 without dotfiles: Verify skip-post-create works without dotfiles configured
-///
-/// This test verifies that --skip-post-create works correctly even when no dotfiles
-/// repository is configured. The flag should still skip postCreate, postStart, and
-/// postAttach phases.
+/// #476 without dotfiles: `--skip-post-create` defers every phase even when no
+/// dotfiles repository is configured.
 #[test]
 #[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
-fn test_skip_post_create_without_dotfiles_sc003() {
+fn test_skip_post_create_without_dotfiles_defers_every_phase() {
     if !is_docker_available() {
-        eprintln!("Skipping test_skip_post_create_without_dotfiles_sc003: Docker not available");
+        eprintln!(
+            "Skipping test_skip_post_create_without_dotfiles_defers_every_phase: Docker not available"
+        );
         return;
     }
 
@@ -877,71 +842,31 @@ fn test_skip_post_create_without_dotfiles_sc003() {
         }
     };
 
-    // SC-003 Verification: Base phases run, post* phases skipped
-
-    // onCreate should have executed (counter = 1)
-    let on_create_count = read_counter("onCreate");
-    assert_eq!(
-        on_create_count,
-        Some(1),
-        "SC-003 violation: onCreate should have executed with --skip-post-create, got {:?}",
-        on_create_count
-    );
-
-    // updateContent should have executed (counter = 1)
-    let update_content_count = read_counter("updateContent");
-    assert_eq!(
-        update_content_count,
-        Some(1),
-        "SC-003 violation: updateContent should have executed with --skip-post-create, got {:?}",
-        update_content_count
-    );
-
-    // postCreate should be skipped (counter = None, file doesn't exist)
-    let post_create_count = read_counter("postCreate");
-    assert!(
-        post_create_count.is_none(),
-        "SC-003 violation: postCreate should be SKIPPED with --skip-post-create, got {:?}",
-        post_create_count
-    );
-
-    // postStart should be skipped (counter = None, file doesn't exist)
-    let post_start_count = read_counter("postStart");
-    assert!(
-        post_start_count.is_none(),
-        "SC-003 violation: postStart should be SKIPPED with --skip-post-create, got {:?}",
-        post_start_count
-    );
-
-    // postAttach should be skipped (counter = None, file doesn't exist)
-    let post_attach_count = read_counter("postAttach");
-    assert!(
-        post_attach_count.is_none(),
-        "SC-003 violation: postAttach should be SKIPPED with --skip-post-create, got {:?}",
-        post_attach_count
-    );
-
-    eprintln!("SC-003 verification (no dotfiles) passed:");
-    eprintln!("  - onCreate: executed (counter=1)");
-    eprintln!("  - updateContent: executed (counter=1)");
-    eprintln!("  - postCreate: SKIPPED (no counter file)");
-    eprintln!("  - postStart: SKIPPED (no counter file)");
-    eprintln!("  - postAttach: SKIPPED (no counter file)");
+    // #476: every phase is deferred, so no counter file exists at all.
+    for phase in [
+        "onCreate",
+        "updateContent",
+        "postCreate",
+        "postStart",
+        "postAttach",
+    ] {
+        let count = read_counter(phase);
+        assert!(
+            count.is_none(),
+            "#476 violation: {phase} must be DEFERRED by --skip-post-create, got {count:?}"
+        );
+    }
 }
 
-/// Test SC-003 edge case: Resume after --skip-post-create should re-run skipped phases
-///
-/// This test verifies that if you run `up` with --skip-post-create first, then run
-/// `up` again without the flag, the previously skipped phases (postCreate, postStart,
-/// postAttach, dotfiles) should now execute since they were never completed.
-///
-/// This tests the interaction between skip-post-create and resume behavior.
+/// #476: a deferred `up` loses nothing. Run `up --skip-post-create`, then `up`
+/// again without the flag, and every phase runs exactly once — the first run wrote
+/// no completion markers because it ran nothing.
 #[test]
 #[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
-fn test_skip_post_create_then_normal_resume_runs_skipped_phases_sc003() {
+fn test_skip_post_create_then_normal_up_runs_every_deferred_phase() {
     if !is_docker_available() {
         eprintln!(
-            "Skipping test_skip_post_create_then_normal_resume_runs_skipped_phases_sc003: Docker not available"
+            "Skipping test_skip_post_create_then_normal_up_runs_every_deferred_phase: Docker not available"
         );
         return;
     }
@@ -1009,16 +934,15 @@ fn test_skip_post_create_then_normal_resume_runs_skipped_phases_sc003() {
         }
     };
 
-    // After first up with --skip-post-create:
-    // - onCreate: 1 (executed)
-    // - updateContent: 1 (executed)
-    // - postCreate: None (skipped)
-    // - postStart: None (skipped)
-    // - postAttach: None (skipped)
-    assert_eq!(read_counter("onCreate"), Some(1), "onCreate after first up");
+    // #476: after the first up, NOTHING has run — the flag defers the whole
+    // lifecycle, so even onCreate has no counter yet.
+    assert!(
+        read_counter("onCreate").is_none(),
+        "onCreate must be deferred by --skip-post-create on the first up"
+    );
     assert!(
         read_counter("postCreate").is_none(),
-        "postCreate should be skipped after first up"
+        "postCreate should be deferred after first up"
     );
 
     // Second up WITHOUT --skip-post-create (normal resume)
@@ -1037,38 +961,21 @@ fn test_skip_post_create_then_normal_resume_runs_skipped_phases_sc003() {
         String::from_utf8_lossy(&output2.stderr)
     );
 
-    // After second up (normal resume behavior):
-    // Per SC-002: Resume should only run postStart and postAttach if markers indicate completion
-    // However, since postCreate was skipped (not completed), the behavior depends on marker state
-    //
-    // Per FR-004: If prior run ended before postCreate, resume should run postCreate first
-    // But --skip-post-create doesn't create failure markers, it just skips
-    //
-    // The expected behavior with current implementation:
-    // - onCreate: 1 (skipped on resume due to prior marker)
-    // - updateContent: 1 (skipped on resume due to prior marker)
-    // - postCreate: may be 1 (runs because no completion marker from skip)
-    // - postStart: should run (runtime hook)
-    // - postAttach: should run (runtime hook)
-
-    // At minimum, postStart and postAttach should have run
-    let post_start_count = read_counter("postStart");
-    let post_attach_count = read_counter("postAttach");
-
-    // Runtime hooks should execute on normal resume
-    assert!(
-        post_start_count.is_some() && post_start_count.unwrap() >= 1,
-        "postStart should have executed on normal resume, got {:?}",
-        post_start_count
-    );
-
-    assert!(
-        post_attach_count.is_some() && post_attach_count.unwrap() >= 1,
-        "postAttach should have executed on normal resume, got {:?}",
-        post_attach_count
-    );
-
-    eprintln!("SC-003 skip-then-resume test passed:");
-    eprintln!("  - First up (--skip-post-create): onCreate/updateContent ran, post* skipped");
-    eprintln!("  - Second up (normal): Runtime hooks (postStart/postAttach) executed");
+    // After the second up (no flag): the first run wrote NO markers, so this is a
+    // fresh lifecycle and every phase runs exactly once. That is the whole point of
+    // deferral — the work is not lost, only postponed (#476).
+    for phase in [
+        "onCreate",
+        "updateContent",
+        "postCreate",
+        "postStart",
+        "postAttach",
+    ] {
+        let count = read_counter(phase);
+        assert_eq!(
+            count,
+            Some(1),
+            "{phase} should have run exactly once on the deferred second up, got {count:?}"
+        );
+    }
 }

@@ -171,14 +171,17 @@ pub(crate) async fn execute_lifecycle_commands(
         debug!("No features with lifecycle commands; using config commands only");
     }
 
-    // T020: --skip-post-create flag handling
-    // Per FR-005: When --skip-post-create is provided, up MUST perform required base setup
-    // (container creation and content update via onCreate/updateContent) and MUST skip
-    // postCreate, postStart, postAttach, and dotfiles.
+    // `--skip-post-create` defers the ENTIRE lifecycle — onCreate and updateContent
+    // included — not just postCreate onward (#476). The container is still created and
+    // Features are still installed; only the hooks wait for a later
+    // `run-user-commands`. This corrects 008 FR-005/SC-003, which had been written
+    // from the flag's NAME: the reference CLI's own help says "Do not run
+    // onCreateCommand, updateContentCommand, postCreateCommand, postStartCommand or
+    // postAttachCommand and do not install dotfiles", and it gates its whole lifecycle
+    // runner on `postCreateEnabled: !skipPostCreate`. Measured at oracle 0.87.0.
     //
-    // The skipping of specific phases is handled by the InvocationContext::should_skip_phase()
-    // method which returns "--skip-post-create flag" as the reason for skipped phases.
-    // This allows onCreate and updateContent to still execute.
+    // The per-phase skipping is `InvocationContext::should_skip_phase()`, which returns
+    // "--skip-post-create flag" as the reason.
 
     // T014: Build invocation context with prior markers for resume decision logic
     // Per SC-002: On resume, skip onCreate, updateContent, postCreate, dotfiles; run postStart, postAttach
@@ -272,9 +275,9 @@ pub(crate) async fn execute_lifecycle_commands(
     // The should_skip_phase method returns the reason for skipping (e.g., "--skip-post-create flag",
     // "prior completion marker", "prebuild mode") which we use in debug logs.
     //
-    // T020: --skip-post-create and prebuild mode both skip postCreate/dotfiles/postStart/postAttach.
-    // The InvocationContext handles these via should_skip_phase().
-    // PostAttach also respects the separate --skip-post-attach flag.
+    // `--skip-post-create` defers every phase (#476); prebuild skips
+    // postCreate/dotfiles/postStart/postAttach. The InvocationContext handles both via
+    // should_skip_phase(). PostAttach also respects the separate --skip-post-attach flag.
     let mut commands = ContainerLifecycleCommands::new();
     let phases = [
         LifecyclePhase::OnCreate,
@@ -745,6 +748,18 @@ mod tests {
 
         assert_eq!(ctx.mode, InvocationMode::SkipPostCreate);
         assert!(ctx.flags.skip_post_create);
+
+        // #476: `up --skip-post-create` defers the WHOLE lifecycle, so the loop below
+        // (which is what `execute_lifecycle_commands` runs) queues nothing at all.
+        // onCreate and updateContent are the two that used to slip through.
+        for phase in LifecyclePhase::spec_order() {
+            assert_eq!(
+                ctx.should_skip_phase(*phase),
+                Some("--skip-post-create flag"),
+                "{} must be deferred by --skip-post-create",
+                phase.as_str()
+            );
+        }
     }
 
     #[test]

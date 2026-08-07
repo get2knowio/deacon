@@ -634,20 +634,24 @@ fn test_compose_up_runs_full_lifecycle_phase_set() {
     }
 }
 
-/// #460: `--skip-post-create` means the same thing on compose as on a single
-/// container — postCreate ONWARD is skipped, the base setup is not.
+/// #460/#476: `--skip-post-create` means the same thing on compose as on a single
+/// container — it defers the WHOLE lifecycle, `onCreate` and `updateContent`
+/// included.
 ///
-/// The old compose path gated its whole post-create block on
-/// `if !args.skip_post_create`, which is a different rule: with no other phase
-/// implemented it was indistinguishable, but once the full set runs, gating the
-/// call would also skip `onCreate` and `updateContent`, which the flag is
-/// specified to keep. That decision belongs to `InvocationContext`, which both
-/// paths now share.
+/// This test previously asserted the opposite (base setup runs, postCreate onward
+/// is skipped), read off the flag's NAME. #476 measured the pinned oracle 0.87.0:
+/// `devcontainer up --skip-post-create` runs no hook at all, because it sets
+/// `postCreateEnabled: false` and the whole lifecycle runner is gated on it. The
+/// flag is spec-silent, so the reference is the authority.
+///
+/// What compose must NOT do is re-decide this locally: the rule lives in
+/// `InvocationContext::should_skip_phase`, which both paths share, so the compose
+/// path stays a caller rather than a second copy that can drift.
 #[test]
-fn test_compose_up_skip_post_create_runs_only_base_setup() {
+fn test_compose_up_skip_post_create_defers_every_phase() {
     if !is_docker_available() {
         eprintln!(
-            "Skipping test_compose_up_skip_post_create_runs_only_base_setup: Docker not available"
+            "Skipping test_compose_up_skip_post_create_defers_every_phase: Docker not available"
         );
         return;
     }
@@ -673,10 +677,11 @@ fn test_compose_up_skip_post_create_runs_only_base_setup() {
     );
 
     assert_eq!(
-        phase_log(workspace).as_deref(),
-        Some("onCreate-string\nupdateContent-array\n"),
-        "--skip-post-create must still run the base setup (onCreate, updateContent) \
-         and must run nothing after it (up stderr: {})",
+        phase_log(workspace),
+        None,
+        "--skip-post-create must defer EVERY phase, onCreate and updateContent \
+         included, so the shared phase log must not exist at all \
+         (up stderr: {})",
         String::from_utf8_lossy(&up_output.stderr)
     );
     assert!(

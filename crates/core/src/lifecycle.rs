@@ -94,17 +94,34 @@ impl LifecyclePhase {
         )
     }
 
-    /// Returns whether this phase is skipped when --skip-post-create is set.
+    /// Returns whether this phase is skipped when `--skip-post-create` is set.
     ///
-    /// With --skip-post-create, postCreate, dotfiles, postStart, and postAttach are all skipped.
+    /// EVERY phase is — the flag defers the whole lifecycle, not just the tail.
+    /// Despite its name it is not "skip postCreate onward": the reference CLI's own
+    /// help text for the flag reads "Do not run onCreateCommand, updateContentCommand,
+    /// postCreateCommand, postStartCommand or postAttachCommand and do not install
+    /// dotfiles", and its `up` gates the entire lifecycle runner on
+    /// `lifecycleHook.enabled` (`postCreateEnabled: !skipPostCreate`), so `onCreate`
+    /// and `updateContent` never reach it either (#476).
+    ///
+    /// The flag is spec-silent — a CLI surface, absent from containers.dev at
+    /// `113500f4` — so the reference is the authority. deacon previously ran
+    /// onCreate + updateContent here; measured against oracle 0.87.0, the reference
+    /// runs nothing, and `run-user-commands` is what executes the deferred set.
+    ///
+    /// Written as an exhaustive `match` rather than `matches!`/`true` on purpose: a
+    /// phase added later must be classified here deliberately, and only the compiler
+    /// enforces that.
     pub fn is_skipped_with_skip_post_create(&self) -> bool {
-        matches!(
-            self,
-            LifecyclePhase::PostCreate
-                | LifecyclePhase::Dotfiles
-                | LifecyclePhase::PostStart
-                | LifecyclePhase::PostAttach
-        )
+        match self {
+            LifecyclePhase::Initialize
+            | LifecyclePhase::OnCreate
+            | LifecyclePhase::UpdateContent
+            | LifecyclePhase::PostCreate
+            | LifecyclePhase::Dotfiles
+            | LifecyclePhase::PostStart
+            | LifecyclePhase::PostAttach => true,
+        }
     }
 }
 
@@ -320,7 +337,11 @@ pub enum InvocationMode {
     Resume,
     /// Prebuild: stop after updateContent, skip dotfiles and post* hooks
     Prebuild,
-    /// Skip post-create: run base setup but skip postCreate, dotfiles, and all runtime hooks
+    /// Skip post-create: defer EVERY lifecycle phase — onCreate, updateContent,
+    /// postCreate, dotfiles, postStart and postAttach — to a later
+    /// `run-user-commands`, matching the reference CLI's `--skip-post-create`
+    /// (#476). The container is still created and Features are still installed;
+    /// only the hooks are deferred.
     SkipPostCreate,
 }
 
@@ -1542,9 +1563,11 @@ mod tests {
         assert!(LifecyclePhase::PostStart.is_skipped_in_prebuild());
         assert!(LifecyclePhase::PostAttach.is_skipped_in_prebuild());
 
-        // Skipped with --skip-post-create
-        assert!(!LifecyclePhase::OnCreate.is_skipped_with_skip_post_create());
-        assert!(!LifecyclePhase::UpdateContent.is_skipped_with_skip_post_create());
+        // Skipped with --skip-post-create: EVERY phase, including onCreate and
+        // updateContent (#476 — the flag defers the whole lifecycle, matching the
+        // reference CLI's `postCreateEnabled` gate on its lifecycle runner).
+        assert!(LifecyclePhase::OnCreate.is_skipped_with_skip_post_create());
+        assert!(LifecyclePhase::UpdateContent.is_skipped_with_skip_post_create());
         assert!(LifecyclePhase::PostCreate.is_skipped_with_skip_post_create());
         assert!(LifecyclePhase::Dotfiles.is_skipped_with_skip_post_create());
         assert!(LifecyclePhase::PostStart.is_skipped_with_skip_post_create());
@@ -1674,20 +1697,15 @@ mod tests {
         assert_eq!(ctx.mode, InvocationMode::SkipPostCreate);
         assert!(ctx.flags.skip_post_create);
 
-        // skip-post-create skips postCreate, dotfiles, postStart, postAttach
-        assert!(ctx.should_skip_phase(LifecyclePhase::OnCreate).is_none());
-        assert!(
-            ctx.should_skip_phase(LifecyclePhase::UpdateContent)
-                .is_none()
-        );
-        assert_eq!(
-            ctx.should_skip_phase(LifecyclePhase::PostCreate),
-            Some("--skip-post-create flag")
-        );
-        assert_eq!(
-            ctx.should_skip_phase(LifecyclePhase::Dotfiles),
-            Some("--skip-post-create flag")
-        );
+        // skip-post-create defers EVERY phase (#476), onCreate/updateContent included.
+        for phase in LifecyclePhase::spec_order() {
+            assert_eq!(
+                ctx.should_skip_phase(*phase),
+                Some("--skip-post-create flag"),
+                "{} must be deferred by --skip-post-create",
+                phase.as_str()
+            );
+        }
     }
 
     #[test]
@@ -1949,45 +1967,17 @@ mod tests {
 
         let decisions = orchestrator.phases_with_decisions();
 
-        // onCreate and updateContent should execute
-        assert_eq!(
-            decisions[0],
-            (LifecyclePhase::OnCreate, PhaseDecision::Execute)
-        );
-        assert_eq!(
-            decisions[1],
-            (LifecyclePhase::UpdateContent, PhaseDecision::Execute)
-        );
-
-        // Everything else should be skipped
-        assert_eq!(
-            decisions[2],
-            (
-                LifecyclePhase::PostCreate,
-                PhaseDecision::Skip("--skip-post-create flag")
-            )
-        );
-        assert_eq!(
-            decisions[3],
-            (
-                LifecyclePhase::Dotfiles,
-                PhaseDecision::Skip("--skip-post-create flag")
-            )
-        );
-        assert_eq!(
-            decisions[4],
-            (
-                LifecyclePhase::PostStart,
-                PhaseDecision::Skip("--skip-post-create flag")
-            )
-        );
-        assert_eq!(
-            decisions[5],
-            (
-                LifecyclePhase::PostAttach,
-                PhaseDecision::Skip("--skip-post-create flag")
-            )
-        );
+        // #476: EVERY phase is deferred, onCreate and updateContent included — the
+        // reference gates its whole lifecycle runner on this flag.
+        assert_eq!(decisions.len(), LifecyclePhase::spec_order().len());
+        for (phase, decision) in &decisions {
+            assert_eq!(
+                *decision,
+                PhaseDecision::Skip("--skip-post-create flag"),
+                "{} must be deferred by --skip-post-create",
+                phase.as_str()
+            );
+        }
     }
 
     #[test]
@@ -2207,13 +2197,11 @@ mod tests {
         assert_eq!(prebuild_phases[0], LifecyclePhase::OnCreate);
         assert_eq!(prebuild_phases[1], LifecyclePhase::UpdateContent);
 
-        // Skip-post-create mode
+        // Skip-post-create mode: nothing executes (#476). This is the line that
+        // separates it from prebuild, which DOES run the two base phases.
         let skip_ctx = InvocationContext::new_skip_post_create(PathBuf::from("/workspace"));
         let skip_orchestrator = LifecycleOrchestrator::new(skip_ctx);
-        let skip_phases = skip_orchestrator.phases_to_execute();
-        assert_eq!(skip_phases.len(), 2);
-        assert_eq!(skip_phases[0], LifecyclePhase::OnCreate);
-        assert_eq!(skip_phases[1], LifecyclePhase::UpdateContent);
+        assert!(skip_orchestrator.phases_to_execute().is_empty());
     }
 
     #[test]

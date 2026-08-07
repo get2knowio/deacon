@@ -43,14 +43,14 @@ cd "$SCRIPT_DIR"
 # run-user-commands doesn't accept the same flag set.
 UP_ARGS=( "$@" )
 
-# Scenario 1: bring container up with the post-create phase suppressed.
-# `--skip-post-create` only suppresses the postCreate phase onward;
-# onCreate and updateContent still fire as part of `up`.
-echo "== up --skip-post-create (only post-create+ suppressed) ==" >&2
+# Scenario 1: bring the container up with the WHOLE lifecycle deferred.
+# `--skip-post-create` defers every phase, onCreate and updateContent included
+# (#476, matching the reference CLI), so no marker exists yet.
+echo "== up --skip-post-create (every phase deferred) ==" >&2
 run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" \
 	--remove-existing-container --skip-post-create "${UP_ARGS[@]}" >/dev/null
-assert_marker onCreate present
-assert_marker updateContent present
+assert_marker onCreate absent
+assert_marker updateContent absent
 assert_marker postCreate absent
 assert_marker postStart absent
 assert_marker postAttach absent

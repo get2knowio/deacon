@@ -7,7 +7,7 @@
 //! matching `up`.
 //!
 //! This test installs a local feature that declares a `postCreateCommand`, runs
-//! `up --skip-post-create` (so no postCreate fires yet), then runs
+//! `up --skip-post-create` (so no lifecycle hook fires yet, #476), then runs
 //! `run-user-commands` and asserts BOTH the feature's and the config's
 //! postCreate markers appear.
 //!
@@ -121,8 +121,8 @@ fn test_run_user_commands_runs_feature_lifecycle_commands() {
     )
     .unwrap();
 
-    // Bring the container up with postCreate suppressed, so neither the
-    // feature's nor the config's postCreate has fired yet.
+    // Bring the container up with the whole lifecycle deferred (#476), so
+    // neither the feature's nor the config's postCreate has fired yet.
     Command::cargo_bin("deacon")
         .unwrap()
         .current_dir(root)

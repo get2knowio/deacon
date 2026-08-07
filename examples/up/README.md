@@ -150,7 +150,8 @@ deacon up --workspace-folder . --gpu-mode none
 
 ### Lifecycle Control
 
-- `--skip-post-create`: Skip all post-create lifecycle commands
+- `--skip-post-create`: Defer every lifecycle command (onCreate through postAttach)
+  and dotfiles to a later `run-user-commands`
 - `--skip-post-attach`: Skip post-attach command only
 - `--skip-non-blocking-commands`: Skip background tasks
 - `--prebuild`: Stop after onCreate and updateContent

@@ -13,8 +13,9 @@ workflow. The lifecycle phases the spec defines (`onCreate`, `updateContent`,
 ## Scenarios exercised by `exec.sh`
 
 1. **Full re-run.** `deacon up --skip-post-create` creates the container with
-   the lifecycle hooks suppressed; the marker files are absent. Then
-   `deacon run-user-commands` runs *all* hooks and the markers appear.
+   *every* lifecycle hook deferred — onCreate and updateContent included — so no
+   marker file exists. Then `deacon run-user-commands` runs all the hooks and the
+   markers appear.
 
 2. **Prebuild mode** (`--prebuild`). Stops after `updateContentCommand`. The
    `postCreate`, `postStart`, and `postAttach` markers stay from step 1 (or
@@ -31,7 +32,7 @@ workflow. The lifecycle phases the spec defines (`onCreate`, `updateContent`,
 ## Manual usage
 
 ```sh
-# Start with lifecycle suppressed so we can drive it manually below.
+# Start with the whole lifecycle deferred so we can drive it manually below.
 deacon up --workspace-folder . --remove-existing-container --skip-post-create
 
 # Run every phase.

@@ -166,7 +166,7 @@ deacon read-configuration --config devcontainer.json | jq '{
 ### CLI Options for Development
 When using DevContainer CLI, control lifecycle execution:
 ```bash
-# Skip post-creation commands (faster iteration)
+# Defer every lifecycle command (faster iteration)
 devcontainer up --skip-post-create
 
 # Skip non-blocking commands

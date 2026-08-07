@@ -72,7 +72,7 @@ Operators running `up` with skip or prebuild options need the command to honor l
 - **FR-002**: The system MUST record completion markers per lifecycle phase to enforce ordering on subsequent invocations and to inform resume decisions.
 - **FR-003**: On resume after a successful initial run, `up` MUST skip onCreate, updateContent, postCreate, and dotfiles, and rerun only postStart followed by postAttach.
 - **FR-004**: If a prior run ended before postStart completed, a subsequent `up` MUST rerun any incomplete earlier phases in order before executing postStart and postAttach.
-- **FR-005**: When `--skip-post-create` is provided, `up` MUST perform required base setup (container creation and content update) and MUST skip postCreate, postStart, postAttach, and dotfiles.
+- **FR-005**: When `--skip-post-create` is provided, `up` MUST perform required base setup (container creation and content update) and MUST skip postCreate, postStart, postAttach, and dotfiles. **SUPERSEDED by [#476](https://github.com/get2knowio/deacon/issues/476)**: measured against the pinned reference CLI 0.87.0, `--skip-post-create` defers EVERY phase including onCreate and updateContent. The clause above was written from the flag's name; the flag is spec-silent, so the reference is the authority. See the `up` section of `parity/SPEC_STATUS.md`.
 - **FR-006**: In prebuild mode, `up` MUST stop after completing updateContent, MUST skip dotfiles, postCreate, postStart, and postAttach, and MUST rerun updateContent on every prebuild invocation regardless of prior runs.
 - **FR-007**: The command MUST present a summary indicating which phases executed or were skipped (including dotfiles) so users can verify lifecycle behavior.
 - **FR-008**: Prebuild executions MUST keep lifecycle markers isolated from normal `up` runs so that a subsequent standard `up` reruns onCreate and updateContent before proceeding to postCreate, postStart, and postAttach.
@@ -88,7 +88,7 @@ Operators running `up` with skip or prebuild options need the command to honor l
 
 - **SC-001**: In fresh `up` runs with hooks and dotfiles configured, 100% of observed runs execute onCreate -> updateContent -> postCreate -> dotfiles -> postStart -> postAttach in that order without reordering or omission.
 - **SC-002**: In resume runs after a completed initial `up`, 100% of runs skip onCreate, updateContent, postCreate, and dotfiles, while postStart and postAttach execute successfully.
-- **SC-003**: With `--skip-post-create`, 100% of runs complete required base setup while skipping postCreate, postStart, postAttach, and dotfiles, with clear reporting of skipped phases.
+- **SC-003**: With `--skip-post-create`, 100% of runs complete required base setup while skipping postCreate, postStart, postAttach, and dotfiles, with clear reporting of skipped phases. **SUPERSEDED by [#476](https://github.com/get2knowio/deacon/issues/476)**: measured against the pinned reference CLI 0.87.0, `--skip-post-create` defers EVERY phase including onCreate and updateContent. The clause above was written from the flag's name; the flag is spec-silent, so the reference is the authority. See the `up` section of `parity/SPEC_STATUS.md`.
 - **SC-004**: In prebuild mode, 100% of runs stop after updateContent, skip dotfiles and all post* hooks, and updateContent reruns on every repeated prebuild invocation.
 
 ## Assumptions
