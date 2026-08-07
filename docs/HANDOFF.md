@@ -1,15 +1,15 @@
 # Session Handoff — Differential Parity Steady State
 
-Last updated: 2026-08-06, `main` at `ba8368a`. This document is the cross-session
+Last updated: 2026-08-07, `main` at `dabf102`. This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
 changes, update this file in the same PR.
 
 ## Where things stand
 
-- **Zero open nonconformances.** `parity/SPEC_STATUS.md` records **120 behaviors**:
+- **Zero open nonconformances.** `parity/SPEC_STATUS.md` records **121 behaviors**:
   0 open nonconformance, 9 follows-spec, 11 documented choice, 19 extension,
-  81 conformant-and-matching. The header census is CI-guarded
+  82 conformant-and-matching. The header census is CI-guarded
   (`check_spec_status_census` in `crates/parity-harness/src/registry.rs`) — rows and
   header must change together.
 - **The differential nightly's diverging set is empty.** Current verdict:
@@ -19,12 +19,29 @@ changes, update this file in the same PR.
 - **The pinned oracle** is `@devcontainers/cli@0.87.0`
   (`npm install -g @devcontainers/cli@0.87.0`). Docker and the oracle both work in
   this dev container — verify parity changes for real, never by reasoning alone.
+- **⚠️ This dev container's Docker daemon was modified (2026-08-06, decision
+  pending).** Docker 29's default containerd-snapshotter + BuildKit could not
+  mount overlay here — *every* `RUN` failed (`operation not permitted`,
+  `userxattr`) for BOTH CLIs, making feature-installing builds impossible. The
+  #417 agent wrote `/etc/docker/daemon.json` =
+  `{"features": {"containerd-snapshotter": false}}` and restarted dockerd (this
+  persists across host restarts). Costs: `case-build-output-export-tar` and
+  `case-build-output-metadata-label` fail locally (`--output type=docker` needs
+  the containerd store; CI is unaffected), and some large images
+  (`universal:2-linux`, `base:ubuntu`) fail layer extraction on this
+  overlay2-on-btrfs setup. Untried alternative that might fix both:
+  `{"features": {"containerd-snapshotter": true}, "storage-driver": "btrfs"}`.
+  Maintainer decides: keep, revert, or try the btrfs snapshotter. Until then,
+  treat those local failures as environment-pinned, not regressions (#538's
+  neutrality diff confirmed identical failure sets at HEAD and `main`).
 
 ## Recent landings (this campaign, newest first)
 
 | PR | What | Issues |
 |---|---|---|
-| #537 | `up` Feature install ORDER is observable at last: three multi-Feature cases read the sequence three local `install.sh` scripts append inside the created container — one order-by-declaration (`overrideFeatureInstallOrder`), one order-by-dependency (`installsAfter` + `dependsOn`), one differential. Measured at 0.87.0: no divergence, the hole was in the coverage and not in the behavior | #417 fixed, #536 filed |
+| #538 `dabf102` | `set-up` reports `mergedConfiguration.customizations` as per-tool ARRAYS (one slot per contributing metadata entry, `[…label fragments, --config]`, upstream `Tt`), via the new `metadata_customizations_layers` carrier (the #477 pattern) routed through the existing `apply_customizations_shape`; layers are variable-substituted because the reference maps `substitute` over label entries (`Tr`→`IG`, confirmed live) | #532 fixed |
+| #537 `aa8258f` | `up` Feature install ORDER is observable at last: three multi-Feature cases read the sequence three local `install.sh` scripts append inside the created container — one order-by-declaration (`overrideFeatureInstallOrder`), one order-by-dependency (`installsAfter` + `dependsOn`), one differential. Measured at 0.87.0: no divergence, the hole was in the coverage and not in the behavior | #417 fixed, #536 filed |
+| #535 `bf338f7` | `port_forward` registry tests deterministic: the flake was the test helper's drop-then-rebind of an ephemeral port (measured 1/300 under pressure), NOT a product TOCTOU (`TcpListener::bind` is the atomic take and the allocator holds its listener). Bind probe injected via private `allocate_with` seam; assertions strengthened, `free_port()` deleted from all five tests | #482 fixed |
 | #531 `ba8368a` | exec/run-user-commands read `devcontainer.metadata` from the CONTAINER inspect; the identity labels pick between two compositions (complete-record vs layered), transcribed from the reference bundle | #527 fixed |
 | #530 `56494de` | `run-user-commands` and `set-up` stamp `config_hash` in lifecycle markers via the shared `canonical_reconnect_identity` contract (hash the config AS LOADED, before mutation) | #372 fixed |
 | #533 `32be9ae` | `set-up` folds only the reference's enumerated metadata property list (upstream `pickConfigProperties` ∪ `entrypoint`, 25 names); label-authored `workspaceFolder` no longer becomes the hook CWD | #526 fixed, #475 refuted/closed |
@@ -41,25 +58,20 @@ defects it concealed were filed as #526 and #527, both now fixed.
 Sharpest first. Every item below already has a measurement or a precise claim in
 its issue — read the issue before briefing an agent.
 
-1. **#532** — `set-up` mergedConfiguration deep-merges `customizations`; the
-   reference reports **per-tool arrays**. Measured during #533's post-fix
-   re-measurement (25 identical keys, one differing value). Small, well-scoped.
-2. **#476** — characterize `--skip-post-create` phase coverage: the reference
+1. **#476** — characterize `--skip-post-create` phase coverage: the reference
    defers everything, deacon defers postCreate onward. Measure, then either align
    or file an allowlist ruling request.
-3. **#482** — `port_forward prefers_same_number_when_free` is a TOCTOU flake on
-   busy runners. Test-infra fix.
-4. **#454** — `case-merged-decl-extends-child` can pull an image inside the
+2. **#454** — `case-merged-decl-extends-child` can pull an image inside the
    "needs nothing" hermetic lane. Lane-truthfulness fix.
-5. **#441** — hermetic case data is Linux-pinned; lane gated to Linux pending
+3. **#441** — hermetic case data is Linux-pinned; lane gated to Linux pending
    portability.
-6. **#371** — `up` leaves the previous container RUNNING when a changed config
+4. **#371** — `up` leaves the previous container RUNNING when a changed config
    forces a new one.
-7. **#402** — discovery: no-longer-reproducing is unreachable — nothing retires a
+5. **#402** — discovery: no-longer-reproducing is unreachable — nothing retires a
    finding.
-8. **#480 batch-2** — mine the reference's remaining ~40 e2e fixtures into
+6. **#480 batch-2** — mine the reference's remaining ~40 e2e fixtures into
    declarative parity cases (grouped by blocker in the issue).
-9. **#536** — `build` installs Features too and no case declares more than one,
+7. **#536** — `build` installs Features too and no case declares more than one,
    so its install order is unverified. Not the same defect as #417 (no `build`
    behavior CLAIMS an order, so nothing there is vacuous) — a coverage gap.
 
@@ -111,8 +123,8 @@ each learned from a real failure:
   containers whose `devcontainer.local_folder` label names a directory that no
   longer exists, plus `deacon-*`/`deacon_*` compose orphans AND their networks
   (leaked networks accumulate toward address-pool exhaustion). A day of
-  Docker-gated agent runs leaked ~117 containers + 14 networks; sweep at
-  session end.
+  Docker-gated agent runs leaked ~117 containers + 14 networks (a later one
+  161 + 24); sweep at session end — last sweep 2026-08-07 left 0/0.
 - **Gate for metadata/lifecycle-path changes**: the standard pre-push set
   (fmt --check, clippy `--workspace --all-targets --all-features`, build
   all-targets, `dev-fast`, live `--profile parity`) does NOT select
@@ -122,9 +134,14 @@ each learned from a real failure:
 
 ## Key seams touched recently (for orientation, not authority)
 
+- `crates/core/src/config.rs` — `metadata_customizations_layers` carrier
+  (`#[serde(skip)]`, concatenated in `merge_two_configs`, substituted in both
+  passes, #532); its lifecycle sibling `metadata_lifecycle_layers` (#477).
+- `crates/core/src/port_forward/registry.rs` — `allocate_with` injected bind
+  probe (test seam, production byte-identical, #482).
 - `crates/deacon/src/commands/shared/container_metadata.rs` —
   `resolve_config_against_container` + `MetadataComposition`
-  (complete-record vs layered, #527).
+  (complete-record vs layered, #527); per-fragment customizations capture (#532).
 - `crates/deacon/src/commands/set_up.rs` — `METADATA_MERGE_PROPERTIES` /
   `restrict_to_metadata_properties` (#526), marker `config_hash` stamping (#372).
 - `crates/deacon/src/commands/shared/identity.rs` —
