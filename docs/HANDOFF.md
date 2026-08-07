@@ -74,6 +74,12 @@ its issue — read the issue before briefing an agent.
 7. **#536** — `build` installs Features too and no case declares more than one,
    so its install order is unverified. Not the same defect as #417 (no `build`
    behavior CLAIMS an order, so nothing there is vacuous) — a coverage gap.
+8. **#540** — ~38 test sites call `NamedTempFile::new()` in the shared `%TEMP%`
+   root; on Windows a sibling test's delete-pending file surfaces as an
+   unretried PermissionDenied (caught live on this PR's own CI, docs-only diff).
+   The measured instance (`templates.rs`) was fixed in #541; the rest is a
+   mechanical sweep. Same defect class as #482 — a test depending on a
+   host-global namespace it cannot hold still.
 
 Unmeasured probe candidate (not yet filed): `overrideFeatureInstallOrder`'s
 metadata-id alias surface, noted during #505.
