@@ -161,10 +161,37 @@ impl TokenMap {
         TokenMap::default()
     }
 
-    /// A token map that rewrites the workspace path to `<WORKSPACE>`.
+    /// A token map that rewrites the workspace path to `<WORKSPACE>` — in EVERY spelling
+    /// the operating system admits for it, not only the one the harness happens to hold.
+    ///
+    /// A CLI does not have to echo back the path string it was handed. deacon's
+    /// `SubstitutionContext::new` canonicalizes `--workspace-folder` before
+    /// `${localWorkspaceFolder}` resolves, so the path in its output can be a DIFFERENT
+    /// STRING naming the same directory:
+    ///
+    /// - Windows canonicalization returns the `\\?\` verbatim form and expands 8.3 short
+    ///   names, so a workspace under the runner's `C:\Users\RUNNER~1\AppData\Local\Temp`
+    ///   comes back as `\\?\C:\Users\runneradmin\AppData\Local\Temp\…` — which does not
+    ///   contain the harness's spelling as a substring at all, so the single-spelling map
+    ///   tokenized nothing and `case-readconfig-substitution-object-fields` diverged at
+    ///   `configuration.build.args.WS` (#441).
+    /// - macOS `$TMPDIR` lives under `/var/folders/…`, and `/var` is a symlink, so the
+    ///   canonical form is `/private/var/folders/…`. Same failure mode, latent.
+    ///
+    /// So the map registers the path as given, its canonical form, and (on Windows) that
+    /// canonical form with the verbatim prefix stripped, since deacon is free to present
+    /// either. This is [`path_token`] doing what it already claims — rewriting the temp
+    /// workspace path to a stable token — over the full set of names for one directory.
+    /// It is NOT a separator munge: nothing rewrites `\` to `/`, and a path that is not
+    /// this workspace is untouched.
+    ///
+    /// Every spelling maps to the SAME token, so the map cannot hide a difference between
+    /// two distinct directories; it can only stop reporting one directory under two names.
     pub fn workspace(workspace: &Path) -> TokenMap {
         let mut m = TokenMap::new();
-        m.insert(workspace.to_string_lossy(), "<WORKSPACE>");
+        for spelling in path_spellings(workspace) {
+            m.insert(spelling, "<WORKSPACE>");
+        }
         m
     }
 
@@ -215,6 +242,31 @@ impl TokenMap {
         }
         out
     }
+}
+
+/// The Windows verbatim path prefix `std::fs::canonicalize` returns. Stripping it from a
+/// string is a no-op on every other platform, so this needs no `cfg`.
+const WINDOWS_VERBATIM_PREFIX: &str = r"\\?\";
+
+/// Every string spelling of `path` a CLI might present: as given, canonicalized, and the
+/// canonical form without the Windows verbatim prefix. Deduplicated, so the common case
+/// (an already-canonical Linux temp path) yields exactly one entry. An uncanonicalizable
+/// path — deleted, or never created — contributes only its literal spelling rather than
+/// failing: the caller is building a normalization map, not validating the filesystem.
+///
+/// See [`TokenMap::workspace`] for why the alternates matter.
+fn path_spellings(path: &Path) -> Vec<String> {
+    let mut out = vec![path.to_string_lossy().into_owned()];
+    if let Ok(canonical) = path.canonicalize() {
+        let canonical = canonical.to_string_lossy().into_owned();
+        if let Some(stripped) = canonical.strip_prefix(WINDOWS_VERBATIM_PREFIX) {
+            out.push(stripped.to_string());
+        }
+        out.push(canonical);
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// **Rule `path_token`** (FR-024): rewrite temp workspace/project paths to stable tokens
@@ -1258,6 +1310,66 @@ mod tests {
         let obj = out.as_object().unwrap();
         for k in ["null_val", "empty_str", "empty_arr", "empty_obj"] {
             assert!(obj.contains_key(k), "field {k} must not be dropped");
+        }
+    }
+
+    /// #441: the CLI may present the workspace under a name the harness never typed —
+    /// deacon canonicalizes `--workspace-folder` before `${localWorkspaceFolder}` resolves.
+    /// A symlinked spelling is the portable stand-in for Windows' `\\?\` + 8.3 expansion:
+    /// same mechanism (canonicalization returns a different string for one directory), and
+    /// creatable on any Unix. Both spellings must reach `<WORKSPACE>`.
+    #[cfg(unix)]
+    #[test]
+    fn workspace_tokenizes_the_canonical_spelling_too() {
+        let real = tempfile::tempdir().expect("tempdir");
+        let link_parent = tempfile::tempdir().expect("tempdir");
+        let link = link_parent.path().join("ws-link");
+        std::os::unix::fs::symlink(real.path(), &link).expect("symlink");
+
+        // The harness holds the SYMLINKED spelling; deacon would report the canonical one.
+        let tokens = TokenMap::workspace(&link);
+        let canonical = real.path().canonicalize().expect("canonicalize");
+        let value = json!({
+            "asGiven": link.to_string_lossy(),
+            "asCanonicalized": format!("{}/x", canonical.display()),
+        });
+        let out = path_token(&value, &tokens);
+        assert_eq!(out["asGiven"], json!("<WORKSPACE>"));
+        assert_eq!(
+            out["asCanonicalized"],
+            json!("<WORKSPACE>/x"),
+            "the canonical spelling names the same directory and must tokenize"
+        );
+    }
+
+    /// The verbatim-prefix handling is Windows-shaped but the code path is unconditional,
+    /// so assert the two invariants that hold everywhere. (1) The literal spelling the
+    /// caller passed always survives, including for a path that does not exist, where
+    /// canonicalization can contribute nothing — a normalization map is not a filesystem
+    /// validator. (2) A verbatim spelling is never registered ALONE: deacon may present
+    /// either form, so `\\?\C:\…` and `C:\…` are both registered or neither is. On Unix
+    /// (2) is vacuous; on Windows it is the whole fix.
+    #[test]
+    fn path_spellings_keep_the_literal_and_pair_the_verbatim_form() {
+        let missing = std::path::Path::new("/definitely/not/a/real/path-441");
+        assert_eq!(
+            path_spellings(missing),
+            vec!["/definitely/not/a/real/path-441".to_string()]
+        );
+
+        let real = tempfile::tempdir().expect("tempdir");
+        let spellings = path_spellings(real.path());
+        assert!(
+            spellings.contains(&real.path().to_string_lossy().into_owned()),
+            "the spelling the caller passed must survive: {spellings:?}"
+        );
+        for s in &spellings {
+            if let Some(stripped) = s.strip_prefix(WINDOWS_VERBATIM_PREFIX) {
+                assert!(
+                    spellings.iter().any(|o| o == stripped),
+                    "a verbatim spelling must be paired with its plain twin: {spellings:?}"
+                );
+            }
         }
     }
 

@@ -376,7 +376,7 @@ lets most of the suite gate every pull request:
 
 | Binary | Needs | Runs where |
 |---|---|---|
-| `parity_hermetic` | a Linux host | every profile, `dev-fast` included; Linux only (#441) |
+| `parity_hermetic` | nothing | every profile, `dev-fast` included; Linux, macOS and Windows (#441) |
 | `parity_docker` | Docker | wherever a daemon exists; the release gate |
 | `parity_differential` | Docker + the pinned oracle | `--profile parity` ONLY (nightly) |
 | `parity_harness_faults` | nothing | `default`, `dev-fast` — the hermetic guard proving the comparison can fail (oracle mismatch, timeout, normalization failure, injected difference) |
@@ -772,6 +772,19 @@ We ship Windows binaries, so keep this lane green. Hard-won lessons:
   (`.replace('\\', "/")`) for relative fragments; for substituted absolute paths compare
   the **leaf component** (`dest_dir.file_name()`), which survives canonicalization, rather
   than the full path string.
+- **A fixture whose BYTES are the expectation must be pinned `-text` in `.gitattributes`.**
+  Git's autocrlf rewrites LF to CRLF on a Windows checkout, so a test comparing a file's
+  content to a `"…\n"` literal fails on bytes git introduced, not on anything the code did
+  — that is what kept `parity_hermetic` off Windows (#441), fixed by
+  `parity/fixtures/** -text`. Prefer `-text` over `eol=lf` (it matches the other pins here
+  and cannot corrupt a binary fixture), and run `git add --renormalize <path>` after adding
+  the rule: it must produce NO diff, or every contributor sees the tree as modified.
+- **A test that holds a path and compares it against a path the CLI printed must expect
+  every SPELLING of it.** deacon canonicalizes `--workspace-folder`, and canonicalization
+  renames: Windows returns the `\\?\` verbatim form with 8.3 short names expanded
+  (`RUNNER~1` → `runneradmin`), macOS resolves `/var` → `/private/var`. The string the test
+  passed in is then not a substring of the string it gets back. The parity normalizer's
+  `TokenMap::workspace` registers all three spellings for this reason.
 - **`--no-fail-fast`** is set on the test step so one run reports the full failure set
   (a single failure otherwise cancels the run and hides the rest — `nextest` shows
   `N/Total tests run` when cancelled vs `Total tests run` when complete).

@@ -687,6 +687,49 @@ mod tests {
         assert_eq!(v.outcome, Outcome::Diverge);
     }
 
+    /// The `mode` predicate has no case in the committed set: its only expectation lived on
+    /// `case-templates-apply-multifile-tree` and was dropped with #441, because a POSIX file
+    /// mode is not an observable off Unix (`FilesystemObserver::mode_string` reports `null`
+    /// there) and an octal pin was therefore an assertion about the runner. The predicate is
+    /// still reachable from the case schema, so it is exercised HERE rather than left to rot
+    /// — an arm nothing evaluates is an arm nobody notices breaking.
+    #[test]
+    fn filesystem_mode_predicate() {
+        let ev = norm(
+            CHAN_FILESYSTEM,
+            json!({ "a.json": { "exists": true, "mode": "0644" } }),
+        );
+        assert_eq!(
+            verdict_spec_expectation(CHAN_FILESYSTEM, &ev, &json!({"mode": {"a.json": "0644"}}))
+                .unwrap()
+                .outcome,
+            Outcome::Agree
+        );
+        assert_eq!(
+            verdict_spec_expectation(CHAN_FILESYSTEM, &ev, &json!({"mode": {"a.json": "0755"}}))
+                .unwrap()
+                .outcome,
+            Outcome::Diverge
+        );
+
+        // The off-Unix observation: the concept does not exist, so the observer reports
+        // `null` and no octal expectation can hold. This is the shape that gated the lane.
+        let unix_less = norm(
+            CHAN_FILESYSTEM,
+            json!({ "a.json": { "exists": true, "mode": Value::Null } }),
+        );
+        assert_eq!(
+            verdict_spec_expectation(
+                CHAN_FILESYSTEM,
+                &unix_less,
+                &json!({"mode": {"a.json": "0644"}})
+            )
+            .unwrap()
+            .outcome,
+            Outcome::Diverge
+        );
+    }
+
     #[test]
     fn malformed_assertion_is_fail_loud() {
         let ev = norm(CHAN_EXIT_CODE, json!(0));

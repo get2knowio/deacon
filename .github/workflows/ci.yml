@@ -158,11 +158,11 @@ jobs:
       # cross-platform failure set, not just the earliest).
       run: cargo nextest run --profile dev-fast --no-fail-fast
 
-    # `parity_hermetic` is selected by `dev-fast` too, so this lane also owes its evidence
-    # on failure (#474). The name carries the matrix leg because one run's artifacts share a
-    # namespace; `if-no-files-found: ignore` is doing real work here rather than guarding a
-    # hypothetical — the macOS and Windows legs run no parity binary at all (#441), so they
-    # have no `target/parity/` to upload even when they fail.
+    # `parity_hermetic` is selected by `dev-fast` on every leg of this matrix (#441 removed
+    # its Linux gate), so this lane also owes its evidence on failure (#474). The name
+    # carries the matrix leg because one run's artifacts share a namespace;
+    # `if-no-files-found: ignore` guards the legs that fail before the parity binary runs
+    # and therefore wrote no `target/parity/`.
     - name: Upload parity evidence
       if: failure()
       uses: actions/upload-artifact@v7
@@ -360,7 +360,8 @@ jobs:
         echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
     # `parity_docker` is excluded here, and that is a SELECTION rather than a skip — the
-    # mirror of the platform gate on `parity_hermetic` (#441). The parity harness probes the
+    # same truthful-by-non-selection principle that keeps `parity_differential` off every
+    # machine without the pinned oracle. The parity harness probes the
     # container runtime through the literal `docker` CLI (`workspace.rs` discovery and
     # reclamation, `observe/mod.rs` container probe) and its case data is Docker-MEASURED.
     # Under `DEACON_CONTAINER_RUNTIME=podman` deacon creates a podman container that a
