@@ -1029,6 +1029,39 @@ pub struct DevContainerConfig {
     #[serde(skip)]
     pub metadata_lifecycle_layers: Vec<LifecycleHookLayer>,
 
+    /// `customizations` contributed by metadata layers that sit BELOW this
+    /// configuration in precedence — today, a container's
+    /// `devcontainer.metadata` label — kept as one entry per contributing
+    /// fragment rather than deep-merged away.
+    ///
+    /// Why this exists (#532): upstream's `mergeConfiguration` does not fold
+    /// `customizations` at all. It deletes the property from the base config and
+    /// rebuilds it as one array SLOT PER CONTRIBUTING METADATA ENTRY, keyed by
+    /// tool — `{vscode: [c_from_entry0, c_from_entry1, …]}` — leaving each
+    /// consuming tool to reconcile its own slots. A deep merge answers a
+    /// different question and loses the contributor boundaries the reference
+    /// reports, so the boundaries have to survive the fold, exactly as the five
+    /// lifecycle hooks do on [`Self::metadata_lifecycle_layers`].
+    ///
+    /// Each element is the fragment's whole `customizations` OBJECT (tool keys at
+    /// the top level), in layer order. A fragment authoring no customizations —
+    /// or an empty object — contributes no entry.
+    ///
+    /// Not serialized, for the same reason its lifecycle sibling is not: this is
+    /// merge provenance, not an authored property. `read-configuration` reports
+    /// the per-tool arrays it assembles separately, and a stamped
+    /// `devcontainer.metadata` label already carries each layer as its own entry.
+    ///
+    /// It IS variable-substituted, because the reference substitutes it: `Tr`
+    /// maps the config's own `substitute` over every label entry before
+    /// `mergeConfiguration` reads them (bundle `IG`: `i.map(e)`). Measured at
+    /// oracle 0.87.0 — a `${localEnv:*}` inside a label's `customizations`
+    /// resolves in the reported `mergedConfiguration`, while
+    /// `${localWorkspaceFolder}` stays literal under `set-up` like everything
+    /// else there.
+    #[serde(skip)]
+    pub metadata_customizations_layers: Vec<serde_json::Value>,
+
     /// Unknown / unmodeled fields, preserved verbatim for forward-compatibility.
     ///
     /// The spec's extensibility model assumes tools tolerate fields they don't
@@ -1235,6 +1268,17 @@ impl DevContainerConfig {
                 &mut report,
             ));
         }
+
+        // …and the per-layer copies the deep merge above cannot represent (#532).
+        // The reference substitutes every metadata entry with the very same
+        // function it applies to the configuration (`Tr` → `IG`: `i.map(e)`), so a
+        // layer left literal here would report a `${localEnv:*}` the reference
+        // resolved.
+        config.metadata_customizations_layers = config
+            .metadata_customizations_layers
+            .iter()
+            .map(|layer| VariableSubstitution::substitute_json_value(layer, context, &mut report))
+            .collect();
 
         // Substitute workspace_folder
         if let Some(ref workspace_folder) = config.workspace_folder {
@@ -1486,6 +1530,16 @@ impl DevContainerConfig {
                 report,
             )?);
         }
+
+        // …and the per-layer copies (#532) — see apply_variable_substitution.
+        let mut substituted_layers =
+            Vec::with_capacity(config.metadata_customizations_layers.len());
+        for layer in &config.metadata_customizations_layers {
+            substituted_layers.push(VariableSubstitution::substitute_json_value_with_options(
+                layer, context, options, report,
+            )?);
+        }
+        config.metadata_customizations_layers = substituted_layers;
 
         // Substitute mounts (JSON values that may contain strings). Each of these
         // rebuilds through the `Option` so an unauthored property stays absent
@@ -1784,6 +1838,7 @@ impl Default for DevContainerConfig {
             security_opt: None,
             secrets: None,
             metadata_lifecycle_layers: Vec::new(),
+            metadata_customizations_layers: Vec::new(),
             extra: serde_json::Map::new(),
         }
     }
@@ -2013,6 +2068,19 @@ impl ConfigMerger {
                 .metadata_lifecycle_layers
                 .iter()
                 .chain(overlay.metadata_lifecycle_layers.iter())
+                .cloned()
+                .collect(),
+
+            // Lower-precedence `customizations` contributions: CONCATENATED in
+            // precedence order for the same reason (#532). The singular
+            // `customizations` field below still deep-merges — that is what every
+            // non-reporting consumer reads — but the per-contributor boundaries
+            // upstream's `mergeConfiguration` reports as per-tool ARRAYS only
+            // survive here.
+            metadata_customizations_layers: base
+                .metadata_customizations_layers
+                .iter()
+                .chain(overlay.metadata_customizations_layers.iter())
                 .cloned()
                 .collect(),
 

@@ -587,6 +587,7 @@ mod tests {
             security_opt: Some(Vec::new()),
             secrets: None,
             metadata_lifecycle_layers: Vec::new(),
+            metadata_customizations_layers: Vec::new(),
             extra: Default::default(),
         };
 
@@ -667,6 +668,7 @@ mod tests {
             security_opt: Some(Vec::new()),
             secrets: None,
             metadata_lifecycle_layers: Vec::new(),
+            metadata_customizations_layers: Vec::new(),
             extra: Default::default(),
         };
 

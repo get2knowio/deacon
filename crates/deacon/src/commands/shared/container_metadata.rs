@@ -86,6 +86,19 @@ pub fn config_from_metadata_label(container: &ContainerInfo) -> Result<Option<De
         .filter_map(LifecycleHookLayer::from_config)
         .collect();
 
+    // Same reason, different property (#532): upstream's `mergeConfiguration`
+    // reports `customizations` as one array slot per contributing entry, keyed by
+    // tool, so the fragment boundaries have to be captured before the fold that
+    // deep-merges them into one object. An empty (or absent) `customizations`
+    // contributes no slot, matching `for (let u in c.customizations)` over a
+    // fragment that has none.
+    let customizations_layers: Vec<serde_json::Value> = configs
+        .iter()
+        .filter_map(|cfg| cfg.customizations.as_ref())
+        .filter(|value| value.as_object().is_some_and(|map| !map.is_empty()))
+        .cloned()
+        .collect();
+
     let mut merged = ConfigMerger::merge_configs(&configs);
 
     // One home per hook: clear the five singular fields the fold just last-won,
@@ -96,6 +109,10 @@ pub fn config_from_metadata_label(container: &ContainerInfo) -> Result<Option<De
     // label and `metadata_lifecycle_layers` is `#[serde(skip)]`, so the fold
     // concatenated nothing and `merged`'s vec is empty by construction.
     merged.metadata_lifecycle_layers = hook_layers;
+    // Assignment for the same reason, and additive rather than replacing:
+    // `merged.customizations` keeps the deep-merged object every non-reporting
+    // consumer reads. Only the REPORTING layer prefers the slots.
+    merged.metadata_customizations_layers = customizations_layers;
 
     Ok(Some(merged))
 }

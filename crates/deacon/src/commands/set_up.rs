@@ -174,13 +174,33 @@ fn configuration_document(
 /// keys the scheme off whether the CALLER NAMED the file, and `set-up` only ever has a
 /// `--config` it was given. A `set-up` with no `--config` has no config file, and the
 /// reference emits no `configFilePath` for it either.
+///
+/// `customizations` is the one property whose reported shape the merge cannot produce
+/// (#532). Upstream's `mergeConfiguration` DELETES it from the base config and rebuilds it
+/// as one array slot per contributing metadata entry, keyed by tool —
+/// `{"vscode": [{…entry0}, {…entry1}]}` — leaving each tool to reconcile its own slots.
+/// deacon reported the deep-merged object instead, which reads as a single contributor and
+/// silently resolves conflicts (two entries setting the same VS Code setting collapsed to
+/// the later one) that the reference hands to the tool intact. The entries are ordered
+/// `[…label fragments in label order, --config]`, which is upstream's `Tt`:
+/// `[...labelEntries, pick(config, pickConfigProperties)]` — and `base_config` is therefore
+/// the `--config` document ALONE, not the merged one, whose `customizations` already
+/// contains the label's.
+///
+/// Reuses `read-configuration`'s `apply_customizations_shape` rather than growing a second
+/// one; the reason set-up never reached it is that it routed through
+/// `apply_upstream_merge_shape` only, and `ConfigMerger` had already collapsed the
+/// fragments by then. The per-fragment objects now ride down on
+/// [`DevContainerConfig::metadata_customizations_layers`], the same carrier
+/// [`DevContainerConfig::metadata_lifecycle_layers`] gave the hooks in #477.
 fn merged_configuration_document(
     merged: &DevContainerConfig,
+    base_config: &DevContainerConfig,
     config_path: Option<&std::path::Path>,
 ) -> Result<serde_json::Value> {
     use crate::commands::read_configuration::{
-        apply_upstream_merge_shape, collect_entry_from_config_json, insert_config_file_path,
-        normalize_merged_configuration_shape,
+        apply_customizations_shape, apply_upstream_merge_shape, collect_entry_from_config_json,
+        insert_config_file_path, normalize_merged_configuration_shape,
     };
 
     let merged_json =
@@ -205,7 +225,19 @@ fn merged_configuration_document(
         entries.push(base_entry);
     }
 
+    // `[…label fragments in label order, --config]`. A contributor that authored an
+    // empty object is not a contributor: upstream's `for (let u in c.customizations)`
+    // adds no key for one, so an authored `"customizations": {}` must not create a slot.
+    let mut customizations_entries: Vec<serde_json::Value> =
+        merged.metadata_customizations_layers.clone();
+    if let Some(value) = &base_config.customizations {
+        if value.as_object().is_some_and(|map| !map.is_empty()) {
+            customizations_entries.push(value.clone());
+        }
+    }
+
     let mut shaped = apply_upstream_merge_shape(merged_json, &entries);
+    shaped = apply_customizations_shape(shaped, &customizations_entries);
     normalize_merged_configuration_shape(&mut shaped);
     if let Some(path) = config_path {
         insert_config_file_path(&mut shaped, path, true);
@@ -332,7 +364,11 @@ pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Re
         merged_configuration: args
             .include_merged_configuration
             .then(|| {
-                merged_configuration_document(&substituted_merged, args.config_path.as_deref())
+                merged_configuration_document(
+                    &substituted_merged,
+                    &substituted_config,
+                    args.config_path.as_deref(),
+                )
             })
             .transpose()?,
     };
@@ -481,6 +517,10 @@ const METADATA_MERGE_PROPERTIES: &[&str] = &[
 /// singular hook fields were already lifted onto it by
 /// [`container_metadata::config_from_metadata_label`], and losing it here would silently
 /// stop every label-contributed hook from running (#475/#477).
+/// [`DevContainerConfig::metadata_customizations_layers`] is re-attached for the same
+/// reason (#532) — losing it would silently return the reported `customizations` to the
+/// deep-merged single-contributor shape, and the fold's own `customizations` key survives
+/// the restriction, so nothing would look broken.
 fn restrict_to_metadata_properties(metadata: &DevContainerConfig) -> Result<DevContainerConfig> {
     let mut value = serde_json::to_value(metadata)
         .context("Failed to serialize container metadata configuration")?;
@@ -492,6 +532,9 @@ fn restrict_to_metadata_properties(metadata: &DevContainerConfig) -> Result<DevC
     restricted
         .metadata_lifecycle_layers
         .clone_from(&metadata.metadata_lifecycle_layers);
+    restricted
+        .metadata_customizations_layers
+        .clone_from(&metadata.metadata_customizations_layers);
     Ok(restricted)
 }
 
@@ -1289,7 +1332,11 @@ mod tests {
     /// `--config` — so what `--include-merged-configuration` REPORTS is pinned against
     /// what set-up actually RUNS. A report that disagreed with the execution would be the
     /// worse defect of the two, and only building both from one input can see it.
-    fn merged_for_report() -> DevContainerConfig {
+    ///
+    /// Returns the `--config` document alongside the merge, because the reported
+    /// `customizations` entries need the config's OWN contribution rather than the merged
+    /// one (#532) — exactly what `execute_set_up` hands the reporting layer.
+    fn merged_for_report() -> (DevContainerConfig, DevContainerConfig) {
         let mut labels = HashMap::new();
         labels.insert(
             "devcontainer.metadata".to_string(),
@@ -1308,7 +1355,8 @@ mod tests {
             post_create_command: Some(serde_json::json!("ws-postCreate")),
             ..DevContainerConfig::default()
         };
-        merge_configs(&file_cfg, metadata.as_ref()).unwrap()
+        let merged = merge_configs(&file_cfg, metadata.as_ref()).unwrap();
+        (merged, file_cfg)
     }
 
     /// #483: the block carries the COLLECTED plural arrays, in the order the hooks run,
@@ -1318,7 +1366,8 @@ mod tests {
     /// one command per phase, and a containment assertion would have called that a pass.
     #[test]
     fn merged_configuration_reports_the_collected_plural_arrays() {
-        let doc = merged_configuration_document(&merged_for_report(), None).unwrap();
+        let (merged, file_cfg) = merged_for_report();
+        let doc = merged_configuration_document(&merged, &file_cfg, None).unwrap();
 
         assert_eq!(
             doc["onCreateCommands"],
@@ -1381,10 +1430,11 @@ mod tests {
     /// too (measured at oracle 0.87.0 on both shapes).
     #[test]
     fn merged_configuration_reports_config_file_path_only_when_config_was_named() {
-        let merged = merged_for_report();
+        let (merged, file_cfg) = merged_for_report();
 
-        let named = merged_configuration_document(&merged, Some(Path::new("/ws/overlay.json")))
-            .expect("shaping a named config succeeds");
+        let named =
+            merged_configuration_document(&merged, &file_cfg, Some(Path::new("/ws/overlay.json")))
+                .expect("shaping a named config succeeds");
         assert_eq!(named["configFilePath"]["scheme"], serde_json::json!("file"));
         assert!(
             named["configFilePath"]["fsPath"]
@@ -1393,8 +1443,168 @@ mod tests {
             "the reported path names the file the caller passed: {named:#}"
         );
 
-        let unnamed = merged_configuration_document(&merged, None).unwrap();
+        let unnamed = merged_configuration_document(&merged, &file_cfg, None).unwrap();
         assert!(unnamed.get("configFilePath").is_none());
+    }
+
+    /// Build the merged + `--config` pair set-up reports from, for a container label and a
+    /// `--config` document given as raw JSON. The label goes through the real
+    /// `config_from_metadata_label` / `merge_configs` path, so the per-fragment
+    /// `customizations` reach the reporting layer the same way they do in production.
+    fn report_inputs(
+        label: serde_json::Value,
+        config: serde_json::Value,
+    ) -> (DevContainerConfig, DevContainerConfig) {
+        let mut labels = HashMap::new();
+        labels.insert("devcontainer.metadata".to_string(), label.to_string());
+        let container = make_container("abc", "alpine:3.18", labels);
+        let metadata = extract_image_metadata_config(&container).unwrap();
+        let file_cfg: DevContainerConfig =
+            serde_json::from_value(config).expect("the --config document should deserialize");
+        let merged = merge_configs(&file_cfg, metadata.as_ref()).unwrap();
+        (merged, file_cfg)
+    }
+
+    /// #532: `mergedConfiguration.customizations` is one array SLOT PER CONTRIBUTOR, keyed
+    /// by tool — not a deep merge.
+    ///
+    /// Upstream's `mergeConfiguration` deletes `customizations` from the base config (it is
+    /// on the `kV` delete list) and rebuilds it as
+    /// `entries.reduce((acc, e) => { for (let tool in e.customizations) …push… })`, leaving
+    /// each consuming tool to reconcile its own slots. deacon reported whatever
+    /// `ConfigMerger` had deep-merged, which reads as a single contributor and silently
+    /// resolves conflicts the reference hands over intact.
+    ///
+    /// Both label fragments below set `vscode.settings`, and one sets a key the other also
+    /// sets. That is the assertion that can tell the shapes apart: a deep merge produces
+    /// ONE `vscode` object with `{"a": 1, "b": 2}`, and only the array form preserves the
+    /// boundary. Measured at oracle 0.87.0 on a raw-labeled container carrying exactly this
+    /// label plus this `--config`.
+    #[test]
+    fn merged_configuration_reports_customizations_as_per_tool_arrays() {
+        let (merged, file_cfg) = report_inputs(
+            serde_json::json!([
+                {"id": "frag1", "customizations": {"vscode": {"settings": {"a": 1},
+                                                              "extensions": ["ext.one"]}}},
+                {"id": "frag2", "customizations": {"vscode": {"settings": {"b": 2}},
+                                                   "jetbrains": {"backend": "IU"}}},
+                {"remoteUser": "root"},
+            ]),
+            serde_json::json!({"customizations": {"vscode": {"settings": {"fromConfig": true}}}}),
+        );
+
+        let doc = merged_configuration_document(&merged, &file_cfg, None).unwrap();
+
+        assert_eq!(
+            doc["customizations"],
+            serde_json::json!({
+                "vscode": [
+                    {"settings": {"a": 1}, "extensions": ["ext.one"]},
+                    {"settings": {"b": 2}},
+                    {"settings": {"fromConfig": true}},
+                ],
+                "jetbrains": [{"backend": "IU"}],
+            }),
+            "one slot per contributing entry, in `[…label fragments in label order, \
+             --config]` order — a fragment that authored no customizations contributes \
+             none. Got: {doc:#}"
+        );
+    }
+
+    /// The negative half, and the reason the field is omitted rather than emitted empty:
+    /// upstream ends with `customizations: Object.keys(t).length ? t : void 0`. A label and
+    /// a `--config` that author none — or author an empty object, which the `for (let tool
+    /// in …)` loop adds no key for — leave the property out entirely. Measured at oracle
+    /// 0.87.0, which reports no `customizations` key on this shape.
+    #[test]
+    fn merged_configuration_omits_customizations_when_nobody_contributed() {
+        let (merged, file_cfg) = report_inputs(
+            serde_json::json!([{"remoteUser": "root"}, {"customizations": {}}]),
+            serde_json::json!({"customizations": {}}),
+        );
+
+        let doc = merged_configuration_document(&merged, &file_cfg, None).unwrap();
+
+        assert!(
+            doc.get("customizations").is_none(),
+            "an empty contribution is not a contribution: {doc:#}"
+        );
+    }
+
+    /// The `--config`'s slot carries what the CALLER authored, never the merge.
+    ///
+    /// Upstream's final entry is `pick(config, pickConfigProperties)` — the configuration
+    /// document itself — so a tool the label also customized must NOT find the label's
+    /// values folded into the config's slot. Reading `merged.customizations` here (the
+    /// deep-merged object) instead of the `--config`'s own would produce exactly that, and
+    /// the single-contributor case would still pass, which is why this asserts the
+    /// two-contributor one.
+    #[test]
+    fn the_config_slot_reports_the_authored_document_not_the_merge() {
+        let (merged, file_cfg) = report_inputs(
+            serde_json::json!([{"customizations": {"vscode": {"settings": {"fromLabel": 1}}}}]),
+            serde_json::json!({"customizations": {"vscode": {"settings": {"fromConfig": 2}}}}),
+        );
+
+        let doc = merged_configuration_document(&merged, &file_cfg, None).unwrap();
+
+        assert_eq!(
+            doc["customizations"]["vscode"],
+            serde_json::json!([
+                {"settings": {"fromLabel": 1}},
+                {"settings": {"fromConfig": 2}},
+            ]),
+            "the config's slot is its own document — a merged one would carry \
+             `fromLabel` too: {doc:#}"
+        );
+    }
+
+    /// The label's per-fragment `customizations` are variable-substituted, with the very
+    /// substitution `set-up` applies to the configuration — the reference maps its
+    /// `substitute` over every metadata entry before merging (`Tr` → `IG`: `i.map(e)`).
+    ///
+    /// Under `set-up` that means `${localEnv:*}` RESOLVES while `${localWorkspaceFolder}`
+    /// stays literal (there is no `--workspace-folder`, #510). Measured at oracle 0.87.0 on
+    /// a label carrying both tokens: the reported slot holds the env value and the literal
+    /// workspace token, side by side.
+    ///
+    /// Without this the layers would report the raw label text while the deep-merged
+    /// `customizations` — which deacon already substituted — reported the resolved one, so
+    /// the fix would have traded one divergence for another.
+    #[test]
+    fn label_customizations_layers_are_substituted_like_the_configuration() {
+        let (merged, file_cfg) = report_inputs(
+            serde_json::json!([{"customizations": {"vscode": {"settings": {
+                "le": "${localEnv:DEACON_TEST_532_PROBE}",
+                "lwf": "${localWorkspaceFolder}",
+            }}}}]),
+            serde_json::json!({}),
+        );
+
+        // Exactly the context `execute_set_up` builds, with the probe seeded on it
+        // rather than on the process environment (env mutation is a global side effect
+        // in a parallel test binary).
+        let cwd = std::env::current_dir().unwrap();
+        let mut context = SubstitutionContext::without_workspace(&cwd).unwrap();
+        context.local_env.insert(
+            "DEACON_TEST_532_PROBE".to_string(),
+            "probe-value".to_string(),
+        );
+        let (substituted_merged, _) = merged.apply_variable_substitution(&context);
+        let (substituted_config, _) = file_cfg.apply_variable_substitution(&context);
+
+        let doc =
+            merged_configuration_document(&substituted_merged, &substituted_config, None).unwrap();
+
+        assert_eq!(
+            doc["customizations"]["vscode"],
+            serde_json::json!([{"settings": {
+                "le": "probe-value",
+                "lwf": "${localWorkspaceFolder}",
+            }}]),
+            "`${{localEnv:*}}` resolves and `${{localWorkspaceFolder}}` stays literal, \
+             exactly as in the rest of set-up's reported blocks: {doc:#}"
+        );
     }
 
     /// `set-up` has no `--workspace-folder`, so the workspace-derived variables must
