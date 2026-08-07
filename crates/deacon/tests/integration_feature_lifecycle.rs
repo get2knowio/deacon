@@ -1863,3 +1863,139 @@ fn test_set_up_folds_only_the_enumerated_metadata_properties() {
          exec CWD and fail every one of them with exit 127 (#526)"
     );
 }
+
+/// #532 (`set-up` surface): `mergedConfiguration.customizations` is one array SLOT PER
+/// CONTRIBUTING METADATA ENTRY, keyed by tool — the reference does not deep-merge it.
+///
+/// Upstream's `mergeConfiguration` STRIPS `customizations` from the base config (it is on
+/// the `kV` delete list) and rebuilds it with
+/// `entries.reduce((acc, e) => { for (let tool in e.customizations) acc[tool].push(…) })`,
+/// leaving each consuming tool to reconcile its own slots. deacon reported whatever
+/// `ConfigMerger` had deep-merged into a single object, which reads as one contributor and
+/// silently resolves conflicts — two entries setting the same VS Code setting collapsed to
+/// the later one — that the reference hands over intact.
+///
+/// A **raw-labeled** container is the evidence shape, for the reason #526 documented one
+/// line up: `deacon up` and the reference's `up` both stamp their OWN picked entries as the
+/// run-time `devcontainer.metadata` label, which overrides the image's, so a hand-written
+/// base-image entry is invisible to `set-up` on both sides and no `op-up` parity case can
+/// reach this. `docker run --label` puts the metadata document on the container directly.
+///
+/// The two label fragments below both set `vscode.settings`, and the second sets a key the
+/// first does not — the only assertion shape that can tell the forms apart, since a deep
+/// merge yields ONE `vscode` object carrying every key. Measured at oracle 0.87.0 on this
+/// exact label plus this exact `--config`: the reference reports the three-slot array
+/// asserted below, deacon reported `{"vscode": {"extensions": […], "settings": {"a": 1,
+/// "b": 2, "fromConfig": true}}}`.
+#[test]
+fn test_set_up_reports_customizations_as_per_tool_arrays() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_set_up_reports_customizations_as_per_tool_arrays: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let guard = ContainerGuard::new();
+
+    let unique = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+
+    // Fragment 3 authors no `customizations` at all, so it must contribute no slot —
+    // upstream's `for (let tool in e.customizations)` adds no key for one.
+    let label = json!([
+        {
+            "id": "frag1",
+            "customizations": {
+                "vscode": { "settings": { "a": 1 }, "extensions": ["ext.one"] },
+            },
+        },
+        {
+            "id": "frag2",
+            "customizations": {
+                "vscode": { "settings": { "b": 2 } },
+                "jetbrains": { "backend": "IU" },
+            },
+        },
+        { "remoteUser": "root" },
+    ])
+    .to_string();
+
+    let name = format!("deacon-test-setup-532-{}", unique);
+    let out = StdCommand::new("docker")
+        .args(["run", "-d", "--name", &name, "--label"])
+        .arg(format!("devcontainer.metadata={}", label))
+        .args(["alpine:3.19", "sleep", "infinity"])
+        .output()
+        .expect("docker run should execute");
+    assert!(
+        out.status.success(),
+        "docker run failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let container_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    guard.register(container_id.clone());
+
+    let config_path = temp_dir.path().join("set-up-config.json");
+    fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&json!({
+            "customizations": {
+                "vscode": { "settings": { "fromConfig": true } },
+                "codespaces": { "repositories": {} },
+            },
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("deacon")
+        .expect("deacon binary")
+        .env("DEACON_LOG", "warn")
+        .args([
+            "set-up",
+            "--container-id",
+            &container_id,
+            "--config",
+            config_path.to_str().unwrap(),
+            "--include-merged-configuration",
+        ])
+        .assert();
+    let output = assert.get_output();
+    assert!(
+        output.status.success(),
+        "deacon set-up failed:\nSTDOUT:\n{}\nSTDERR:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let document: Value = serde_json::from_slice(&output.stdout)
+        .expect("set-up must emit a single JSON document on stdout");
+    let merged = document
+        .get("mergedConfiguration")
+        .and_then(Value::as_object)
+        .expect("--include-merged-configuration must produce the block");
+
+    assert_eq!(
+        merged.get("customizations"),
+        Some(&json!({
+            "vscode": [
+                { "settings": { "a": 1 }, "extensions": ["ext.one"] },
+                { "settings": { "b": 2 } },
+                { "settings": { "fromConfig": true } },
+            ],
+            "jetbrains": [ { "backend": "IU" } ],
+            "codespaces": [ { "repositories": {} } ],
+        })),
+        "one slot per contributing entry, keyed by tool, ordered `[…label fragments in \
+         label order, --config]` — measured at oracle 0.87.0 (#532). Got: {}",
+        serde_json::to_string_pretty(merged).unwrap()
+    );
+}

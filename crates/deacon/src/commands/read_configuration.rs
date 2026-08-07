@@ -1025,7 +1025,7 @@ fn ordered_customizations_entries(
 /// replaces it with the per-tool array form. If no entry contributes any customizations the
 /// field is omitted entirely (matching upstream's
 /// `Object.keys(customizations).length ? customizations : undefined`).
-fn apply_customizations_shape(
+pub(crate) fn apply_customizations_shape(
     mut base: serde_json::Value,
     customizations_entries: &[serde_json::Value],
 ) -> serde_json::Value {
