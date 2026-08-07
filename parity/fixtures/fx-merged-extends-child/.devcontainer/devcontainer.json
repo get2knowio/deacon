@@ -1,0 +1,10 @@
+{
+  "name": "Child overrides base",
+  "extends": "./base.json",
+  "features": {
+    "./node-local": { "version": "20" }
+  },
+  "forwardPorts": [4000],
+  "containerEnv": { "CHILD": "yes" },
+  "remoteUser": "vscode"
+}

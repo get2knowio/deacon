@@ -1,0 +1,12 @@
+{
+  "id": "node-local",
+  "version": "1.0.0",
+  "name": "Node (local)",
+  "options": {
+    "version": {
+      "type": "string",
+      "default": "20",
+      "description": "Node major version the child document pins."
+    }
+  }
+}

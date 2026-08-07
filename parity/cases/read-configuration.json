@@ -726,10 +726,12 @@
           "argv": [
             "--workspace-folder",
             "${WORKSPACE}",
-            "--include-merged-configuration"
+            "--include-merged-configuration",
+            "--docker-path",
+            "/nonexistent/deacon-parity-no-container-runtime"
           ],
           "fixtures": [
-            "fx-tier1-extends-child"
+            "fx-merged-extends-child"
           ]
         }
       ],
@@ -756,7 +758,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "Merged-mode VARIANT of the tier-1 corpus case `extends-child`, and the one unit whose recorded expectation is a REFERENCE rejection: deacon resolves the full `extends` chain eagerly under --include-merged-configuration where the reference errors — the ahead-of-spec capability recorded as ext-extends-resolution and characterized by that record alone (the duplicate waiver wvr-extends-child-merged was retired 2026-08-01). Expressed as a spec-expectation, NOT a live-differential: a differential asserts the two sides are EQUAL, which both inverts this expectation into a guaranteed failure and pins nothing about deacon's own side. It pins deacon succeeding and resolving the base image from the extends chain — the recorded `image` signal — so the ahead-of-spec resolution cannot silently regress (023 T072). The reference-side rejection stays characterized by ext-extends-resolution."
+      "notes": "Merged-mode VARIANT of the tier-1 corpus case `extends-child`, and the one unit whose recorded expectation is a REFERENCE rejection: deacon resolves the full `extends` chain eagerly under --include-merged-configuration where the reference errors — the ahead-of-spec capability recorded as ext-extends-resolution and characterized by that record alone (the duplicate waiver wvr-extends-child-merged was retired 2026-08-01). Expressed as a spec-expectation, NOT a live-differential: a differential asserts the two sides are EQUAL, which both inverts this expectation into a guaranteed failure and pins nothing about deacon's own side. It pins deacon succeeding and resolving the base image from the extends chain — the recorded `image` signal — so the ahead-of-spec resolution cannot silently regress (023 T072). The reference-side rejection stays characterized by ext-extends-resolution.\n\n#454 — the two things that make this case HERMETIC, both of which it previously only appeared to be. (1) Its own fixture, `fx-merged-extends-child`, rather than the differential sibling's `fx-tier1-extends-child`. That fixture declares `ghcr.io/devcontainers/features/node:1`, and `--include-merged-configuration` RESOLVES the feature set to fold each feature's metadata into the merged document — a ghcr.io fetch whose failure is fatal (correctly: a declared feature that cannot be fetched must fail fast). Watched to fail: with the network namespace removed, this case exited 1 with `Failed to fetch feature 'ghcr.io/devcontainers/features/node:1'` — the exact `chan-exit-code: Diverge; chan-structured-output: Diverge` signature the flake reported. The new fixture declares a LOCAL feature instead, which needs no registry and still exercises the feature-metadata contribution to `mergedConfiguration`. (2) `--docker-path` naming a binary that does not exist. A merged read on an image-shaped config inspects the base image's `devcontainer.metadata` LABEL and PULLS on a cache miss (#307) — so on any runner with a daemon this case downloaded `mcr.microsoft.com/devcontainers/base:bookworm` (1.2 GB) inside the lane that gates every pull request, and a registry that HANGS rather than fails would take the whole run to CASE_TIMEOUT. The flag removes that reach and turns it into an assertion: `--include-merged-configuration` must degrade cleanly when no container runtime exists, which nothing else pins. It also makes the case SUBSTRATE-INDEPENDENT — before, the merged document silently gained the base image's baked `customizations` on machines that happened to have the image cached and not on machines that did not. Neither the exit code nor the `image` signal depends on either reach: `mergedConfiguration.image` is echoed from the parent document, which is precisely what this case claims. Measured after the change: exit 0 in 165 ms with the network namespace removed, byte-identical to the run with network and a real daemon. The reaches are NOT gratuitous product behavior and are not being worked around — they stay covered by the Docker-lane and differential merged cases, whose jobs provision for them."
     },
     {
       "id": "case-merged-decl-feature-order",
