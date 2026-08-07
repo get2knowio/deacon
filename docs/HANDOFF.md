@@ -24,6 +24,7 @@ changes, update this file in the same PR.
 
 | PR | What | Issues |
 |---|---|---|
+| #537 | `up` Feature install ORDER is observable at last: three multi-Feature cases read the sequence three local `install.sh` scripts append inside the created container — one order-by-declaration (`overrideFeatureInstallOrder`), one order-by-dependency (`installsAfter` + `dependsOn`), one differential. Measured at 0.87.0: no divergence, the hole was in the coverage and not in the behavior | #417 fixed, #536 filed |
 | #531 `ba8368a` | exec/run-user-commands read `devcontainer.metadata` from the CONTAINER inspect; the identity labels pick between two compositions (complete-record vs layered), transcribed from the reference bundle | #527 fixed |
 | #530 `56494de` | `run-user-commands` and `set-up` stamp `config_hash` in lifecycle markers via the shared `canonical_reconnect_identity` contract (hash the config AS LOADED, before mutation) | #372 fixed |
 | #533 `32be9ae` | `set-up` folds only the reference's enumerated metadata property list (upstream `pickConfigProperties` ∪ `entrypoint`, 25 names); label-authored `workspaceFolder` no longer becomes the hook CWD | #526 fixed, #475 refuted/closed |
@@ -43,23 +44,24 @@ its issue — read the issue before briefing an agent.
 1. **#532** — `set-up` mergedConfiguration deep-merges `customizations`; the
    reference reports **per-tool arrays**. Measured during #533's post-fix
    re-measurement (25 identical keys, one differing value). Small, well-scoped.
-2. **#417** — Feature install ORDER is claimed but never verified with more than
-   one Feature. Needs a two-Feature fixture whose install scripts record ordering.
-3. **#476** — characterize `--skip-post-create` phase coverage: the reference
+2. **#476** — characterize `--skip-post-create` phase coverage: the reference
    defers everything, deacon defers postCreate onward. Measure, then either align
    or file an allowlist ruling request.
-4. **#482** — `port_forward prefers_same_number_when_free` is a TOCTOU flake on
+3. **#482** — `port_forward prefers_same_number_when_free` is a TOCTOU flake on
    busy runners. Test-infra fix.
-5. **#454** — `case-merged-decl-extends-child` can pull an image inside the
+4. **#454** — `case-merged-decl-extends-child` can pull an image inside the
    "needs nothing" hermetic lane. Lane-truthfulness fix.
-6. **#441** — hermetic case data is Linux-pinned; lane gated to Linux pending
+5. **#441** — hermetic case data is Linux-pinned; lane gated to Linux pending
    portability.
-7. **#371** — `up` leaves the previous container RUNNING when a changed config
+6. **#371** — `up` leaves the previous container RUNNING when a changed config
    forces a new one.
-8. **#402** — discovery: no-longer-reproducing is unreachable — nothing retires a
+7. **#402** — discovery: no-longer-reproducing is unreachable — nothing retires a
    finding.
-9. **#480 batch-2** — mine the reference's remaining ~40 e2e fixtures into
+8. **#480 batch-2** — mine the reference's remaining ~40 e2e fixtures into
    declarative parity cases (grouped by blocker in the issue).
+9. **#536** — `build` installs Features too and no case declares more than one,
+   so its install order is unverified. Not the same defect as #417 (no `build`
+   behavior CLAIMS an order, so nothing there is vacuous) — a coverage gap.
 
 Unmeasured probe candidate (not yet filed): `overrideFeatureInstallOrder`'s
 metadata-id alias surface, noted during #505.

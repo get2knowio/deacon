@@ -1,0 +1,11 @@
+{
+	"id": "late",
+	"version": "1.0.0",
+	"name": "Conformance install-order late",
+	"installsAfter": [
+		"./features/early"
+	],
+	"dependsOn": {
+		"./features/pulled": {}
+	}
+}
