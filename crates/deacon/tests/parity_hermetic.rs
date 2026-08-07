@@ -5,19 +5,22 @@
 //! external has to exist for them to mean something. That is what makes them the one
 //! parity lane that can gate every pull request, in every profile.
 //!
-//! **Linux only, and that is a selection rather than a skip.** The hermetic case data pins
-//! LINUX-MEASURED output: `case-doctor-structured-*` assert `host_os.name: "linux"`, and the
-//! `templates apply` / substitution cases pin path separators and line endings. Those are
-//! assertions about the runner, so the lane runs only where its pins are valid — the same
-//! reasoning that keeps `parity_differential` out of every profile that has no oracle. On
-//! macOS and Windows the lane is truthfully NOT SELECTED rather than skipped or excused, and
-//! deacon's own cross-platform coverage stays with the rest of `dev-fast`. Making the data
-//! platform-conditional instead would rebuild the case machinery this suite deleted; the
-//! four measured portability gaps are inventoried on #441.
+//! **Every platform CI runs, and the case data is what earned that** (#441). The lane was
+//! gated to Linux because its records pinned LINUX-MEASURED output rather than deacon's
+//! behavior: `case-doctor-structured-*` asserted `host_os.name: "linux"` — the RUNNER's
+//! operating system, which deacon does not choose — and a `templates apply` case pinned a
+//! POSIX file mode, an observable that does not exist off Unix. Both are now claims deacon
+//! can actually satisfy anywhere (a present `host_os` OBJECT; presence and bytes, not
+//! permissions). The remaining two were never case-data problems at all: git's autocrlf
+//! rewrote the `templates apply` fixture bytes on a Windows checkout, fixed by pinning
+//! `parity/fixtures/** -text` in `.gitattributes`, and `TokenMap::workspace` registered
+//! ONE spelling of the workspace path while deacon reports the canonicalized one
+//! (`\\?\` + 8.3 expansion on Windows, `/private/var` on macOS), fixed in the normalizer.
 //!
-//! The inner `cfg` leaves an EMPTY test binary off Linux rather than an uncompiled one,
-//! which is required: nextest compiles every test target before filtering, so this file
-//! must still build on Windows.
+//! Nothing here is platform-conditional: there is no per-platform expected value, no
+//! `cfg`-gated case and no skip. That was the constraint — making the DATA name the host
+//! would have rebuilt the case machinery this suite deleted, and keeping the gate would
+//! have been better than that.
 //!
 //! **No skips.** A missing fixture, a CLI failure or a normalization failure FAILS with a
 //! cause-specific message (constitution IV). The lane never has to *skip* a case it cannot
@@ -28,8 +31,6 @@
 //!
 //! Its siblings: `parity_docker` (Docker-backed, still no oracle) and
 //! `parity_differential` (live against the pinned reference).
-
-#![cfg(target_os = "linux")]
 
 use std::path::PathBuf;
 use std::sync::Arc;

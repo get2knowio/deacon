@@ -279,15 +279,6 @@
           }
         },
         {
-          "channel": "chan-filesystem",
-          "operation": "op-apply",
-          "assertion": {
-            "mode": {
-              "applied/.devcontainer/devcontainer.json": "0644"
-            }
-          }
-        },
-        {
           "channel": "chan-file-content",
           "operation": "op-apply",
           "assertion": {
@@ -306,7 +297,7 @@
       "cleanup": {
         "tempdir": true
       },
-      "notes": "The third covering case for `chan-filesystem` (SC-005's floor), and the one that asserts scaffolding as a TREE rather than as a single document. Three separate claims, each its own predicate. `exists`: a file outside `.devcontainer/` is scaffolded too — a template is a directory, not a configuration file. `absent`: `devcontainer-template.json` is template METADATA and must not land in the user's project; a naive whole-tree copy leaves it behind and every other assertion still passes. `mode`: the scaffolded configuration's permissions are observed, not just its bytes. The `chan-file-content` assertion pins the option substituted into the DOCKERFILE, not the configuration — substitution that only walks `devcontainer.json` produces a scaffolded tree with a raw `${templateOption:...}` in it. Also closes the `dockerfile` x `cli-overlay` pair. NOT asserted, deliberately: the template's script is committed executable and is scaffolded `0644`, so deacon drops the executable bit. That is a real observation with no reference side (the pinned reference cannot apply a LOCAL template directory at all, so there is nothing to differentiate against); pinning either mode here would record an unreviewed judgement as an expectation."
+      "notes": "The third covering case for `chan-filesystem` (SC-005's floor), and the one that asserts scaffolding as a TREE rather than as a single document. Two separate claims, each its own predicate. `exists`: a file outside `.devcontainer/` is scaffolded too — a template is a directory, not a configuration file. `absent`: `devcontainer-template.json` is template METADATA and must not land in the user's project; a naive whole-tree copy leaves it behind and every other assertion still passes. The `chan-file-content` assertion pins the option substituted into the DOCKERFILE, not the configuration — substitution that only walks `devcontainer.json` produces a scaffolded tree with a raw `${templateOption:...}` in it. Also closes the `dockerfile` x `cli-overlay` pair. NOT asserted, deliberately: the template's script is committed executable and is scaffolded `0644`, so deacon drops the executable bit. That is a real observation with no reference side (the pinned reference cannot apply a LOCAL template directory at all, so there is nothing to differentiate against); pinning either mode here would record an unreviewed judgement as an expectation. A third `mode: {\"applied/.devcontainer/devcontainer.json\": \"0644\"}` claim was DROPPED with #441 and the reason is the same defect the doctor `host_os.name` pin had: a POSIX file mode is not an observable off Unix — `FilesystemObserver::mode_string` reports `null` there BY DESIGN — so `\"0644\"` asserted the runner's operating system, not what deacon did. It was the case set's only `mode` expectation; the predicate itself stays exercised by `compare::tests::filesystem_mode_predicate`, and the coverage that was lost (one octal string, on a file whose bytes and presence are both still asserted) is the price of this lane running on three platforms instead of one."
     },
     {
       "id": "case-templates-apply-option-substituted",

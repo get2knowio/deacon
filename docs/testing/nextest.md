@@ -197,9 +197,9 @@ default-filter = 'binary(=parity_differential)'
 ONE binary, because only `live-differential` cases need the reference CLI. The
 other two parity lanes carry their expectation in the record and therefore need
 no oracle, so they run in the ordinary lanes: `parity_hermetic` (no Docker
-either — it runs in `dev-fast`, on Linux hosts; its case data pins
-Linux-measured output, so it is `#![cfg(target_os = "linux")]`-gated and simply
-not selected elsewhere — #441) and `parity_docker` (needs a daemon). The split
+either — it runs in `dev-fast` on every platform CI covers, Linux, macOS and
+Windows alike, since #441 removed the last host-measured pins from its case
+data) and `parity_docker` (needs a daemon). The split
 is by what a case NEEDS, not by subject; adding a scenario is a JSON edit and no
 binary changes.
 

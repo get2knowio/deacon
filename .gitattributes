@@ -74,3 +74,13 @@ conformance/obligations/** -text
 # canonical-rendering comparison fails on bytes git introduced — pointing the reader at a
 # renderer that is working correctly. Same discipline, same pin.
 conformance/discovery/** -text
+
+# The differential parity suite's fixtures ARE the expected bytes. A `templates apply`
+# case materializes `parity/fixtures/fx-templates-*/` into a temp workspace, runs deacon,
+# and compares the scaffolded file's content to a literal in `parity/cases/templates.json`
+# — so the fixture's line endings are the subject of the assertion, not incidental to it.
+# On a Windows checkout git's autocrlf rewrote LF to CRLF and all six `chan-file-content`
+# cases diverged on bytes git introduced, which is what gated the hermetic lane to Linux
+# (#441). `-text` (not `eol=lf`) matches every other byte-exact pin in this file and keeps
+# a future binary fixture safe from translation in both directions.
+parity/fixtures/** -text
