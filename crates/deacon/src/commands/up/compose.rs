@@ -254,6 +254,22 @@ pub(crate) async fn execute_compose_up(
                     })?;
                 debug!("Primary service container ID: {}", container_id);
 
+                // #371: this project is the workspace's live generation, so any
+                // OTHER project this workspace still has running is superseded.
+                // Reached by editing the configuration and editing it back — the
+                // original project name is restored and reconnected to, leaving
+                // the intermediate generation running. Same sweep, same ruling as
+                // the created-project path below.
+                deacon_core::container::stop_superseded_containers(
+                    runtime,
+                    identity,
+                    deacon_core::container::CurrentContainer {
+                        container_id: Some(&container_id),
+                        compose_project: Some(&project.name),
+                    },
+                )
+                .await;
+
                 // Return container info for already-running project
                 let remote_user = config
                     .remote_user
@@ -615,6 +631,25 @@ pub(crate) async fn execute_compose_up(
     //    also removes a `docker compose ps` round-trip from every compose `up`.
     let primary_container_id =
         resolve_primary_container_id_with_retry(&compose_manager, &project).await?;
+
+    // #371, compose half. The project name is `deacon_<workspace_hash>_<config_hash>`
+    // (`compose::derive_project_name`), so an edited configuration names a WHOLE NEW
+    // project and the previous one's containers keep running exactly as on the
+    // single-container path. Reaching here means we started a project rather than
+    // reconnecting to one already running (that branch returned above), so anything
+    // else this workspace still has live belongs to a superseded generation.
+    // Sweeping by project — not by deacon's own labels — is what reaches compose's
+    // dependency services, which carry no `devcontainer.*` labels of ours; see
+    // `stop_superseded_containers`. Stopped, not removed, per the same ruling.
+    deacon_core::container::stop_superseded_containers(
+        runtime,
+        identity,
+        deacon_core::container::CurrentContainer {
+            container_id: Some(&primary_container_id),
+            compose_project: Some(&project.name),
+        },
+    )
+    .await;
 
     if let Some(set) = host_ca_set {
         let _ = inject_runtime(runtime, &primary_container_id, set).await?;

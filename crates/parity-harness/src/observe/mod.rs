@@ -114,6 +114,16 @@ pub struct RunContext {
     /// authored set out from under the document being classified, and deacon's and the
     /// reference's temp workspaces would be read at different instants.
     pub authored_properties: std::collections::BTreeSet<String>,
+    /// How many containers the workspace label matched after the final `up`, and how many
+    /// of them were running. Captured by the runner from the same two `docker ps` probes
+    /// that decide which container the Docker channels observe, so no observer pays for it.
+    ///
+    /// This is what lets a case ASSERT that one `up` leaves one live container rather than
+    /// assume it (#371): deacon recreates on a changed configuration and, until that fix,
+    /// left the superseded container running, so a workspace accrued one live container
+    /// per configuration edit and nothing in the suite could see it. `None` for cases that
+    /// never brought a container up.
+    pub workspace_containers: Option<WorkspaceContainerCensus>,
     /// Per-operation process outcomes, keyed by `Operation::id`, populated by the runner
     /// before observers run.
     outcomes: HashMap<String, ProcessOutcome>,
@@ -121,6 +131,22 @@ pub struct RunContext {
     /// boundary), keyed by `Operation::id`. Populated by the runner after each Docker op
     /// so the invariant/metamorphic oracle can compare state ACROSS operations (US6).
     op_snapshots: HashMap<String, OpSnapshot>,
+}
+
+/// How many containers a workspace has, and how many are live.
+///
+/// Deliberately a COUNT and not the id set: ids are random hex and differ on every run and
+/// between the two sides, so they could never be compared; the count is the property the
+/// invariant is actually about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkspaceContainerCensus {
+    /// Containers matching the workspace label in ANY state. After a deacon recreate this
+    /// is >1: the superseded generation is stopped, not removed, so it stays inspectable
+    /// and recoverable with `docker start`.
+    pub total: usize,
+    /// How many of them are running. The invariant #371 establishes is that this is 1
+    /// after any successful single-container `up`, however many generations preceded it.
+    pub running: usize,
 }
 
 /// The container state captured at one operation's boundary (US6 metamorphic evaluation).
@@ -162,6 +188,7 @@ impl RunContext {
             image_tag: None,
             fs_allowlist: Vec::new(),
             authored_properties,
+            workspace_containers: None,
             outcomes: HashMap::new(),
             op_snapshots: HashMap::new(),
         }

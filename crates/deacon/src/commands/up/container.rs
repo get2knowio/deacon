@@ -687,6 +687,37 @@ pub(crate) async fn execute_container_up(
         container_result.image_id
     );
 
+    // #371: whatever container this `up` settled on is now the workspace's live
+    // generation, so every OTHER container this workspace still has running was
+    // provisioned from a configuration that no longer applies — deacon's identity
+    // includes a configHash, so an edited document is a new identity and never
+    // reattaches. Stop them, or a developer editing `devcontainer.json` a few
+    // times accumulates one live container per edit, each holding ports and
+    // memory.
+    //
+    // Deliberately NOT gated on `!container_result.reused`. Editing a document
+    // and editing it back reuses the first generation rather than creating a
+    // third, and gating on create leaves that round trip with two containers
+    // running — the same accumulation, reached by a route the create-only check
+    // cannot see. The invariant worth holding is total: after any successful
+    // `up`, exactly one container for this workspace is live.
+    //
+    // Stopped, not removed (maintainer ruling 2026-08-07): ports and memory are
+    // released, container-local state and volumes survive so a generation can be
+    // recovered with `docker start` — which is precisely what makes the round
+    // trip above reattach instead of rebuild. `--remove-existing-container`
+    // remains the explicit removal path. Lifecycle markers are untouched: they
+    // are workspace-scoped, and only #117's explicit replace clears them.
+    deacon_core::container::stop_superseded_containers(
+        docker,
+        identity,
+        deacon_core::container::CurrentContainer {
+            container_id: Some(&container_result.container_id),
+            compose_project: None,
+        },
+    )
+    .await;
+
     // Host-CA runtime injection (016, T026): stream the corporate bundle into
     // the running container and install it into the distro trust store BEFORE
     // any lifecycle hook runs, so onCreate/postCreate network calls trust the
