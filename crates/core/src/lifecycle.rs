@@ -114,8 +114,15 @@ impl LifecyclePhase {
     /// enforces that.
     pub fn is_skipped_with_skip_post_create(&self) -> bool {
         match self {
-            LifecyclePhase::Initialize
-            | LifecyclePhase::OnCreate
+            // initializeCommand is NOT in the deferred set. The reference's help
+            // text enumerates the five container phases plus dotfiles, and its
+            // bundle invokes the initialize executor unconditionally — before
+            // container creation, outside the `lifecycleHook.enabled` gate — so
+            // initializeCommand runs under --skip-post-create. deacon's host-side
+            // initialize path does not consult this predicate today; this arm
+            // keeps the classification true if it ever does.
+            LifecyclePhase::Initialize => false,
+            LifecyclePhase::OnCreate
             | LifecyclePhase::UpdateContent
             | LifecyclePhase::PostCreate
             | LifecyclePhase::Dotfiles
@@ -1563,9 +1570,12 @@ mod tests {
         assert!(LifecyclePhase::PostStart.is_skipped_in_prebuild());
         assert!(LifecyclePhase::PostAttach.is_skipped_in_prebuild());
 
-        // Skipped with --skip-post-create: EVERY phase, including onCreate and
-        // updateContent (#476 — the flag defers the whole lifecycle, matching the
-        // reference CLI's `postCreateEnabled` gate on its lifecycle runner).
+        // Skipped with --skip-post-create: every container phase plus dotfiles,
+        // including onCreate and updateContent (#476 — the flag defers the whole
+        // lifecycle runner, matching the reference CLI's `postCreateEnabled` gate).
+        // initializeCommand is host-side, outside that gate, and the reference
+        // runs it under the flag — so it is NOT in the deferred set.
+        assert!(!LifecyclePhase::Initialize.is_skipped_with_skip_post_create());
         assert!(LifecyclePhase::OnCreate.is_skipped_with_skip_post_create());
         assert!(LifecyclePhase::UpdateContent.is_skipped_with_skip_post_create());
         assert!(LifecyclePhase::PostCreate.is_skipped_with_skip_post_create());
