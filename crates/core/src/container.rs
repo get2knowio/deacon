@@ -37,6 +37,12 @@ pub const LABEL_HOST_CA_SUBJECTS: &str = "devcontainer.deacon.hostCaSubjects";
 /// exec/read-configuration/set-up to recover config without the workspace.
 pub const LABEL_DEVCONTAINER_METADATA: &str = "devcontainer.metadata";
 
+/// Compose's own project label. Compose stamps it on **every** container it
+/// creates — including dependency services that carry none of deacon's
+/// `devcontainer.*` labels — so it is the only durable handle on a *whole*
+/// compose project (see [`stop_superseded_containers`]).
+pub const LABEL_COMPOSE_PROJECT: &str = "com.docker.compose.project";
+
 /// Source identifier for containers created by deacon
 pub const DEACON_SOURCE: &str = "deacon";
 
@@ -1418,5 +1424,482 @@ where
             id: container_id.to_string(),
         }
         .into()),
+    }
+}
+
+/// Which container the caller just brought up, so the supersede sweep can
+/// exclude it. See [`stop_superseded_containers`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CurrentContainer<'a> {
+    /// Id of the container `up` created (single-container path).
+    pub container_id: Option<&'a str>,
+    /// Compose project name `up` brought up (compose path). Every container in
+    /// that project — including dependency services that carry none of deacon's
+    /// own labels — is spared.
+    pub compose_project: Option<&'a str>,
+}
+
+/// Stop the containers that a freshly created container superseded (#371).
+///
+/// deacon's container identity includes a `configHash`, so editing
+/// `devcontainer.json` makes the next `up` provision a NEW container rather
+/// than reattach (`bhv-up-changed-config-recreates-container`, an intentional,
+/// waivered divergence from the reference CLI, which reattaches). That choice
+/// is not at issue here; leaving the OLD container **running** is. Without this
+/// sweep, one workspace accumulates one live container per configuration edit,
+/// each holding ports and memory.
+///
+/// Superseded containers are **stopped, not removed** (maintainer ruling,
+/// 2026-08-07): stopping releases ports and memory while preserving
+/// container-local state and volumes, so a developer can recover a generation
+/// with `docker start`. `--remove-existing-container` remains the explicit
+/// removal path.
+///
+/// # Why this query is safe
+///
+/// The candidate set is the intersection of two labels, both applied by the
+/// daemon at create time and both required:
+///
+/// * `devcontainer.source=deacon` — deacon created it. Containers the reference
+///   CLI or the VS Code Dev Containers extension created in the same folder also
+///   carry `devcontainer.local_folder`, and this pins them out.
+/// * `devcontainer.local_folder=<canonicalized absolute workspace path>` — the
+///   spec-canonical "which workspace does this container belong to" label, the
+///   same one [`down --all`](ContainerIdentity::workspace_label_selector)
+///   already sweeps to stop *and remove*. Matching on it (rather than on
+///   [`ContainerIdentity::label_selector`], which pins `configHash`) is the
+///   whole point: a superseded container is by definition one whose
+///   `configHash` drifted, so the config-pinned selector cannot see it.
+///
+/// Filtering happens daemon-side (`docker ps --filter label=…`, AND semantics),
+/// so a container missing either label is never returned. From that set the
+/// container the caller just brought up is excluded by id and/or by compose
+/// project, and only containers actually `running` are touched.
+///
+/// When `local_folder` is `None` (the workspace path did not canonicalize) this
+/// is a no-op: there is no reliable workspace identity to scope by, and falling
+/// back to the config-pinned selector would either match nothing or match the
+/// just-created container. Refusing to guess is the safe direction.
+///
+/// # Compose
+///
+/// deacon's compose project name is `deacon_<workspace_hash>_<config_hash>`, so
+/// a changed configuration produces a whole new project and leaks the old one
+/// the same way. deacon stamps its identity labels on the primary service and
+/// every `runServices` entry, but NOT on dependency services compose starts on
+/// its own — a label-only sweep would stop the primary and leave sidecars
+/// running with the network still referenced. So when a candidate turns out to
+/// belong to a different compose project, that project is expanded through
+/// `com.docker.compose.project` (which compose stamps on *every* container it
+/// creates) and swept whole.
+///
+/// # Errors
+///
+/// None. This is post-provisioning hygiene: a container that could not be
+/// listed or stopped is logged and skipped, never surfaced as an `up` failure.
+/// Returns the ids actually stopped, so callers and tests can observe the sweep.
+#[instrument(skip(docker))]
+pub async fn stop_superseded_containers<D>(
+    docker: &D,
+    identity: &ContainerIdentity,
+    current: CurrentContainer<'_>,
+) -> Vec<String>
+where
+    D: crate::docker::Docker + ?Sized,
+{
+    let Some(local_folder) = identity.local_folder.as_ref() else {
+        debug!("No local_folder on identity; skipping superseded-container sweep");
+        return Vec::new();
+    };
+
+    // Both labels are required; `list_containers` splits on `,` into one
+    // `--filter label=…` per part and the daemon ANDs them.
+    let selector = format!(
+        "{}={},{}={}",
+        LABEL_SOURCE,
+        DEACON_SOURCE,
+        LABEL_LOCAL_FOLDER,
+        local_folder.display()
+    );
+
+    let candidates = match docker.list_containers(Some(&selector)).await {
+        Ok(c) => c,
+        Err(e) => {
+            debug!("Could not list workspace containers for supersede sweep: {e}");
+            return Vec::new();
+        }
+    };
+
+    let mut to_stop: Vec<String> = Vec::new();
+    let mut superseded_projects: Vec<String> = Vec::new();
+
+    for container in candidates {
+        if current.container_id == Some(container.id.as_str()) {
+            continue;
+        }
+
+        // `list_containers` does not populate labels (they need an inspect), and
+        // the compose project is the one label that decides whether this
+        // container belongs to the project we just brought up. Only inspect when
+        // a compose project is in play; the single-container path needs nothing
+        // beyond the id and state already in hand.
+        if current.compose_project.is_some() {
+            let project = match docker.inspect_container(&container.id).await {
+                Ok(Some(info)) => info.labels.get(LABEL_COMPOSE_PROJECT).cloned(),
+                Ok(None) => continue, // vanished between list and inspect
+                Err(e) => {
+                    debug!(
+                        container_id = %container.id,
+                        "Could not inspect candidate for supersede sweep: {e}"
+                    );
+                    continue;
+                }
+            };
+            match project.as_deref() {
+                Some(p) if Some(p) == current.compose_project => continue,
+                Some(p) => {
+                    if !superseded_projects.iter().any(|known| known == p) {
+                        superseded_projects.push(p.to_string());
+                    }
+                    continue; // swept via the project expansion below
+                }
+                None => {}
+            }
+        }
+
+        if container.state == "running" {
+            to_stop.push(container.id);
+        }
+    }
+
+    // Expand each superseded compose project so dependency services — which
+    // carry no `devcontainer.*` labels and would otherwise keep running, and
+    // keep the project's network referenced — are stopped too.
+    for project in superseded_projects {
+        let project_selector = format!("{}={}", LABEL_COMPOSE_PROJECT, project);
+        match docker.list_containers(Some(&project_selector)).await {
+            Ok(members) => {
+                for member in members {
+                    if current.container_id == Some(member.id.as_str()) {
+                        continue;
+                    }
+                    if member.state == "running" && !to_stop.contains(&member.id) {
+                        to_stop.push(member.id);
+                    }
+                }
+            }
+            Err(e) => debug!("Could not expand superseded compose project {project}: {e}"),
+        }
+    }
+
+    let mut stopped = Vec::new();
+    for id in to_stop {
+        match docker.stop_container(&id, None).await {
+            Ok(()) => {
+                debug!(container_id = %id, "Stopped superseded container");
+                stopped.push(id);
+            }
+            // Best effort: a container that raced away (or a daemon hiccup)
+            // must never fail the `up` that just succeeded.
+            Err(e) => {
+                tracing::warn!(container_id = %id, "Failed to stop superseded container: {e}")
+            }
+        }
+    }
+
+    if !stopped.is_empty() {
+        tracing::info!(
+            count = stopped.len(),
+            "Stopped {} superseded container(s) for this workspace",
+            stopped.len()
+        );
+    }
+
+    stopped
+}
+
+#[cfg(test)]
+mod supersede_tests {
+    use super::*;
+    use crate::docker::{ContainerInfo, Docker, ExecConfig, ExecResult, ImageInfo};
+    use std::sync::Mutex;
+
+    /// Records the label selectors it was asked for and the containers it was told to
+    /// stop, so the tests can assert on the QUERY (the safety claim) and not only on the
+    /// outcome.
+    #[derive(Debug, Default)]
+    struct RecordingDocker {
+        /// `label_selector -> containers to return`.
+        listings: Vec<(String, Vec<ContainerInfo>)>,
+        selectors_seen: Mutex<Vec<String>>,
+        stopped: Mutex<Vec<String>>,
+    }
+
+    fn info(id: &str, state: &str, labels: &[(&str, &str)]) -> ContainerInfo {
+        ContainerInfo {
+            id: id.to_string(),
+            names: vec![id.to_string()],
+            image: "alpine:3.19".to_string(),
+            status: state.to_string(),
+            state: state.to_string(),
+            exposed_ports: vec![],
+            port_mappings: vec![],
+            env: HashMap::new(),
+            labels: labels
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            mounts: vec![],
+        }
+    }
+
+    impl Docker for RecordingDocker {
+        async fn ping(&self) -> Result<()> {
+            Ok(())
+        }
+
+        async fn list_containers(
+            &self,
+            label_selector: Option<&str>,
+        ) -> Result<Vec<ContainerInfo>> {
+            let selector = label_selector.unwrap_or_default().to_string();
+            self.selectors_seen.lock().unwrap().push(selector.clone());
+            Ok(self
+                .listings
+                .iter()
+                .find(|(s, _)| *s == selector)
+                .map(|(_, c)| c.clone())
+                .unwrap_or_default())
+        }
+
+        async fn inspect_container(&self, id: &str) -> Result<Option<ContainerInfo>> {
+            Ok(self
+                .listings
+                .iter()
+                .flat_map(|(_, c)| c.iter())
+                .find(|c| c.id == id)
+                .cloned())
+        }
+
+        async fn inspect_image(&self, _image_ref: &str) -> Result<Option<ImageInfo>> {
+            Ok(None)
+        }
+
+        async fn exec(
+            &self,
+            _container_id: &str,
+            _command: &[String],
+            _config: ExecConfig,
+        ) -> Result<ExecResult> {
+            unreachable!("the supersede sweep never execs")
+        }
+
+        async fn stop_container(&self, container_id: &str, _timeout: Option<u32>) -> Result<()> {
+            self.stopped.lock().unwrap().push(container_id.to_string());
+            Ok(())
+        }
+    }
+
+    const WS: &str = "/tmp/ws-supersede";
+
+    fn identity_for(local_folder: Option<&str>) -> ContainerIdentity {
+        ContainerIdentity {
+            workspace_hash: "ws000000".to_string(),
+            config_hash: "cfgnew00".to_string(),
+            name: Some("demo".to_string()),
+            custom_name: None,
+            local_folder: local_folder.map(PathBuf::from),
+            config_file: None,
+            host_ca_bundle_path: None,
+            host_ca_subjects: None,
+            additional_labels: HashMap::new(),
+            metadata_label: None,
+        }
+    }
+
+    fn workspace_selector() -> String {
+        format!(
+            "{}={},{}={}",
+            LABEL_SOURCE, DEACON_SOURCE, LABEL_LOCAL_FOLDER, WS
+        )
+    }
+
+    /// The core of #371: a workspace whose configuration changed holds the container the
+    /// current `up` settled on plus older generations. Only the older RUNNING ones are
+    /// stopped — the current one is spared, and an already-stopped generation is not
+    /// pointlessly re-stopped.
+    #[tokio::test]
+    async fn stops_only_the_running_containers_this_up_superseded() {
+        let docker = RecordingDocker {
+            listings: vec![(
+                workspace_selector(),
+                vec![
+                    info("current", "running", &[]),
+                    info("older-running", "running", &[]),
+                    info("older-exited", "exited", &[]),
+                ],
+            )],
+            ..Default::default()
+        };
+
+        let stopped = stop_superseded_containers(
+            &docker,
+            &identity_for(Some(WS)),
+            CurrentContainer {
+                container_id: Some("current"),
+                compose_project: None,
+            },
+        )
+        .await;
+
+        assert_eq!(stopped, vec!["older-running".to_string()]);
+        assert_eq!(*docker.stopped.lock().unwrap(), vec!["older-running"]);
+    }
+
+    /// The safety claim, asserted on the QUERY rather than inferred from an outcome: the
+    /// sweep only ever considers containers carrying BOTH `devcontainer.source=deacon`
+    /// (so a container the reference CLI or the VS Code extension created in the same
+    /// folder is never touched) AND this workspace's `devcontainer.local_folder`.
+    #[tokio::test]
+    async fn the_candidate_query_pins_both_the_source_and_the_workspace() {
+        let docker = RecordingDocker::default();
+        stop_superseded_containers(
+            &docker,
+            &identity_for(Some(WS)),
+            CurrentContainer::default(),
+        )
+        .await;
+
+        let seen = docker.selectors_seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1, "exactly one candidate query: {seen:?}");
+        let selector = &seen[0];
+        assert!(
+            selector.contains(&format!("{LABEL_SOURCE}={DEACON_SOURCE}")),
+            "the sweep must pin deacon as the creator: {selector}"
+        );
+        assert!(
+            selector.contains(&format!("{LABEL_LOCAL_FOLDER}={WS}")),
+            "the sweep must pin this workspace: {selector}"
+        );
+        assert!(
+            !selector.contains(LABEL_CONFIG_HASH),
+            "pinning the configHash would match only the CURRENT generation, which is \
+             exactly the container that must be spared: {selector}"
+        );
+    }
+
+    /// Without a canonicalized workspace path there is no reliable identity to scope by,
+    /// and guessing risks stopping a container that is not ours. Refuse to look at all.
+    #[tokio::test]
+    async fn without_a_local_folder_nothing_is_queried_or_stopped() {
+        let docker = RecordingDocker::default();
+        let stopped = stop_superseded_containers(
+            &docker,
+            &identity_for(None),
+            CurrentContainer {
+                container_id: Some("current"),
+                compose_project: None,
+            },
+        )
+        .await;
+
+        assert!(stopped.is_empty());
+        assert!(
+            docker.selectors_seen.lock().unwrap().is_empty(),
+            "no local_folder means no query at all"
+        );
+    }
+
+    /// Compose: the superseded generation is a whole PROJECT. deacon labels only its
+    /// primary and `runServices` containers, so the project is expanded through compose's
+    /// own label to reach dependency services — which carry none of deacon's labels and
+    /// would otherwise stay up holding the project's network.
+    #[tokio::test]
+    async fn a_superseded_compose_project_is_swept_including_its_unlabelled_sidecars() {
+        let old_project = "deacon_ws000000_cfgold0";
+        let new_project = "deacon_ws000000_cfgnew0";
+        let docker = RecordingDocker {
+            listings: vec![
+                (
+                    workspace_selector(),
+                    vec![
+                        info(
+                            "current-app",
+                            "running",
+                            &[(LABEL_COMPOSE_PROJECT, new_project)],
+                        ),
+                        info(
+                            "old-app",
+                            "running",
+                            &[(LABEL_COMPOSE_PROJECT, old_project)],
+                        ),
+                    ],
+                ),
+                (
+                    format!("{LABEL_COMPOSE_PROJECT}={old_project}"),
+                    vec![
+                        info("old-app", "running", &[]),
+                        // A dependency service: compose stamps its project label, deacon
+                        // stamps nothing, so only the project expansion reaches it.
+                        info("old-db", "running", &[]),
+                    ],
+                ),
+            ],
+            ..Default::default()
+        };
+
+        let stopped = stop_superseded_containers(
+            &docker,
+            &identity_for(Some(WS)),
+            CurrentContainer {
+                container_id: Some("current-app"),
+                compose_project: Some(new_project),
+            },
+        )
+        .await;
+
+        assert_eq!(
+            stopped,
+            vec!["old-app".to_string(), "old-db".to_string()],
+            "the whole superseded project goes down, sidecars included"
+        );
+    }
+
+    /// A container belonging to the project this `up` just brought up is spared even
+    /// though it is not the primary id the caller passed — a compose project is more than
+    /// one container, and sweeping by id alone would take down its own siblings.
+    #[tokio::test]
+    async fn siblings_of_the_current_compose_project_are_spared() {
+        let current = "deacon_ws000000_cfgnew0";
+        let docker = RecordingDocker {
+            listings: vec![(
+                workspace_selector(),
+                vec![
+                    info(
+                        "current-app",
+                        "running",
+                        &[(LABEL_COMPOSE_PROJECT, current)],
+                    ),
+                    info(
+                        "current-web",
+                        "running",
+                        &[(LABEL_COMPOSE_PROJECT, current)],
+                    ),
+                ],
+            )],
+            ..Default::default()
+        };
+
+        let stopped = stop_superseded_containers(
+            &docker,
+            &identity_for(Some(WS)),
+            CurrentContainer {
+                container_id: Some("current-app"),
+                compose_project: Some(current),
+            },
+        )
+        .await;
+
+        assert!(stopped.is_empty(), "nothing in the live project is stopped");
     }
 }

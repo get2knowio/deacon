@@ -230,6 +230,9 @@ pub(crate) async fn execute_ops(
     // The final `up` container's full `docker inspect`, captured ONCE (off the executor)
     // and handed to every Docker channel observer via `RunContext` (finding #4).
     let mut container_inspect: Option<serde_json::Value> = None;
+    // How many containers the workspace held after the final `up`, and how many were live
+    // (#371) — captured from the same probes that pick the observed container.
+    let mut workspace_container_census: Option<crate::observe::WorkspaceContainerCensus> = None;
     // The final successful `build`'s image inspect, captured the same way.
     let mut image_inspect: Option<serde_json::Value> = None;
 
@@ -285,7 +288,31 @@ pub(crate) async fn execute_ops(
             // The op SUCCEEDED, so a container must exist: finding none means the
             // observation is broken, not that there is nothing to see (D-2).
             require_observed_container(&case.id, &op.id, &this_ids, &workspace)?;
-            let this_id = this_ids.first().cloned();
+            // Which of them are RUNNING. Two things depend on knowing this, and both were
+            // broken while a superseded container stayed live (#371).
+            //
+            // First, WHICH container the Docker channels observe. `this_ids` is sorted by
+            // id — random hex — so picking `.first()` out of a multi-container workspace is
+            // a coin flip between generations, and a draft of
+            // `case-up-stale-config-reentry-differential` observing `chan-container-state`
+            // after a recreate failed about one run in three for exactly that reason. #371
+            // stops the superseded container but deliberately does NOT remove it, so the
+            // ambiguity survives the fix and has to be resolved here: the live generation
+            // is the one still running.
+            //
+            // Second, it is the census `chan-temporal` reports, which is how a case asserts
+            // "exactly one container for this workspace is live" rather than assuming it.
+            let ws_for_running = workspace.clone();
+            let running_ids = tokio::task::spawn_blocking(move || {
+                running_containers_for_workspace(&ws_for_running)
+            })
+            .await
+            .map_err(blocking_join_err)??;
+            let workspace_containers = Some(crate::observe::WorkspaceContainerCensus {
+                total: this_ids.len(),
+                running: running_ids.len(),
+            });
+            let this_id = running_ids.first().or_else(|| this_ids.first()).cloned();
             let inspect = match this_id.clone() {
                 Some(id) => {
                     tokio::task::spawn_blocking(move || crate::observe::docker_inspect(&id))
@@ -310,6 +337,7 @@ pub(crate) async fn execute_ops(
                 // The final `up`'s container + its inspect are what the channel observers use.
                 container_id = this_id;
                 container_inspect = inspect;
+                workspace_container_census = workspace_containers;
             }
         }
 
@@ -369,6 +397,7 @@ pub(crate) async fn execute_ops(
     ctx.fs_allowlist = case.fs_allowlist.clone();
     ctx.container_id = container_id;
     ctx.container_inspect = container_inspect;
+    ctx.workspace_containers = workspace_container_census;
     ctx.image_inspect = image_inspect;
     ctx.image_tag = image_tag;
     for (op_id, outcome) in outcomes {
@@ -535,6 +564,26 @@ fn containers_for_workspace(workspace: &Path) -> Result<Vec<String>, HarnessErro
     containers_for_workspace_with(DOCKER_BIN, workspace)
 }
 
+/// [`containers_for_workspace`] restricted to containers that are RUNNING.
+///
+/// A separate probe rather than a state field on the existing one: `docker ps` filters
+/// server-side, so this is one more cheap call instead of an inspect per candidate.
+///
+/// BLOCKING; async callers offload it via `spawn_blocking`.
+fn running_containers_for_workspace(workspace: &Path) -> Result<Vec<String>, HarnessError> {
+    running_containers_for_workspace_with(DOCKER_BIN, workspace)
+}
+
+/// [`running_containers_for_workspace`] with an injectable container-CLI program — the
+/// same seam [`containers_for_workspace_with`] exposes for the hermetic fault tests.
+pub fn running_containers_for_workspace_with(
+    docker: &str,
+    workspace: &Path,
+) -> Result<Vec<String>, HarnessError> {
+    // `ps` without `-a` lists running containers only.
+    workspace_container_ids(docker, workspace, false)
+}
+
 /// [`containers_for_workspace`] with an injectable container-CLI program — the seam the
 /// hermetic fault tests drive (a stub that cannot spawn / exits non-zero / prints ids), so
 /// the fault path is demonstrated without a Docker daemon or process-wide `PATH` mutation.
@@ -542,18 +591,35 @@ pub fn containers_for_workspace_with(
     docker: &str,
     workspace: &Path,
 ) -> Result<Vec<String>, HarnessError> {
+    workspace_container_ids(docker, workspace, true)
+}
+
+/// The shared body of the two workspace probes: `docker ps [-a] -q --filter
+/// label=devcontainer.local_folder=<ws>`, sorted and deduped. `all` selects `-a`
+/// (every state) versus running-only.
+fn workspace_container_ids(
+    docker: &str,
+    workspace: &Path,
+    all: bool,
+) -> Result<Vec<String>, HarnessError> {
     let ws = workspace.to_string_lossy();
     let filter = format!("label=devcontainer.local_folder={ws}");
+    let mut args: Vec<&str> = vec!["ps"];
+    if all {
+        args.push("-a");
+    }
+    args.extend(["-q", "--filter", &filter]);
+    let shown = args.join(" ");
     let output = std::process::Command::new(docker)
-        .args(["ps", "-aq", "--filter", &filter])
+        .args(&args)
         .output()
         .map_err(|e| HarnessError::DockerUnavailable {
-            cause: format!("could not run `docker ps -aq --filter {filter}`: {e}"),
+            cause: format!("could not run `docker {shown}`: {e}"),
         })?;
     if !output.status.success() {
         return Err(HarnessError::DockerUnavailable {
             cause: format!(
-                "`docker ps -aq --filter {filter}` exited with {}: {}",
+                "`docker {shown}` exited with {}: {}",
                 output.status,
                 String::from_utf8_lossy(&output.stderr).trim()
             ),

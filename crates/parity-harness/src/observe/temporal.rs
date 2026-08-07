@@ -44,11 +44,25 @@ impl ChannelObserver for TemporalObserver {
         let Some(inspect) = &ctx.container_inspect else {
             return Ok(not_captured(CHAN_TEMPORAL, &op.id));
         };
+        let mut value = temporal_from_inspect(inspect);
+        // The per-container transition markers above say nothing about how many
+        // containers the run LEFT BEHIND, which is its own lifecycle-transition fact and
+        // the one #371 is about: deacon recreates on a changed configuration, so a
+        // workspace can hold several generations, and only one of them should be live.
+        // Added here rather than in `temporal_from_inspect` because that function is also
+        // the metamorphic oracle's per-op snapshot, which compares container IDENTITY
+        // across two operations and has no use for a census.
+        if let (Some(obj), Some(census)) = (value.as_object_mut(), ctx.workspace_containers) {
+            obj.insert(
+                "workspaceContainers".to_string(),
+                json!({ "total": census.total, "running": census.running }),
+            );
+        }
         Ok(RawChannelEvidence {
             channel: CHAN_TEMPORAL.to_string(),
             operation: op.id.clone(),
             present: true,
-            value: temporal_from_inspect(inspect),
+            value,
         })
     }
 }
