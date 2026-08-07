@@ -1,15 +1,15 @@
 # Session Handoff — Differential Parity Steady State
 
-Last updated: 2026-08-07, `main` at `dabf102`. This document is the cross-session
+Last updated: 2026-08-07, `main` at `4582692`. This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
 changes, update this file in the same PR.
 
 ## Where things stand
 
-- **Zero open nonconformances.** `parity/SPEC_STATUS.md` records **121 behaviors**:
+- **Zero open nonconformances.** `parity/SPEC_STATUS.md` records **122 behaviors**:
   0 open nonconformance, 9 follows-spec, 11 documented choice, 19 extension,
-  82 conformant-and-matching. The header census is CI-guarded
+  83 conformant-and-matching. The header census is CI-guarded
   (`check_spec_status_census` in `crates/parity-harness/src/registry.rs`) — rows and
   header must change together.
 - **The differential nightly's diverging set is empty.** Current verdict:
@@ -39,6 +39,9 @@ changes, update this file in the same PR.
 
 | PR | What | Issues |
 |---|---|---|
+| #545 `05d9282` + #546 `4582692` | `up --skip-post-create` defers ALL five lifecycle phases + dotfiles, matching the reference (spec-silent flag → reference is authority; transcribed `postCreateEnabled: !skipPostCreate` gating the whole runner, measured full matrix at 0.87.0). One exhaustive-match classifier; two new parity cases (one-op `absent` + a run-user-commands-resume differential; filesystem channels capture once, after ALL ops — recorded in the SPEC_STATUS row). #546 is the compensating-review catch: `Initialize` was misclassified as deferred; the reference runs initializeCommand under the flag (its executor is outside the gate) — inert but corrected, with a pinned negative | #476 fixed |
+| #543 `e4e50f4` | the hermetic lane's one merged-config case is actually hermetic: local feature replaces the ghcr fetch, `--docker-path /nonexistent/…` turns the base-image label pull into a no-runtime degradation assertion. Watched-to-fail via `unshare -rn` reproducing the exact CI flake; 165 ms, byte-identical with and without network. The no-network run exposed six MORE registry-reaching hermetic cases → #544 (lane-contract ruling needed) | #454 fixed, #544 filed |
+| #542 `5be7282` | 37 remaining test `NamedTempFile::new()` sites moved onto test-owned TempDirs (Windows delete-pending flake class); production fallible sites untouched; per-shape faithfulness breaks; zero dropped-TempDir patterns | #540 fixed |
 | #538 `dabf102` | `set-up` reports `mergedConfiguration.customizations` as per-tool ARRAYS (one slot per contributing metadata entry, `[…label fragments, --config]`, upstream `Tt`), via the new `metadata_customizations_layers` carrier (the #477 pattern) routed through the existing `apply_customizations_shape`; layers are variable-substituted because the reference maps `substitute` over label entries (`Tr`→`IG`, confirmed live) | #532 fixed |
 | #537 `aa8258f` | `up` Feature install ORDER is observable at last: three multi-Feature cases read the sequence three local `install.sh` scripts append inside the created container — one order-by-declaration (`overrideFeatureInstallOrder`), one order-by-dependency (`installsAfter` + `dependsOn`), one differential. Measured at 0.87.0: no divergence, the hole was in the coverage and not in the behavior | #417 fixed, #536 filed |
 | #535 `bf338f7` | `port_forward` registry tests deterministic: the flake was the test helper's drop-then-rebind of an ephemeral port (measured 1/300 under pressure), NOT a product TOCTOU (`TcpListener::bind` is the atomic take and the allocator holds its listener). Bind probe injected via private `allocate_with` seam; assertions strengthened, `free_port()` deleted from all five tests | #482 fixed |
@@ -58,28 +61,24 @@ defects it concealed were filed as #526 and #527, both now fixed.
 Sharpest first. Every item below already has a measurement or a precise claim in
 its issue — read the issue before briefing an agent.
 
-1. **#476** — characterize `--skip-post-create` phase coverage: the reference
-   defers everything, deacon defers postCreate onward. Measure, then either align
-   or file an allowlist ruling request.
-2. **#454** — `case-merged-decl-extends-child` can pull an image inside the
-   "needs nothing" hermetic lane. Lane-truthfulness fix.
-3. **#441** — hermetic case data is Linux-pinned; lane gated to Linux pending
-   portability.
-4. **#371** — `up` leaves the previous container RUNNING when a changed config
-   forces a new one.
-5. **#402** — discovery: no-longer-reproducing is unreachable — nothing retires a
-   finding.
-6. **#480 batch-2** — mine the reference's remaining ~40 e2e fixtures into
-   declarative parity cases (grouped by blocker in the issue).
-7. **#536** — `build` installs Features too and no case declares more than one,
+1. **#371** — `up` leaves the previous container RUNNING when a changed config
+   forces a new one. **Maintainer ruling recorded on the issue (2026-08-07):
+   STOP the superseded container, don't remove** — ready for an end-to-end agent.
+2. **#536** — `build` installs Features too and no case declares more than one,
    so its install order is unverified. Not the same defect as #417 (no `build`
    behavior CLAIMS an order, so nothing there is vacuous) — a coverage gap.
-8. **#540** — ~38 test sites call `NamedTempFile::new()` in the shared `%TEMP%`
-   root; on Windows a sibling test's delete-pending file surfaces as an
-   unretried PermissionDenied (caught live on this PR's own CI, docs-only diff).
-   The measured instance (`templates.rs`) was fixed in #541; the rest is a
-   mechanical sweep. Same defect class as #482 — a test depending on a
-   host-global namespace it cannot hold still.
+3. **#544** — six more hermetic-lane cases reach a registry (found by #454's
+   no-network run); shape (b) does not extend to them (version-pinned OCI refs,
+   `upgrade --dry-run` digest resolution). **Needs a maintainer ruling on the
+   lane contract**: widened `parity_hermetic` promise vs a registry axis on
+   `lane_of` vs cache pre-seeding — plus the proposed `unshare -rn` guard that
+   would make the "no network" promise true by construction.
+4. **#402** — discovery: no-longer-reproducing is unreachable — nothing retires a
+   finding.
+5. **#441** — hermetic case data is Linux-pinned; lane gated to Linux pending
+   portability.
+6. **#480 batch-2** — mine the reference's remaining ~40 e2e fixtures into
+   declarative parity cases (grouped by blocker in the issue).
 
 Unmeasured probe candidate (not yet filed): `overrideFeatureInstallOrder`'s
 metadata-id alias surface, noted during #505.
