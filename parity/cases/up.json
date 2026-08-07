@@ -2591,6 +2591,174 @@
         "tempdir": true
       },
       "notes": "The single-container analogue of the compose uid-remap case (#462). The Dockerfile creates `foo` at uid 1234 / gid 4321 and the configuration selects it as `remoteUser`; the workspace is a bind mount of a host directory the runner owns. `postCreateCommand` writes `whoami` into that mount, which succeeds only if BOTH halves hold: the hook ran as `remoteUser`, and that user's uid was remapped to the host's. 1234 is not a plausible host uid, so neither half can pass by coincidence — the failure mode this fixture's compose sibling hit on GitHub's runners and not locally.\n\nThe marker records the NAME, not `id -u`: the remapped uid is the host's and so differs between a dev box and a CI runner, which would make a fixed assertion a statement about the host. The remap is measured by the file existing at all.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-up-feature-multi-declared-order",
+      "behaviors": [
+        "bhv-up-feature-install-order"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-feature-multi-declared-order"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "cat",
+            "/usr/local/share/conformance/install-order"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": "charlie\nalpha\nbravo\n"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes the ORDERING half of `bhv-up-feature-install-order`, which until #417 was backed by five cases that between them declared at most ONE Feature — so the claim the behavior is named for could not fail. Three local Features each append their id to `/usr/local/share/conformance/install-order` from `install.sh`, and the case reads the file back out of the created container, so what is asserted is the sequence the installs actually ran in rather than the sequence a resolver reported.\n\nThe expected sequence is `charlie, alpha, bravo`, and every term of it is load-bearing: `overrideFeatureInstallOrder` names that order while the `features` map declares `alpha, bravo, charlie`. It therefore differs from map/declaration order, from lexicographic order (which `feature-dependencies.md` §Round Stable Sort makes the within-round tie-break, so it is what an implementation ignoring the override would produce), and from reverse map order — three Features rather than two is what rules the reversal out. `equals` rather than `contains`: `contains` cannot see an APPENDED line, which is one of the four vacuous assertions this suite has already committed once.\n\nMeasured at oracle 0.87.0: both CLIs write `charlie\\nalpha\\nbravo\\n`. The override rule itself already has cross-CLI coverage at the RESOLUTION level (`bhv-features-override-order-*`, two `live-differential` read-configuration cases mined from upstream), so this case pins the INSTALL level on deacon's side and its dependency-order sibling carries the cross-CLI half."
+    },
+    {
+      "id": "case-up-feature-multi-dependency-order",
+      "behaviors": [
+        "bhv-up-feature-install-order"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-feature-multi-dependency-order"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "cat",
+            "/usr/local/share/conformance/install-order"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": "early\npulled\nlate\n"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The half of #417 that distinguishes the two ordering RULES. Its sibling `case-up-feature-multi-declared-order` fixes the order by declaration (`overrideFeatureInstallOrder`); here nothing declares an order and the resolved order is DERIVED, so a configuration whose declared order and resolved order coincided would not tell the two apart.\n\nThe fixture makes them differ deliberately. The `features` map declares `./features/late` first and `./features/early` second; `late` carries `installsAfter: [\"./features/early\"]` (a soft edge) and `dependsOn: {\"./features/pulled\": {}}` (a hard edge to a Feature the configuration never names). Resolution therefore has to invert the declaration AND pull in a third Feature: `early` and `pulled` are both eligible in round one and commit in the §Round Stable Sort lexicographic order, then `late` commits in round two — `early, pulled, late`. Declaration order (`late, early`) and lexicographic order over the declared set (`early, late`) are both different sequences, and neither includes `pulled` at all, so an implementation applying either rule fails here rather than passing by coincidence.\n\nMeasured at oracle 0.87.0: both CLIs write `early\\npulled\\nlate\\n`. `case-up-feature-multi-dependency-order-differential` runs the same fixture against the reference so the agreement is enforced rather than recorded."
+    },
+    {
+      "id": "case-up-feature-multi-dependency-order-differential",
+      "behaviors": [
+        "bhv-up-feature-install-order"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-feature-multi-dependency-order"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "cat",
+            "/usr/local/share/conformance/install-order"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": "early\npulled\nlate\n"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The cross-CLI half of the ordering claim (#417). `bhv-up-feature-install-order` reads \"matches the reference\", and until now the only differential behind it observed a single-Feature `up`'s exit code — which agrees for any install order whatsoever. This one compares the marker sequence the installs wrote INSIDE the container, so a deacon that resolved `installsAfter`/`dependsOn` differently from the reference reports a `chan-stdout` divergence instead of two green exit codes.\n\nThe declared assertion is carried in addition to the comparison on purpose: a differential alone cannot fail when both sides are equally wrong, and the sequence here is one the spec pins (§Round Stable Sort) rather than one only the reference knows. Measured at oracle 0.87.0 on `fx-up-feature-multi-dependency-order`: both sides write `early\\npulled\\nlate\\n` and both exit 0.\n\nOnly the dependency fixture gets a differential. The declared-order (`overrideFeatureInstallOrder`) rule already has two `live-differential` cases at the resolution level (`bhv-features-override-order-*`), so a second install-level differential over the same rule would buy a container build per nightly and no new information."
     }
   ]
 }

@@ -1,0 +1,14 @@
+{
+	"name": "ConformanceUpFeatureMultiDeclaredOrder",
+	"image": "alpine:3.19",
+	"features": {
+		"./features/alpha": {},
+		"./features/bravo": {},
+		"./features/charlie": {}
+	},
+	"overrideFeatureInstallOrder": [
+		"./features/charlie",
+		"./features/alpha",
+		"./features/bravo"
+	]
+}
