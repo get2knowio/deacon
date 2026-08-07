@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceBuildFeatureMultiOrder",
+	"build": { "dockerfile": "Dockerfile", "args": { "VARIANT": "3.19" } },
+	"features": {
+		"./features/late": {},
+		"./features/early": {}
+	},
+	"containerEnv": { "PARITY_BUILD_MULTI_ORDER": "authored-in-config" },
+	"remoteUser": "root"
+}
