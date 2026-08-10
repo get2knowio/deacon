@@ -21,6 +21,84 @@ use super::types::{
 };
 use super::utils::{classify_network_error, get_features_cache_dir, verify_content_digest};
 
+/// The metadata file that makes a cached FEATURE entry complete.
+pub(crate) const FEATURE_METADATA_FILE: &str = "devcontainer-feature.json";
+
+/// The metadata file that makes a cached TEMPLATE entry complete.
+pub(crate) const TEMPLATE_METADATA_FILE: &str = "devcontainer-template.json";
+
+/// Disambiguates staging directories created by the same process.
+static EXTRACTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Is `dir` a COMPLETE cache entry?
+///
+/// The directory merely existing is not the question — that is exactly the
+/// state a concurrent writer used to leave behind mid-unpack (#560). An entry
+/// counts as a cache hit only once its metadata file is there, so a partial
+/// entry left by an older deacon or a killed process is re-fetched instead of
+/// being read and reported as `metadata file not found`.
+pub(crate) fn is_complete_cache_entry(dir: &Path, marker: &str) -> bool {
+    dir.join(marker).exists()
+}
+
+/// Move a fully extracted `staging` tree to `dest` atomically.
+///
+/// Concurrency is expected here, not exceptional: several processes may extract
+/// the same layer at once and race to publish it. Whoever renames first wins and
+/// everyone else discovers a destination that is already complete — a benign
+/// outcome, since the entry is content-addressed by layer digest and every
+/// racer extracted identical bytes.
+fn publish_cache_entry(staging: &Path, dest: &Path, marker: &str, cache_dir: &Path) -> Result<()> {
+    if std::fs::rename(staging, dest).is_ok() {
+        return Ok(());
+    }
+
+    // On Unix a directory rename fails only when `dest` is a non-empty
+    // directory (ENOTEMPTY); an empty `dest` is replaced atomically. So a
+    // failure here means some tree is already sitting at `dest`.
+    if is_complete_cache_entry(dest, marker) {
+        debug!(
+            "Cache entry {} was published concurrently; discarding our copy",
+            dest.display()
+        );
+        let _ = std::fs::remove_dir_all(staging);
+        return Ok(());
+    }
+
+    // `dest` holds an INCOMPLETE tree. Nothing that follows this fix can create
+    // one, so it is a leftover from an older version or an interrupted run.
+    // Vacate it with a second rename rather than deleting in place: a
+    // `remove_dir_all` on the live path would make a partial `dest` observable
+    // all over again, which is the defect being fixed.
+    warn!(
+        "Replacing incomplete cache entry at {} (missing {})",
+        dest.display(),
+        marker
+    );
+    let discarded = cache_dir.join(format!(
+        ".discarded-{}-{}",
+        std::process::id(),
+        EXTRACTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+    ));
+    if std::fs::rename(dest, &discarded).is_ok() {
+        let _ = std::fs::remove_dir_all(&discarded);
+    }
+
+    match std::fs::rename(staging, dest) {
+        Ok(()) => Ok(()),
+        // Lost a second race against a sibling doing the same repair: their
+        // tree is complete, so the cache is in the state we wanted.
+        Err(_) if is_complete_cache_entry(dest, marker) => {
+            let _ = std::fs::remove_dir_all(staging);
+            Ok(())
+        }
+        Err(e) => Err(FeatureError::Extraction {
+            message: format!("Failed to publish cache entry to {}: {}", dest.display(), e),
+        }
+        .into()),
+    }
+}
+
 /// Feature fetcher for OCI registries
 pub struct FeatureFetcher<C: HttpClient> {
     client: C,
@@ -147,7 +225,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
             let cache_key = self.get_cache_key(&layer.digest);
             let cached_dir = self.cache_dir.join(&cache_key);
 
-            let is_cached = cached_dir.exists();
+            let is_cached = is_complete_cache_entry(&cached_dir, FEATURE_METADATA_FILE);
             if is_cached {
                 info!("Found cached feature at: {}", cached_dir.display());
                 let feature = self
@@ -173,7 +251,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
                     },
                 })?;
             let extracted_dir = self
-                .extract_layer(layer_data, &cache_key)
+                .extract_layer(layer_data, &cache_key, FEATURE_METADATA_FILE)
                 .await
                 .map_err(|e| match e {
                     crate::errors::DeaconError::Feature(f) => f,
@@ -184,7 +262,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
 
             // Parse metadata. parse_feature_metadata is sync and does file IO;
             // offload to spawn_blocking so we don't block the runtime.
-            let metadata_path = extracted_dir.join("devcontainer-feature.json");
+            let metadata_path = extracted_dir.join(FEATURE_METADATA_FILE);
             let parse_path = metadata_path.clone();
             let metadata = tokio::task::spawn_blocking(move || parse_feature_metadata(&parse_path))
                 .await
@@ -401,7 +479,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
         let cache_key = self.get_cache_key(&layer.digest);
         let cached_dir = self.cache_dir.join(&cache_key);
 
-        if cached_dir.exists() {
+        if is_complete_cache_entry(&cached_dir, TEMPLATE_METADATA_FILE) {
             info!("Found cached template at: {}", cached_dir.display());
             return self
                 .load_cached_template(cached_dir, layer.digest.clone())
@@ -412,10 +490,12 @@ impl<C: HttpClient> FeatureFetcher<C> {
         let layer_data = self
             .download_layer_template(template_ref, &layer.digest)
             .await?;
-        let extracted_dir = self.extract_layer(layer_data, &cache_key).await?;
+        let extracted_dir = self
+            .extract_layer(layer_data, &cache_key, TEMPLATE_METADATA_FILE)
+            .await?;
 
         // Parse metadata
-        let metadata_path = extracted_dir.join("devcontainer-template.json");
+        let metadata_path = extracted_dir.join(TEMPLATE_METADATA_FILE);
         let metadata = crate::templates::parse_template_metadata(&metadata_path)?;
 
         info!("Successfully fetched template: {}", metadata.id);
@@ -530,7 +610,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
         cached_dir: PathBuf,
         digest: String,
     ) -> Result<DownloadedTemplate> {
-        let metadata_path = cached_dir.join("devcontainer-template.json");
+        let metadata_path = cached_dir.join(TEMPLATE_METADATA_FILE);
         let metadata = crate::templates::parse_template_metadata(&metadata_path)?;
 
         Ok(DownloadedTemplate {
@@ -584,30 +664,93 @@ impl<C: HttpClient> FeatureFetcher<C> {
         Ok(layer_data)
     }
 
-    /// Extract a tar layer to the cache directory
+    /// Extract a tar layer into the cache and PUBLISH it atomically.
+    ///
+    /// The cache directory is shared by every concurrent `deacon` on the host —
+    /// CI matrices, monorepo scripts and the parity lanes all run several
+    /// invocations that resolve the same Feature at once. Unpacking straight
+    /// into `cache_dir/<key>` made the half-populated directory observable, and
+    /// both observations are real failures seen in the wild (#560):
+    ///
+    /// * a READER found `cache_dir/<key>` already present (the writer had done
+    ///   its `create_dir_all`) and reported
+    ///   `Feature metadata file not found: …/devcontainer-feature.json`;
+    /// * two WRITERS both missed the cache and unpacked into the same directory,
+    ///   colliding with `Failed to extract tar archive: failed to unpack …`.
+    ///
+    /// So we extract into a unique sibling temp directory and `rename` it into
+    /// place. `rename(2)` is atomic, and the temp directory lives under
+    /// `cache_dir` so the rename never crosses a filesystem. The destination is
+    /// therefore only ever ABSENT or COMPLETE — never partial — which is the
+    /// same publish-by-rename discipline `cache/disk.rs::save_index` uses for
+    /// the disk-cache index.
+    ///
+    /// `marker` is the metadata file that makes an entry complete
+    /// (`devcontainer-feature.json` / `devcontainer-template.json`); it is what
+    /// distinguishes "a sibling published first" from "a stale partial entry an
+    /// older version left behind".
     ///
     /// `tar::Archive::unpack` is synchronous and the `tar` crate has no async
-    /// equivalent, so we offload the whole create_dir_all + unpack block to
+    /// equivalent, so the whole create + unpack + publish block is offloaded to
     /// spawn_blocking instead of blocking the runtime threadpool.
-    async fn extract_layer(&self, layer_data: Bytes, cache_key: &str) -> Result<PathBuf> {
+    async fn extract_layer(
+        &self,
+        layer_data: Bytes,
+        cache_key: &str,
+        marker: &str,
+    ) -> Result<PathBuf> {
         let extraction_dir = self.cache_dir.join(cache_key);
-        let dir_for_task = extraction_dir.clone();
+        let cache_dir = self.cache_dir.clone();
+        let dest = extraction_dir.clone();
+        let marker = marker.to_string();
 
         debug!("Extracting layer to: {}", extraction_dir.display());
 
         tokio::task::spawn_blocking(move || -> Result<()> {
-            std::fs::create_dir_all(&dir_for_task).map_err(|e| FeatureError::Extraction {
-                message: format!("Failed to create extraction directory: {}", e),
+            std::fs::create_dir_all(&cache_dir).map_err(|e| FeatureError::Extraction {
+                message: format!("Failed to create cache directory: {}", e),
             })?;
 
-            let cursor = std::io::Cursor::new(layer_data);
-            let mut archive = Archive::new(cursor);
-            archive
-                .unpack(&dir_for_task)
-                .map_err(|e| FeatureError::Extraction {
-                    message: format!("Failed to extract tar archive: {}", e),
+            // A name no concurrent extraction can pick: process id, a
+            // process-local counter, and the nanosecond clock. The `.` prefix
+            // keeps it out of the cache-key namespace (keys are 16 hex chars).
+            let staging = cache_dir.join(format!(
+                ".staging-{}-{}-{}",
+                std::process::id(),
+                EXTRACTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos(),
+            ));
+
+            let unpack = (|| -> Result<()> {
+                std::fs::create_dir_all(&staging).map_err(|e| FeatureError::Extraction {
+                    message: format!("Failed to create extraction directory: {}", e),
                 })?;
-            Ok(())
+
+                let cursor = std::io::Cursor::new(layer_data);
+                let mut archive = Archive::new(cursor);
+                archive
+                    .unpack(&staging)
+                    .map_err(|e| FeatureError::Extraction {
+                        message: format!("Failed to extract tar archive: {}", e),
+                    })?;
+                Ok(())
+            })();
+
+            if let Err(e) = unpack {
+                // Publish nothing on a failed extraction: the destination must
+                // never come into existence holding a truncated tree.
+                let _ = std::fs::remove_dir_all(&staging);
+                return Err(e);
+            }
+
+            let published = publish_cache_entry(&staging, &dest, &marker, &cache_dir);
+            if published.is_err() {
+                let _ = std::fs::remove_dir_all(&staging);
+            }
+            published
         })
         .await
         .map_err(|e| FeatureError::Extraction {
@@ -624,7 +767,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
         digest: String,
         manifest_digest: String,
     ) -> Result<DownloadedFeature> {
-        let metadata_path = cached_dir.join("devcontainer-feature.json");
+        let metadata_path = cached_dir.join(FEATURE_METADATA_FILE);
         // parse_feature_metadata is sync and does file IO; offload to spawn_blocking
         // so we don't block the runtime.
         let parse_path = metadata_path.clone();
@@ -1015,6 +1158,280 @@ pub fn default_fetcher_with_config(
         cache_dir,
         retry_config,
     ))
+}
+
+/// Regression coverage for the shared feature cache (#560).
+///
+/// The cache directory is shared by every concurrent `deacon` on a host. Before
+/// the atomic publish, an extraction wrote straight into `cache_dir/<key>` and
+/// two failure modes were observable there — both reproduced from `main` before
+/// the fix, and both asserted here without any sleeping or timing.
+#[cfg(test)]
+mod cache_publish_tests {
+    use super::*;
+    use crate::oci::client::MockHttpClient;
+    use tempfile::TempDir;
+
+    const REGISTRY: &str = "registry.test";
+    const NAMESPACE: &str = "acme";
+    const NAME: &str = "demo";
+
+    fn feature_ref() -> FeatureRef {
+        FeatureRef::new(
+            REGISTRY.to_string(),
+            NAMESPACE.to_string(),
+            NAME.to_string(),
+            Some("1.0.0".to_string()),
+        )
+    }
+
+    /// A layer tar holding a valid `devcontainer-feature.json`, padded so a
+    /// concurrent racer has a realistic unpack window to fall into.
+    fn feature_layer_tar() -> Vec<u8> {
+        let metadata = br#"{"id":"demo","version":"1.0.0","name":"Demo"}"#;
+        let mut builder = tar::Builder::new(Vec::new());
+
+        // Padding first, metadata LAST. Real Feature tarballs order their
+        // entries arbitrarily, and this is the worst case: under an in-place
+        // extraction the destination directory exists for the whole unpack
+        // while the file that makes it usable arrives at the very end. That is
+        // the window a concurrent reader fell into, so the fixture opens it as
+        // wide as the format allows rather than relying on a lucky schedule.
+        let filler = vec![b'x'; 4096];
+        for i in 0..400 {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(filler.len() as u64);
+            h.set_mode(0o644);
+            h.set_cksum();
+            builder
+                .append_data(&mut h, format!("pad/{i}.bin"), &filler[..])
+                .expect("append filler");
+        }
+
+        let mut header = tar::Header::new_gnu();
+        header.set_size(metadata.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, FEATURE_METADATA_FILE, &metadata[..])
+            .expect("append metadata");
+        builder.into_inner().expect("finish tar")
+    }
+
+    fn sha256_digest(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        format!("sha256:{:x}", hasher.finalize())
+    }
+
+    /// Wire a mock registry serving `layer` for the feature above, and return it
+    /// alongside the cache key the fetcher will derive for that layer.
+    async fn mock_registry(layer: Vec<u8>) -> (MockHttpClient, String) {
+        let digest = sha256_digest(&layer);
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "layers": [{
+                "mediaType": "application/vnd.devcontainers.layer.v1+tar",
+                "size": layer.len(),
+                "digest": digest,
+            }],
+        })
+        .to_string();
+
+        let client = MockHttpClient::new();
+        client
+            .add_response(
+                format!(
+                    "https://{}/v2/{}/{}/manifests/1.0.0",
+                    REGISTRY, NAMESPACE, NAME
+                ),
+                Bytes::from(manifest),
+            )
+            .await;
+        client
+            .add_response(
+                format!(
+                    "https://{}/v2/{}/{}/blobs/{}",
+                    REGISTRY, NAMESPACE, NAME, digest
+                ),
+                Bytes::from(layer),
+            )
+            .await;
+
+        // Mirrors `FeatureFetcher::get_cache_key`.
+        let mut hasher = Sha256::new();
+        hasher.update(digest.as_bytes());
+        let cache_key = format!("{:x}", hasher.finalize())[..16].to_string();
+        (client, cache_key)
+    }
+
+    /// The CI symptom, deterministically.
+    ///
+    /// An empty `cache_dir/<key>` is EXACTLY the state a mid-unpack writer used
+    /// to leave behind between its `create_dir_all` and the metadata file
+    /// landing. A reader that treated the bare directory as a cache hit reported
+    /// `Feature metadata file not found: …/devcontainer-feature.json` — the
+    /// error that turned `Test (Podman)` red. A cache hit is now the metadata
+    /// file, so the entry is re-fetched and published instead.
+    #[tokio::test]
+    async fn a_partial_cache_entry_is_not_a_cache_hit() {
+        let cache = TempDir::new().unwrap();
+        let (client, cache_key) = mock_registry(feature_layer_tar()).await;
+
+        std::fs::create_dir_all(cache.path().join(&cache_key)).unwrap();
+
+        let fetcher = FeatureFetcher::with_cache_dir(client, cache.path().to_path_buf());
+        let feature = fetcher
+            .fetch_feature(&feature_ref())
+            .await
+            .expect("a partial cache entry must be re-fetched, not read");
+
+        assert_eq!(feature.metadata.id, "demo");
+        assert!(
+            cache
+                .path()
+                .join(&cache_key)
+                .join(FEATURE_METADATA_FILE)
+                .exists(),
+            "the re-fetch must leave a complete entry behind"
+        );
+    }
+
+    /// The atomic-publish invariant: the destination is only ever ABSENT or
+    /// COMPLETE. A layer that fails to unpack must publish nothing at all —
+    /// under the old in-place extraction it left the truncated tree at the
+    /// destination, which is the state the previous test shows is poison.
+    #[tokio::test]
+    async fn a_failed_extraction_publishes_nothing() {
+        let cache = TempDir::new().unwrap();
+        // A valid tar header followed by a truncated body: digest verification
+        // passes (the mock declares this blob's real digest) and `unpack` then
+        // fails partway, which is the case that matters.
+        let mut truncated = feature_layer_tar();
+        truncated.truncate(600);
+        let (client, cache_key) = mock_registry(truncated).await;
+
+        let fetcher = FeatureFetcher::with_cache_dir(client, cache.path().to_path_buf());
+        let err = fetcher
+            .fetch_feature(&feature_ref())
+            .await
+            .expect_err("a truncated layer must not extract");
+        assert!(
+            format!("{}", err).contains("tar archive") || format!("{:?}", err).contains("tar"),
+            "expected an extraction error, got: {:?}",
+            err
+        );
+
+        assert!(
+            !cache.path().join(&cache_key).exists(),
+            "a failed extraction must publish nothing, but {} exists",
+            cache_key
+        );
+        assert!(
+            std::fs::read_dir(cache.path())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .all(|e| !e.file_name().to_string_lossy().starts_with(".staging-")),
+            "the staging directory must be cleaned up on failure"
+        );
+    }
+
+    /// The shape of the CI failure itself: many resolvers, one cold cache, one
+    /// feature. Every racer must succeed and see the same metadata — the losers
+    /// of the publish race included.
+    ///
+    /// This is a sensitive GUARD, not the proof. It cannot be made to fail on
+    /// demand, because catching the old defect needs a reader to land inside
+    /// another task's unpack; with the widened window above it failed on 4 of 6
+    /// pre-fix runs. It never flakes in the other direction — post-fix the
+    /// outcome does not depend on the interleaving at all — so the deterministic
+    /// evidence lives in the two tests above and this one covers the whole path.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_fetches_of_one_feature_all_succeed() {
+        const RACERS: usize = 12;
+
+        let cache = TempDir::new().unwrap();
+        let (client, cache_key) = mock_registry(feature_layer_tar()).await;
+        let barrier = Arc::new(tokio::sync::Barrier::new(RACERS));
+
+        let mut set = tokio::task::JoinSet::new();
+        for _ in 0..RACERS {
+            let fetcher =
+                FeatureFetcher::with_cache_dir(client.clone(), cache.path().to_path_buf());
+            let barrier = Arc::clone(&barrier);
+            set.spawn(async move {
+                barrier.wait().await;
+                fetcher
+                    .fetch_feature(&feature_ref())
+                    .await
+                    .map(|f| f.metadata.id)
+            });
+        }
+
+        let mut ids = Vec::new();
+        while let Some(joined) = set.join_next().await {
+            ids.push(
+                joined
+                    .expect("task panicked")
+                    .expect("every racer must succeed"),
+            );
+        }
+        assert_eq!(ids.len(), RACERS);
+        assert!(ids.iter().all(|id| id == "demo"));
+
+        // Exactly one published entry, and no staging or discarded leftovers.
+        let entries: Vec<String> = std::fs::read_dir(cache.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(entries, vec![cache_key], "cache should hold one entry");
+    }
+
+    /// `publish_cache_entry`'s benign race: a sibling got there first, so our
+    /// copy is dropped and the winner's entry stands.
+    #[test]
+    fn publishing_over_a_complete_entry_keeps_the_winner() {
+        let cache = TempDir::new().unwrap();
+        let (staging, dest) = (cache.path().join(".staging-x"), cache.path().join("key"));
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join(FEATURE_METADATA_FILE), b"ours").unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join(FEATURE_METADATA_FILE), b"winner").unwrap();
+
+        publish_cache_entry(&staging, &dest, FEATURE_METADATA_FILE, cache.path()).unwrap();
+
+        assert!(!staging.exists(), "our staging copy must be cleaned up");
+        assert_eq!(
+            std::fs::read(dest.join(FEATURE_METADATA_FILE)).unwrap(),
+            b"winner",
+            "the entry that published first must survive"
+        );
+    }
+
+    /// A non-empty but INCOMPLETE destination can only be a leftover from an
+    /// interrupted run or a pre-fix deacon. It is replaced, not read.
+    #[test]
+    fn publishing_over_an_incomplete_entry_replaces_it() {
+        let cache = TempDir::new().unwrap();
+        let (staging, dest) = (cache.path().join(".staging-y"), cache.path().join("key"));
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join(FEATURE_METADATA_FILE), b"ours").unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("half-written.sh"), b"stale").unwrap();
+
+        publish_cache_entry(&staging, &dest, FEATURE_METADATA_FILE, cache.path()).unwrap();
+
+        assert_eq!(
+            std::fs::read(dest.join(FEATURE_METADATA_FILE)).unwrap(),
+            b"ours"
+        );
+        assert!(
+            !dest.join("half-written.sh").exists(),
+            "the stale tree must be gone, not merged with ours"
+        );
+    }
 }
 
 #[cfg(test)]
