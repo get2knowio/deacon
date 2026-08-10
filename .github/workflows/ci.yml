@@ -159,7 +159,16 @@ jobs:
       run: cargo nextest run --profile dev-fast --no-fail-fast
 
     # `parity_hermetic` is selected by `dev-fast` on every leg of this matrix (#441 removed
-    # its Linux gate), so this lane also owes its evidence on failure (#474). The name
+    # its Linux gate), so this lane also owes its evidence on failure (#474).
+    #
+    # `parity_registry` is NOT, and that is the point of it (#544): this job has no Docker
+    # setup, no prepull and no GHCR token, so a case that resolves an OCI Feature has no
+    # business gating on it. Six such cases sat in `parity_hermetic` and passed here only
+    # because the runner has network. They gate on `Test (MVP integration)` below instead,
+    # which acquires a read-only GHCR bearer token. Do NOT add `binary(=parity_registry)`
+    # to the `dev-fast` `default-filter`'s exception list.
+    #
+    # The name
     # carries the matrix leg because one run's artifacts share a namespace;
     # `if-no-files-found: ignore` guards the legs that fail before the parity binary runs
     # and therefore wrote no `target/parity/`.
@@ -264,6 +273,13 @@ jobs:
         fi
         echo "DEACON_REGISTRY_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
+    # This token is also what makes `parity_registry` gate a pull request HERE rather than
+    # on `Test (MVP fast)` (#544). The `mvp-integration` profile selects it through its
+    # `binary(#parity_*)` clause; the six registry-reaching cases split out of
+    # `parity_hermetic` therefore still gate every pull request, on the job actually
+    # provisioned for a registry. If that clause is ever narrowed, they stop gating
+    # anything — check `cargo nextest list -E 'binary(=parity_registry)' --profile
+    # mvp-integration` before touching it.
     - name: Run MVP integration tests
       run: make test-nextest-mvp-integration
 
@@ -371,8 +387,9 @@ jobs:
     # devcontainer.local_folder=…").
     #
     # The filterset INTERSECTS with the profile's `default-filter`, so this removes exactly
-    # the two `parity_docker` tests and leaves the other 381 — the same 381 that already
-    # pass here. `parity_hermetic` is unaffected: it is runtime-agnostic.
+    # the two `parity_docker` tests and leaves the rest — the same set that already passes
+    # here. `parity_hermetic` and `parity_registry` are unaffected: both are
+    # runtime-agnostic, and this job acquires the GHCR token the latter needs.
     - name: Run integration suite against Podman (full failure set)
       run: cargo nextest run --profile mvp-integration --no-fail-fast -E 'not binary(=parity_docker)'
 

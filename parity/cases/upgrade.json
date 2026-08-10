@@ -7,6 +7,7 @@
         "bhv-upgrade-cli-config-overlay-honored"
       ],
       "context": [],
+      "needsRegistry": true,
       "oracleType": "spec-expectation",
       "operations": [
         {
@@ -186,6 +187,7 @@
         "bhv-upgrade-regenerates-lockfile"
       ],
       "context": [],
+      "needsRegistry": true,
       "oracleType": "spec-expectation",
       "operations": [
         {
@@ -234,6 +236,7 @@
         "bhv-upgrade-cli-config-overlay-honored"
       ],
       "context": [],
+      "needsRegistry": true,
       "oracleType": "spec-expectation",
       "operations": [
         {

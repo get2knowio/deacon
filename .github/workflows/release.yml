@@ -45,9 +45,16 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       # The PINNED scenario suite: every parity case whose expectation lives in its own
-      # record. `parity_hermetic` needs nothing; `parity_docker` needs the daemon this
-      # runner already has. Neither needs `@devcontainers/cli`, which is what makes them
-      # a release gate rather than a nightly.
+      # record. `parity_hermetic` needs nothing; `parity_registry` needs `ghcr.io`, which
+      # this runner reaches (it pre-pulls fixture images below); `parity_docker` needs the
+      # daemon this runner already has. None needs `@devcontainers/cli`, which is what
+      # makes them a release gate rather than a nightly.
+      #
+      # All three are named EXPLICITLY rather than by a `binary(#parity_*)` glob, so adding
+      # a lane is a deliberate decision about what gates a release. `parity_registry` was
+      # added with the lane (#544) precisely so the six cases split out of `parity_hermetic`
+      # keep gating a tag; dropping it here would have been a silent coverage regression
+      # disguised as a laning change.
       #
       # Differential-vs-oracle status is deliberately NOT gated here. It compares against
       # a third-party binary at a pin we do not control, so a republish upstream would
@@ -78,8 +85,8 @@ jobs:
           echo "engine exporter capability verified"
       - name: Build + pre-pull declarative-fixture images
         run: ./scripts/parity/prepull-fixture-images.sh
-      - name: Pinned parity scenarios (hermetic + Docker, no oracle)
-        run: cargo nextest run -E 'binary(=parity_hermetic) | binary(=parity_docker)'
+      - name: Pinned parity scenarios (hermetic + registry + Docker, no oracle)
+        run: cargo nextest run -E 'binary(=parity_hermetic) | binary(=parity_registry) | binary(=parity_docker)'
 
       # The evidence for the step above (#474). This is the RELEASE gate: a parity failure
       # here blocks a tag, and the raw capture behind it must outlive the runner rather than

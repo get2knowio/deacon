@@ -51,11 +51,22 @@ parity-cli = { max-threads = 8 }
 # `normalize_consistency` and `runner_record_replay` do NOT match `binary(#parity_*)`,
 # so the live-parity exclusions never capture them.
 #
-# The three parity lanes split by what a case NEEDS, not by what it is about:
-#   `parity_hermetic`    — no Docker, no oracle → runs in EVERY profile, dev-fast included.
-#                          Gated to Linux in the source (`#![cfg(target_os = "linux")]`):
-#                          its case data pins Linux-measured output, so off-Linux the lane
-#                          is truthfully not selected rather than skipped (#441).
+# The four parity lanes split by what a case NEEDS, not by what it is about. Three
+# prerequisites, all independent: a registry, a daemon, the pinned oracle.
+#   `parity_hermetic`    — nothing at all → runs in EVERY profile, dev-fast included, on
+#                          every platform CI runs (#441 removed the Linux gate; the case
+#                          data now pins claims deacon can satisfy anywhere). Its own
+#                          `hermetic_lane_runs_without_a_network` test re-runs the lane
+#                          inside a network namespace, so "nothing at all" is enforced
+#                          rather than promised (#544).
+#   `parity_registry`    — a registry, no Docker, no oracle → must be selected only by
+#                          profiles whose JOB is provisioned for `ghcr.io`. That is
+#                          `mvp-integration` (a required PR check that acquires a
+#                          read-only GHCR bearer token) and NOT `dev-fast`, whose
+#                          `Test (MVP fast)` job has no token, no prepull and no Docker.
+#                          It is excluded from `dev-fast` by the `binary(#parity_*)` glob
+#                          in that profile's `default-filter`, which lists its exceptions
+#                          explicitly — do not add this binary to that exception list.
 #   `parity_docker`      — Docker, no oracle    → runs wherever a daemon is available
 #   `parity_differential`— needs the pinned oracle → `[profile.parity]` ONLY
 # The LIVE binary is `parity_differential`. It must be selected by `[profile.parity]` and
@@ -114,11 +125,11 @@ test-group = 'docker-exclusive'
 slow-timeout = { period = "5m", terminate-after = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic))'
+filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic) | binary(=parity_registry))'
 test-group = 'parity'
 
 [[profile.default.overrides]]
-filter = 'binary(=parity_hermetic)'
+filter = 'binary(=parity_hermetic) | binary(=parity_registry)'
 test-group = 'parity-cli'
 
 # Hermetic harness self-tests + parity-harness integration tests (018 US5, T046):
@@ -252,11 +263,11 @@ filter = 'binary(=build_consistency)'
 test-group = 'docker-exclusive'
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic))'
+filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic) | binary(=parity_registry))'
 test-group = 'parity'
 
 [[profile.dev-fast.overrides]]
-filter = 'binary(=parity_hermetic)'
+filter = 'binary(=parity_hermetic) | binary(=parity_registry)'
 test-group = 'parity-cli'
 
 # Hermetic harness self-tests + parity-harness integration tests (018 US5, T046):
@@ -398,11 +409,11 @@ filter = 'binary(=smoke_cli)'
 test-group = 'smoke-cli'
 
 [[profile.docker.overrides]]
-filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic))'
+filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic) | binary(=parity_registry))'
 test-group = 'parity'
 
 [[profile.docker.overrides]]
-filter = 'binary(=parity_hermetic)'
+filter = 'binary(=parity_hermetic) | binary(=parity_registry)'
 test-group = 'parity-cli'
 
 # Hermetic harness self-tests (018 US5, T046): fs-heavy where selected; the rest
@@ -497,11 +508,11 @@ filter = 'binary(=smoke_cli)'
 test-group = 'smoke-cli'
 
 [[profile.full.overrides]]
-filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic))'
+filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic) | binary(=parity_registry))'
 test-group = 'parity'
 
 [[profile.full.overrides]]
-filter = 'binary(=parity_hermetic)'
+filter = 'binary(=parity_hermetic) | binary(=parity_registry)'
 test-group = 'parity-cli'
 
 # Hermetic harness self-tests + parity-harness integration tests (018 US5, T046):
@@ -586,11 +597,11 @@ filter = 'binary(=smoke_cli)'
 test-group = 'smoke-cli'
 
 [[profile.ci.overrides]]
-filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic))'
+filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic) | binary(=parity_registry))'
 test-group = 'parity'
 
 [[profile.ci.overrides]]
-filter = 'binary(=parity_hermetic)'
+filter = 'binary(=parity_hermetic) | binary(=parity_registry)'
 test-group = 'parity-cli'
 
 # Hermetic harness self-tests + parity-harness integration tests (018 US5, T046):
@@ -676,11 +687,11 @@ test-group = 'smoke-cli'
 
 # Parity test grouping
 [[profile.mvp-integration.overrides]]
-filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic))'
+filter = 'binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_hermetic) | binary(=parity_registry))'
 test-group = 'parity'
 
 [[profile.mvp-integration.overrides]]
-filter = 'binary(=parity_hermetic)'
+filter = 'binary(=parity_hermetic) | binary(=parity_registry)'
 test-group = 'parity-cli'
 
 # Hermetic harness self-tests + parity-harness integration tests (018 US5, T046):

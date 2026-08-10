@@ -159,12 +159,46 @@ two are now failures. **After writing any assertion, perturb it once and confirm
 
 ## The lanes
 
-Three lane binaries, split by what a case NEEDS rather than by what it is about, which is
+Four lane binaries, split by what a case NEEDS rather than by what it is about, which is
 what lets most of the suite gate every pull request. `driver::lane_of` derives a case's lane
-from its `oracleType` and `resourceGroup`, so a lane never *skips* a case it cannot run — a
-case it cannot run is in another lane. A skip and a pass look identical in a report; a
+from **three** prerequisites — `oracleType` (the pinned reference), `resourceGroup` (the
+daemon) and `needsRegistry` (an OCI registry) — so a lane never *skips* a case it cannot run
+— a case it cannot run is in another lane. A skip and a pass look identical in a report; a
 non-selection does not. The table of binaries and how to run them is in
 [`CLAUDE.md`](../CLAUDE.md) § Differential Parity Suite.
+
+**The registry axis, and why it exists** (#544). For a long time `lane_of` derived from
+`oracleType` and `resourceGroup` alone. That axis encodes the reference and the daemon, and
+"reaches `ghcr.io`" cannot be said on it — so six cases that resolve OCI Features at case
+time (`read-configuration --include-merged-configuration` folding Feature metadata into the
+merged document; `upgrade --dry-run` resolving digests to regenerate a lockfile) sat in
+`parity_hermetic`, the lane whose promise is *no network*, gating every pull request on a job
+with no registry token. They passed only because CI happened to have network; each was a
+standing dependency waiting to present as a transient, with the signature of #454.
+
+A case now declares `"needsRegistry": true` and lands in `parity_registry`, which the
+`mvp-integration` profile selects and `dev-fast` excludes — so those six still gate every
+pull request, on `Test (MVP integration)`, the required check that already acquires a
+read-only GHCR bearer token. Two rules travel with the axis:
+
+- **The dependency is DERIVED from the case's own record**, exactly as Docker-ness is
+  derived from its `resourceGroup`. A list of case ids in the driver would be the same
+  defect one level up — it would live apart from the case it describes, and adding a case
+  would stop being a pure data edit.
+- **Re-laning is a laning change, not a coverage change.** Nothing a moved case asserts may
+  be rewritten to fit its new lane. `bhv-extends-feature-version-override` (#411) keeps its
+  `git:1.3.2` → `git:1.3.8` pin exactly as authored: that pin *is* the behavior, and a local
+  Feature has no version in its id, so the claim cannot be expressed hermetically at all.
+
+**Hermeticity is enforced, not promised.** `parity_hermetic`'s own
+`hermetic_lane_runs_without_a_network` re-runs the lane's drivers inside a fresh user +
+network namespace, so a case that reaches out cannot resolve anything and the contract is
+true by construction. Before it existed, the promise lived in a docstring and nowhere else,
+which is exactly how six cases drifted out of it unnoticed. It is Linux-only (`unshare(2)`
+is a Linux facility) while the lane itself runs on macOS and Windows since #441: the `#[cfg]`
+is a visible non-selection, and the property it checks belongs to the case DATA, which is
+identical on every platform. At run time it never skips — a host that cannot create a
+namespace FAILS with that cause named, because "could not verify" is not "verified".
 
 **Selection is profile-based. There is no env-var opt-in and no silent skip.** Live parity
 runs ONLY under `cargo nextest run --profile parity`; every other profile excludes it, so
@@ -185,7 +219,9 @@ Neither belongs in this file — status snapshots in prose go stale within the d
 **What a failing run leaves behind.** Every lane writes its raw capture and report fragments
 under `target/parity/`, and every job that runs a parity binary uploads that tree as a
 `parity-evidence-*` artifact — the nightly on any outcome, the gating lanes (`ci.yml`'s fast,
-MVP-integration and Podman jobs; `release.yml`'s verify job) on failure only. Download it
+MVP-integration and Podman jobs; `release.yml`'s verify job) on failure only. The hermetic
+guard's namespaced re-run writes to a temp root of its own rather than to `target/parity`,
+so its evidence cannot be confused with the lane's; what it reports is in the failure text. Download it
 before re-running: a re-run that goes green destroys the only copy of what happened (#474).
 The failure text itself carries the diverging observable paths, and — for a `chan-exit-code`
 divergence specifically — a tail-bounded excerpt of the stderr of whichever side exited
