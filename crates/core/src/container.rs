@@ -1493,6 +1493,13 @@ pub struct CurrentContainer<'a> {
 /// `com.docker.compose.project` (which compose stamps on *every* container it
 /// creates) and swept whole.
 ///
+/// That expansion is driven by what the CANDIDATES are, never by what this `up`
+/// is (#551). A workspace's document can change SHAPE — compose one day, a plain
+/// `image` the next — and the superseded generation is still a whole project.
+/// Every candidate is therefore inspected for a project label; any project that
+/// is not the one this `up` brought up (and when this `up` is single-container,
+/// that is every project) is superseded and expanded.
+///
 /// # Errors
 ///
 /// None. This is post-provisioning hygiene: a container that could not be
@@ -1540,31 +1547,48 @@ where
 
         // `list_containers` does not populate labels (they need an inspect), and
         // the compose project is the one label that decides whether this
-        // container belongs to the project we just brought up. Only inspect when
-        // a compose project is in play; the single-container path needs nothing
-        // beyond the id and state already in hand.
-        if current.compose_project.is_some() {
-            let project = match docker.inspect_container(&container.id).await {
-                Ok(Some(info)) => info.labels.get(LABEL_COMPOSE_PROJECT).cloned(),
-                Ok(None) => continue, // vanished between list and inspect
-                Err(e) => {
-                    debug!(
-                        container_id = %container.id,
-                        "Could not inspect candidate for supersede sweep: {e}"
-                    );
+        // container belongs to the project we just brought up — and, when it
+        // belongs to a DIFFERENT project, the only handle that reaches that
+        // project's unlabelled sidecars.
+        //
+        // Inspected unconditionally, NOT only when this `up` was itself compose
+        // (#551). A workspace can change SHAPE: a document that was compose and
+        // is now a plain `image` supersedes a whole project, and gating the
+        // inspect on `current.compose_project.is_some()` left that project's
+        // dependency services running — the sweep stopped its primary (which
+        // carries deacon's labels) and never learned there was a project to
+        // expand. When this `up` is single-container, `current.compose_project`
+        // is `None`, so every project a candidate names is by definition
+        // superseded. The cost is one inspect per candidate on a path where
+        // candidates are few (they are already pinned to this workspace).
+        let project = match docker.inspect_container(&container.id).await {
+            Ok(Some(info)) => info.labels.get(LABEL_COMPOSE_PROJECT).cloned(),
+            Ok(None) => continue, // vanished between list and inspect
+            Err(e) => {
+                debug!(
+                    container_id = %container.id,
+                    "Could not inspect candidate for supersede sweep: {e}"
+                );
+                // Without the label we cannot tell a sibling of the current
+                // project from a superseded one, so sparing it is the safe
+                // direction — unless this `up` has no project at all, in which
+                // case there is nothing it could be a sibling of and the
+                // pre-#551 behaviour (stop it, by label alone) still holds.
+                if current.compose_project.is_some() {
                     continue;
                 }
-            };
-            match project.as_deref() {
-                Some(p) if Some(p) == current.compose_project => continue,
-                Some(p) => {
-                    if !superseded_projects.iter().any(|known| known == p) {
-                        superseded_projects.push(p.to_string());
-                    }
-                    continue; // swept via the project expansion below
-                }
-                None => {}
+                None
             }
+        };
+        match project.as_deref() {
+            Some(p) if Some(p) == current.compose_project => continue,
+            Some(p) => {
+                if !superseded_projects.iter().any(|known| known == p) {
+                    superseded_projects.push(p.to_string());
+                }
+                continue; // swept via the project expansion below
+            }
+            None => {}
         }
 
         if container.state == "running" {
@@ -1863,6 +1887,105 @@ mod supersede_tests {
             vec!["old-app".to_string(), "old-db".to_string()],
             "the whole superseded project goes down, sidecars included"
         );
+    }
+
+    /// #551, the reported bug: the workspace's document changed SHAPE — it was compose,
+    /// it is now a plain `image` — so this `up` has no compose project of its own. The
+    /// superseded generation is still a whole project, and its dependency services still
+    /// carry none of deacon's labels. Stopping only the primary (the one container the
+    /// label query can see) leaves them running and the project network referenced, which
+    /// is the accumulation #550 set out to end, reached by one more route.
+    #[tokio::test]
+    async fn a_compose_project_superseded_by_a_single_container_up_is_swept_whole() {
+        let old_project = "deacon_ws000000_cfgold0";
+        let docker = RecordingDocker {
+            listings: vec![
+                (
+                    workspace_selector(),
+                    vec![
+                        // What this `up` settled on: a plain container, no project.
+                        info("current-single", "running", &[]),
+                        // The superseded compose generation's primary. deacon labelled
+                        // it, so the workspace query finds it; compose labelled it too,
+                        // which is the only handle on the rest of its project.
+                        info(
+                            "old-app",
+                            "running",
+                            &[(LABEL_COMPOSE_PROJECT, old_project)],
+                        ),
+                    ],
+                ),
+                (
+                    format!("{LABEL_COMPOSE_PROJECT}={old_project}"),
+                    vec![
+                        info("old-app", "running", &[]),
+                        info("old-db", "running", &[]),
+                    ],
+                ),
+            ],
+            ..Default::default()
+        };
+
+        let stopped = stop_superseded_containers(
+            &docker,
+            &identity_for(Some(WS)),
+            CurrentContainer {
+                container_id: Some("current-single"),
+                compose_project: None,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            stopped,
+            vec!["old-app".to_string(), "old-db".to_string()],
+            "a single-container `up` must still expand the compose project it superseded"
+        );
+        assert!(
+            docker
+                .selectors_seen
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|s| s == &format!("{LABEL_COMPOSE_PROJECT}={old_project}")),
+            "the superseded project must be expanded through compose's own label, which is \
+             the only label its sidecars carry"
+        );
+    }
+
+    /// The other half of the shape change: compose now, plain `image` before. This already
+    /// worked (the sweep inspected candidates whenever the CURRENT `up` was compose), and
+    /// it must keep working — the widened inspect must not turn a project-less superseded
+    /// container into something the sweep skips.
+    #[tokio::test]
+    async fn a_single_container_superseded_by_a_compose_up_is_stopped() {
+        let current = "deacon_ws000000_cfgnew0";
+        let docker = RecordingDocker {
+            listings: vec![(
+                workspace_selector(),
+                vec![
+                    info(
+                        "current-app",
+                        "running",
+                        &[(LABEL_COMPOSE_PROJECT, current)],
+                    ),
+                    info("old-single", "running", &[]),
+                ],
+            )],
+            ..Default::default()
+        };
+
+        let stopped = stop_superseded_containers(
+            &docker,
+            &identity_for(Some(WS)),
+            CurrentContainer {
+                container_id: Some("current-app"),
+                compose_project: Some(current),
+            },
+        )
+        .await;
+
+        assert_eq!(stopped, vec!["old-single".to_string()]);
     }
 
     /// A container belonging to the project this `up` just brought up is spared even
