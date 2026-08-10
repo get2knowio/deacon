@@ -126,7 +126,7 @@ async fn hermetic_group_fs_heavy() {
 
 /// The lane's "no network" promise, ENFORCED (#544).
 ///
-/// Re-runs this binary's own driver tests inside a fresh user + network namespace, so a
+/// Re-runs this binary's own driver tests inside a fresh network namespace, so a
 /// case that reaches out cannot resolve anything. Before this existed the promise lived in
 /// the docstring above and nowhere else, and six registry-reaching cases drifted into the
 /// lane and stayed — passing on every CI run that happened to have network, and waiting to
@@ -141,9 +141,19 @@ async fn hermetic_group_fs_heavy() {
 /// everywhere; what would not be acceptable is a platform silently believing it had been
 /// checked.
 ///
-/// **Never a silent skip at run time either.** If the host cannot create a user+network
+/// **Never a silent skip at run time either.** If the host cannot create a network
 /// namespace the guard FAILS with that cause named, exactly as every other prerequisite
 /// failure in this suite does (constitution IV). "Could not verify" is not "verified".
+///
+/// **It does NOT map root, and that is load-bearing.** `unshare --map-root-user` writes
+/// `/proc/self/uid_map`, which Ubuntu 24.04 denies to an unprivileged process: creating the
+/// user namespace succeeds and the map write returns `EPERM`
+/// (`kernel.apparmor_restrict_unprivileged_userns`). MEASURED on `ubuntu-latest`, the very
+/// runner where this lane gates — `unshare: write failed /proc/self/uid_map: Operation not
+/// permitted`. The namespace is what this guard needs; the mapping was only convenience, so
+/// the child runs as the unmapped overflow uid (`nobody`) instead. It is given a writable
+/// `HOME`, `TMPDIR` and report root under the world-writable temp dir for exactly that
+/// reason — every path it must write is one `nobody` can create.
 #[cfg(target_os = "linux")]
 #[test]
 fn hermetic_lane_runs_without_a_network() {
@@ -152,12 +162,17 @@ fn hermetic_lane_runs_without_a_network() {
     /// This test's own name — the child selects everything BUT this, which is what keeps
     /// the re-exec from recursing. Kept next to the `--skip` that consumes it.
     const SELF: &str = "hermetic_lane_runs_without_a_network";
+    /// The unprivileged way to get an empty network namespace: a user namespace supplies
+    /// `CAP_SYS_ADMIN` inside it, which is what `--net` then requires. Deliberately WITHOUT
+    /// `--map-root-user` — see the doc comment.
+    const NS_ARGS: [&str; 2] = ["--user", "--net"];
 
-    // Probe the facility separately from using it, so "this host has no unprivileged user
-    // namespaces" cannot be misread as "a hermetic case reached the network". The two
-    // failures have completely different remedies and must not share a message.
+    // Probe the facility separately from using it, so "this host cannot create a namespace"
+    // cannot be misread as "a hermetic case reached the network". The two failures have
+    // completely different remedies and must not share a message.
     let probe = Command::new("unshare")
-        .args(["--map-root-user", "--net", "--", "true"])
+        .args(NS_ARGS)
+        .args(["--", "true"])
         .output();
     match probe {
         Err(e) => panic!(
@@ -169,11 +184,11 @@ fn hermetic_lane_runs_without_a_network() {
         ),
         Ok(out) if !out.status.success() => panic!(
             "the hermetic guard could not create a user+network namespace \
-             (`unshare --map-root-user --net` exited {}): {}\nThis is a MACHINERY failure, \
-             not a parity divergence — unprivileged user namespaces must be enabled \
-             (`sysctl kernel.unprivileged_userns_clone=1` on some distributions, \
-             `/proc/sys/user/max_user_namespaces` non-zero). It is deliberately not a \
-             skip.",
+             (`unshare {} --` exited {}): {}\nThis is a MACHINERY failure, not a parity \
+             divergence — unprivileged user namespaces must be available \
+             (`/proc/sys/user/max_user_namespaces` non-zero; on some distributions \
+             `sysctl kernel.unprivileged_userns_clone=1`). It is deliberately not a skip.",
+            NS_ARGS.join(" "),
             out.status,
             String::from_utf8_lossy(&out.stderr).trim(),
         ),
@@ -182,20 +197,29 @@ fn hermetic_lane_runs_without_a_network() {
 
     // The child writes its own report fragments. Sharing `target/parity` with the outer
     // run would have two processes writing one path concurrently — nextest may schedule
-    // this test alongside the drivers it re-runs.
-    let evidence = tempfile::tempdir().expect("create a temp report root for the guard run");
+    // this test alongside the drivers it re-runs. It must also be a path the UNMAPPED child
+    // can create, so it is named under the world-writable temp dir and left to the child to
+    // make, rather than created here (owner-only) and handed over.
+    let scratch =
+        std::env::temp_dir().join(format!("deacon-hermetic-guard-{}", std::process::id()));
 
     let self_exe = std::env::current_exe().expect("locate this test binary to re-exec it");
     let output = Command::new("unshare")
-        .args(["--map-root-user", "--net", "--"])
+        .args(NS_ARGS)
+        .arg("--")
         .arg(&self_exe)
         // Everything in this binary EXCEPT this test: a selection, not a skip. Running the
         // drivers themselves is the point — the guard must exercise the same case set the
         // lane does, or it would only be checking a copy of it.
         .args(["--skip", SELF, "--test-threads=1"])
-        .env("DEACON_PARITY_REPORT_DIR", evidence.path())
+        .env("DEACON_PARITY_REPORT_DIR", scratch.join("report"))
+        .env("DEACON_CACHE_DIR", scratch.join("cache"))
+        .env("HOME", scratch.join("home"))
+        .env("TMPDIR", std::env::temp_dir())
         .output()
         .expect("re-exec this test binary inside the namespace");
+
+    let _ = std::fs::remove_dir_all(&scratch);
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -208,8 +232,12 @@ fn hermetic_lane_runs_without_a_network() {
          does not belong in it. Declare `\"needsRegistry\": true` on the case and it moves \
          to `parity_registry`, which runs on the jobs provisioned for a registry; do NOT \
          weaken what the case asserts to fit this lane.\n\
+         (The re-run is unprivileged — an unmapped `nobody` — so on the rare failure that \
+         names a permission rather than a registry, read it as machinery: every path the \
+         child writes is redirected under {}.)\n\
          --- namespaced re-run stdout ---\n{stdout}\n\
          --- namespaced re-run stderr ---\n{stderr}",
+        scratch.display(),
     );
 
     // A guard that selected nothing would pass forever. Assert it actually drove the
