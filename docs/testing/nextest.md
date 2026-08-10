@@ -195,13 +195,16 @@ default-filter = 'binary(=parity_differential)'
 ```
 
 ONE binary, because only `live-differential` cases need the reference CLI. The
-other two parity lanes carry their expectation in the record and therefore need
-no oracle, so they run in the ordinary lanes: `parity_hermetic` (no Docker
-either — it runs in `dev-fast` on every platform CI covers, Linux, macOS and
-Windows alike, since #441 removed the last host-measured pins from its case
-data) and `parity_docker` (needs a daemon). The split
+other three parity lanes carry their expectation in the record and therefore need
+no oracle, so they run in the ordinary lanes: `parity_hermetic` (nothing at all —
+it runs in `dev-fast` on every platform CI covers, Linux, macOS and Windows
+alike, since #441 removed the last host-measured pins from its case data),
+`parity_registry` (an OCI registry but no daemon — selected by `mvp-integration`,
+which has a GHCR token, and EXCLUDED from `dev-fast`, which does not; #544) and
+`parity_docker` (needs a daemon). The split
 is by what a case NEEDS, not by subject; adding a scenario is a JSON edit and no
-binary changes.
+binary changes — including moving one onto the registry axis, which is a
+`"needsRegistry": true` in the case's own record.
 
 The explicit list is deliberate. A `binary(#parity_*)` glob would also match
 `parity_harness_faults`, the **hermetic guard** that proves the comparison can

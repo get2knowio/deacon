@@ -15,10 +15,15 @@
 //!
 //! So the case set is partitioned by [`ResourceGroup`] and each group gets its own driver
 //! function. A second, independent axis — [`Lane`] — partitions by what a case NEEDS
-//! (Docker? the pinned oracle?), which is what lets the hermetic and pinned-Docker
-//! majorities gate every pull request while only the oracle-dependent cases stay nightly.
-//! The two axes cross into the three test binaries `parity_hermetic`, `parity_docker` and
-//! `parity_differential`.
+//! (a registry? Docker? the pinned oracle?), which is what lets the hermetic, registry and
+//! pinned-Docker majorities gate every pull request while only the oracle-dependent cases
+//! stay nightly. The two axes cross into the four test binaries `parity_hermetic`,
+//! `parity_registry`, `parity_docker` and `parity_differential`.
+//!
+//! The registry prerequisite joined the `Lane` axis rather than [`ResourceGroup`] because
+//! the two answer different questions (#544): a group says what a case CONTENDS for, which
+//! is why `needs_docker` can be read off it; nothing about contention can say "reaches
+//! `ghcr.io`". Keeping them separate is also what lets a case declare both.
 //!
 //! **SC-013 is preserved.** `ResourceGroup` is a CLOSED set and every variant already has a
 //! driver, so adding a case with an existing group stays a pure data edit. Only introducing
@@ -118,11 +123,17 @@ pub fn default_concurrency(group: ResourceGroup) -> usize {
 /// where 72 sub-second cases taken one at a time is over a minute of pure latency in the
 /// loop developers run most.
 ///
+/// The registry lane's config-only groups run four at a time: its cases are dominated by
+/// network round-trips rather than by CPU, so serializing them is pure latency, but a
+/// third party's rate limiter is a shared resource in a way a temp directory is not — so
+/// it gets the fs-heavy number rather than the hermetic one.
+///
 /// The Docker groups keep their existing numbers, which encode real daemon contention:
 /// raising those would trade a correctness property for wall clock.
 pub fn concurrency_for(lane: Lane, group: ResourceGroup) -> usize {
     match (lane, group) {
         (Lane::Hermetic, ResourceGroup::None | ResourceGroup::FsHeavy) => 8,
+        (Lane::Registry, ResourceGroup::None | ResourceGroup::FsHeavy) => 4,
         _ => default_concurrency(group),
     }
 }
@@ -130,20 +141,33 @@ pub fn concurrency_for(lane: Lane, group: ResourceGroup) -> usize {
 /// Which lane a case can run in, decided by what it NEEDS rather than by what it is
 /// about.
 ///
-/// The two axes are independent and both are prerequisites, not preferences: a case that
-/// runs the reference cannot run without the pinned oracle installed, and a case that
-/// creates a container cannot run without a daemon. Splitting on them is what lets the
-/// hermetic majority gate every pull request while the oracle-dependent majority stays
-/// nightly — and, crucially, it is why a fast lane never has to *skip* anything. A skip is
-/// indistinguishable from a pass; non-selection is visible in the lane's own definition.
+/// The three axes are independent and all are prerequisites, not preferences: a case that
+/// runs the reference cannot run without the pinned oracle installed, a case that creates
+/// a container cannot run without a daemon, and a case that resolves an OCI Feature cannot
+/// run without a registry. Splitting on them is what lets the hermetic majority gate every
+/// pull request while the oracle-dependent majority stays nightly — and, crucially, it is
+/// why a fast lane never has to *skip* anything. A skip is indistinguishable from a pass;
+/// non-selection is visible in the lane's own definition.
+///
+/// The registry axis is the newest and was the one a case could sit on undeclared (#544):
+/// `resourceGroup` encodes the daemon and the contention, `oracleType` encodes the
+/// reference, and neither could say "reaches `ghcr.io`". Six cases were therefore in a lane
+/// promising "no network" and passing only because CI had some.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lane {
-    /// No Docker and no oracle: a `spec-expectation` case in a config-only group. It
-    /// compares deacon against a DECLARED assertion, so it can run anywhere.
+    /// No Docker, no oracle and no network: a `spec-expectation` case in a config-only
+    /// group. It compares deacon against a DECLARED assertion, so it can run anywhere —
+    /// and `parity_hermetic`'s namespace guard proves that by running this selection with
+    /// the network removed.
     Hermetic,
+    /// No Docker and no oracle, but reaches an OCI registry: a `spec-expectation` case in
+    /// a config-only group that declares `needsRegistry`. Runs on the jobs provisioned for
+    /// a registry, which on a pull request is `Test (MVP integration)`.
+    Registry,
     /// Docker but no oracle: a `spec-expectation` or `invariant-metamorphic` case in a
     /// Docker group. Its expectation is pinned in the record, so it needs a daemon but
-    /// not the reference.
+    /// not the reference. A Docker case may ALSO reach a registry; every job with a
+    /// daemon has network, so the daemon is the binding prerequisite and it stays here.
     Docker,
     /// Needs the pinned oracle, with or without Docker: every `live-differential` case.
     Differential,
@@ -154,6 +178,7 @@ impl Lane {
     pub fn slug(self) -> &'static str {
         match self {
             Lane::Hermetic => "hermetic",
+            Lane::Registry => "registry",
             Lane::Docker => "docker",
             Lane::Differential => "differential",
         }
@@ -169,13 +194,31 @@ impl Lane {
     }
 }
 
-/// The lane a case belongs to. `live-differential` always needs the reference; anything
-/// else is decided by its resource group.
+/// Whether a case reaches an OCI registry at run time — the third prerequisite axis,
+/// DERIVED from the case's own record exactly as Docker-ness is derived from its
+/// `resourceGroup`, never from a list of case ids kept in this file (#544).
+///
+/// A hand-maintained list here would be the same defect one level up: it would live apart
+/// from the case it describes, and adding a case would stop being a pure data edit. The
+/// declaration travels with the record; `parity_hermetic`'s namespace guard is what
+/// catches a record that forgot to make it.
+pub fn needs_registry(case: &TestCase) -> bool {
+    case.needs_registry
+}
+
+/// The lane a case belongs to, in prerequisite order: the oracle is the scarcest resource,
+/// then the daemon, then the registry.
+///
+/// A Docker case that also reaches a registry stays in [`Lane::Docker`] — every job that
+/// provides a daemon also has network, so the daemon is the binding constraint and
+/// splitting further would buy nothing.
 pub fn lane_of(case: &TestCase) -> Lane {
     if case.oracle_type == Some(OracleType::LiveDifferential) {
         Lane::Differential
     } else if needs_docker(group_of(case)) {
         Lane::Docker
+    } else if needs_registry(case) {
+        Lane::Registry
     } else {
         Lane::Hermetic
     }
@@ -938,6 +981,116 @@ mod tests {
         assert_eq!(
             concurrency_for(Lane::Docker, ResourceGroup::DockerExclusive),
             1
+        );
+        // The registry lane is network-bound, so serializing it is pure latency — but a
+        // third party's rate limiter is a shared resource, so it gets four rather than
+        // eight.
+        assert_eq!(concurrency_for(Lane::Registry, ResourceGroup::None), 4);
+        assert_eq!(concurrency_for(Lane::Registry, ResourceGroup::FsHeavy), 4);
+    }
+
+    /// The registry axis is DERIVED from the case's own record, exactly as Docker-ness is
+    /// derived from its `resourceGroup` — never from a list of ids kept in this file
+    /// (#544). Declaring it is what routes a case out of the hermetic lane, and a case
+    /// that declares nothing stays hermetic, which is why the namespace guard has to
+    /// exist.
+    #[test]
+    fn the_registry_axis_is_declared_by_the_case_not_listed_in_the_driver() {
+        let plain = declarative("case-plain", None);
+        assert!(!needs_registry(&plain));
+        assert_eq!(lane_of(&plain), Lane::Hermetic);
+
+        let mut reaches = declarative("case-reaches", None);
+        reaches.needs_registry = true;
+        assert!(needs_registry(&reaches));
+        assert_eq!(lane_of(&reaches), Lane::Registry);
+    }
+
+    /// The three prerequisites resolve in scarcity order: the oracle, then the daemon,
+    /// then the registry. A Docker case that also reaches a registry stays in the Docker
+    /// lane — every job with a daemon has network — and a `live-differential` case stays
+    /// differential whatever else it declares.
+    #[test]
+    fn registry_never_outranks_the_daemon_or_the_oracle() {
+        let mut docker_and_registry = declarative("case-both", Some(ResourceGroup::DockerShared));
+        docker_and_registry.needs_registry = true;
+        assert_eq!(lane_of(&docker_and_registry), Lane::Docker);
+
+        let mut live = declarative("case-live", None);
+        live.needs_registry = true;
+        live.oracle_type = Some(OracleType::LiveDifferential);
+        assert_eq!(lane_of(&live), Lane::Differential);
+    }
+
+    /// The four lanes PARTITION the declarative set within a group: every case is driven by
+    /// exactly one binary. A case driven by nobody is the inert-declaration defect the lane
+    /// split exists to prevent, and a case driven twice would double-count evidence.
+    #[test]
+    fn the_lanes_partition_every_group() {
+        let mut registry_case = declarative("case-registry", Some(ResourceGroup::None));
+        registry_case.needs_registry = true;
+        let mut live = declarative("case-live", Some(ResourceGroup::None));
+        live.oracle_type = Some(OracleType::LiveDifferential);
+        let cases = vec![
+            declarative("case-hermetic", Some(ResourceGroup::None)),
+            registry_case,
+            live,
+            declarative("case-docker", Some(ResourceGroup::DockerShared)),
+        ];
+
+        for group in [
+            ResourceGroup::None,
+            ResourceGroup::FsHeavy,
+            ResourceGroup::DockerShared,
+            ResourceGroup::DockerExclusive,
+        ] {
+            let per_lane: usize = [
+                Lane::Hermetic,
+                Lane::Registry,
+                Lane::Docker,
+                Lane::Differential,
+            ]
+            .iter()
+            .map(|l| cases_in_lane_and_group(&cases, *l, group).len())
+            .sum();
+            assert_eq!(
+                per_lane,
+                cases_in_group(&cases, group).len(),
+                "the lanes must partition group `{}`",
+                group_slug(group)
+            );
+        }
+
+        assert_eq!(
+            cases_in_lane_and_group(&cases, Lane::Hermetic, ResourceGroup::None)
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["case-hermetic"],
+            "the registry case must have LEFT the hermetic selection, not joined a second one"
+        );
+    }
+
+    /// Each lane's slug is distinct — they name report fragments and diagnostics, and two
+    /// lanes sharing one would silently merge two lanes' evidence.
+    #[test]
+    fn every_lane_has_a_distinct_slug() {
+        let slugs: Vec<&str> = [
+            Lane::Hermetic,
+            Lane::Registry,
+            Lane::Docker,
+            Lane::Differential,
+        ]
+        .iter()
+        .map(|l| l.slug())
+        .collect();
+        let mut sorted = slugs.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), slugs.len(), "lane slugs must be distinct");
+        assert!(
+            !Lane::Registry.needs_oracle(),
+            "the registry lane compares against a declared assertion, so it needs no oracle"
         );
     }
 

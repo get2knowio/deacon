@@ -33,12 +33,20 @@ pub const LIVE_BINARIES: &[&str] = &["parity_differential"];
 /// they must never be treated as live and MUST run in the ordinary lanes.
 ///
 /// Two kinds, both non-live for the same reason — they need no reference CLI:
-/// `parity_hermetic` and `parity_docker` run cases whose expectation is pinned in the
-/// record, and `parity_harness_faults` is the hermetic proof that the comparison can
-/// fail at all. Recognized by [`check_test_files`] so the file↔name match does not flag
-/// them as undeclared live binaries.
-pub const META_TEST_BINARIES: &[&str] =
-    &["parity_harness_faults", "parity_hermetic", "parity_docker"];
+/// `parity_hermetic`, `parity_registry` and `parity_docker` run cases whose expectation is
+/// pinned in the record, and `parity_harness_faults` is the hermetic proof that the
+/// comparison can fail at all. Recognized by [`check_test_files`] so the file↔name match
+/// does not flag them as undeclared live binaries.
+///
+/// They differ only in what they NEED — nothing, a registry, a daemon — which is the same
+/// axis [`crate::driver::Lane`] splits on, and the reason each can gate a pull request on
+/// the job provisioned for it.
+pub const META_TEST_BINARIES: &[&str] = &[
+    "parity_harness_faults",
+    "parity_hermetic",
+    "parity_registry",
+    "parity_docker",
+];
 
 /// Bidirectional file↔name match for `parity_*` sources under `tests_dir`. Returns
 /// human-readable problems (empty = OK).

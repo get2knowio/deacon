@@ -377,19 +377,39 @@ lets most of the suite gate every pull request:
 | Binary | Needs | Runs where |
 |---|---|---|
 | `parity_hermetic` | nothing | every profile, `dev-fast` included; Linux, macOS and Windows (#441) |
+| `parity_registry` | an OCI registry (no daemon, no oracle) | profiles whose JOB is provisioned for `ghcr.io`: `mvp-integration` (a required PR check with a GHCR token), `ci`, `docker`, `full`, `default`, the release gate — NOT `dev-fast` (#544) |
 | `parity_docker` | Docker | wherever a daemon exists; the release gate |
 | `parity_differential` | Docker + the pinned oracle | `--profile parity` ONLY (nightly) |
 | `parity_harness_faults` | nothing | `default`, `dev-fast` — the hermetic guard proving the comparison can fail (oracle mismatch, timeout, normalization failure, injected difference) |
 
-`driver::lane_of` derives a case's lane from its `oracleType` and `resourceGroup`, so a lane
+`driver::lane_of` derives a case's lane from THREE prerequisites — `oracleType` (the
+reference), `resourceGroup` (the daemon) and `needsRegistry` (a registry) — so a lane
 never *skips* a case it cannot run — a case it cannot run is in another lane, written down
 rather than discovered at run time. Live parity runs ONLY under `cargo nextest run --profile
 parity`; every other profile excludes it, so those lanes are truthful by non-selection — a
 green fast run never implies parity ran. There is no env-var opt-in and no silent skip: a
 missing oracle, absent Docker, or a normalization failure FAILS with a cause-specific
 `HarnessError`. The nightly runs `--no-fail-fast` (its job is to enumerate a work queue, not
-to stop at the first item) and gates nothing; the two no-oracle lanes DO gate — `release.yml`
-runs `binary(=parity_hermetic) | binary(=parity_docker)` in its verify job.
+to stop at the first item) and gates nothing; the three no-oracle lanes DO gate —
+`release.yml` runs `binary(=parity_hermetic) | binary(=parity_registry) |
+binary(=parity_docker)` in its verify job.
+
+**The registry axis is DERIVED from case data, never hand-listed** (#544). A case that
+reaches `ghcr.io` declares `"needsRegistry": true` in its own record, exactly as a
+Docker-backed case declares its `resourceGroup`; `driver::needs_registry` reads it and
+`lane_of` routes on it. Adding one stays a pure data edit. Two rules travel with it:
+re-laning is a **laning** change, so nothing a moved case asserts may be rewritten to fit
+the new lane (`bhv-extends-feature-version-override` keeps its `git:1.3.2` → `git:1.3.8`
+pin — that pin IS the behavior); and a Docker case that also reaches a registry stays in
+`parity_docker`, since every job with a daemon has network.
+
+**`parity_hermetic`'s "no network" is enforced, not promised.** Its own
+`hermetic_lane_runs_without_a_network` re-runs the lane's drivers inside a fresh user +
+network namespace (`unshare --map-root-user --net`). Reproduce a suspected leak with
+`unshare -rn cargo nextest run -E 'binary(=parity_hermetic)' --no-fail-fast --offline`. The
+guard is `#[cfg(target_os = "linux")]` — a visible non-selection off Linux, never a runtime
+skip — and FAILS with a cause-specific message when the host cannot create a namespace. If
+it goes red, move the case with `needsRegistry`; do NOT weaken what the case asserts.
 
 **`.config/nextest.toml` gotcha, learned the hard way.** Editing the profiles once silently
 dropped the `default-filter` from four of them, so `dev-fast` selected every Docker binary.

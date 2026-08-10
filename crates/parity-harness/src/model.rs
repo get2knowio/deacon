@@ -495,6 +495,27 @@ pub struct TestCase {
     /// The nextest resource group for a Docker-backed case (default `none`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource_group: Option<ResourceGroup>,
+    /// Whether running this case REACHES AN OCI REGISTRY (default `false`) — the third
+    /// prerequisite axis, alongside the daemon and the oracle (#544).
+    ///
+    /// `resourceGroup` answers "what does this case contend for?" and, incidentally,
+    /// "does it need a daemon?". It cannot answer "does it need the network?": a
+    /// `read-configuration --include-merged-configuration` over an OCI Feature, or an
+    /// `upgrade --dry-run` regenerating a lockfile, contends for nothing and creates no
+    /// container, yet cannot run without `ghcr.io`. Six such cases sat in the lane whose
+    /// docstring promised "no network" and passed only because CI happened to have some;
+    /// each was a standing dependency waiting to present as a transient (#454, #544).
+    ///
+    /// Declaring it is what routes the case to [`crate::driver::Lane::Registry`] and the
+    /// jobs provisioned for a registry. Forgetting to declare it on a new case is caught
+    /// by `parity_hermetic`'s own namespace guard, which runs the hermetic selection with
+    /// the network removed — the contract is enforced, not merely documented.
+    ///
+    /// **Excluded from `caseHash`** by construction (`case_hash.rs` builds an explicit
+    /// allow-list): it classifies the case, it does not change a byte the runner feeds the
+    /// CLI, so re-laning a case must never mark its snapshot stale.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_registry: bool,
     /// Human prose; **excluded from `caseHash`** so annotating never re-records (D3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,

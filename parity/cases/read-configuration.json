@@ -1406,6 +1406,7 @@
         "bhv-readconfig-merged-configuration"
       ],
       "context": [],
+      "needsRegistry": true,
       "oracleType": "spec-expectation",
       "operations": [
         {
@@ -1878,6 +1879,7 @@
         "bhv-readconfig-extends-merged"
       ],
       "context": [],
+      "needsRegistry": true,
       "oracleType": "spec-expectation",
       "operations": [
         {
@@ -2173,6 +2175,7 @@
         "bhv-extends-feature-version-override"
       ],
       "context": [],
+      "needsRegistry": true,
       "oracleType": "spec-expectation",
       "operations": [
         {
