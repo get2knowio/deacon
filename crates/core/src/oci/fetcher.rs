@@ -53,9 +53,10 @@ fn publish_cache_entry(staging: &Path, dest: &Path, marker: &str, cache_dir: &Pa
         return Ok(());
     }
 
-    // On Unix a directory rename fails only when `dest` is a non-empty
-    // directory (ENOTEMPTY); an empty `dest` is replaced atomically. So a
-    // failure here means some tree is already sitting at `dest`.
+    // A directory rename fails here only because something already occupies
+    // `dest`. (Unix replaces an EMPTY `dest` atomically and fails ENOTEMPTY
+    // otherwise; Windows refuses any existing directory. Either way the
+    // recovery below is the same, so neither platform needs its own path.)
     if is_complete_cache_entry(dest, marker) {
         debug!(
             "Cache entry {} was published concurrently; discarding our copy",
