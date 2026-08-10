@@ -2874,6 +2874,103 @@
         "tempdir": true
       },
       "notes": "#476, the half that makes deferral safe: the deferred hooks must still RUN, and run exactly once. After `up --skip-post-create`, `run-user-commands` executes all five phases, so the append-only log holds exactly five lines in phase order. Both CLIs produce that, and their marker mechanisms differ without changing it — deacon's completion markers are host-side (`{user_data_folder}/state/<workspace-hash>/`), the reference's are container-side (`{containerDataFolder}/.<phase>CommandMarker`, keyed on the container's `createdAt`) — because neither writes a marker for a phase that never ran.\n\nThe line COUNT is what carries the regression, which is why this case can assert the deferral through a channel captured only at the end of the run: before the fix deacon wrote SEVEN lines here (`onCreate`, `updateContent` from `up`, then all five again from `run-user-commands`) against the reference's five. `jsonSubset` on the whole file content is an exact-content match for that one key, so the two extra leading lines fail it.\n\nIt carries that assertion in ADDITION to the comparison for the reason FR-043 gives: a differential alone would stay green if BOTH sides started running the base phases, and the record meant to say which side is right would then say nothing. Deliberately NOT asserted here: what a plain (non-deferred) `up` followed by `run-user-commands` produces — deacon re-runs every completed hook where the reference skips it, which is the separately characterized `wvr-ruc-completed-hooks-not-rerun` and is untouched by this fix."
+    },
+    {
+      "id": "case-up-upstream-lockfile-frozen-matching",
+      "behaviors": [
+        "bhv-up-frozen-lockfile-accepts-matching-lockfile"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--frozen-lockfile"
+          ],
+          "fixtures": [
+            "fx-upstream-lockfile-frozen"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up"
+        }
+      ],
+      "fsAllowlist": [
+        ".devcontainer-lock.json"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED on purpose — [#557](https://github.com/get2knowio/deacon/issues/557). The committed `.devcontainer-lock.json` is not a hand-written expectation: it is the file the REFERENCE CLI wrote for this exact configuration at oracle 0.87.0, copied verbatim. So the question the case asks is the one that matters to a user with a lockfile in version control — **does deacon accept a lockfile the other CLI produced?** — and today the answer is no.\n\nMEASURED at oracle 0.87.0 on this fixture: the reference exits 0 and leaves the file byte-unchanged. deacon builds the Feature-extended image and then exits 1 with `Lockfile does not match.` The two documents are SEMANTICALLY IDENTICAL — same single Feature, same `version`, same `resolved`, same `integrity`, same 2-space indentation, same trailing newline, same 327 bytes — and differ only in the order of the three keys inside the entry: the reference writes `version, resolved, integrity` (the spec's own example order in `devcontainer-lockfile.md`), deacon writes them alphabetically as `integrity, resolved, version`.\n\nThe defect is the COMPARISON, not the ordering. `up::helpers::compare_lockfile_frozen` re-serialises the freshly-resolved lockfile and compares BYTES, so any serialisation the file did not happen to use is reported as a content mismatch. Upstream hit the same trap and fixed it before 0.87.0 — `lockfile.test.ts` carries a dedicated test, `frozen lockfile matches despite formatting differences`, which strips the trailing newline and still expects success. Control measurement, so the claim cannot be misread as \"deacon rejects everything\": deacon accepts its OWN lockfile on this same fixture and exits 0.\n\n`chan-file-content` rather than `chan-filesystem`: presence is not the claim — the file is present on both sides either way. The claim is that a frozen run READS and does not REWRITE, and only the bytes can say that. It is declared as a pure differential with no assertion, because pinning the expected bytes here would pin a published Feature's digest into a case whose subject is the comparison; the fixture already owns those bytes.\n\nThe base is `debian:bookworm-slim`, which has no `remoteUser`, so this case never enters the reference's uid-remap path or its `updateUID.Dockerfile-<version>` ENOENT race (#480, batch 1). It claims nothing about uid remapping and must not opt into it.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 2 — the lockfile family). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-up-upstream-lockfile-frozen-missing",
+      "behaviors": [
+        "bhv-up-frozen-lockfile-requires-lockfile"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--frozen-lockfile"
+          ],
+          "fixtures": [
+            "fx-upstream-lockfile-no-lockfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-up",
+          "assertion": {
+            "absent": ".devcontainer-lock.json"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        ".devcontainer-lock.json"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "GREEN, and the control that gives the two RED `build` cases their meaning: `up` implements the lockfile gate that `build` does not, so the difference recorded by [#556](https://github.com/get2knowio/deacon/issues/556) is a MISSING WIRE on one subcommand rather than a missing capability.\n\nMEASURED at oracle 0.87.0 on this fixture: both CLIs exit 1 without creating a container, and neither writes `.devcontainer-lock.json`. deacon validates pre-build in `commands/up/mod.rs` and reports `Lockfile does not exist.` with the path it expected and how to generate one; the reference reports the same sentence as its result document's `message`. The two documents are shaped differently (deacon puts the sentence in `description` under a generic `message`), which is why `chan-structured-output` is NOT declared — it would report an error-envelope difference that this case is not about, and that shape is characterised elsewhere.\n\nThe filesystem claim is what makes the case more than an exit code: a run that refused AFTER writing the lockfile would satisfy `equals: 1` and have already done the thing `--frozen-lockfile` exists to prevent.\n\nBase `debian:bookworm-slim` (no `remoteUser`) — this case claims nothing about uid remapping and does not enter the reference's remap path.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 2 — the lockfile family). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
     }
   ]
 }

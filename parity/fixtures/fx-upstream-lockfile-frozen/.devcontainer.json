@@ -1,0 +1,6 @@
+{
+	"image": "debian:bookworm-slim",
+	"features": {
+		"ghcr.io/devcontainers/features/git:1.3.2": {}
+	}
+}

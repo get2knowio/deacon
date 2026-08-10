@@ -38,8 +38,17 @@ fi
 # `*/.devcontainer/devcontainer.json` glob silently matched neither, which is the same
 # "a glob that matches nothing is not an error" failure as 023 T116 — the bug this whole
 # script was written to prevent, reintroduced one directory level down.
+#
+# The DOT-PREFIXED root form is a third discovery location and was missing here. A
+# fixture may put its config at `<fx>/.devcontainer.json` — that is a spec discovery
+# location, several fixtures use it, and `-name 'devcontainer.json'` does NOT match
+# `.devcontainer.json` (they are different filenames). Every such fixture was therefore
+# invisible to this script: its base image was never warmed, and the first parity run to
+# need it paid the cold-pull inside the harness's 120s bound — the exact failure mode
+# this file exists to prevent, one leading dot away.
 configs="$(find "${fixtures}" \
-             \( -name 'devcontainer.json' -o -name 'devcontainer.jsonc' \) \
+             \( -name 'devcontainer.json'  -o -name 'devcontainer.jsonc' \
+                -o -name '.devcontainer.json' -o -name '.devcontainer.jsonc' \) \
              -type f 2>/dev/null | sort)"
 
 if [ -z "${configs}" ]; then
