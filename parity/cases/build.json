@@ -1114,6 +1114,157 @@
         "tempdir": true
       },
       "notes": "Error-path tier, build stage: `build.target` names a stage the Dockerfile does not define. Nothing about the document is wrong and BOTH CLIs read it without complaint — the target is a free-form string, and no reader can know which stages exist until the builder resolves the Dockerfile graph. That is the point: the failure is unreachable until after the stage where the reference is most lenient, which is exactly where parity used to stop comparing. Both sides fail (verified against oracle 0.87.0 in an isolated workspace)."
+    },
+    {
+      "id": "case-build-upstream-lockfile-frozen-missing",
+      "behaviors": [
+        "bhv-build-frozen-lockfile-requires-lockfile"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--frozen-lockfile"
+          ],
+          "fixtures": [
+            "fx-upstream-lockfile-no-lockfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-build",
+          "assertion": {
+            "absent": ".devcontainer-lock.json"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        ".devcontainer-lock.json"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED on purpose — [#556](https://github.com/get2knowio/deacon/issues/556). `build --frozen-lockfile` on a workspace with NO lockfile must refuse: the flag's whole contract is \"resolution may not change the lockfile\", and there is no lockfile for resolution to agree with.\n\nMEASURED at oracle 0.87.0 on this fixture. The reference exits 1 before building anything, prints `{\"outcome\":\"error\",\"message\":\"Lockfile does not exist.\"}` and leaves the workspace clean. deacon exits 0, builds the Feature-extended image, and WRITES `.devcontainer-lock.json` — the precise inverse of what the flag asks for. The cause is not subtle and is admitted in the source: `commands/build/mod.rs`'s `BuildArgs` documents `no_lockfile` / `frozen_lockfile` as \"not yet consumed by `build`'s lockfile-writing path\", so both flags are parsed, threaded, and then dropped. `up` implements both (`commands/up/helpers.rs::handle_lockfile_post_build`); `build` does not. A modelled flag accepted and then ignored is the silent-fallback shape constitution IV rules out — the same class as #492 (`build.options`), one surface over.\n\nTWO channels, and both are load-bearing. The exit code alone would pass the day someone made `build` fail for an unrelated reason; the filesystem claim is the one that says the refusal happened BEFORE anything was written. The assertion is written for the fixed behavior (exit 1, no lockfile) rather than for today's, so the case turns green on the fix and not on a case edit.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 2 — the lockfile family). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-build-upstream-lockfile-no-lockfile-flag",
+      "behaviors": [
+        "bhv-build-no-lockfile-suppresses-lockfile"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--no-lockfile"
+          ],
+          "fixtures": [
+            "fx-upstream-lockfile-no-lockfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-build",
+          "assertion": {
+            "absent": ".devcontainer-lock.json"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        ".devcontainer-lock.json"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED on purpose — [#556](https://github.com/get2knowio/deacon/issues/556), the same defect as `case-build-upstream-lockfile-frozen-missing` seen through the other flag. This is the half that CANNOT be caught by an exit code: both CLIs exit 0, both produce an image, and the only observable difference is a file one of them wrote that the user asked it not to write.\n\nMEASURED at oracle 0.87.0 on this fixture: the reference build succeeds and `.devcontainer-lock.json` is ABSENT afterwards; deacon's build succeeds and the file is PRESENT (327 bytes, the resolved `git:1.3.2` entry). Two flags, one cause — `build` parses `--no-lockfile` / `--frozen-lockfile` and never consults either.\n\nBoth cases are kept rather than merged into one, because the two flags have opposite correct outcomes (refuse vs succeed-and-write-nothing) and a fix that wired only one of them would leave the other silently broken. The assertion states the FIXED behavior.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 2 — the lockfile family). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-build-upstream-lockfile-flags-mutually-exclusive",
+      "behaviors": [
+        "bhv-lockfile-flags-mutually-exclusive"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "fs-heavy",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--no-lockfile",
+            "--frozen-lockfile"
+          ],
+          "fixtures": [
+            "fx-upstream-lockfile-no-lockfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-build",
+          "assertion": {
+            "absent": ".devcontainer-lock.json"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        ".devcontainer-lock.json"
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "GREEN. `--no-lockfile` and `--frozen-lockfile` ask for contradictory things — ignore the lockfile entirely, and require it to be present and unchanged — so naming both is a user error rather than a precedence question, and the reference rejects it rather than picking a winner. Upstream drives this from three parameterised tests (the second flag is `--frozen-lockfile`, `--experimental-frozen-lockfile` or `--experimental-lockfile`); the graduated pair is the one both CLIs share, so it is the one measured here.\n\nMEASURED at oracle 0.87.0: both exit 1, and both leave the workspace byte-identical — the rejection happens at argument validation, before either CLI touches Docker, a registry or the filesystem. So the case needs no daemon — and it is `resourceGroup: fs-heavy` anyway, which is the group that isolates a workspace WITHOUT touching Docker. `none` was the obvious choice and is the wrong one, and the reason was found by perturbing this very case: a `none` case runs against the COMMITTED fixture directory, so when the watched-to-fail run dropped `--no-lockfile` from the argv, the surviving `--frozen-lockfile` stopped being rejected, deacon built for real, and a stray `.devcontainer-lock.json` appeared in `parity/fixtures/fx-upstream-lockfile-no-lockfile/` — an untracked file that would have silently changed what the OTHER cases on that fixture measure, which is exactly the failure #423 documented for `fx-upgrade-overlay-lockfile`. A `build` or `up` operation must never run un-isolated, however certain one is that today's argv writes nothing: the argv is one edit away from writing. The `absent` filesystem claim is kept as the second line of defence.\n\n`chan-stderr` is deliberately NOT declared. Both CLIs say the same sentence (`--no-lockfile and --frozen-lockfile are mutually exclusive.`), but the reference prepends its entire `yargs` usage block, so comparing the stream would report a divergence about help-text formatting and say nothing about the behaviour. The exit code plus the assertion is the whole claim.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 2 — the lockfile family). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
     }
   ]
 }
