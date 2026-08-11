@@ -96,10 +96,14 @@ The 1.0 release is being assembled across a series of PRs tracked in
 - **Lockfile graduation (PR-4):** `--no-lockfile`, `--frozen-lockfile`, and
   legacy `--experimental-lockfile <PATH>` / `--experimental-frozen-lockfile`
   (hidden aliases, WARN-on-use). After `up` resolves features the writer
-  emits a sorted, trailing-newline-terminated `devcontainer-lock.json`
-  byte-identical to upstream `devcontainers/cli`'s `writeLockfile`.
-  `--frozen-lockfile` byte-compares the freshly-built lockfile against the
-  on-disk file and fails with the upstream-aligned messages
+  emits a trailing-newline-terminated `devcontainer-lock.json` byte-identical
+  to upstream `devcontainers/cli`'s `writeLockfile`: Feature ids sorted, and
+  each entry's keys in the reference's order, `version, resolved, integrity`
+  (then `dependsOn`). `--frozen-lockfile` compares the freshly-built lockfile
+  against the on-disk file as a *document* rather than as bytes — so a lockfile
+  the reference CLI wrote, or one an editor reformatted, still validates
+  ([#557](https://github.com/get2knowio/deacon/issues/557)) — and fails with
+  the upstream-aligned messages
   `"Lockfile does not exist."` / `"Lockfile does not match."`. Read-only
   workspaces (EROFS/EACCES) downgrade to a WARN. Schema parity fix: the
   `dependsOn` field now serializes as camelCase.
