@@ -957,6 +957,65 @@ impl ComposeManager {
             .with_profiles(project.profiles.clone())
     }
 
+    /// Find Compose projects that still hold NAMED VOLUMES for this workspace under a
+    /// project name deacon no longer derives (#564).
+    ///
+    /// Volumes, not containers, are the subject: `stop_superseded_containers` already
+    /// stops the container side of a superseded generation, and nothing touches volumes
+    /// (they hold data). The query reads Compose's own `com.docker.compose.project` label
+    /// off every volume rather than parsing volume NAMES, so it does not care how either
+    /// tool spells a resource; [`classify_superseded_projects`] then decides which of
+    /// those project names belong to this workspace.
+    ///
+    /// Best-effort and infallible by design — a daemon that cannot be queried costs the
+    /// user a diagnostic, never an `up`. Returns an empty vector in that case.
+    #[instrument(skip(self))]
+    pub async fn detect_superseded_volume_projects(
+        &self,
+        current_project: &str,
+        workspace_hash: &str,
+        workspace_folder: &Path,
+    ) -> Vec<SupersededProject> {
+        let Some(basename) = workspace_folder
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+        else {
+            return Vec::new();
+        };
+
+        let output = tokio::process::Command::new(&self.docker_path)
+            .args([
+                "volume",
+                "ls",
+                "--format",
+                "{{.Label \"com.docker.compose.project\"}}",
+            ])
+            .output()
+            .await;
+
+        let stdout = match output {
+            Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+            Ok(out) => {
+                debug!(
+                    "Could not list volumes for the superseded-project check: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
+                return Vec::new();
+            }
+            Err(e) => {
+                debug!("Could not run `{} volume ls`: {e}", self.docker_path);
+                return Vec::new();
+            }
+        };
+
+        classify_superseded_projects(
+            stdout.lines().map(str::trim),
+            current_project,
+            workspace_hash,
+            &basename,
+        )
+    }
+
     /// Check if project containers are running
     #[instrument(skip(self))]
     pub async fn is_project_running(&self, project: &ComposeProject) -> Result<bool> {
@@ -1678,6 +1737,65 @@ fn parse_compose_file_for_project_name(compose_file_path: &Path) -> Option<Strin
     None
 }
 
+/// The most characters of the workspace-folder stem an auto-derived project name keeps.
+///
+/// The stem is readability, not identity — the two hashes after it are what make the name
+/// unique — so truncating a very long folder name costs nothing but keeps the derived
+/// Compose resource names (`<project>-<service>-1`, `<project>_<volume>`) comfortably
+/// inside Docker's 255-character object-name limit.
+const PROJECT_STEM_MAX_LEN: usize = 32;
+
+/// Reduce a workspace-folder basename to a segment that is legal inside a Docker Compose
+/// project name.
+///
+/// Compose requires a project name to match `[a-z0-9][a-z0-9_-]*`, and the value goes
+/// straight into a `--project-name` argument, so this is the ingress filter for a string
+/// the user controls (a directory name). Everything outside the allowed set is replaced
+/// with `-` rather than deleted — deleting would silently glue unrelated words together —
+/// runs of separators collapse, and leading characters that are not alphanumeric are
+/// trimmed because the first character has the stricter rule.
+///
+/// Returns an EMPTY string when nothing survives (`/`, `..`, `---`, a purely non-ASCII
+/// name). The caller must then fall back to the hash-only form: a malformed
+/// `--project-name` is rejected by `docker compose` outright, which is the failure
+/// `bhv-compose-project-name-robust` exists to prevent.
+pub fn sanitize_project_stem(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len().min(PROJECT_STEM_MAX_LEN));
+    let mut last_was_separator = false;
+
+    for ch in raw.chars() {
+        let lowered = ch.to_ascii_lowercase();
+        // Anything outside `[a-z0-9_-]` — whitespace, `.`, `/`, `:`, a non-ASCII grapheme
+        // — becomes a single separator. The `is_ascii_*` tests are deliberate: a
+        // multi-byte char is never legal in a Compose project name, so it is replaced
+        // rather than lowercased and passed through.
+        let mapped = match lowered {
+            c if c.is_ascii_alphanumeric() || c == '_' || c == '-' => c,
+            _ => '-',
+        };
+
+        let is_separator = mapped == '-' || mapped == '_';
+        if is_separator {
+            // Collapse runs, and never let a separator open the stem (the first character
+            // must be `[a-z0-9]`).
+            if last_was_separator || out.is_empty() {
+                continue;
+            }
+        }
+        if out.len() >= PROJECT_STEM_MAX_LEN {
+            break;
+        }
+        out.push(mapped);
+        last_was_separator = is_separator;
+    }
+
+    // A trailing separator is legal but reads badly against the `_<hash>` that follows.
+    while out.ends_with('-') || out.ends_with('_') {
+        out.pop();
+    }
+    out
+}
+
 fn derive_project_name(
     base_path: &Path,
     config: &DevContainerConfig,
@@ -1722,10 +1840,165 @@ fn derive_project_name(
     // Folding in `config_hash` disambiguates siblings exactly as the
     // single-container path does. This is a one-way migration from any prior
     // naming: projects created by older deacon versions become orphaned (not
-    // deleted) — `docker compose -p <old-name> down` clears them.
+    // deleted) — `docker compose -p <old-name> down` clears them, and `up`
+    // says so once via `superseded_project_advice`.
+    //
+    // The SANITIZED WORKSPACE-FOLDER STEM leads (#564, maintainer ruling
+    // 2026-08-11). `deacon_6fb1205c_532a7bdd` identifies nothing to someone
+    // reading `docker compose ps` or pointing an agent at container state, and
+    // that terminal-first audience is deacon's primary one: there is no VS Code
+    // integration path for deacon (no extension; the Dev Containers extension
+    // bundles and drives the reference CLI), so the two-tools-provisioning-one-
+    // workspace collision #265 defends against is a migration period, not a
+    // steady state. `deacon_site_6fb1205c_532a7bdd` is readable AND still
+    // outside the reference's `<folder>_devcontainer` convention by
+    // construction, so #265's isolation holds unchanged.
+    //
+    // A stem that sanitizes to empty (a folder like `-myproj`, `..`, a
+    // workspace at `/`, a purely non-ASCII basename) falls back to the
+    // hash-only form rather than emitting a malformed `--project-name`
+    // (`bhv-compose-project-name-robust`).
     let workspace_hash = crate::container::ContainerIdentity::hash_workspace_path(base_path);
     let config_hash = crate::container::ContainerIdentity::hash_config(config);
-    format!("deacon_{workspace_hash}_{config_hash}")
+    let stem = base_path
+        .file_name()
+        .map(|n| sanitize_project_stem(&n.to_string_lossy()))
+        .unwrap_or_default();
+    if stem.is_empty() {
+        return format!("deacon_{workspace_hash}_{config_hash}");
+    }
+    format!("deacon_{stem}_{workspace_hash}_{config_hash}")
+}
+
+/// Which tool/generation named a Compose project deacon no longer derives for this
+/// workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SupersededProjectOrigin {
+    /// `deacon_<workspaceHash>_<configHash>` — the auto-derived name deacon used before
+    /// #564 put the workspace-folder stem in front of the hashes.
+    DeaconLegacy,
+    /// `<folder>_devcontainer` — the reference CLI's own derivation, i.e. the user came
+    /// from `devcontainer up` or the VS Code Dev Containers extension.
+    ReferenceCli,
+}
+
+/// A Compose project that holds this workspace's named volumes under a project name
+/// deacon will not use.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SupersededProject {
+    /// The Compose project name, exactly as `com.docker.compose.project` reports it.
+    pub name: String,
+    /// What named it.
+    pub origin: SupersededProjectOrigin,
+}
+
+/// Pick out the projects in `projects` that named THIS workspace's volumes under a
+/// superseded naming scheme. Pure — the Docker call that produces `projects` is
+/// [`ComposeManager::detect_superseded_volume_projects`].
+///
+/// Two schemes qualify, and only two:
+///
+/// * **`deacon_<workspaceHash>_<configHash>`** — this workspace's `workspace_hash`
+///   followed by exactly one more field. The trailing field is the *config* hash, which
+///   is unknown for a configuration the user has since edited, so it is matched
+///   structurally (no further `_`) rather than by value. The post-#564 form always has
+///   the stem between `deacon_` and the workspace hash, so it can never be mistaken for
+///   the legacy form unless the stem IS the workspace hash — and in that case the project
+///   is this workspace's anyway.
+/// * **`<folder>_devcontainer`** — the reference CLI's derivation, matched against both
+///   the raw lowercased basename (what the reference passes to `--project-name`) and the
+///   sanitized stem (what Compose may normalize it to).
+///
+/// `current` is never reported: it is the project this `up` is about to use.
+pub fn classify_superseded_projects<I, S>(
+    projects: I,
+    current: &str,
+    workspace_hash: &str,
+    workspace_basename: &str,
+) -> Vec<SupersededProject>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let legacy_prefix = format!("deacon_{workspace_hash}_");
+    let reference_forms = {
+        let mut forms = vec![format!(
+            "{}_devcontainer",
+            workspace_basename.to_ascii_lowercase()
+        )];
+        let sanitized = sanitize_project_stem(workspace_basename);
+        if !sanitized.is_empty() {
+            let form = format!("{sanitized}_devcontainer");
+            if !forms.contains(&form) {
+                forms.push(form);
+            }
+        }
+        forms
+    };
+
+    let mut found: Vec<SupersededProject> = Vec::new();
+    for project in projects {
+        let name = project.as_ref();
+        if name.is_empty() || name == current {
+            continue;
+        }
+        let origin = if name
+            .strip_prefix(&legacy_prefix)
+            .is_some_and(|rest| !rest.is_empty() && !rest.contains('_'))
+        {
+            SupersededProjectOrigin::DeaconLegacy
+        } else if reference_forms.iter().any(|f| f == name) {
+            SupersededProjectOrigin::ReferenceCli
+        } else {
+            continue;
+        };
+        let entry = SupersededProject {
+            name: name.to_string(),
+            origin,
+        };
+        if !found.contains(&entry) {
+            found.push(entry);
+        }
+    }
+    found.sort();
+    found
+}
+
+/// The one-time `up` diagnostic for a detected project-name transition (#564).
+///
+/// Compose prefixes every named volume with the project name, so a project rename leaves
+/// the previous project's volumes intact but INVISIBLE to the new project — an unexplained
+/// empty database is the worst outcome here, and it is silent. `stop_superseded_containers`
+/// already handles the container side; nothing touches volumes, deliberately (they hold
+/// data), which is exactly why this has to be said out loud.
+///
+/// Returns `None` when there is nothing to report, so the caller emits nothing.
+pub fn superseded_project_advice(
+    superseded: &[SupersededProject],
+    current_project: &str,
+) -> Option<String> {
+    if superseded.is_empty() {
+        return None;
+    }
+
+    let mut message = format!(
+        "This workspace has Docker Compose volumes under {} other project name(s); deacon will use `{current_project}`.",
+        superseded.len()
+    );
+    for project in superseded {
+        let origin = match project.origin {
+            SupersededProjectOrigin::DeaconLegacy => "created by an older deacon",
+            SupersededProjectOrigin::ReferenceCli => "created by the devcontainer CLI",
+        };
+        message.push_str(&format!("\n  - `{}` ({origin})", project.name));
+    }
+    message.push_str(
+        "\nDocker Compose prefixes named volumes with the project name, so those volumes belong to the previous project and are NOT visible to the new one. \
+No data was deleted — it is still there under the old project. \
+To inspect or remove a previous project: `docker compose -p <project> ps` / `docker compose -p <project> down -v`. \
+To migrate a volume's contents: `docker run --rm -v <old-volume>:/from -v <new-volume>:/to alpine sh -c 'cp -a /from/. /to/'`.",
+    );
+    Some(message)
 }
 
 #[cfg(test)]
@@ -2007,10 +2280,11 @@ mod tests {
         assert_eq!(all_services, vec!["app"]);
     }
 
-    /// #265: the auto-derived project name is `deacon_<workspace_hash>_<config_hash>`
-    /// — the SAME two hashes `ContainerIdentity` computes — not the reference
-    /// CLI's `<folder>_devcontainer` convention, so `devcontainer up` can never
-    /// mistake a deacon-owned compose project for its own.
+    /// #265 + #564: the auto-derived project name is
+    /// `deacon_<stem>_<workspace_hash>_<config_hash>` — the sanitized workspace-folder
+    /// stem in front of the SAME two hashes `ContainerIdentity` computes — never the
+    /// reference CLI's `<folder>_devcontainer` convention, so `devcontainer up` can
+    /// still not mistake a deacon-owned compose project for its own.
     #[test]
     fn test_derive_project_name_is_deacon_namespaced_and_hash_based() {
         let path = Path::new("/tmp/my-workspace");
@@ -2018,14 +2292,224 @@ mod tests {
         let name = derive_project_name(path, &config, &[]);
         assert!(
             name.starts_with("deacon_"),
-            "expected deacon_<hash>, got {name}"
+            "expected deacon_<stem>_<hash>_<hash>, got {name}"
         );
         let expected = format!(
-            "deacon_{}_{}",
+            "deacon_my-workspace_{}_{}",
             crate::container::ContainerIdentity::hash_workspace_path(path),
             crate::container::ContainerIdentity::hash_config(&config),
         );
         assert_eq!(name, expected);
+    }
+
+    /// #564's whole point: the derived name has to be READABLE, and readable means the
+    /// folder someone is working in appears in `docker compose ps` without them computing
+    /// a hash. Both hashes stay — `workspace_hash` disambiguates two checkouts sharing a
+    /// basename, `config_hash` is what makes an edited configuration a new generation
+    /// (#371, #551 are built on it).
+    #[test]
+    fn test_derive_project_name_leads_with_the_workspace_stem() {
+        let config = DevContainerConfig::default();
+        let name = derive_project_name(Path::new("/home/dev/site"), &config, &[]);
+        assert!(
+            name.starts_with("deacon_site_"),
+            "the workspace stem must lead the hashes, got {name}"
+        );
+        let fields: Vec<&str> = name.split('_').collect();
+        assert_eq!(
+            fields.len(),
+            4,
+            "expected deacon_<stem>_<wsHash>_<cfgHash>, got {name}"
+        );
+        assert_eq!(fields[2].len(), 8, "workspace hash must survive: {name}");
+        assert_eq!(fields[3].len(), 8, "config hash must survive: {name}");
+    }
+
+    /// Two checkouts of the same project under different parents share a BASENAME. The
+    /// stem alone would collapse them onto one Compose project; `workspace_hash` is what
+    /// keeps them apart, and it is still there.
+    #[test]
+    fn test_derive_project_name_same_stem_different_parents_still_differ() {
+        let config = DevContainerConfig::default();
+        let a = derive_project_name(Path::new("/home/dev/work/api"), &config, &[]);
+        let b = derive_project_name(Path::new("/home/dev/tmp/api"), &config, &[]);
+        assert!(a.starts_with("deacon_api_") && b.starts_with("deacon_api_"));
+        assert_ne!(a, b, "same basename, different checkouts must not collide");
+    }
+
+    /// A folder whose basename sanitizes to nothing falls back to the hash-only form
+    /// rather than emitting a `--project-name` `docker compose` rejects — the robustness
+    /// claim `bhv-compose-project-name-robust` records, preserved verbatim through #564.
+    #[test]
+    fn test_derive_project_name_empty_stem_falls_back_to_hash_only() {
+        let config = DevContainerConfig::default();
+        for path in ["/tmp/-", "/tmp/...", "/tmp/---"] {
+            let path = Path::new(path);
+            let name = derive_project_name(path, &config, &[]);
+            let expected = format!(
+                "deacon_{}_{}",
+                crate::container::ContainerIdentity::hash_workspace_path(path),
+                crate::container::ContainerIdentity::hash_config(&config),
+            );
+            assert_eq!(name, expected, "{} must fall back", path.display());
+        }
+        // A workspace at the filesystem root has no basename at all.
+        let root = Path::new("/");
+        assert_eq!(
+            derive_project_name(root, &config, &[]),
+            format!(
+                "deacon_{}_{}",
+                crate::container::ContainerIdentity::hash_workspace_path(root),
+                crate::container::ContainerIdentity::hash_config(&config),
+            )
+        );
+    }
+
+    /// Every derived name must satisfy Compose's `[a-z0-9][a-z0-9_-]*`, including for the
+    /// hostile basenames a user can create. This is the security-adjacent half: the stem
+    /// is user-controlled input that ends up in a `--project-name` argument.
+    #[test]
+    fn test_sanitize_project_stem_covers_hostile_inputs() {
+        // (raw basename, expected stem — empty means "fall back to hash-only")
+        let cases = [
+            ("site", "site"),
+            ("My-Project", "my-project"),
+            ("my project", "my-project"),
+            ("My  Weird   Name", "my-weird-name"),
+            ("café", "caf"),
+            ("日本語", ""),
+            ("..", ""),
+            ("-myproj", "myproj"),
+            ("---", ""),
+            ("", ""),
+            ("_leading", "leading"),
+            ("trailing-", "trailing"),
+            ("a/b:c;d", "a-b-c-d"),
+            ("under_score", "under_score"),
+            ("$(whoami)", "whoami"),
+            ("--project-name=evil", "project-name-evil"),
+            ("9lives", "9lives"),
+            (
+                "a-very-long-workspace-folder-name-that-keeps-going-and-going",
+                "a-very-long-workspace-folder-nam",
+            ),
+        ];
+        for (raw, expected) in cases {
+            let got = sanitize_project_stem(raw);
+            assert_eq!(got, expected, "sanitizing {raw:?}");
+            assert!(
+                got.len() <= PROJECT_STEM_MAX_LEN,
+                "{raw:?} produced an over-long stem: {got}"
+            );
+            if !got.is_empty() {
+                let mut chars = got.chars();
+                let first = chars.next().expect("non-empty");
+                assert!(
+                    first.is_ascii_alphanumeric(),
+                    "{raw:?} produced a stem starting with {first:?}"
+                );
+                assert!(
+                    got.chars().all(|c| c.is_ascii_lowercase()
+                        || c.is_ascii_digit()
+                        || c == '-'
+                        || c == '_'),
+                    "{raw:?} produced an illegal stem: {got}"
+                );
+            }
+        }
+    }
+
+    /// The classifier that drives the #564 transition diagnostic. Both superseded shapes
+    /// are recognized, and nothing else is — a sibling workspace's project, another
+    /// deacon workspace's project, and the current project are all left alone.
+    #[test]
+    fn test_classify_superseded_projects_recognizes_both_transitions() {
+        let current = "deacon_site_742b6f14_b5e9edc0";
+        let projects = [
+            current,
+            "deacon_742b6f14_b5e9edc0", // this workspace, older deacon format
+            "deacon_742b6f14_0bad0bad", // same, a different (edited) config
+            "site_devcontainer",        // this workspace, reference CLI
+            "deacon_99999999_b5e9edc0", // a DIFFERENT workspace, older format
+            "deacon_other_742b6f14_b5e9ed", // a stem that merely looks similar
+            "other_devcontainer",       // a different folder's reference project
+            "",
+        ];
+        let found = classify_superseded_projects(projects, current, "742b6f14", "site");
+        assert_eq!(
+            found,
+            vec![
+                SupersededProject {
+                    name: "deacon_742b6f14_0bad0bad".to_string(),
+                    origin: SupersededProjectOrigin::DeaconLegacy,
+                },
+                SupersededProject {
+                    name: "deacon_742b6f14_b5e9edc0".to_string(),
+                    origin: SupersededProjectOrigin::DeaconLegacy,
+                },
+                SupersededProject {
+                    name: "site_devcontainer".to_string(),
+                    origin: SupersededProjectOrigin::ReferenceCli,
+                },
+            ]
+        );
+    }
+
+    /// The reference CLI passes the workspace basename to `--project-name` verbatim and
+    /// Compose lowercases it, so a mixed-case folder must still be recognized — the same
+    /// case-insensitivity rule every name-marker sweep here relies on (#442).
+    #[test]
+    fn test_classify_superseded_projects_matches_lowercased_reference_project() {
+        let found = classify_superseded_projects(
+            ["mysite_devcontainer", "my-site_devcontainer"],
+            "deacon_mysite_1111_2222",
+            "1111",
+            "MySite",
+        );
+        assert_eq!(
+            found,
+            vec![SupersededProject {
+                name: "mysite_devcontainer".to_string(),
+                origin: SupersededProjectOrigin::ReferenceCli,
+            }]
+        );
+    }
+
+    /// Nothing detected means nothing said: the diagnostic never fires on a clean machine
+    /// or on the second `up` after the old volumes are gone.
+    #[test]
+    fn test_superseded_project_advice_is_silent_when_nothing_is_superseded() {
+        assert!(superseded_project_advice(&[], "deacon_site_1111_2222").is_none());
+    }
+
+    /// The message has to carry three things or it is not worth emitting: the project
+    /// deacon WILL use, the project(s) whose volumes are now separate, and the fact that
+    /// Compose prefixes named volumes with the project name (which is why the data looks
+    /// gone without being gone).
+    #[test]
+    fn test_superseded_project_advice_names_project_and_explains_volumes() {
+        let advice = superseded_project_advice(
+            &[
+                SupersededProject {
+                    name: "deacon_742b6f14_b5e9edc0".to_string(),
+                    origin: SupersededProjectOrigin::DeaconLegacy,
+                },
+                SupersededProject {
+                    name: "site_devcontainer".to_string(),
+                    origin: SupersededProjectOrigin::ReferenceCli,
+                },
+            ],
+            "deacon_site_742b6f14_b5e9edc0",
+        )
+        .expect("advice");
+        assert!(advice.contains("deacon_site_742b6f14_b5e9edc0"));
+        assert!(advice.contains("deacon_742b6f14_b5e9edc0"));
+        assert!(advice.contains("site_devcontainer"));
+        assert!(advice.contains("older deacon"));
+        assert!(advice.contains("devcontainer CLI"));
+        assert!(advice.contains("prefixes named volumes with the project name"));
+        assert!(advice.contains("No data was deleted"));
+        assert!(advice.contains("docker compose -p"));
     }
 
     /// Same input path + config -> same project name (deterministic), and it

@@ -1483,7 +1483,8 @@ pub struct CurrentContainer<'a> {
 ///
 /// # Compose
 ///
-/// deacon's compose project name is `deacon_<workspace_hash>_<config_hash>`, so
+/// deacon's compose project name is `deacon_<stem>_<workspace_hash>_<config_hash>`
+/// (#564; hash-only when the workspace-folder stem sanitizes to empty), so
 /// a changed configuration produces a whole new project and leaks the old one
 /// the same way. deacon stamps its identity labels on the primary service and
 /// every `runServices` entry, but NOT on dependency services compose starts on

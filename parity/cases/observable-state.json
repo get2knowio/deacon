@@ -179,14 +179,14 @@
           "behavior": "bhv-compose-project-name-robust",
           "context": [],
           "observablePath": "chan-container-state.composeProjectResources.project",
-          "rationale": "deacon derives `deacon_<workspaceHash>_<configHash>`; the reference derives `<workspace-dir>_devcontainer`. Scoped to the project NAME — the project-relative `networks` and `volumes` alongside it stay compared, which is the whole reason the prefix rewrite exists.",
+          "rationale": "deacon derives `deacon_<folderStem>_<workspaceHash>_<configHash>` (#564); the reference derives `<workspace-dir>_devcontainer`. Scoped to the project NAME — the project-relative `networks` and `volumes` alongside it stay compared, which is the whole reason the prefix rewrite exists.",
           "divergenceId": "bhv-compose-project-name-robust"
         },
         {
           "behavior": "bhv-compose-project-name-robust",
           "context": [],
           "observablePath": "chan-container-state.labels.com.docker.compose.project",
-          "rationale": "deacon derives `deacon_<workspaceHash>_<configHash>`; the reference derives `<workspace-dir>_devcontainer`. The same difference the `composeProjectResources.project` tolerance names, reported by Compose's own label.",
+          "rationale": "deacon derives `deacon_<folderStem>_<workspaceHash>_<configHash>` (#564); the reference derives `<workspace-dir>_devcontainer`. The same difference the `composeProjectResources.project` tolerance names, reported by Compose's own label.",
           "divergenceId": "bhv-compose-project-name-robust"
         },
         {
@@ -326,14 +326,14 @@
           "behavior": "bhv-compose-project-name-robust",
           "context": [],
           "observablePath": "chan-container-state.composeProjectResources.project",
-          "rationale": "deacon derives `deacon_<workspaceHash>_<configHash>`; the reference derives `<workspace-dir>_devcontainer`. Scoped to the project NAME — the project-relative `networks` and `volumes` alongside it stay compared, which is the whole reason the prefix rewrite exists.",
+          "rationale": "deacon derives `deacon_<folderStem>_<workspaceHash>_<configHash>` (#564); the reference derives `<workspace-dir>_devcontainer`. Scoped to the project NAME — the project-relative `networks` and `volumes` alongside it stay compared, which is the whole reason the prefix rewrite exists.",
           "divergenceId": "bhv-compose-project-name-robust"
         },
         {
           "behavior": "bhv-compose-project-name-robust",
           "context": [],
           "observablePath": "chan-container-state.labels.com.docker.compose.project",
-          "rationale": "deacon derives `deacon_<workspaceHash>_<configHash>`; the reference derives `<workspace-dir>_devcontainer`. The same difference the `composeProjectResources.project` tolerance names, reported by Compose's own label.",
+          "rationale": "deacon derives `deacon_<folderStem>_<workspaceHash>_<configHash>` (#564); the reference derives `<workspace-dir>_devcontainer`. The same difference the `composeProjectResources.project` tolerance names, reported by Compose's own label.",
           "divergenceId": "bhv-compose-project-name-robust"
         },
         {

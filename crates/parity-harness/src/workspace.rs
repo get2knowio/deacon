@@ -206,10 +206,17 @@ impl DockerWorkspace {
 
         // A Compose project the REFERENCE created in this workspace is not deacon's to tear
         // down. The reference derives its project name from the workspace DIRECTORY
-        // (`<basename>_devcontainer`) while deacon derives `deacon_<workspaceHash>_<configHash>`,
-        // so `deacon down` never sees the reference's project and neither does the container
-        // label sweep above reach its NETWORK and VOLUMES — only its containers carry
+        // (`<basename>_devcontainer`) while deacon derives
+        // `deacon_<basename>_<workspaceHash>_<configHash>` (#564), so `deacon down` never
+        // sees the reference's project and neither does the container label sweep above
+        // reach its NETWORK and VOLUMES — only its containers carry
         // `devcontainer.local_folder`.
+        //
+        // Since #564 the name sweep below reaches BOTH sides' projects, where before it
+        // reached only the reference's: deacon's own project embeds the same workspace
+        // basename this sweep matches on, so its network and volumes are reclaimed here
+        // too. Before #564 a `deacon_<hash>_<hash>_default` network carried no marker and
+        // leaked past every sweep in this file.
         //
         // Left alone they accumulate across runs until the daemon answers a compose `up`
         // with "all predefined address pools have been fully subnetted", and the tier fails
@@ -412,8 +419,14 @@ mod tests {
         assert_ne!(a.resource_name("net"), b.resource_name("net"));
     }
 
-    /// The reference's Compose project is named for the workspace DIRECTORY, so its network
-    /// and volumes are reclaimed by name; a sibling workspace's resources are not touched.
+    /// BOTH CLIs' Compose projects are named for the workspace DIRECTORY — the reference's
+    /// as `<basename>_devcontainer`, deacon's as `deacon_<basename>_<wsHash>_<cfgHash>`
+    /// (#564) — so both are reclaimed by this one name marker; a sibling workspace's
+    /// resources are not touched.
+    ///
+    /// deacon's side is the part #564 changed. Its pre-#564 name (`deacon_<wsHash>_<cfgHash>`,
+    /// the fourth listing line) carries no marker at all and leaked past this sweep; the
+    /// stem is what brings it in range.
     #[test]
     fn compose_leftovers_select_this_workspace_only() {
         let listing = "\
@@ -422,6 +435,8 @@ deacon-conf-aaaaaa_devcontainer_default
 deacon-conf-bbbbbb_devcontainer_default
 deacon-conf-aaaaaa_devcontainer_app-data
 deacon_1444def5_d0eb6f3d_default
+deacon_deacon-conf-aaaaaa_1444def5_d0eb6f3d_default
+deacon_deacon-conf-bbbbbb_1444def5_d0eb6f3d_default
 host
 
 ";
@@ -431,8 +446,14 @@ host
             vec![
                 "deacon-conf-aaaaaa_devcontainer_default",
                 "deacon-conf-aaaaaa_devcontainer_app-data",
+                "deacon_deacon-conf-aaaaaa_1444def5_d0eb6f3d_default",
             ],
-            "both the network and the volume of THIS workspace's project are selected"
+            "the reference's AND deacon's project resources for THIS workspace are selected"
+        );
+        assert!(
+            !mine.contains(&"deacon_1444def5_d0eb6f3d_default"),
+            "the pre-#564 hash-only name carries no workspace marker, so it is out of reach \
+             of a name sweep — recorded here because that is exactly the leak the stem closes"
         );
         assert!(
             !mine.iter().any(|n| n.contains("bbbbbb")),
@@ -447,7 +468,7 @@ host
         // leak in place behind a sweep that appears to work.
         assert_eq!(
             compose_leftovers(listing, "deacon-conf-AAAAAA").len(),
-            2,
+            3,
             "the project name is lowercased; the workspace basename is not"
         );
     }

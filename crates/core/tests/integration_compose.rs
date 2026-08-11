@@ -2,7 +2,7 @@
 //!
 //! These tests verify Docker Compose integration with minimal alpine services.
 
-use deacon_core::compose::ComposeManager;
+use deacon_core::compose::{ComposeManager, sanitize_project_stem};
 use deacon_core::config::{ConfigLoader, DevContainerConfig};
 use deacon_core::container::ContainerIdentity;
 use serde_json::json;
@@ -11,20 +11,32 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 /// Helper to compute the expected compose project name:
-/// `deacon_<workspace_hash>_<config_hash>` (#265) — the same two hashes
-/// `ContainerIdentity` computes (mirroring `container_name`), so sibling
-/// devcontainers under one git root never collide. Computed via the same
-/// public constructor so this test doesn't duplicate the hash algorithm; the
-/// config must be the SAME one passed to `create_project`, since the
-/// config_hash now participates.
+/// `deacon_<stem>_<workspace_hash>_<config_hash>` (#265 for the namespacing, #564 for the
+/// readable stem) — the sanitized workspace-folder basename in front of the same two
+/// hashes `ContainerIdentity` computes (mirroring `container_name`), so sibling
+/// devcontainers under one git root never collide and `docker compose ps` still says
+/// which folder a project belongs to. Computed via the same public constructor and the
+/// same public sanitizer so this test duplicates neither the hash algorithm nor the
+/// stem rules; the config must be the SAME one passed to `create_project`, since the
+/// config_hash participates.
 fn expected_project_name_for_config(
     base_path: &std::path::Path,
     config: &DevContainerConfig,
 ) -> String {
     let identity = ContainerIdentity::new(base_path, config);
+    let stem = base_path
+        .file_name()
+        .map(|n| sanitize_project_stem(&n.to_string_lossy()))
+        .unwrap_or_default();
+    if stem.is_empty() {
+        return format!(
+            "deacon_{}_{}",
+            identity.workspace_hash, identity.config_hash
+        );
+    }
     format!(
-        "deacon_{}_{}",
-        identity.workspace_hash, identity.config_hash
+        "deacon_{}_{}_{}",
+        stem, identity.workspace_hash, identity.config_hash
     )
 }
 
