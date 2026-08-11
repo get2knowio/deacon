@@ -76,13 +76,26 @@ kind of thing worth calling out in a blog post or on the project page.
 
 ## Robustness
 
-- **Valid compose project names where the reference fails.** Both derive the compose
-  project name from the workspace folder; the reference emits it verbatim, so a folder
-  like `-myproj` produces an invalid `--project-name` that `docker compose` rejects
-  (exit 1). Deacon trims leading separators / falls back to a safe stem, so the same
-  folder still comes up. (Normal folders produce the identical `<folder>_devcontainer`
-  name as the reference.) (`crates/core/src/compose.rs`.) Recorded in the conformance
-  registry as behavior `bhv-compose-project-name-robust`.
+- **Valid, isolated, readable compose project names where the reference fails.** Both
+  derive the compose project name from the workspace folder; the reference emits it
+  verbatim as `<folder>_devcontainer`, so a folder like `-myproj` produces an invalid
+  `--project-name` that `docker compose` rejects (exit 1). Deacon derives
+  `deacon_<folder>_<workspaceHash>_<configHash>` — the folder stem sanitized to Compose's
+  `[a-z0-9][a-z0-9_-]*`, falling back to the hash-only `deacon_<workspaceHash>_<configHash>`
+  when nothing survives sanitization — so the same folder still comes up.
+  **Deacon's derived name is deliberately NOT the reference's** (issue #265): a shared name
+  let `devcontainer up` discover a deacon-owned compose project and then die looking for a
+  `vsc-*` image deacon never builds. The stem in front of the hashes (issue #564) is what
+  keeps the name readable in `docker compose ps` while that isolation holds by
+  construction; both hashes are load-bearing (`workspaceHash` separates two checkouts
+  sharing a basename, `configHash` is what makes an edited configuration a new generation).
+  An explicit `COMPOSE_PROJECT_NAME` in a sibling `.env` or a compose file's top-level
+  `name:` still wins verbatim, ahead of any derivation.
+  Because a project rename orphans the previous project's named volumes (compose prefixes
+  them with the project name), `deacon up` emits a one-time diagnostic when it finds
+  volumes for this workspace under an older deacon project name or under a
+  `<folder>_devcontainer` project. (`crates/core/src/compose.rs`.) Recorded in the
+  conformance registry as behavior `bhv-compose-project-name-robust`.
 
 ## Security
 

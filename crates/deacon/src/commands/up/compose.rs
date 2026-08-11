@@ -100,6 +100,35 @@ pub(crate) async fn execute_compose_up(
     let config_dir = config_path.parent().unwrap_or(workspace_folder);
     let mut project = compose_manager.create_project(config, workspace_folder, config_dir)?;
 
+    // #564. Compose prefixes every named volume with the project name, so any change to
+    // the project name leaves the previous project's volumes intact but INVISIBLE to the
+    // new project. Two transitions produce that silently: an older deacon's
+    // `deacon_<wsHash>_<cfgHash>` (the format before the workspace stem was prepended),
+    // and a `<folder>_devcontainer` project someone arrived with from the reference CLI.
+    // The container side is already covered by `stop_superseded_containers`; volumes are
+    // deliberately never swept because they hold data, which is precisely why the
+    // situation has to be said out loud rather than left for an unexplained empty
+    // database to explain later.
+    //
+    // Emitted here — before `docker compose up` and before the reconnect branch below —
+    // so it is reported on every shape of this call exactly once, and reported even if
+    // the provisioning that follows fails. Detection is a daemon query with no
+    // suppression state: the condition clears itself the moment the old volumes are gone,
+    // and persisting a "already told you" marker would risk the single emission landing
+    // in a run whose output the user never read.
+    let superseded_projects = compose_manager
+        .detect_superseded_volume_projects(
+            &project.name,
+            &identity.workspace_hash,
+            workspace_folder,
+        )
+        .await;
+    if let Some(advice) =
+        deacon_core::compose::superseded_project_advice(&superseded_projects, &project.name)
+    {
+        warn!("{advice}");
+    }
+
     // Add env files from CLI args
     project.env_files = args.env_file.clone();
 
@@ -632,7 +661,8 @@ pub(crate) async fn execute_compose_up(
     let primary_container_id =
         resolve_primary_container_id_with_retry(&compose_manager, &project).await?;
 
-    // #371, compose half. The project name is `deacon_<workspace_hash>_<config_hash>`
+    // #371, compose half. The project name is
+    // `deacon_<stem>_<workspace_hash>_<config_hash>`
     // (`compose::derive_project_name`), so an edited configuration names a WHOLE NEW
     // project and the previous one's containers keep running exactly as on the
     // single-container path. Reaching here means we started a project rather than

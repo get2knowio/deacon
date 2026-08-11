@@ -13,6 +13,9 @@
 //! - #460: the compose path runs the FULL lifecycle phase set, in every command
 //!   form, and honors `--skip-post-create` / `--skip-non-blocking-commands` the
 //!   way the single-container path does.
+//! - #564: the compose project name carries the sanitized workspace-folder stem,
+//!   and `up` says so out loud when this workspace still has named volumes under
+//!   a superseded project name (an older deacon's, or the reference CLI's).
 
 mod support;
 
@@ -62,6 +65,22 @@ fn up_container_id(up_output: &std::process::Output) -> Option<String> {
     })?;
     value
         .get("containerId")?
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+/// Extract the derived compose project name from `deacon up`'s JSON result.
+fn up_project_name(up_output: &std::process::Output) -> Option<String> {
+    let stdout = String::from_utf8_lossy(&up_output.stdout);
+    let trimmed = stdout.trim();
+    let value: Value = serde_json::from_str(trimmed).ok().or_else(|| {
+        trimmed
+            .rfind('{')
+            .and_then(|i| serde_json::from_str(&trimmed[i..]).ok())
+    })?;
+    value
+        .get("composeProjectName")?
         .as_str()
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
@@ -878,5 +897,166 @@ fn test_compose_up_collects_image_metadata_and_config_hooks_for_the_same_phase()
         "root",
         "remoteUser stays 'Last value wins' on the compose path: the config's \
          `root` must beat the image metadata's `metauser`"
+    );
+}
+
+/// #564: `up` names the transition to the readable compose project name out loud.
+///
+/// Compose prefixes every named volume with the project name, so renaming the project
+/// leaves the previous project's volumes intact but INVISIBLE to the new one. Two
+/// transitions produce that silently — an older deacon's `deacon_<wsHash>_<cfgHash>`
+/// project, and a `<folder>_devcontainer` project someone arrived with from the reference
+/// CLI — and neither is covered by `stop_superseded_containers`, which stops CONTAINERS
+/// and deliberately never touches volumes.
+///
+/// Both are staged here as real Docker volumes carrying Compose's own
+/// `com.docker.compose.project` label, which is the handle the detection reads: no volume
+/// NAME is parsed, so the assertion is about the label the daemon reports and not about
+/// how either tool spells a resource. The second `up` reconnects rather than
+/// re-provisions (same configuration), which is the point — the diagnostic is emitted
+/// before that branch, so it is reported on every shape of the call.
+#[test]
+fn test_compose_up_reports_superseded_project_volumes() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_compose_up_reports_superseded_project_volumes: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let workspace = temp_dir.path();
+    let _down = DeaconDownGuard(workspace);
+
+    let compose_yml = r#"services:
+  app:
+    image: alpine:3.18
+    command: ["sleep", "infinity"]
+"#;
+    let devcontainer_json = r#"{
+  "name": "Compose Superseded Project",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace"
+}"#;
+    fs::write(workspace.join("docker-compose.yml"), compose_yml).unwrap();
+    fs::create_dir(workspace.join(".devcontainer")).unwrap();
+    fs::write(
+        workspace.join(".devcontainer/devcontainer.json"),
+        devcontainer_json,
+    )
+    .unwrap();
+
+    // First `up` establishes the project and, with it, the workspace hash — read out of
+    // deacon's own reported name rather than recomputed, so the test cannot drift from
+    // the derivation it is checking.
+    let first = support::deacon_command()
+        .current_dir(workspace)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(workspace)
+        .arg("--skip-post-create")
+        .output()
+        .expect("deacon up should run");
+    assert!(
+        first.status.success(),
+        "first up failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let project = up_project_name(&first).expect("up should report a composeProjectName");
+
+    let fields: Vec<&str> = project.split('_').collect();
+    assert_eq!(
+        fields.len(),
+        4,
+        "expected deacon_<stem>_<wsHash>_<cfgHash>, got {project}"
+    );
+    assert_eq!(fields[0], "deacon");
+    let workspace_hash = fields[2];
+
+    // The stem is the sanitized workspace basename. `tempfile` names its directories
+    // `.tmpAbC123`, so this also exercises the leading-dot trim and the lowercasing on a
+    // real path rather than only in a unit test.
+    let basename = workspace
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let expected_stem = deacon_core::compose::sanitize_project_stem(&basename);
+    assert!(
+        !expected_stem.is_empty(),
+        "a tempfile basename must sanitize to something"
+    );
+    assert_eq!(fields[1], expected_stem, "stem of {project}");
+
+    // Stage both superseded projects: volumes carrying the Compose project label of a
+    // pre-#564 deacon project for THIS workspace, and of a reference-CLI project for it.
+    let legacy_project = format!("deacon_{workspace_hash}_0badc0de");
+    let reference_project = format!("{expected_stem}_devcontainer");
+    let staged = [
+        (
+            format!("{legacy_project}_probe-data"),
+            legacy_project.clone(),
+        ),
+        (
+            format!("{reference_project}_probe-data"),
+            reference_project.clone(),
+        ),
+    ];
+    for (volume, owner) in &staged {
+        let created = std::process::Command::new("docker")
+            .args([
+                "volume",
+                "create",
+                "--label",
+                &format!("com.docker.compose.project={owner}"),
+                volume,
+            ])
+            .output()
+            .expect("docker volume create should run");
+        assert!(
+            created.status.success(),
+            "docker volume create failed: {}",
+            String::from_utf8_lossy(&created.stderr)
+        );
+    }
+
+    let second = support::deacon_command()
+        .current_dir(workspace)
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(workspace)
+        .arg("--skip-post-create")
+        .output()
+        .expect("deacon up should run");
+
+    // Remove the staged volumes before asserting, so a failed assertion cannot leak them.
+    for (volume, _) in &staged {
+        let _ = std::process::Command::new("docker")
+            .args(["volume", "rm", "-f", volume])
+            .output();
+    }
+
+    assert!(
+        second.status.success(),
+        "second up failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(
+        stderr.contains(&legacy_project),
+        "the diagnostic must name the older deacon project. stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(&reference_project),
+        "the diagnostic must name the reference CLI's project. stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(&project),
+        "the diagnostic must name the project deacon WILL use. stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("prefixes named volumes with the project name"),
+        "the diagnostic must say WHY the old volumes are invisible. stderr:\n{stderr}"
     );
 }
