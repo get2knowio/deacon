@@ -6,21 +6,16 @@
 //! - `apply_user_mapping` - Apply user mapping configuration
 //! - `handle_lockfile_post_build` - Write/compare lockfile after a feature build
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::errors::DeaconError;
-use deacon_core::lockfile::{Lockfile, get_lockfile_path, lockfile_text_matches, write_lockfile};
-use std::io;
+use deacon_core::lockfile::Lockfile;
 use std::path::Path;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, instrument, warn};
+
+use crate::commands::shared::lockfile::{LockfilePolicy, apply_lockfile_policy};
 
 use super::args::UpArgs;
-
-/// Linux `EROFS` errno value — "Read-only file system". Used in the
-/// best-effort lockfile write path because `io::ErrorKind::ReadOnlyFilesystem`
-/// is unavailable on MSRV 1.82 (stabilized in 1.83).
-#[cfg(unix)]
-const EROFS: i32 = 30;
 
 /// Resolve the container workspace folder reported to callers.
 ///
@@ -294,21 +289,14 @@ pub(crate) async fn apply_user_mapping<R: deacon_core::docker::Docker + Send + S
     Ok(())
 }
 
-/// Apply the lockfile policy after a feature build completes.
+/// Apply the lockfile policy after a Feature build completes.
 ///
-/// Dispatches on the CLI flags (`--no-lockfile`, `--frozen-lockfile`,
-/// deprecated `--experimental-lockfile <PATH>`):
-///
-/// - `--no-lockfile`: skip entirely.
-/// - `--frozen-lockfile` (or `--experimental-lockfile` set): serialize the
-///   freshly-built lockfile, byte-compare it to the on-disk file, and fail
-///   with the upstream-aligned `"Lockfile does not match."` /
-///   `"Lockfile does not exist."` strings if they differ.
-/// - Default: write the freshly-built lockfile to disk.
-///
-/// On read-only workspaces (EROFS/EACCES on write), emit a WARN and continue
-/// so a read-only mount doesn't break `up`. Frozen mode never reaches this
-/// branch — it only reads — so this fallback is write-side only.
+/// A thin adapter over the shared decision in
+/// [`crate::commands::shared::lockfile`], which `build` reaches through the
+/// same door (#556). All the behavior — skip / semantic compare / best-effort
+/// write, and the upstream-aligned `"Lockfile does not exist."` /
+/// `"Lockfile does not match."` strings — lives there, so a lockfile's fate
+/// never depends on which subcommand resolved the Features.
 ///
 /// Mirrors upstream `writeLockfile` in `devcontainers/cli`
 /// `src/spec-configuration/lockfile.ts` (`PR #1212`).
@@ -317,126 +305,9 @@ pub(crate) async fn handle_lockfile_post_build(
     config_path: &Path,
     lockfile: &Lockfile,
 ) -> Result<()> {
-    if args.no_lockfile {
-        debug!("--no-lockfile set; skipping lockfile write/compare");
-        return Ok(());
-    }
-
-    let lockfile_path = get_lockfile_path(config_path);
-
-    if args.frozen_lockfile {
-        compare_lockfile_frozen(&lockfile_path, lockfile).await
-    } else {
-        write_lockfile_best_effort(&lockfile_path, lockfile).await
-    }
-}
-
-/// Frozen-mode comparison: compare the on-disk lockfile to the freshly-resolved
-/// one **as documents**, not as bytes.
-///
-/// `--frozen-lockfile` asks "would resolution change what this file says?", and
-/// key order, indentation and a trailing newline are serialisation choices
-/// rather than content. Byte-comparing answered a different question and made
-/// deacon reject every lockfile the reference CLI writes (#557); the reference
-/// normalises before comparing for exactly this reason and carries the test
-/// `frozen lockfile matches despite formatting differences`.
-///
-/// A missing file, unparseable text, or a genuine content difference all still
-/// fail with the upstream-aligned summary string.
-async fn compare_lockfile_frozen(lockfile_path: &Path, lockfile: &Lockfile) -> Result<()> {
-    let actual_text = match tokio::fs::read_to_string(lockfile_path).await {
-        Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Err(
-                DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                    message: format!(
-                        "Lockfile does not exist.\nExpected at '{}'.\n\
-                         Run without --frozen-lockfile to generate a lockfile, or \
-                         generate one with `deacon upgrade`.",
-                        lockfile_path.display()
-                    ),
-                })
-                .into(),
-            );
-        }
-        Err(e) => {
-            return Err(anyhow::Error::from(e).context(format!(
-                "Failed to read existing lockfile at '{}'",
-                lockfile_path.display()
-            )));
-        }
-    };
-
-    if !lockfile_text_matches(&actual_text, lockfile) {
-        return Err(
-            DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                message: format!(
-                    "Lockfile does not match.\n\
-                     The on-disk lockfile at '{}' differs from the freshly-resolved feature set.\n\
-                     Run without --frozen-lockfile to update the lockfile, or run `deacon upgrade`.",
-                    lockfile_path.display()
-                ),
-            })
-            .into(),
-        );
-    }
-
-    info!(
-        "Lockfile up-to-date: '{}' matches the resolved feature set",
-        lockfile_path.display()
-    );
+    let policy = LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile);
+    apply_lockfile_policy(policy, config_path, lockfile).await?;
     Ok(())
-}
-
-/// Best-effort write: succeeds normally, but downgrades EROFS/EACCES to WARN
-/// so a read-only workspace (e.g. CI mount, container with a read-only volume)
-/// doesn't break `up`. All other write errors propagate.
-async fn write_lockfile_best_effort(lockfile_path: &Path, lockfile: &Lockfile) -> Result<()> {
-    match write_lockfile(lockfile_path, lockfile, true).await {
-        Ok(()) => {
-            debug!("Wrote lockfile to '{}'", lockfile_path.display());
-            Ok(())
-        }
-        Err(e) => {
-            let e = anyhow::Error::from(e);
-            if is_readonly_fs_error(&e) {
-                warn!(
-                    path = %lockfile_path.display(),
-                    error = %e,
-                    "Lockfile write skipped (read-only workspace); continuing without persisting lockfile"
-                );
-                Ok(())
-            } else {
-                Err(e).with_context(|| {
-                    format!("Failed to write lockfile to '{}'", lockfile_path.display())
-                })
-            }
-        }
-    }
-}
-
-/// Inspect an anyhow error chain for an `io::Error` whose kind indicates a
-/// read-only / permission-denied filesystem.
-///
-/// `EACCES` surfaces as `io::ErrorKind::PermissionDenied`. `EROFS` is checked
-/// via `raw_os_error()` because the dedicated `ErrorKind::ReadOnlyFilesystem`
-/// variant was stabilized in Rust 1.83 and our MSRV is 1.82.
-fn is_readonly_fs_error(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        let Some(io_err) = cause.downcast_ref::<io::Error>() else {
-            return false;
-        };
-        if io_err.kind() == io::ErrorKind::PermissionDenied {
-            return true;
-        }
-        #[cfg(unix)]
-        {
-            if io_err.raw_os_error() == Some(EROFS) {
-                return true;
-            }
-        }
-        false
-    })
 }
 
 #[cfg(test)]
@@ -472,7 +343,10 @@ mod remote_workspace_folder_tests {
 #[cfg(test)]
 mod lockfile_post_build_tests {
     use super::*;
-    use deacon_core::lockfile::{LockfileFeature, canonical_lockfile_json, read_lockfile};
+    use deacon_core::lockfile::{
+        LockfileFeature, canonical_lockfile_json, get_lockfile_path, lockfile_text_matches,
+        read_lockfile, write_lockfile,
+    };
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -720,20 +594,6 @@ mod lockfile_post_build_tests {
             "expected upstream-aligned summary, got: {:#}",
             err
         );
-    }
-
-    #[test]
-    fn is_readonly_fs_error_detects_permission_denied() {
-        let inner = io::Error::from(io::ErrorKind::PermissionDenied);
-        let err: anyhow::Error = anyhow::anyhow!(inner).context("write failed");
-        assert!(is_readonly_fs_error(&err));
-    }
-
-    #[test]
-    fn is_readonly_fs_error_ignores_other_io_errors() {
-        let inner = io::Error::from(io::ErrorKind::NotFound);
-        let err: anyhow::Error = anyhow::anyhow!(inner).context("read failed");
-        assert!(!is_readonly_fs_error(&err));
     }
 }
 

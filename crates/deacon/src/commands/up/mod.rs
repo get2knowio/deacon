@@ -44,6 +44,7 @@ pub use result::{EffectiveMount, UpContainerInfo, UpError, UpResult, UpSuccess};
 #[allow(unused_imports)]
 pub use crate::commands::shared::NormalizedRemoteEnv;
 
+use crate::commands::shared::lockfile::{LockfilePolicy, ensure_frozen_lockfile_usable};
 use crate::commands::shared::{
     ConfigLoadArgs, ConfigLoadResult, canonical_reconnect_identity, load_config,
 };
@@ -53,9 +54,6 @@ use deacon_core::container::ContainerSelector;
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::host_ca::{CorporateCaSet, HOST_CA_BUNDLE_PATH, discover_corporate_set};
-use deacon_core::lockfile::{
-    LockfileValidationResult, get_lockfile_path, read_lockfile, validate_lockfile_against_config,
-};
 use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::state::StateManager;
@@ -232,66 +230,15 @@ pub(crate) async fn execute_up_with_runtime(
     check_for_disallowed_features(config.features())?;
     debug!("Validated features - no disallowed features found");
 
-    // Frozen-lockfile pre-build validation (graduated in 1.0).
-    // Skip lockfile interaction entirely when --no-lockfile is set.
-    if !args.no_lockfile && args.frozen_lockfile {
-        let lockfile_path = get_lockfile_path(&config_path);
-
-        if args.frozen_lockfile {
-            info!(
-                "Frozen lockfile mode enabled: validating features against '{}'",
-                lockfile_path.display()
-            );
-        } else {
-            debug!(
-                "Lockfile validation enabled: path={}",
-                lockfile_path.display()
-            );
-        }
-
-        // Read the lockfile (may be None if missing)
-        let lockfile = read_lockfile(&lockfile_path).await.with_context(|| {
-            format!(
-                "Failed to read lockfile at '{}'. \
-                 The file may be corrupted or contain invalid JSON. \
-                 To regenerate, remove the file and run without --frozen-lockfile.",
-                lockfile_path.display()
-            )
-        })?;
-
-        // Validate lockfile against config features
-        let validation_result =
-            validate_lockfile_against_config(lockfile.as_ref(), config.features(), &lockfile_path);
-
-        match &validation_result {
-            LockfileValidationResult::Matched => {
-                if args.frozen_lockfile {
-                    info!(
-                        "Lockfile validation passed: all features match '{}'",
-                        lockfile_path.display()
-                    );
-                } else {
-                    debug!("Lockfile validation passed");
-                }
-            }
-            _ => {
-                let error_message = validation_result.format_error();
-
-                if args.frozen_lockfile {
-                    // Frozen mode: fail immediately on any mismatch (exit code 1)
-                    return Err(DeaconError::Config(
-                        deacon_core::errors::ConfigError::Validation {
-                            message: error_message,
-                        },
-                    )
-                    .into());
-                } else {
-                    // Non-frozen lockfile mode: warn but continue
-                    warn!("{}", error_message);
-                }
-            }
-        }
-    }
+    // Frozen-lockfile pre-build refusal (graduated in 1.0). Shared with `build`
+    // (#556) so both subcommands refuse at the same point, with the same
+    // upstream-aligned strings, and both leave the workspace untouched.
+    ensure_frozen_lockfile_usable(
+        LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
+        &config_path,
+        config.features(),
+    )
+    .await?;
 
     // T006: Prepare build options from CLI args for threading through Dockerfile and feature builds
     let build_options = build_options_from_args(&args);
