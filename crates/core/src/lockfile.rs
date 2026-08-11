@@ -312,24 +312,12 @@ pub async fn write_lockfile(path: &Path, lockfile: &Lockfile, force_init: bool) 
             })?;
     }
 
-    // Convert to serde_json::Value for deterministic ordering
-    let mut value = serde_json::to_value(lockfile).map_err(|source| LockfileError::Json {
+    // Serialize to the one canonical form shared by every writer (see
+    // `canonical_lockfile_json`).
+    let json = canonical_lockfile_json(lockfile).map_err(|source| LockfileError::Json {
         path: path.to_path_buf(),
         source,
     })?;
-
-    // Sort all object keys recursively for stable JSON output
-    sort_json_object(&mut value);
-
-    // Serialize with pretty printing (2-space indentation) and a trailing
-    // newline to match upstream `devcontainers/cli`'s `writeLockfile` output
-    // (`JSON.stringify(..., 2) + '\n'`). Byte-identical output keeps the
-    // `--frozen-lockfile` content comparison stable across implementations.
-    let mut json = serde_json::to_string_pretty(&value).map_err(|source| LockfileError::Json {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    json.push('\n');
 
     // Atomic write: write to temp file in same directory, then rename
     // Using same directory ensures same filesystem for atomic rename on all platforms
@@ -545,27 +533,91 @@ fn detect_dependency_cycles(lockfile: &Lockfile) -> Result<()> {
     Ok(())
 }
 
-/// Recursively sort all keys in a JSON object for deterministic output
-fn sort_json_object(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            // Convert to BTreeMap for sorted keys
-            let sorted: std::collections::BTreeMap<_, _> = map.iter().collect();
-            *map = sorted
-                .into_iter()
-                .map(|(k, v)| {
-                    let mut v = v.clone();
-                    sort_json_object(&mut v);
-                    (k.clone(), v)
-                })
-                .collect();
-        }
-        serde_json::Value::Array(arr) => {
-            for item in arr {
-                sort_json_object(item);
+/// The lockfile's canonical JSON *document*, before serialisation.
+///
+/// This is the single definition of lockfile shape in the codebase. Every
+/// writer (`write_lockfile`, `up`'s `--frozen-lockfile` comparison, `upgrade
+/// --dry-run`) goes through it, so a lockfile's bytes never depend on which
+/// subcommand produced it.
+///
+/// Two ordering decisions, both transcribed from the reference CLI's
+/// `generateLockfile` / `writeLockfile` (`src/spec-configuration/lockfile.ts`,
+/// minified as `wQ`/`mQ` in `dist/spec-node/devContainersSpecCLI.js` at
+/// `@devcontainers/cli@0.87.0`):
+///
+/// 1. **Entry keys are `version, resolved, integrity, dependsOn`** — the order
+///    the reference builds its entry object literal in, and the order every
+///    example in `parity/spec/113500f4/devcontainer-lockfile.md` uses. This is
+///    simply `LockfileFeature`'s declaration order, preserved because
+///    `serde_json` is built with `preserve_order`. Do NOT re-sort it: writing
+///    the keys alphabetically is what made deacon reject every lockfile the
+///    reference CLI writes (#557).
+/// 2. **Feature ids are sorted.** The reference sorts them
+///    (`.sort((a, b) => a.id.localeCompare(b.id))`) before inserting into the
+///    `features` map. We sort by Unicode code point, which agrees with
+///    `localeCompare` for every legal lowercase OCI feature reference we have
+///    measured (`ghcr.io/…/name[:tag]` over `[a-z0-9./-]`). The two collations
+///    can differ for ids containing `_`, or where one id's name is a digit-
+///    extension of another's at the `:` boundary; matching ICU exactly would
+///    pin us to one ICU version *and* one host locale, which is strictly worse
+///    than a stable code-point order.
+fn canonical_lockfile_value(
+    lockfile: &Lockfile,
+) -> std::result::Result<serde_json::Value, serde_json::Error> {
+    let mut value = serde_json::to_value(lockfile)?;
+
+    // `Lockfile::features` is a `HashMap`, so `to_value` hands back an
+    // arbitrary key order. Sort it; leave every nested object (the entries)
+    // exactly as the struct declared them.
+    if let Some(features) = value.get_mut("features").and_then(|v| v.as_object_mut()) {
+        let mut ids: Vec<String> = features.keys().cloned().collect();
+        ids.sort();
+        let mut sorted = serde_json::Map::with_capacity(ids.len());
+        for id in ids {
+            if let Some(entry) = features.remove(&id) {
+                sorted.insert(id, entry);
             }
         }
-        _ => {}
+        *features = sorted;
+    }
+
+    Ok(value)
+}
+
+/// The exact bytes `write_lockfile` puts on disk, as a `String`.
+///
+/// 2-space pretty-print plus a trailing newline, matching the reference CLI's
+/// `JSON.stringify(lockfile, null, 2) + '\n'`. See
+/// [`canonical_lockfile_value`] for the ordering rules.
+pub fn canonical_lockfile_json(
+    lockfile: &Lockfile,
+) -> std::result::Result<String, serde_json::Error> {
+    let value = canonical_lockfile_value(lockfile)?;
+    let mut json = serde_json::to_string_pretty(&value)?;
+    json.push('\n');
+    Ok(json)
+}
+
+/// Compare an on-disk lockfile's raw text against the freshly-resolved
+/// lockfile **as documents**, not as bytes.
+///
+/// This is what `--frozen-lockfile` needs to ask: *would resolution change
+/// what this file says?* Key order, indentation and a trailing newline are
+/// serialisation choices, not content, so a lockfile written by the reference
+/// CLI — or by an editor that reformatted it — still matches. The reference
+/// normalises the same way before comparing (`JSON.stringify(JSON.parse(raw),
+/// null, 2) + '\n'`), and carries a dedicated test for it, `frozen lockfile
+/// matches despite formatting differences`.
+///
+/// Text that is not valid JSON never matches, mirroring the reference's
+/// `try { … } catch {}` leaving its normalised form undefined.
+pub fn lockfile_text_matches(on_disk: &str, lockfile: &Lockfile) -> bool {
+    let Ok(actual) = serde_json::from_str::<serde_json::Value>(on_disk) else {
+        return false;
+    };
+    match canonical_lockfile_value(lockfile) {
+        Ok(expected) => actual == expected,
+        Err(_) => false,
     }
 }
 
@@ -870,6 +922,184 @@ pub fn validate_lockfile_against_config(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// Build a lockfile from `(id, version, digest_hex)` triples.
+    fn lockfile_of(entries: &[(&str, &str, &str)]) -> Lockfile {
+        let mut features = HashMap::new();
+        for (id, version, digest) in entries {
+            let repo = id.rsplit_once(':').map(|(r, _)| r).unwrap_or(id);
+            features.insert(
+                (*id).to_string(),
+                LockfileFeature {
+                    version: (*version).to_string(),
+                    resolved: format!("{}@sha256:{}", repo, digest),
+                    integrity: format!("sha256:{}", digest),
+                    depends_on: None,
+                },
+            );
+        }
+        Lockfile { features }
+    }
+
+    /// The reference CLI writes a Feature entry as `version, resolved,
+    /// integrity` — the order its `generateLockfile` object literal declares
+    /// and the order every example in `devcontainer-lockfile.md` uses.
+    /// deacon alphabetised them, which is why it rejected every lockfile the
+    /// reference wrote (#557). Assert on the TEXT, since the whole claim is
+    /// about serialisation.
+    #[test]
+    fn canonical_json_emits_spec_entry_key_order() {
+        let lockfile = lockfile_of(&[("ghcr.io/devcontainers/features/git:1.3.2", "1.3.2", "ab")]);
+        let json = canonical_lockfile_json(&lockfile).expect("canonicalize");
+
+        let version = json.find("\"version\"").expect("version key");
+        let resolved = json.find("\"resolved\"").expect("resolved key");
+        let integrity = json.find("\"integrity\"").expect("integrity key");
+        assert!(
+            version < resolved && resolved < integrity,
+            "expected `version, resolved, integrity`, got:\n{json}"
+        );
+    }
+
+    /// `dependsOn` trails the three required keys, matching the reference's
+    /// entry literal.
+    #[test]
+    fn canonical_json_puts_depends_on_last() {
+        let mut lockfile = lockfile_of(&[("ghcr.io/o/f:1", "1.0.0", "cd")]);
+        lockfile
+            .features
+            .get_mut("ghcr.io/o/f:1")
+            .expect("entry")
+            .depends_on = Some(vec!["ghcr.io/o/dep:1".to_string()]);
+        let json = canonical_lockfile_json(&lockfile).expect("canonicalize");
+
+        let integrity = json.find("\"integrity\"").expect("integrity key");
+        let depends_on = json.find("\"dependsOn\"").expect("dependsOn key");
+        assert!(
+            integrity < depends_on,
+            "expected `dependsOn` last, got:\n{json}"
+        );
+    }
+
+    /// The reference sorts Feature ids before inserting them into the map, so
+    /// the file is stable regardless of declaration order. `features` is a
+    /// `HashMap`, so without the explicit sort this output would be random.
+    #[test]
+    fn canonical_json_sorts_feature_ids() {
+        let lockfile = lockfile_of(&[
+            ("ghcr.io/devcontainers/features/node:1", "1.7.1", "01"),
+            ("ghcr.io/devcontainers/features/git-lfs:1", "1.2.5", "02"),
+            (
+                "ghcr.io/devcontainers/features/common-utils:2",
+                "2.5.9",
+                "03",
+            ),
+            ("ghcr.io/devcontainers/features/git:1.3.2", "1.3.2", "04"),
+        ]);
+        let json = canonical_lockfile_json(&lockfile).expect("canonicalize");
+
+        let order: Vec<&str> = ["common-utils:2", "git-lfs:1", "git:1.3.2", "node:1"].to_vec();
+        let positions: Vec<usize> = order
+            .iter()
+            .map(|id| json.find(id).unwrap_or_else(|| panic!("missing {id}")))
+            .collect();
+        assert!(
+            positions.windows(2).all(|w| w[0] < w[1]),
+            "feature ids not in sorted order; got:\n{json}"
+        );
+    }
+
+    /// deacon's bytes MUST equal the reference CLI's bytes for the same input.
+    /// The expectation is not hand-written: it is
+    /// `parity/fixtures/fx-upstream-lockfile-frozen/.devcontainer-lock.json`,
+    /// which is the file the reference wrote for that fixture at oracle
+    /// 0.87.0, copied verbatim (see the fixture's UPSTREAM.md). Pinned `-text`
+    /// in `.gitattributes`, so its bytes survive a Windows checkout.
+    #[test]
+    fn canonical_json_is_byte_identical_to_the_reference_output() {
+        const DIGEST: &str = "63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014d";
+        let lockfile =
+            lockfile_of(&[("ghcr.io/devcontainers/features/git:1.3.2", "1.3.2", DIGEST)]);
+
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../parity/fixtures/fx-upstream-lockfile-frozen/.devcontainer-lock.json");
+        let reference_bytes = std::fs::read_to_string(&fixture)
+            .unwrap_or_else(|e| panic!("read {}: {e}", fixture.display()));
+
+        assert_eq!(
+            canonical_lockfile_json(&lockfile).expect("canonicalize"),
+            reference_bytes,
+            "deacon's lockfile bytes diverged from the reference CLI's own output"
+        );
+    }
+
+    /// `--frozen-lockfile` asks whether resolution would change what the file
+    /// SAYS. Serialisation choices the reference (or an editor) happens to
+    /// make must not be reported as a mismatch (#557).
+    #[test]
+    fn text_matches_across_formatting_differences() {
+        let lockfile = lockfile_of(&[("ghcr.io/devcontainers/features/git:1.3.2", "1.3.2", "ef")]);
+        let canonical = canonical_lockfile_json(&lockfile).expect("canonicalize");
+
+        // Same document, four different serialisations.
+        assert!(lockfile_text_matches(&canonical, &lockfile));
+        assert!(
+            lockfile_text_matches(canonical.trim_end(), &lockfile),
+            "stripped trailing newline must still match"
+        );
+
+        let value: serde_json::Value = serde_json::from_str(&canonical).unwrap();
+        assert!(
+            lockfile_text_matches(&serde_json::to_string(&value).unwrap(), &lockfile),
+            "minified must still match"
+        );
+
+        // Alphabetised entry keys — exactly what deacon itself wrote before
+        // this change, so old lockfiles keep validating across the rewrite.
+        let alphabetised = "{\"features\":{\"ghcr.io/devcontainers/features/git:1.3.2\":{\
+             \"integrity\":\"sha256:ef\",\
+             \"resolved\":\"ghcr.io/devcontainers/features/git@sha256:ef\",\
+             \"version\":\"1.3.2\"}}}";
+        assert!(
+            lockfile_text_matches(alphabetised, &lockfile),
+            "a lockfile deacon wrote before #557 must still validate"
+        );
+    }
+
+    /// Tolerance is about FORMATTING only — a genuine content difference, a
+    /// missing entry, an extra entry or unparseable text must all still fail.
+    #[test]
+    fn text_does_not_match_on_real_differences() {
+        let lockfile = lockfile_of(&[("ghcr.io/devcontainers/features/git:1.3.2", "1.3.2", "ef")]);
+        let canonical = canonical_lockfile_json(&lockfile).expect("canonicalize");
+
+        assert!(
+            !lockfile_text_matches(&canonical.replace("1.3.2\",", "1.3.3\","), &lockfile),
+            "a changed version must not match"
+        );
+        assert!(
+            !lockfile_text_matches("{\"features\":{}}", &lockfile),
+            "a missing entry must not match"
+        );
+        assert!(
+            !lockfile_text_matches("not json at all", &lockfile),
+            "unparseable text must not match"
+        );
+        assert!(
+            !lockfile_text_matches("", &lockfile),
+            "empty text must not match"
+        );
+
+        let extra = lockfile_of(&[
+            ("ghcr.io/devcontainers/features/git:1.3.2", "1.3.2", "ef"),
+            ("ghcr.io/devcontainers/features/node:1", "1.7.1", "ef"),
+        ]);
+        let extra_json = canonical_lockfile_json(&extra).expect("canonicalize");
+        assert!(
+            !lockfile_text_matches(&extra_json, &lockfile),
+            "an extra entry must not match"
+        );
+    }
 
     #[test]
     fn test_get_lockfile_path_normal_config() {
