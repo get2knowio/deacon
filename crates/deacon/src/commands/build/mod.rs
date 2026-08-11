@@ -7,6 +7,9 @@ pub mod result;
 
 use crate::cli::{BuildKitOption, OutputFormat};
 use crate::commands::shared::build_resolution::resolve_devcontainer_build_config;
+use crate::commands::shared::lockfile::{
+    LockfilePolicy, apply_lockfile_policy, ensure_frozen_lockfile_usable,
+};
 use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
 use anyhow::{Context, Result, anyhow};
 use deacon_core::config::DevContainerConfig;
@@ -76,16 +79,14 @@ pub struct BuildArgs {
     /// which honors `--additional-features` unconditionally.
     pub ignore_additional_features: bool,
     /// Skip lockfile generation and verification (graduated 1.0).
-    /// Currently not yet consumed by `build`'s lockfile-writing path —
-    /// PR-4c (#41) hardcoded "always write when features present". Plumb
-    /// this into `apply_features_and_lockfile` when wiring the gate.
-    #[allow(dead_code)]
+    /// Consumed via [`crate::commands::shared::lockfile::LockfilePolicy`],
+    /// the same decision `up` makes (#556).
     pub no_lockfile: bool,
     /// Require an up-to-date lockfile; fail if resolution would change it.
-    /// Same follow-up as `no_lockfile`: the byte-compare frozen behavior
-    /// lives in `up::helpers::handle_lockfile_post_build` and needs to be
-    /// lifted into a shared helper before `build` can consume it.
-    #[allow(dead_code)]
+    /// Enforced twice, mirroring the reference: a pre-build refusal when the
+    /// lockfile is missing (nothing is built and nothing is written), and a
+    /// semantic comparison against the freshly-resolved set after the Feature
+    /// layering pass (#556).
     pub frozen_lockfile: bool,
 
     /// Resolved host-CA injection activation (016). Resolved at the CLI tier
@@ -715,6 +716,19 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
             .as_object()
             .is_some_and(|obj| !obj.is_empty());
 
+    // #556: what the two lockfile flags ask for. Both were parsed and then
+    // dropped until now — `build` wrote the lockfile unconditionally, which is
+    // the precise inverse of what either flag requests.
+    let lockfile_policy = LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile);
+
+    // `--frozen-lockfile` with no lockfile on disk cannot be satisfied, so
+    // refuse here rather than after a Feature-extended image has been built.
+    // The reference refuses from its Feature-resolution pass, before the build,
+    // and leaves the workspace clean; measured at oracle 0.87.0: exit 1,
+    // `{"outcome":"error","message":"Lockfile does not exist."}`, no lockfile
+    // written.
+    ensure_frozen_lockfile_usable(lockfile_policy, &config_path, config.features()).await?;
+
     // Check cache if not forced (skip cache if pushing or exporting).
     // When features are present we deliberately skip the cache check: the
     // current `config_hash` does not include feature digests, so a cached
@@ -885,6 +899,7 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
                     &config_path,
                     host_ca_set.as_ref(),
                     args.build_output_mode,
+                    lockfile_policy,
                 )
                 .await?;
 
@@ -1569,7 +1584,6 @@ async fn execute_compose_build_with_features(
     use crate::commands::up::compose::resolve_compose_feature_image;
     use deacon_core::compose::ComposeManager;
     use deacon_core::container::ContainerIdentity;
-    use deacon_core::lockfile::{get_lockfile_path, write_lockfile};
 
     let service = config
         .service
@@ -1626,24 +1640,17 @@ async fn execute_compose_build_with_features(
         retag_image(&feature_build.image_tag, tag).await?;
     }
 
-    // Write the feature lockfile next to the config (best-effort on read-only FS).
-    let lockfile_path = get_lockfile_path(config_path);
-    match write_lockfile(&lockfile_path, &feature_build.lockfile, true).await {
-        Ok(()) => debug!("Wrote feature lockfile to '{}'", lockfile_path.display()),
-        Err(e) => {
-            let e = anyhow::Error::from(e);
-            if is_readonly_filesystem_error(&e) {
-                warn!(
-                    path = %lockfile_path.display(),
-                    error = %e,
-                    "Lockfile write skipped (read-only workspace); continuing"
-                );
-            } else {
-                return Err(e).with_context(|| {
-                    format!("Failed to write lockfile to '{}'", lockfile_path.display())
-                });
-            }
-        }
+    // Apply the lockfile policy the flags selected (#556): skip under
+    // `--no-lockfile`, compare-and-fail under `--frozen-lockfile`, otherwise
+    // write next to the config (best-effort on a read-only FS).
+    if let Some(path) = apply_lockfile_policy(
+        LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
+        config_path,
+        &feature_build.lockfile,
+    )
+    .await?
+    {
+        debug!("Wrote feature lockfile to '{}'", path.display());
     }
 
     let mut metadata = HashMap::new();
@@ -1891,15 +1898,17 @@ async fn retag_image(source: &str, target: &str) -> Result<()> {
 /// 4. Hand back a `FeatureBuildOutput` whose `lockfile` field is keyed by
 ///    the user-provided feature ID (matching upstream `generateLockfile`).
 ///
-/// The returned `Lockfile` is then written to disk via
-/// `deacon_core::lockfile::write_lockfile(force_init = true)` — same path
-/// + format as `up`'s post-build lockfile write (PR-4b). On read-only
-/// workspaces (`EROFS`/`EACCES`) the write is downgraded to a WARN so a
-/// read-only CI mount doesn't fail the build.
+/// The returned `Lockfile` is then handed to `policy` — the SAME decision `up`
+/// makes ([`crate::commands::shared::lockfile::apply_lockfile_policy`]), so the
+/// bytes on disk never depend on which subcommand resolved the Features (#556).
+/// On read-only workspaces (`EROFS`/`EACCES`) the write is downgraded to a WARN
+/// so a read-only CI mount doesn't fail the build.
 ///
-/// Returns `(new_image_id, Some(lockfile_path), resolved_features)` on success.
-/// The resolved Features are what `devcontainer.metadata` records one entry per
-/// (#436), so they travel back to the caller that stamps the label.
+/// Returns `(new_image_id, Some(lockfile_path), resolved_features)` on success;
+/// the path is `None` when the policy wrote nothing (`--no-lockfile`,
+/// `--frozen-lockfile`, or a read-only workspace). The resolved Features are
+/// what `devcontainer.metadata` records one entry per (#436), so they travel
+/// back to the caller that stamps the label.
 #[instrument(skip(config))]
 async fn apply_features_and_lockfile(
     config: &DevContainerConfig,
@@ -1908,11 +1917,11 @@ async fn apply_features_and_lockfile(
     config_path: &Path,
     host_ca_set: Option<&CorporateCaSet>,
     build_output_mode: deacon_core::build::BuildOutputMode,
+    policy: LockfilePolicy,
 ) -> Result<(String, Option<PathBuf>, Vec<ResolvedFeature>)> {
     use crate::commands::up::features_build::build_image_with_features;
     use deacon_core::build::BuildOptions;
     use deacon_core::container::ContainerIdentity;
-    use deacon_core::lockfile::{get_lockfile_path, write_lockfile};
 
     info!(
         built_image = %built_image_id,
@@ -1957,26 +1966,10 @@ async fn apply_features_and_lockfile(
         "Successfully built feature-extended image"
     );
 
-    // Write the lockfile next to the config file (spec §6 naming rule).
-    let lockfile_path = get_lockfile_path(config_path);
-    let written = match write_lockfile(&lockfile_path, &feature_build.lockfile, true).await {
-        Ok(()) => Some(lockfile_path),
-        Err(e) => {
-            let e = anyhow::Error::from(e);
-            if is_readonly_filesystem_error(&e) {
-                warn!(
-                    path = %lockfile_path.display(),
-                    error = %e,
-                    "Lockfile write skipped (read-only workspace); continuing without persisting lockfile"
-                );
-                None
-            } else {
-                return Err(e).with_context(|| {
-                    format!("Failed to write lockfile to '{}'", lockfile_path.display())
-                });
-            }
-        }
-    };
+    // Apply the lockfile policy the flags selected (#556). The default writes
+    // next to the config file (spec §6 naming rule); `--no-lockfile` writes
+    // nothing; `--frozen-lockfile` compares and fails on any difference.
+    let written = apply_lockfile_policy(policy, config_path, &feature_build.lockfile).await?;
 
     Ok((
         feature_build.image_tag,
@@ -2224,33 +2217,6 @@ async fn push_built_image(targets: &[String]) -> Result<()> {
         debug!(target = %target, "Pushed the built image");
     }
     Ok(())
-}
-
-/// Mirror of `up::helpers::is_readonly_fs_error` for build's write path. We
-/// don't share the helper today because `up::helpers` is private to `up`;
-/// a future cleanup can lift both helpers into a shared module.
-fn is_readonly_filesystem_error(err: &anyhow::Error) -> bool {
-    use std::io;
-    // Linux EROFS (28 on most arches, 30 on Linux) — checked via raw errno
-    // because `io::ErrorKind::ReadOnlyFilesystem` requires Rust 1.83 and our
-    // MSRV is 1.82.
-    #[cfg(unix)]
-    const EROFS: i32 = 30;
-    err.chain().any(|cause| {
-        let Some(io_err) = cause.downcast_ref::<io::Error>() else {
-            return false;
-        };
-        if io_err.kind() == io::ErrorKind::PermissionDenied {
-            return true;
-        }
-        #[cfg(unix)]
-        {
-            if io_err.raw_os_error() == Some(EROFS) {
-                return true;
-            }
-        }
-        false
-    })
 }
 
 /// Execute Docker build
@@ -4181,28 +4147,4 @@ mod tests {
     // =========================================================================
     // PR-4c: features-during-build (helpers tested in isolation)
     // =========================================================================
-
-    #[test]
-    fn is_readonly_filesystem_error_detects_permission_denied() {
-        // EACCES surfaces as PermissionDenied — the most common cause of
-        // a "can't write the lockfile" path on container CI mounts.
-        let inner = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
-        let err: anyhow::Error = anyhow::anyhow!(inner).context("write failed");
-        assert!(super::is_readonly_filesystem_error(&err));
-    }
-
-    #[test]
-    fn is_readonly_filesystem_error_ignores_unrelated_io_errors() {
-        // Other IO errors (NotFound, BrokenPipe, etc.) must propagate —
-        // downgrading them all would hide real bugs.
-        let inner = std::io::Error::from(std::io::ErrorKind::NotFound);
-        let err: anyhow::Error = anyhow::anyhow!(inner).context("read failed");
-        assert!(!super::is_readonly_filesystem_error(&err));
-    }
-
-    #[test]
-    fn is_readonly_filesystem_error_ignores_non_io_errors() {
-        let err = anyhow::anyhow!("not an io error");
-        assert!(!super::is_readonly_filesystem_error(&err));
-    }
 }
