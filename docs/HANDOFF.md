@@ -1,6 +1,6 @@
 # Session Handoff — Differential Parity Steady State
 
-Last updated: 2026-08-10, `main` at `6d82428` (green; v0.3.0 shipped from
+Last updated: 2026-08-11, `main` at `b49da6d` (green; v0.3.0 shipped from
 `d642e8d`). This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
@@ -8,23 +8,21 @@ changes, update this file in the same PR.
 
 ## Where things stand
 
-- **Three open nonconformances, and that is new.** `parity/SPEC_STATUS.md` records
-  **128 behaviors**: 3 open nonconformance, 9 follows-spec, 11 documented choice,
-  20 extension, 85 conformant-and-matching. The header census is CI-guarded
+- **Back to zero open nonconformances.** `parity/SPEC_STATUS.md` records
+  **128 behaviors**: 0 open nonconformance, 9 follows-spec, 11 documented choice,
+  20 extension, 88 conformant-and-matching. The header census is CI-guarded
   (`check_spec_status_census` in `crates/parity-harness/src/registry.rs`) — rows and
-  header must change together. The campaign ran at zero open nonconformances for
-  weeks; #480 batch 2 found two real `build`/`up` lockfile defects (#556, #557) and
-  recorded them the day they were measured, which is the ledger working as designed.
-- **⚠️ The differential nightly is EXPECTED RED, by design.** Three cases
-  (`case-build-upstream-lockfile-frozen-missing`,
-  `case-build-upstream-lockfile-no-lockfile-flag`,
-  `case-up-upstream-lockfile-frozen-matching`) are red ON PURPOSE — they are the
-  standing record of #556/#557 and go green when those are fixed. They are
-  `live-differential`, so they sit in `parity_differential`, which is nightly-only
-  and **gates nothing**; PRs and releases are unaffected. Do NOT read the red
-  nightly as a regression, and do not "fix" it by weakening the cases. Current
-  verdict: `gh run list --workflow=parity.yml --branch=main`; the check that
-  matters is whether the diverging set is those three and nothing else.
+  header must change together. The 2026-08-10/11 arc is the ledger working end to
+  end: #480 batch 2 measured two real lockfile defects, recorded them as three
+  red-on-purpose cases the day they were found (#556, #557), and both are now fixed
+  with those cases green **as authored** — no assertion was bent to reach zero.
+- **The differential nightly is green again.** Current verdict:
+  `gh run list --workflow=parity.yml --branch=main`. A previous version of this
+  file warned that the nightly was expected-red; that is now stale and the warning
+  is removed. The standing rule it encoded still holds and is worth keeping in
+  mind: when a red case IS the deliberate record of an open nonconformance, the
+  check is whether the diverging set is exactly those cases and nothing else — and
+  the fix is to the product, never to the case.
 - **The pinned oracle** is `@devcontainers/cli@0.87.0`
   (`npm install -g @devcontainers/cli@0.87.0`). Docker and the oracle both work in
   this dev container — verify parity changes for real, never by reasoning alone.
@@ -48,6 +46,9 @@ changes, update this file in the same PR.
 
 | PR | What | Issues |
 |---|---|---|
+| #566 `b49da6d` | the derived Compose project name leads with the sanitized workspace-folder stem — `deacon_site_6fb1205c_532a7bdd`, not `deacon_6fb1205c_532a7bdd`. Ruling refined #265 on the ground that deacon's audience is terminal-first: there is NO VS Code integration path (no extension; the Dev Containers extension bundles and drives the reference CLI), and the one workflow that composes — Attach to Running Container — does not provision, so it cannot collide. Isolation still holds by construction (still outside `<folder>_devcontainer`); both hashes stay, each load-bearing (`workspaceHash` separates same-named checkouts, `configHash` drives the new-generation behavior #371/#551 rest on); empty stem falls back to hash-only. A one-time `up` diagnostic names superseded projects because Compose prefixes named VOLUMES with the project name — containers are swept, volumes never are. **Net find**: the parity harness's basename-marker sweeps could not see a pre-#564 `deacon_<hash>_<hash>_default` network at all; the stem makes deacon's own compose resources reclaimable, now asserted | #564 fixed |
+| #565 `334970b` | `build` consumes `--no-lockfile` / `--frozen-lockfile` at last (parsed since forever, consulted never — the source comment admitted it). Both now route with `up` through one `commands/shared/lockfile` (`LockfilePolicy::{Skip,Frozen,Write}`), so the two subcommands cannot drift; a duplicated EROFS/EACCES detector was deleted rather than a fourth copy added. Frozen refuses PRE-build, so nothing is built and nothing written | #556 fixed |
+| #563 `40d6fb6` | `up --frozen-lockfile` compares SEMANTICALLY and deacon emits the spec key order (`version, resolved, integrity`). deacon rejected every lockfile the reference writes — same 327 bytes, alphabetised keys. Both halves shipped together on purpose: the order change rewrites existing lockfiles once, and the tolerant comparison has to already exist when it does. Three duplicated `sort_json_object` copies collapsed into one `canonical_lockfile_value`; feature ids stay sorted (transcribed from `generateLockfile`, confirmed black-box), only entry keys stopped being | #557 fixed |
 | #561 `6d82428` | OCI feature cache entries published ATOMICALLY: extract to a `.staging-<pid>-<n>-<nanos>` sibling under `cache_dir`, then `rename` into place, so a destination is only ever absent or complete. A cache hit is now the MARKER FILE (`devcontainer-feature.json` / `devcontainer-template.json`), not a bare directory, which self-heals partial entries; a stale incomplete tree is vacated by a SECOND rename, never `remove_dir_all` in place (deleting live re-opens the very window). Two symptoms, both reproduced: a reader mid-unpack (`Feature metadata file not found`, the CI error) and two writers colliding (`failed to unpack …`). Found because #558's new registry lane CONCENTRATED five same-feature fetches at concurrency 4 — lane concurrency deliberately left at 4, since lowering it would hide a user-facing defect behind a test-only setting. Cold-cache lane: 14/14 green vs **2/9 red on `main`**; a warm cache hides it entirely, which is why it read as unreproducible | #560 fixed |
 | #559 `e9662ee` | #480 batch 2 — the reference's lockfile fixtures mined: 13 configs triaged, **3 landed as 5 cases, 10 deferred**. The deciding test is not "codspace = defer" but whether the third-party Feature's IDENTITY is incidental to the claim (repinning is faithful for lockfile mechanics, fatal for cases asserting generated bytes / a publisher's `dependsOn` graph / a tarball hash). Found TWO real defects → #556, #557. Also caught in its own data: a `resourceGroup: none` case ran against the committed fixture dir and left a stray `.devcontainer-lock.json` in `parity/fixtures/` (the #423 untracked-copy failure) → moved to `fs-heavy`. Fixed `prepull-fixture-images.sh`'s `find -name 'devcontainer.json'` never matching the root-dot form | #556, #557 filed |
 | #558 `fd4dd63` | registry axis: `needsRegistry` on the record + `Lane::Registry` + `parity_registry`, resolving in scarcity order (oracle → daemon → registry) so a Docker case that also fetches stays in `parity_docker`. NOT a `ResourceGroup` variant — a group says what a case CONTENDS for and cannot say "reaches ghcr.io". Case-data diff is exactly six `"needsRegistry": true` lines; #411's `git:1.3.2` → `1.3.8` pin byte-identical (re-laning is not a coverage change). The lane's no-network promise is now ENFORCED by a namespace guard that re-execs the binary under `unshare --user --net` — deliberately WITHOUT `--map-root-user`, which Ubuntu 24.04 denies (`apparmor_restrict_unprivileged_userns`), measured on the very runner where the lane gates | #544 fixed |
@@ -77,34 +78,44 @@ defects it concealed were filed as #526 and #527, both now fixed.
 Sharpest first. Every item below already has a measurement or a precise claim in
 its issue — read the issue before briefing an agent.
 
-**Two items need a MAINTAINER RULING and cannot be delegated** (an agent that
-invents one corrupts the ledger):
+Nothing is currently blocked on a maintainer ruling. All delegable:
 
-1. **#557** — `up --frozen-lockfile` byte-compares, so deacon rejects every
-   lockfile the reference writes (same 327 bytes, different key order; deacon
-   alphabetises). The COMPARISON half is an unambiguous defect and is filed as
-   such — upstream fixed exactly this before 0.87.0. But **which key order deacon
-   should EMIT is spec-silent**, so no tolerance was authored and no SPEC_STATUS
-   row claims a status (the #486/#490 precedent). Rule that, and the fix is
-   ordinary work.
-2. **#480's compose-project-naming group** (3 configs) — collides with the
-   already-adjudicated documented choice that deacon namespaces project names.
-   Cannot land anything but red until ruled.
-
-Then, delegable:
-
-3. **#556** — `build` parses `--no-lockfile`/`--frozen-lockfile` and consults
-   neither (the source comment at `commands/build/mod.rs:85` admits it). `up`
-   implements both, so this is a missing wire, not a missing capability. Red
-   cases already stand.
-4. **#480 batch 3** — start with `lockfile-oci-integrity`, which the batch-2
+1. **An UNRECORDED behavior needs a row and a case.** #565 changed `up
+   --frozen-lockfile` on a config that declares NO Features from exit 1 to exit 0,
+   incidentally, by gating the refusal on `declares_features` to match the
+   reference's `generateFeaturesConfig` early return. Measured directly on `main`
+   at `334970b` — reference exits 0 writing nothing, deacon now agrees; before the
+   change deacon exited 1. It was disclosed for review, and the `up
+   --frozen-lockfile` SPEC_STATUS row was updated, but that row documents the
+   WITH-Features case, so the featureless carve-out has **no row and no case
+   pinning it** and nothing stops it regressing. The standing ledger rule says
+   every measured difference gets both. Cheap: the fixture is a three-line
+   featureless `devcontainer.json`.
+2. **#480 batch 3** — start with `lockfile-oci-integrity`, which the batch-2
    agent judged fully expressible on a first-party Feature but did not measure.
-   The updated remainder inventory is an issue comment on #480.
-5. **#555** — one-line doc fix: CLAUDE.md's cross-cutting-audit bullet says
+   The updated remainder inventory is an issue comment on #480. **Reclassified
+   2026-08-11: the compose-project-naming group (3 configs) is ORDINARY work, not
+   blocked.** It was queued as needing a ruling on the assumption that it collides
+   with deacon's namespaced-project-name choice. It does not: `derive_project_name`
+   honors an explicit `COMPOSE_PROJECT_NAME` (sibling `.env`) and a compose-file
+   top-level `name:` ahead of any derivation, and all three fixtures declare the
+   name in the compose file. Expect `compose-with-name` and
+   `compose-with-name-and-custom-yaml` to match, and `compose-with-name-using-env-var`
+   (`name: ${CUSTOM_NAME}`) to expose a real defect — the parser is line-wise with
+   no interpolation, so deacon likely uses the literal `${CUSTOM_NAME}`. Code-read,
+   NOT yet measured.
+3. **#555** — one-line doc fix: CLAUDE.md's cross-cutting-audit bullet says
    `dockerComposeFile` resolves against the workspace folder. It does not — spec
    (`devcontainerjson-reference.md:56`) says "relative to the `devcontainer.json`
-   file", and `compose.rs:831-844` already implements that with the citation.
-   Verified independently; the guidance file is what is wrong.
+   file", and `compose.rs` already implements that with the citation. Verified
+   independently; the guidance file is what is wrong. `docs/DIFFERENTIATORS.md`'s
+   sibling error was fixed in #566.
+
+Open question, not blocking: #566 implements the superseded-project diagnostic as
+**one message per `up`** listing every superseded project, rather than a persisted
+suppression marker — the condition is self-clearing, and persisting risks the one
+emission landing in a run nobody read. A small follow-up if persisted suppression
+was intended.
 
 Retired without work: **#402** closed obsolete 2026-08-07 — its subject (the
 discovery findings queue) was deleted with the conformance crate, and the parity
@@ -156,6 +167,18 @@ each learned from a real failure:
   runs `mvp-integration` on a 2-core runner with a COLD cache — when it alone
   fails, suspect concurrency or cache state, not the runtime. Confirm the runtime
   is implicated before believing it is.
+- **A green streak is only green against a COMPLETE check set.** The required set
+  is **TEN**. Two consecutive all-green polls is NOT sufficient on its own: an
+  agent polled `gh pr checks --required`, got eight because `Test (MVP integration)`
+  and `Test (Podman)` had not registered yet, and counted a streak toward merging —
+  8-of-10 read as all-of-8. Its own words: *"the `n > 0` guard I wrote is not a
+  completeness check."* The predicate is `total >= 10 AND all pass`, twice
+  consecutively. It nearly merged without the two jobs that matter most.
+- **Rebuild before you measure.** `./target/debug/deacon` is not evidence of what
+  is on `main`. Twice in one session a measurement against a stale binary produced
+  a confidently wrong conclusion — once saying a landed fix was absent, once
+  showing the old Compose project name. `cargo build` after every pull, and note
+  the commit you built at when you report a measurement.
 - **Self-merge on green**: agents may squash-merge once required checks are
   confirmed green. Every such merge is disclosed to the maintainer with a
   compensating pre- or post-merge diff review by the main session. The offer to
