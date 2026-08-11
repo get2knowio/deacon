@@ -24,7 +24,9 @@
 
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
-use deacon_core::lockfile::{Lockfile, LockfileFeature, get_lockfile_path, write_lockfile};
+use deacon_core::lockfile::{
+    Lockfile, LockfileFeature, canonical_lockfile_json, get_lockfile_path, write_lockfile,
+};
 use deacon_core::oci::{DownloadedFeature, FeatureRef, default_fetcher};
 use deacon_core::registry_parser::parse_registry_reference;
 use std::collections::HashMap;
@@ -401,43 +403,15 @@ fn lockfile_entry_for(
 
 /// Print the lockfile to stdout as canonical JSON.
 ///
-/// Format mirrors `deacon_core::lockfile::write_lockfile`: serde-derived
-/// JSON, recursively sorted object keys, 2-space pretty-printed, with a
-/// trailing newline. A `--dry-run` consumer should be able to redirect this
-/// directly into the lockfile file and get the same bytes as a non-dry-run.
+/// Goes through the same `canonical_lockfile_json` every other writer uses, so
+/// a `--dry-run` consumer can redirect this straight into the lockfile and get
+/// the same bytes as a non-dry-run — and the same bytes the reference CLI
+/// would have written.
 fn emit_lockfile_json(lockfile: &Lockfile) -> Result<()> {
-    let mut value =
-        serde_json::to_value(lockfile).context("Failed to serialize lockfile to JSON value")?;
-    sort_json_object(&mut value);
-    let json =
-        serde_json::to_string_pretty(&value).context("Failed to serialize lockfile to JSON")?;
-    println!("{}", json);
+    let json = canonical_lockfile_json(lockfile).context("Failed to serialize lockfile to JSON")?;
+    // `canonical_lockfile_json` already terminates with a newline.
+    print!("{}", json);
     Ok(())
-}
-
-/// Recursively sort all keys in a JSON object for deterministic output.
-/// Kept private here to mirror `deacon_core::lockfile`'s private helper
-/// (same logic; both produce identical orderings).
-fn sort_json_object(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            let sorted: std::collections::BTreeMap<_, _> = map.iter().collect();
-            *map = sorted
-                .into_iter()
-                .map(|(k, v)| {
-                    let mut v = v.clone();
-                    sort_json_object(&mut v);
-                    (k.clone(), v)
-                })
-                .collect();
-        }
-        serde_json::Value::Array(arr) => {
-            for item in arr {
-                sort_json_object(item);
-            }
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]

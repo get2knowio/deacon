@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::errors::DeaconError;
-use deacon_core::lockfile::{Lockfile, get_lockfile_path, write_lockfile};
+use deacon_core::lockfile::{Lockfile, get_lockfile_path, lockfile_text_matches, write_lockfile};
 use std::io;
 use std::path::Path;
 use tracing::{debug, info, instrument, warn};
@@ -331,13 +331,21 @@ pub(crate) async fn handle_lockfile_post_build(
     }
 }
 
-/// Frozen-mode comparison: serialize the in-memory lockfile to the same
-/// canonical byte form `write_lockfile` would emit, then compare byte-for-byte
-/// with the on-disk file. Any deviation (missing file, mismatched bytes)
-/// fails the build with the upstream-aligned summary string.
+/// Frozen-mode comparison: compare the on-disk lockfile to the freshly-resolved
+/// one **as documents**, not as bytes.
+///
+/// `--frozen-lockfile` asks "would resolution change what this file says?", and
+/// key order, indentation and a trailing newline are serialisation choices
+/// rather than content. Byte-comparing answered a different question and made
+/// deacon reject every lockfile the reference CLI writes (#557); the reference
+/// normalises before comparing for exactly this reason and carries the test
+/// `frozen lockfile matches despite formatting differences`.
+///
+/// A missing file, unparseable text, or a genuine content difference all still
+/// fail with the upstream-aligned summary string.
 async fn compare_lockfile_frozen(lockfile_path: &Path, lockfile: &Lockfile) -> Result<()> {
-    let actual_bytes = match tokio::fs::read(lockfile_path).await {
-        Ok(bytes) => bytes,
+    let actual_text = match tokio::fs::read_to_string(lockfile_path).await {
+        Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             return Err(
                 DeaconError::Config(deacon_core::errors::ConfigError::Validation {
@@ -359,9 +367,7 @@ async fn compare_lockfile_frozen(lockfile_path: &Path, lockfile: &Lockfile) -> R
         }
     };
 
-    let expected_bytes = canonical_lockfile_bytes(lockfile)?;
-
-    if expected_bytes != actual_bytes {
+    if !lockfile_text_matches(&actual_text, lockfile) {
         return Err(
             DeaconError::Config(deacon_core::errors::ConfigError::Validation {
                 message: format!(
@@ -433,50 +439,6 @@ fn is_readonly_fs_error(err: &anyhow::Error) -> bool {
     })
 }
 
-/// Canonical lockfile bytes — exactly what `write_lockfile` would put on disk.
-///
-/// We can't ask `write_lockfile` for the bytes directly (it writes through to
-/// the filesystem), so we replay the same shape: `serde_json::to_value`,
-/// recursively sort object keys, pretty-print with 2-space indent, append a
-/// trailing newline. Any change to the on-disk format must update both this
-/// helper and `deacon_core::lockfile::write_lockfile` in lockstep, otherwise
-/// `--frozen-lockfile` will report spurious mismatches.
-fn canonical_lockfile_bytes(lockfile: &Lockfile) -> Result<Vec<u8>> {
-    let mut value =
-        serde_json::to_value(lockfile).context("Failed to serialize lockfile to JSON value")?;
-    sort_json_object(&mut value);
-    let mut json =
-        serde_json::to_string_pretty(&value).context("Failed to serialize lockfile to JSON")?;
-    json.push('\n');
-    Ok(json.into_bytes())
-}
-
-/// Recursively sort all keys in a JSON object for deterministic output.
-///
-/// Kept private to this module to mirror the private helper inside
-/// `deacon_core::lockfile`; both produce identical orderings.
-fn sort_json_object(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            let sorted: std::collections::BTreeMap<_, _> = map.iter().collect();
-            *map = sorted
-                .into_iter()
-                .map(|(k, v)| {
-                    let mut v = v.clone();
-                    sort_json_object(&mut v);
-                    (k.clone(), v)
-                })
-                .collect();
-        }
-        serde_json::Value::Array(arr) => {
-            for item in arr {
-                sort_json_object(item);
-            }
-        }
-        _ => {}
-    }
-}
-
 #[cfg(test)]
 mod remote_workspace_folder_tests {
     use super::*;
@@ -510,7 +472,7 @@ mod remote_workspace_folder_tests {
 #[cfg(test)]
 mod lockfile_post_build_tests {
     use super::*;
-    use deacon_core::lockfile::{LockfileFeature, read_lockfile};
+    use deacon_core::lockfile::{LockfileFeature, canonical_lockfile_json, read_lockfile};
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -537,11 +499,10 @@ mod lockfile_post_build_tests {
         }
     }
 
-    /// `canonical_lockfile_bytes` MUST match what `write_lockfile` actually
-    /// puts on disk — otherwise `--frozen-lockfile` would report spurious
-    /// mismatches because the two paths produce different bytes.
+    /// The bytes `write_lockfile` puts on disk MUST be the canonical form, so
+    /// a file deacon just wrote satisfies its own `--frozen-lockfile`.
     #[tokio::test(flavor = "current_thread")]
-    async fn canonical_bytes_match_write_lockfile_output() {
+    async fn write_lockfile_emits_canonical_bytes() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("devcontainer-lock.json");
 
@@ -550,13 +511,15 @@ mod lockfile_post_build_tests {
         write_lockfile(&path, &lockfile, true)
             .await
             .expect("write_lockfile");
-        let on_disk = std::fs::read(&path).unwrap();
-        let in_memory = canonical_lockfile_bytes(&lockfile).expect("canonicalize");
+        let on_disk = std::fs::read_to_string(&path).unwrap();
 
         assert_eq!(
-            in_memory, on_disk,
-            "canonical_lockfile_bytes diverged from write_lockfile output; \
-             --frozen-lockfile would report spurious mismatches"
+            on_disk,
+            canonical_lockfile_json(&lockfile).expect("canonicalize")
+        );
+        assert!(
+            lockfile_text_matches(&on_disk, &lockfile),
+            "--frozen-lockfile must accept the file deacon itself just wrote"
         );
     }
 
@@ -668,6 +631,94 @@ mod lockfile_post_build_tests {
         assert!(
             msg.contains("Lockfile does not match."),
             "expected upstream-aligned summary, got: {msg}"
+        );
+    }
+
+    /// The regression #557 is about: a lockfile written by the REFERENCE CLI
+    /// must satisfy `deacon up --frozen-lockfile`. The seeded bytes are the
+    /// reference's own output for `fx-upstream-lockfile-frozen` at oracle
+    /// 0.87.0 — same document as the freshly-resolved lockfile, differing only
+    /// in the order of the three keys inside the entry.
+    ///
+    /// The two other spellings assert the same tolerance the reference's
+    /// `frozen lockfile matches despite formatting differences` test asserts:
+    /// a stripped trailing newline and a reindented file are formatting, not
+    /// content.
+    #[tokio::test(flavor = "current_thread")]
+    async fn frozen_mode_accepts_a_lockfile_the_reference_cli_wrote() {
+        const DIGEST: &str = "63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014d";
+        let mut features = HashMap::new();
+        features.insert(
+            "ghcr.io/devcontainers/features/git:1.3.2".to_string(),
+            LockfileFeature {
+                version: "1.3.2".to_string(),
+                resolved: format!("ghcr.io/devcontainers/features/git@sha256:{DIGEST}"),
+                integrity: format!("sha256:{DIGEST}"),
+                depends_on: None,
+            },
+        );
+        let resolved = Lockfile { features };
+
+        // Verbatim from the reference CLI: `version, resolved, integrity`.
+        let reference_bytes = format!(
+            "{{\n  \"features\": {{\n    \"ghcr.io/devcontainers/features/git:1.3.2\": {{\n      \
+             \"version\": \"1.3.2\",\n      \"resolved\": \
+             \"ghcr.io/devcontainers/features/git@sha256:{DIGEST}\",\n      \"integrity\": \
+             \"sha256:{DIGEST}\"\n    }}\n  }}\n}}\n"
+        );
+
+        for (label, on_disk) in [
+            ("reference key order", reference_bytes.clone()),
+            (
+                "no trailing newline",
+                reference_bytes.trim_end().to_string(),
+            ),
+            (
+                "four-space indent",
+                serde_json::to_string_pretty(
+                    &serde_json::from_str::<serde_json::Value>(&reference_bytes).unwrap(),
+                )
+                .unwrap()
+                .replace("  ", "    "),
+            ),
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let config_path = tmp.path().join(".devcontainer.json");
+            std::fs::write(&config_path, "{}").unwrap();
+            std::fs::write(get_lockfile_path(&config_path), &on_disk).unwrap();
+
+            let args = make_args(false, true);
+            handle_lockfile_post_build(&args, &config_path, &resolved)
+                .await
+                .unwrap_or_else(|e| panic!("frozen must accept {label}: {e:#}"));
+
+            // A frozen run reads; it never rewrites.
+            assert_eq!(
+                std::fs::read_to_string(get_lockfile_path(&config_path)).unwrap(),
+                on_disk,
+                "--frozen-lockfile rewrote the file ({label})"
+            );
+        }
+    }
+
+    /// Tolerance is about serialisation only: unparseable text is still a
+    /// mismatch, mirroring the reference's `try { … } catch {}`.
+    #[tokio::test(flavor = "current_thread")]
+    async fn frozen_mode_rejects_unparseable_lockfile() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join(".devcontainer.json");
+        std::fs::write(&config_path, "{}").unwrap();
+        std::fs::write(get_lockfile_path(&config_path), "{ this is not json").unwrap();
+
+        let lockfile = one_feature_lockfile("1.0.0", &"a".repeat(64));
+        let args = make_args(false, true);
+        let err = handle_lockfile_post_build(&args, &config_path, &lockfile)
+            .await
+            .expect_err("frozen + unparseable must fail");
+        assert!(
+            format!("{:#}", err).contains("Lockfile does not match."),
+            "expected upstream-aligned summary, got: {:#}",
+            err
         );
     }
 
