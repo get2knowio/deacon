@@ -2876,6 +2876,65 @@
       "notes": "#476, the half that makes deferral safe: the deferred hooks must still RUN, and run exactly once. After `up --skip-post-create`, `run-user-commands` executes all five phases, so the append-only log holds exactly five lines in phase order. Both CLIs produce that, and their marker mechanisms differ without changing it — deacon's completion markers are host-side (`{user_data_folder}/state/<workspace-hash>/`), the reference's are container-side (`{containerDataFolder}/.<phase>CommandMarker`, keyed on the container's `createdAt`) — because neither writes a marker for a phase that never ran.\n\nThe line COUNT is what carries the regression, which is why this case can assert the deferral through a channel captured only at the end of the run: before the fix deacon wrote SEVEN lines here (`onCreate`, `updateContent` from `up`, then all five again from `run-user-commands`) against the reference's five. `jsonSubset` on the whole file content is an exact-content match for that one key, so the two extra leading lines fail it.\n\nIt carries that assertion in ADDITION to the comparison for the reason FR-043 gives: a differential alone would stay green if BOTH sides started running the base phases, and the record meant to say which side is right would then say nothing. Deliberately NOT asserted here: what a plain (non-deferred) `up` followed by `run-user-commands` produces — deacon re-runs every completed hook where the reference skips it, which is the separately characterized `wvr-ruc-completed-hooks-not-rerun` and is untouched by this fix."
     },
     {
+      "id": "case-up-frozen-lockfile-no-features",
+      "behaviors": [
+        "bhv-up-frozen-lockfile-featureless-config-proceeds"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--frozen-lockfile"
+          ],
+          "fixtures": [
+            "fx-up-frozen-lockfile-no-features"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success"
+            }
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-up",
+          "assertion": {
+            "absent": ".devcontainer-lock.json"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        ".devcontainer-lock.json"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The featureless carve-out, pinned. [#565](https://github.com/get2knowio/deacon/pull/565) changed this from exit 1 to exit 0 as a side effect of fixing [#556](https://github.com/get2knowio/deacon/issues/556): the frozen refusal is now gated on the configuration DECLARING Features, because that is where the reference's gate lives. The change was disclosed and the with-Features `up --frozen-lockfile` rows were updated, but neither of them documents the featureless path, so nothing stopped it regressing. This case is that stop.\n\nMEASURED at oracle 0.87.0 against a freshly built `main` at `e107a92`, on this exact three-line configuration with no `.devcontainer-lock.json` on disk: BOTH CLIs exit 0, both print a `success` result document naming a container they created, and NEITHER writes `.devcontainer-lock.json`. Before #565 deacon exited 1 with `Lockfile does not exist.` and created nothing — a refusal the reference never makes.\n\nTRANSCRIBED from the reference bundle rather than inferred, because an exit code does not say WHY. `--frozen-lockfile` is consulted only inside `writeLockfile` (`mQ`), which has exactly one caller, `generateFeaturesConfig` (`UQ`), and that function opens with `let o = BV(xQ(t, i), r); if (!o) return;`. `xQ` (`userFeaturesToArray`) returns `undefined` when the configuration's `features` and the `additionalFeatures` overlay are both empty, so with no Features declared the reference returns before the lockfile is even read. The flag is not satisfied here — it is never reached. deacon's `commands/shared/lockfile::declares_features` is that early return, spelled once and shared by `up` and `build` so the two cannot drift.\n\n`spec-expectation`, not `live-differential`, and the LANE is the reason. `lane_of` sends every `live-differential` case to `parity_differential`, which runs under `--profile parity` only — the nightly, which gates nothing. A case whose entire purpose is that nothing gated this behaviour belongs where it gates: `docker-shared` + `spec-expectation` routes it to `parity_docker`, selected by the release gate and by every Docker-provisioned profile. The differential half is not lost, it is the by-hand measurement recorded above and in the ledger row; what the case owns from here is the regression.\n\nThree channels, each load-bearing. `chan-exit-code: 0` IS the regression signal — the pre-#565 behaviour was exit 1. `chan-structured-output` pinning `outcome: success` is what makes that 0 mean \"the container came up\" rather than \"something quietly declined to happen\". `chan-filesystem` `absent` is the other half of the carve-out: exiting 0 by WRITING a lockfile would satisfy both other assertions while doing the one thing `--frozen-lockfile` exists to prevent.\n\nThe reference's early return keys off the UNION of the configuration's Features and `--additional-features`; deacon's gate reads the configuration alone, so the Features-via-flag path refuses later, after building the Feature image. That is out of scope here and is filed as [#569](https://github.com/get2knowio/deacon/issues/569) — this case deliberately passes no `--additional-features`, so it claims nothing about it.\n\nBase `debian:bookworm-slim` with no `remoteUser`, matching the two `fx-upstream-lockfile-*` siblings: the case never enters a uid-remap path it claims nothing about."
+    },
+    {
       "id": "case-up-upstream-lockfile-frozen-matching",
       "behaviors": [
         "bhv-up-frozen-lockfile-accepts-matching-lockfile"
