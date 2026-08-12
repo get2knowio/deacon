@@ -314,7 +314,7 @@ where
     }
 }
 
-fn create_compose_project_for_exec(
+async fn create_compose_project_for_exec(
     workspace_folder: &Path,
     config: &DevContainerConfig,
     config_dir: &Path,
@@ -322,8 +322,9 @@ fn create_compose_project_for_exec(
     env_files: &[PathBuf],
 ) -> Result<(ComposeManager, ComposeProject)> {
     let compose_manager = ComposeManager::with_docker_path(docker_path.to_string());
-    let mut project = compose_manager.create_project(config, workspace_folder, config_dir)?;
-    project.env_files = env_files.to_vec();
+    let project = compose_manager
+        .create_project(config, workspace_folder, config_dir, env_files)
+        .await?;
     Ok((compose_manager, project))
 }
 
@@ -346,7 +347,8 @@ async fn resolve_compose_target_container(
         config_dir,
         docker_path,
         env_files,
-    )?;
+    )
+    .await?;
 
     debug!("Created compose project: {:?}", project.name);
 
@@ -1245,8 +1247,8 @@ mod tests {
         assert!(all_services.contains(&"elasticsearch".to_string()));
     }
 
-    #[test]
-    fn compose_project_for_exec_threads_env_files() {
+    #[tokio::test]
+    async fn compose_project_for_exec_threads_env_files() {
         use serde_json::json;
         use std::fs;
 
@@ -1276,6 +1278,7 @@ services:
         let env_files = vec![env_file.clone()];
         let (compose_manager, project) =
             create_compose_project_for_exec(workspace, &config, workspace, "docker", &env_files)
+                .await
                 .unwrap();
 
         assert_eq!(project.env_files, env_files);

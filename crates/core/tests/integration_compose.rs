@@ -84,8 +84,8 @@ fn create_test_devcontainer_config(compose_file: &str, service: &str) -> DevCont
     }
 }
 
-#[test]
-fn test_compose_project_creation() {
+#[tokio::test]
+async fn test_compose_project_creation() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
 
@@ -94,7 +94,8 @@ fn test_compose_project_creation() {
 
     let manager = ComposeManager::new();
     let project = manager
-        .create_project(&config, &base_path, &base_path)
+        .create_project(&config, &base_path, &base_path, &[])
+        .await
         .expect("Failed to create compose project");
 
     assert_eq!(project.service, "app");
@@ -105,8 +106,8 @@ fn test_compose_project_creation() {
     assert!(project.compose_files[0].exists());
 }
 
-#[test]
-fn test_compose_project_multiple_files() {
+#[tokio::test]
+async fn test_compose_project_multiple_files() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
 
@@ -132,7 +133,8 @@ services:
 
     let manager = ComposeManager::new();
     let project = manager
-        .create_project(&config, &base_path, &base_path)
+        .create_project(&config, &base_path, &base_path, &[])
+        .await
         .expect("Failed to create compose project");
 
     assert_eq!(project.compose_files.len(), 2);
@@ -141,8 +143,8 @@ services:
     assert_eq!(project.get_all_services(), vec!["app", "db", "redis"]);
 }
 
-#[test]
-fn test_compose_command_building() {
+#[tokio::test]
+async fn test_compose_command_building() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
 
@@ -151,7 +153,8 @@ fn test_compose_command_building() {
 
     let manager = ComposeManager::new();
     let project = manager
-        .create_project(&config, &base_path, &base_path)
+        .create_project(&config, &base_path, &base_path, &[])
+        .await
         .expect("Failed to create compose project");
 
     let command_builder = manager.get_command(&project);
@@ -176,8 +179,8 @@ fn test_compose_command_building() {
     assert_eq!(args[project_name_index + 1], project.name);
 }
 
-#[test]
-fn test_config_validation_without_compose() {
+#[tokio::test]
+async fn test_config_validation_without_compose() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
 
@@ -189,7 +192,9 @@ fn test_config_validation_without_compose() {
     };
 
     let manager = ComposeManager::new();
-    let result = manager.create_project(&config, &base_path, &base_path);
+    let result = manager
+        .create_project(&config, &base_path, &base_path, &[])
+        .await;
 
     assert!(result.is_err());
     let error_msg = format!("{:?}", result.unwrap_err());
@@ -197,8 +202,8 @@ fn test_config_validation_without_compose() {
     assert!(error_msg.contains("does not specify Docker Compose setup"));
 }
 
-#[test]
-fn test_config_validation_missing_service() {
+#[tokio::test]
+async fn test_config_validation_missing_service() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
 
@@ -209,7 +214,9 @@ fn test_config_validation_missing_service() {
     };
 
     let manager = ComposeManager::new();
-    let result = manager.create_project(&config, &base_path, &base_path);
+    let result = manager
+        .create_project(&config, &base_path, &base_path, &[])
+        .await;
 
     assert!(result.is_err());
     let error_msg = format!("{:?}", result.unwrap_err());
@@ -275,8 +282,8 @@ async fn test_config_loading_from_file() {
     );
 }
 
-#[test]
-fn test_compose_project_name_generation() {
+#[tokio::test]
+async fn test_compose_project_name_generation() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
 
@@ -285,7 +292,8 @@ fn test_compose_project_name_generation() {
 
     let manager = ComposeManager::new();
     let project = manager
-        .create_project(&config, &base_path, &base_path)
+        .create_project(&config, &base_path, &base_path, &[])
+        .await
         .expect("Failed to create compose project");
 
     // Project name is deacon-namespaced and unique per workspace+config.
@@ -363,7 +371,8 @@ services:
     // Create compose project
     let manager = ComposeManager::new();
     let project = manager
-        .create_project(&config, &devcontainer_dir, &devcontainer_dir)
+        .create_project(&config, &devcontainer_dir, &devcontainer_dir, &[])
+        .await
         .expect("Failed to create compose project");
 
     // Project name is deacon-namespaced and unique per workspace+config.
