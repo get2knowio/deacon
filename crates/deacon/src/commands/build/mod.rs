@@ -59,7 +59,10 @@ pub struct BuildArgs {
         std::sync::Arc<std::sync::Mutex<Option<deacon_core::progress::ProgressTracker>>>,
     pub redaction_config: deacon_core::redaction::RedactionConfig,
     pub secret_registry: deacon_core::redaction::SecretRegistry,
-    #[allow(dead_code)] // Build command doesn't yet support compose configurations
+    /// `--env-file` paths handed to `docker compose` on the compose build paths. Parsed
+    /// but unused until #572, which made them load-bearing: they participate in
+    /// interpolating an authored `name: ${VAR}`, so `build` and `up` would otherwise
+    /// resolve different compose project names from the same configuration.
     pub env_file: Vec<PathBuf>,
     #[allow(dead_code)] // Future: Will be used for custom docker executable path
     pub docker_path: String,
@@ -1494,10 +1497,15 @@ async fn execute_compose_build(
     // containing devcontainer.json (spec parity), not the workspace folder.
     // Use the *resolved* config path (discovery may place it under
     // `.devcontainer/`); `args.config_path` is only the explicit `--config` flag.
+    // `--env-file` is threaded through for the reason #572 gave it teeth: env files
+    // participate in interpolating an authored `name: ${VAR}`, so a `build` that ignored
+    // them would derive a DIFFERENT compose project name than `up --env-file` on the same
+    // configuration. The flag documents itself as "passed to docker compose" and was
+    // parsed-but-unused until now.
     let compose_manager = ComposeManager::new();
     let config_dir = config_path.parent().unwrap_or(workspace_folder);
     let project = compose_manager
-        .create_project(config, workspace_folder, config_dir, &[])
+        .create_project(config, workspace_folder, config_dir, &args.env_file)
         .await?;
 
     // Validate service exists
@@ -1593,10 +1601,13 @@ async fn execute_compose_build_with_features(
         .ok_or_else(|| anyhow!("Docker Compose configuration must specify a service"))?;
 
     let compose_manager = ComposeManager::new();
-    // Compose files resolve relative to the config dir (spec parity).
+    // Compose files resolve relative to the config dir (spec parity). `--env-file` is
+    // threaded for the same reason as `execute_compose_build` above: it participates in
+    // resolving an authored `name: ${VAR}`, so ignoring it here would put `build` on a
+    // different compose project than `up`.
     let config_dir = config_path.parent().unwrap_or(workspace_folder);
     let project = compose_manager
-        .create_project(config, workspace_folder, config_dir, &[])
+        .create_project(config, workspace_folder, config_dir, &args.env_file)
         .await?;
     if !compose_manager
         .validate_service_exists(&project, service)
