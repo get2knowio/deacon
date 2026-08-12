@@ -170,10 +170,14 @@ Pattern axes worth re-running periodically:
   `commands/shared/feature_resolver::resolve_features_ordered` rather than re-implementing
   the local/OCI + dependency-order loop; `read-configuration` keeps its own richer variant
   for `--additional-features`/auto-mapping/registry grouping).
-- Config-relative vs workspace-relative paths: `dockerComposeFile` resolves against the
-  **workspace folder**; local feature paths (`./…`) resolve against the **config dir**
-  (`config_path.parent()` or `<workspace>/.devcontainer`); a plain `devcontainer.json` at
-  the workspace root is NOT a discovery location.
+- Config-relative vs workspace-relative paths: BOTH `dockerComposeFile` and local feature
+  paths (`./…`) resolve against the **config dir** (`config_path.parent()` or
+  `<workspace>/.devcontainer`) — the spec says `dockerComposeFile` is "relative to the
+  `devcontainer.json` file" (`parity/spec/113500f4/devcontainerjson-reference.md:56`), so
+  for the standard layout it is the `.devcontainer` dir, NOT the workspace folder
+  (`ComposeManager::create_project`, which cites the spec). What IS workspace-relative on
+  that same path: the compose project name and working dir, both derived from `base_path`.
+  A plain `devcontainer.json` at the workspace root is NOT a discovery location.
 
 VERIFY agent claims empirically before filing — the workspace-folder audit produced two
 false positives this session (see "Verified Non-Bugs" below). Auditing also surfaces the
