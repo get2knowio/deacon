@@ -27,6 +27,10 @@ release/
 .idea/
 *.log
 .env*
+# Parity fixtures are version-controlled INPUT, and a `.env` beside a Compose file is part
+# of what such a fixture declares (Compose interpolates from it). The blanket `.env*` rule
+# above is about not committing a developer's secrets; it must not swallow a fixture.
+!parity/fixtures/**/.env
 
 /tmp*
 /artifacts/*

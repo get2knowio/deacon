@@ -1,0 +1,8 @@
+name: ${CUSTOM_NAME}
+
+services:
+  app:
+    image: debian:bookworm-slim
+    volumes:
+      - ..:/workspace:cached
+    command: sleep infinity
