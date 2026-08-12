@@ -162,9 +162,32 @@ impl<C: HttpClient> FeatureFetcher<C> {
         &self.client
     }
 
-    /// Fetch a feature from an OCI registry
+    /// Fetch a feature from an OCI registry.
+    ///
+    /// Equivalent to [`fetch_feature_pinned`](Self::fetch_feature_pinned) with
+    /// no pin: resolution follows the reference's tag.
     #[instrument(level = "info", skip(self))]
     pub async fn fetch_feature(&self, feature_ref: &FeatureRef) -> Result<DownloadedFeature> {
+        self.fetch_feature_pinned(feature_ref, None).await
+    }
+
+    /// Fetch a feature from an OCI registry, optionally PINNED to a manifest
+    /// digest recorded in a lockfile's `integrity` field.
+    ///
+    /// When `pin` is `Some`, the manifest is requested BY DIGEST instead of by
+    /// tag and the digest that comes back is re-checked against the pin. That
+    /// ordering is the reference's, transcribed from the 0.87.0 bundle rather
+    /// than inferred (`ji`: `let r = e.version; t && (r = t)`, then `aQ`:
+    /// `if (r && C !== r) throw`), and it is what makes a lockfile a content
+    /// pin rather than a checksum recorded after the fact: a Feature whose
+    /// content no longer matches cannot be resolved AT ALL, so there is no
+    /// window in which it is downloaded, installed, or written back (#571).
+    #[instrument(level = "info", skip(self))]
+    pub async fn fetch_feature_pinned(
+        &self,
+        feature_ref: &FeatureRef,
+        pin: Option<&str>,
+    ) -> Result<DownloadedFeature> {
         let start_time = Instant::now();
         let event_id =
             crate::progress::EVENT_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -190,17 +213,17 @@ impl<C: HttpClient> FeatureFetcher<C> {
             // `Manifest` and its `sha256:`-prefixed digest from it (the
             // digest the reference CLI records in lockfile `resolved`/
             // `integrity` fields — see #264).
-            let manifest_data =
-                self.fetch_manifest_bytes(feature_ref)
-                    .await
-                    .map_err(|e| match e {
-                        crate::errors::DeaconError::Feature(f) => f,
-                        _ => FeatureError::Oci {
-                            message: format!("Get manifest error: {}", e),
-                        },
-                    })?;
+            let manifest_data = self
+                .fetch_manifest_bytes(feature_ref, pin)
+                .await
+                .map_err(|e| match e {
+                    crate::errors::DeaconError::Feature(f) => f,
+                    _ => FeatureError::Oci {
+                        message: format!("Get manifest error: {}", e),
+                    },
+                })?;
             let manifest_digest =
-                Self::manifest_digest(feature_ref, &manifest_data).map_err(|e| match e {
+                Self::manifest_digest(feature_ref, &manifest_data, pin).map_err(|e| match e {
                     crate::errors::DeaconError::Feature(f) => f,
                     _ => FeatureError::Oci {
                         message: format!("Manifest digest error: {}", e),
@@ -345,12 +368,18 @@ impl<C: HttpClient> FeatureFetcher<C> {
     ///
     /// Shared by [`Self::get_manifest`], [`Self::get_manifest_with_digest`], and
     /// [`Self::fetch_feature`] so the manifest is only downloaded once per call site.
-    async fn fetch_manifest_bytes(&self, feature_ref: &FeatureRef) -> Result<Bytes> {
+    async fn fetch_manifest_bytes(
+        &self,
+        feature_ref: &FeatureRef,
+        pin: Option<&str>,
+    ) -> Result<Bytes> {
+        // A lockfile pin REPLACES the tag in the manifest reference — it does
+        // not merely get compared afterwards. See `fetch_feature_pinned`.
         let manifest_url = format!(
             "https://{}/v2/{}/manifests/{}",
             feature_ref.registry,
             feature_ref.repository(),
-            feature_ref.tag()
+            pin.unwrap_or_else(|| feature_ref.tag())
         );
 
         debug!("Fetching manifest from: {}", manifest_url);
@@ -391,21 +420,35 @@ impl<C: HttpClient> FeatureFetcher<C> {
     }
 
     /// Compute the `sha256:`-prefixed digest of a raw manifest body, verifying
-    /// it against a digest-pinned reference (e.g. `feature@sha256:...`) if one
-    /// was requested.
-    fn manifest_digest(feature_ref: &FeatureRef, manifest_data: &[u8]) -> Result<String> {
+    /// it against a digest-pinned reference (e.g. `feature@sha256:...`) or an
+    /// explicit lockfile `pin` if either was requested.
+    fn manifest_digest(
+        feature_ref: &FeatureRef,
+        manifest_data: &[u8],
+        pin: Option<&str>,
+    ) -> Result<String> {
         let mut hasher = Sha256::new();
         hasher.update(manifest_data);
         let digest_hex = format!("{:x}", hasher.finalize());
 
-        // If the reference is digest-pinned (e.g. `feature@sha256:...`, surfaced
-        // here as the tag), the returned manifest MUST hash to that digest.
-        // Otherwise the registry could serve a different manifest than the one
-        // the caller pinned.
-        if let Some(expected_hex) = feature_ref.tag().strip_prefix("sha256:") {
+        // A registry that ignores the digest we asked for, or serves a
+        // different body than the one it names, must not be believed. Both
+        // pin spellings — the caller's `feature@sha256:...` and the lockfile's
+        // `integrity` — are re-checked against what actually arrived.
+        let expected = pin
+            .or_else(|| Some(feature_ref.tag()))
+            .and_then(|r| r.strip_prefix("sha256:"));
+        if let Some(expected_hex) = expected {
             if !digest_hex.eq_ignore_ascii_case(expected_hex) {
+                let context = match pin {
+                    Some(_) => format!(
+                        "manifest for {} pinned by the lockfile's `integrity`",
+                        feature_ref.reference()
+                    ),
+                    None => format!("manifest for {}", feature_ref.reference()),
+                };
                 return Err(FeatureError::IntegrityMismatch {
-                    context: format!("manifest for {}", feature_ref.reference()),
+                    context,
                     expected: format!("sha256:{}", expected_hex),
                     actual: format!("sha256:{}", digest_hex),
                 }
@@ -418,7 +461,7 @@ impl<C: HttpClient> FeatureFetcher<C> {
 
     /// Get the OCI manifest for a feature
     pub async fn get_manifest(&self, feature_ref: &FeatureRef) -> Result<Manifest> {
-        let manifest_data = self.fetch_manifest_bytes(feature_ref).await?;
+        let manifest_data = self.fetch_manifest_bytes(feature_ref, None).await?;
 
         let manifest: Manifest =
             serde_json::from_slice(&manifest_data).map_err(|e| FeatureError::Parsing {
@@ -436,11 +479,11 @@ impl<C: HttpClient> FeatureFetcher<C> {
         &self,
         feature_ref: &FeatureRef,
     ) -> Result<(serde_json::Value, String)> {
-        let manifest_data = self.fetch_manifest_bytes(feature_ref).await?;
+        let manifest_data = self.fetch_manifest_bytes(feature_ref, None).await?;
 
         // Historically this method returned the bare hex digest (no `sha256:`
         // prefix); preserve that for existing callers computing canonical IDs.
-        let digest_with_prefix = Self::manifest_digest(feature_ref, &manifest_data)?;
+        let digest_with_prefix = Self::manifest_digest(feature_ref, &manifest_data, None)?;
         let digest = digest_with_prefix
             .strip_prefix("sha256:")
             .unwrap_or(&digest_with_prefix)
@@ -1575,6 +1618,133 @@ mod tests {
             result.is_ok(),
             "Expected install script to succeed with env vars, got error: {:?}",
             result.unwrap_err()
+        );
+    }
+
+    // ---- lockfile `integrity` pins (#571) --------------------------------
+
+    fn git_ref() -> FeatureRef {
+        FeatureRef::new(
+            "ghcr.io".to_string(),
+            "devcontainers".to_string(),
+            "features/git".to_string(),
+            Some("1.3.2".to_string()),
+        )
+    }
+
+    fn digest_of(body: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(body);
+        format!("sha256:{:x}", hasher.finalize())
+    }
+
+    #[test]
+    fn a_matching_pin_is_accepted() {
+        let body = br#"{"layers":[]}"#;
+        let pin = digest_of(body);
+        let computed = FeatureFetcher::<crate::oci::client::MockHttpClient>::manifest_digest(
+            &git_ref(),
+            body,
+            Some(&pin),
+        )
+        .unwrap();
+        assert_eq!(computed, pin);
+    }
+
+    #[test]
+    fn a_mismatching_pin_is_refused_and_says_so() {
+        let body = br#"{"layers":[]}"#;
+        // The fixture's own corruption: one hex character.
+        let mut wrong = digest_of(body);
+        wrong.pop();
+        wrong.push(if wrong.ends_with('a') { 'b' } else { 'a' });
+
+        let err = FeatureFetcher::<crate::oci::client::MockHttpClient>::manifest_digest(
+            &git_ref(),
+            body,
+            Some(&wrong),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("integrity"), "unexpected error: {err}");
+    }
+
+    /// The pin governs even when the reference itself carries a plain tag —
+    /// which is the whole point, since a lockfile pins a TAGGED declaration.
+    #[test]
+    fn the_pin_is_checked_even_though_the_reference_is_a_tag() {
+        let served = br#"{"layers":[{"digest":"sha256:aa","size":1}]}"#;
+        let other = digest_of(br#"{"layers":[]}"#);
+        assert!(git_ref().tag().starts_with("1."));
+        assert!(
+            FeatureFetcher::<crate::oci::client::MockHttpClient>::manifest_digest(
+                &git_ref(),
+                served,
+                Some(&other),
+            )
+            .is_err()
+        );
+    }
+
+    /// Without a pin nothing is verified for a tagged reference — the
+    /// pre-#571 behaviour, still correct when no lockfile pins the Feature.
+    #[test]
+    fn an_unpinned_tagged_reference_verifies_nothing() {
+        let body = br#"{"layers":[]}"#;
+        assert_eq!(
+            FeatureFetcher::<crate::oci::client::MockHttpClient>::manifest_digest(
+                &git_ref(),
+                body,
+                None
+            )
+            .unwrap(),
+            digest_of(body)
+        );
+    }
+
+    /// The pin REPLACES the tag in the manifest URL rather than being compared
+    /// after a tag fetch. Proven by mocking only the tag URL: a pinned fetch
+    /// must not find it.
+    #[tokio::test]
+    async fn a_pinned_fetch_requests_the_digest_not_the_tag() {
+        let client = crate::oci::client::MockHttpClient::new();
+        let manifest = Bytes::from_static(br#"{"layers":[{"digest":"sha256:dead","size":1}]}"#);
+        client
+            .add_response(
+                "https://ghcr.io/v2/devcontainers/features/git/manifests/1.3.2".to_string(),
+                manifest,
+            )
+            .await;
+        let temp = TempDir::new().unwrap();
+        let fetcher = FeatureFetcher::with_retry_config(
+            client,
+            temp.path().to_path_buf(),
+            RetryConfig {
+                max_attempts: 1,
+                ..RetryConfig::network()
+            },
+        );
+
+        let pin = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+        let err = fetcher
+            .fetch_feature_pinned(&git_ref(), Some(pin))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains(pin),
+            "the pinned URL should be the one requested; got: {err}"
+        );
+
+        // Control: the same fetcher DOES reach the mocked tag URL when unpinned.
+        let unpinned = fetcher
+            .fetch_feature(&git_ref())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            !unpinned.contains("No mock response"),
+            "an unpinned fetch should have found the tag manifest; got: {unpinned}"
         );
     }
 }

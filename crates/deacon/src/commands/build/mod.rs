@@ -8,7 +8,7 @@ pub mod result;
 use crate::cli::{BuildKitOption, OutputFormat};
 use crate::commands::shared::build_resolution::resolve_devcontainer_build_config;
 use crate::commands::shared::lockfile::{
-    LockfilePolicy, apply_lockfile_policy, ensure_frozen_lockfile_usable,
+    LockfilePolicy, apply_lockfile_policy, ensure_lockfile_usable,
 };
 use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
 use anyhow::{Context, Result, anyhow};
@@ -727,7 +727,7 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
     // and leaves the workspace clean; measured at oracle 0.87.0: exit 1,
     // `{"outcome":"error","message":"Lockfile does not exist."}`, no lockfile
     // written.
-    ensure_frozen_lockfile_usable(lockfile_policy, &config_path, config.features()).await?;
+    ensure_lockfile_usable(lockfile_policy, &config_path, config.features()).await?;
 
     // Check cache if not forced (skip cache if pushing or exporting).
     // When features are present we deliberately skip the cache check: the
@@ -1627,6 +1627,7 @@ async fn execute_compose_build_with_features(
         // `deacon build` is docker-only today; podman parity for the build
         // command is tracked separately (issue #30 deferred items).
         &deacon_core::docker::CliDocker::new(),
+        LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
     )
     .await?
     .ok_or_else(|| anyhow!("Compose feature build produced no image (no features declared?)"))?;
@@ -1957,6 +1958,7 @@ async fn apply_features_and_lockfile(
         // `deacon build` is docker-only today; podman parity for the build
         // command is tracked separately (issue #30 deferred items).
         &deacon_core::docker::CliDocker::new(),
+        policy,
     )
     .await
     .context("Failed to build feature-extended image from build output")?;

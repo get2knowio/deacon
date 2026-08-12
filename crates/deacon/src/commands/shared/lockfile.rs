@@ -45,8 +45,8 @@
 use anyhow::{Context, Result};
 use deacon_core::errors::DeaconError;
 use deacon_core::lockfile::{
-    Lockfile, LockfileValidationResult, get_lockfile_path, lockfile_text_matches, read_lockfile,
-    validate_lockfile_against_config, write_lockfile,
+    Lockfile, LockfilePins, LockfileValidationResult, get_lockfile_path, lockfile_text_matches,
+    read_lockfile, read_lockfile_pins, validate_lockfile_against_config, write_lockfile,
 };
 use std::io;
 use std::path::{Path, PathBuf};
@@ -102,8 +102,62 @@ fn declares_features(config_features: &serde_json::Value) -> bool {
         .is_some_and(|obj| !obj.is_empty())
 }
 
-/// Refuse, before anything is built, when `--frozen-lockfile` cannot possibly
-/// be satisfied.
+/// The `integrity` pins the on-disk lockfile imposes on this run's Feature
+/// resolution — the read half of the lockfile contract (#571).
+///
+/// `--no-lockfile` means "do not READ", not merely "do not write": the
+/// reference computes its lockfile as
+/// `A.noLockfile ? {lockfile: undefined} : await fI(t)` and threads that
+/// `undefined` into every Feature lookup, so a `--no-lockfile` run resolves by
+/// tag and a tampered lockfile cannot fail it. Measured at oracle 0.87.0 on
+/// `fx-upstream-lockfile-oci-integrity`: the same workspace that exits 1 on a
+/// plain `build` exits 0 under `--no-lockfile`.
+///
+/// `--frozen-lockfile` is NOT a carve-out — the reference reads for pinning
+/// under it exactly as it does by default; only the WRITE is suppressed.
+pub(crate) async fn resolve_lockfile_pins(
+    policy: LockfilePolicy,
+    config_path: &Path,
+) -> Result<LockfilePins> {
+    if policy == LockfilePolicy::Skip {
+        debug!("--no-lockfile set; resolution will not be pinned by the lockfile");
+        return Ok(LockfilePins::default());
+    }
+
+    let lockfile_path = get_lockfile_path(config_path);
+    let pins = read_lockfile_pins(&lockfile_path)
+        .await
+        .with_context(|| lockfile_read_failure_context(&lockfile_path))?;
+    if !pins.is_empty() {
+        debug!(
+            pinned = pins.len(),
+            "Resolution is pinned by '{}'",
+            lockfile_path.display()
+        );
+    }
+    Ok(pins)
+}
+
+/// The advice attached to every failure to READ a lockfile, so the two read
+/// sites cannot describe the same file two different ways.
+fn lockfile_read_failure_context(lockfile_path: &Path) -> String {
+    format!(
+        "Failed to read lockfile at '{}'. \
+         The file may be corrupted or contain invalid JSON. \
+         To regenerate it, remove the file and build again; \
+         to ignore it for this run, pass --no-lockfile.",
+        lockfile_path.display()
+    )
+}
+
+/// Refuse, before anything is built, when the lockfile cannot be used.
+///
+/// Two refusals, one ordering. A lockfile that cannot be READ fails every
+/// non-`--no-lockfile` run (its `integrity` pins resolution, so an unreadable
+/// one is not a detail that can be skipped — measured at oracle 0.87.0: a
+/// `.devcontainer-lock.json` that is not JSON exits 1 on a plain `build` and
+/// builds nothing). A `--frozen-lockfile` run additionally needs the file to
+/// exist and to name the Features the configuration declares.
 ///
 /// The reference throws `Lockfile does not exist.` from the same pass that
 /// resolves Features, i.e. before it builds the Feature-extended image, and
@@ -118,31 +172,36 @@ fn declares_features(config_features: &serde_json::Value) -> bool {
 /// [`apply_lockfile_policy`]. Both report the upstream-aligned summary strings
 /// (`Lockfile does not exist.` / `Lockfile does not match.`).
 ///
-/// A no-op under [`LockfilePolicy::Skip`] / [`LockfilePolicy::Write`], and a
-/// no-op when the configuration declares no Features (see [`declares_features`]).
-pub(crate) async fn ensure_frozen_lockfile_usable(
+/// A no-op under [`LockfilePolicy::Skip`], and a no-op when the configuration
+/// declares no Features (see [`declares_features`]) — the reference reaches its
+/// lockfile pass only through `generateFeaturesConfig`, which returns first.
+pub(crate) async fn ensure_lockfile_usable(
     policy: LockfilePolicy,
     config_path: &Path,
     config_features: &serde_json::Value,
 ) -> Result<()> {
-    if policy != LockfilePolicy::Frozen || !declares_features(config_features) {
+    if policy == LockfilePolicy::Skip || !declares_features(config_features) {
         return Ok(());
     }
 
     let lockfile_path = get_lockfile_path(config_path);
+
+    // Readability first, and for every policy that reads: an unparseable
+    // lockfile must not be discovered after an image has been built.
+    resolve_lockfile_pins(policy, config_path).await?;
+
+    if policy != LockfilePolicy::Frozen {
+        return Ok(());
+    }
+
     info!(
         "Frozen lockfile mode enabled: validating features against '{}'",
         lockfile_path.display()
     );
 
-    let lockfile = read_lockfile(&lockfile_path).await.with_context(|| {
-        format!(
-            "Failed to read lockfile at '{}'. \
-             The file may be corrupted or contain invalid JSON. \
-             To regenerate, remove the file and run without --frozen-lockfile.",
-            lockfile_path.display()
-        )
-    })?;
+    let lockfile = read_lockfile(&lockfile_path)
+        .await
+        .with_context(|| lockfile_read_failure_context(&lockfile_path))?;
 
     match validate_lockfile_against_config(lockfile.as_ref(), config_features, &lockfile_path) {
         LockfileValidationResult::Matched => {
@@ -367,11 +426,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let config_path = config_path_in(&tmp);
 
-        ensure_frozen_lockfile_usable(LockfilePolicy::Frozen, &config_path, &serde_json::json!({}))
+        ensure_lockfile_usable(LockfilePolicy::Frozen, &config_path, &serde_json::json!({}))
             .await
             .expect("featureless config must not require a lockfile");
 
-        ensure_frozen_lockfile_usable(
+        ensure_lockfile_usable(
             LockfilePolicy::Frozen,
             &config_path,
             &serde_json::Value::Null,
@@ -387,7 +446,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let config_path = config_path_in(&tmp);
 
-        let err = ensure_frozen_lockfile_usable(
+        let err = ensure_lockfile_usable(
             LockfilePolicy::Frozen,
             &config_path,
             &serde_json::json!({ "ghcr.io/devcontainers/features/git:1": {} }),
@@ -413,7 +472,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let config_path = config_path_in(&tmp);
 
-        let err = ensure_frozen_lockfile_usable(
+        let err = ensure_lockfile_usable(
             LockfilePolicy::Frozen,
             &config_path,
             &serde_json::json!({ "./features/local": {} }),
@@ -430,7 +489,7 @@ mod tests {
         let config_path = config_path_in(&tmp);
         let lockfile = one_feature_lockfile("ghcr.io/devcontainers/features/git:1", "1.0.0", 'a');
 
-        ensure_frozen_lockfile_usable(
+        ensure_lockfile_usable(
             LockfilePolicy::Skip,
             &config_path,
             &serde_json::json!({ "ghcr.io/devcontainers/features/git:1": {} }),
@@ -546,5 +605,97 @@ mod tests {
     fn is_readonly_filesystem_error_ignores_non_io_errors() {
         let err = anyhow::anyhow!("not an io error");
         assert!(!is_readonly_fs_error(&err));
+    }
+
+    // ---- the READ half: `integrity` pins (#571) --------------------------
+
+    /// `--no-lockfile` means "do not READ". The reference threads
+    /// `A.noLockfile ? {lockfile: undefined} : await fI(t)` into every Feature
+    /// lookup, so a `--no-lockfile` run resolves by tag and cannot be failed by
+    /// a lockfile — not even one that is not JSON.
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_lockfile_neither_pins_nor_reads() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = config_path_in(&tmp);
+        tokio::fs::write(get_lockfile_path(&config_path), "{ not json")
+            .await
+            .unwrap();
+
+        assert!(
+            resolve_lockfile_pins(LockfilePolicy::Skip, &config_path)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        ensure_lockfile_usable(
+            LockfilePolicy::Skip,
+            &config_path,
+            &serde_json::json!({ "ghcr.io/devcontainers/features/git:1": {} }),
+        )
+        .await
+        .expect("--no-lockfile must not read the lockfile at all");
+    }
+
+    /// The default path DOES read, so an unusable lockfile is refused before
+    /// anything is built rather than discovered after an image exists.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_lockfile_that_cannot_be_read_refuses_the_default_build() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = config_path_in(&tmp);
+        tokio::fs::write(get_lockfile_path(&config_path), "{ not json")
+            .await
+            .unwrap();
+
+        let err = ensure_lockfile_usable(
+            LockfilePolicy::Write,
+            &config_path,
+            &serde_json::json!({ "ghcr.io/devcontainers/features/git:1": {} }),
+        )
+        .await
+        .expect_err("an unparseable lockfile must refuse");
+        let msg = format!("{:#}", err);
+        assert!(msg.contains("Failed to read lockfile"), "got: {msg}");
+    }
+
+    /// …but only once Features are declared, for the same reason the frozen
+    /// gate is scoped that way: the reference never reaches its lockfile pass.
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_unreadable_lockfile_is_irrelevant_without_features() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = config_path_in(&tmp);
+        tokio::fs::write(get_lockfile_path(&config_path), "{ not json")
+            .await
+            .unwrap();
+
+        ensure_lockfile_usable(LockfilePolicy::Write, &config_path, &serde_json::json!({}))
+            .await
+            .expect("featureless config never consults the lockfile");
+    }
+
+    /// `--frozen-lockfile` is not a carve-out from the READ — the reference
+    /// pins under it exactly as it does by default; only the WRITE is
+    /// suppressed.
+    #[tokio::test(flavor = "current_thread")]
+    async fn frozen_still_pins() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = config_path_in(&tmp);
+        tokio::fs::write(
+            get_lockfile_path(&config_path),
+            r#"{"features":{"ghcr.io/devcontainers/features/git:1":{
+                 "version":"1.3.2",
+                 "resolved":"ghcr.io/devcontainers/features/git@sha256:63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014d",
+                 "integrity":"sha256:63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014d"}}}"#,
+        )
+        .await
+        .unwrap();
+
+        for policy in [LockfilePolicy::Frozen, LockfilePolicy::Write] {
+            let pins = resolve_lockfile_pins(policy, &config_path).await.unwrap();
+            assert_eq!(
+                pins.pin_for("ghcr.io/devcontainers/features/git:1"),
+                Some("sha256:63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014d"),
+                "{policy:?} must pin"
+            );
+        }
     }
 }

@@ -1317,7 +1317,172 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "**RED ON PURPOSE** from the day it landed, and the deliberate record of [#571](https://github.com/get2knowio/deacon/issues/571). It asserts the FIXED behaviour on both channels, so it will turn green on the fix rather than on a case edit — the pattern batch 2's three red cases established and closed.\n\nThe claim is the one the lockfile exists for: **`integrity` is a content pin, and a Feature whose content does not match it must not be installed.** `parity/spec/113500f4/devcontainer-lockfile.md` states it as a goal in so many words — \"Improved security by detecting when a feature's release artifact changes after its checksum was first recorded in the lockfile ('trust on first use')\" — so this is not a spec-silent surface where the reference is merely the authority. Both the spec and the reference say deacon is the wrong side.\n\nMEASURED at oracle 0.87.0 on `fx-upstream-lockfile-oci-integrity`, whose committed `.devcontainer-lock.json` names the CORRECT `resolved` digest for `ghcr.io/devcontainers/features/git:1.3.2` and a deliberately wrong `integrity` differing from it in one hex character. The reference exits 1 with `{\"outcome\":\"error\"}` (`Could not resolve Feature manifest for 'ghcr.io/devcontainers/features/git:1.3.2'` → `ERR: Feature … could not be processed`) and leaves the file byte-unchanged. deacon exits 0, builds the Feature-extended image, and **overwrites the corrupted `integrity` with the correct digest** — so a tampered lockfile is not merely ignored, it is silently repaired, and the next `git diff` is the only thing that would ever have said so.\n\nThe control that makes this a measurement rather than an inference: the SAME fixture with the correct `integrity` (`fx-upstream-lockfile-frozen`'s committed lockfile) builds successfully on the reference, exit 0. One hex character is the whole difference between the two runs.\n\nWhy the reference fails is transcribed from the bundle rather than guessed, because \"it verified a checksum\" would have been wrong. `integrity` is the LOOKUP KEY: `kb(ctx, ref, integrity)` → `ji`, which does `let r = e.version; t && (r = t)` and requests `…/v2/<path>/manifests/<integrity>` instead of the tag, then re-checks the returned `docker-content-digest` against it (`if (r && C !== r) throw new Error('Digest did not match for …')`). A wrong `integrity` therefore cannot resolve at all. deacon never reads the field: `oci/fetcher.rs` computes the manifest digest only to RECORD it, and `crates/core/src/lockfile.rs` has no consumer of `integrity` outside `--frozen-lockfile`'s document comparison and `outdated`/`upgrade` reporting.\n\n`--frozen-lockfile` is deliberately NOT in the argv, and is the near-miss worth naming: with it, deacon DOES exit 1 here (`Lockfile does not match.`), because the freshly-resolved entry differs from the corrupted one. That is a comparison of two documents, not a verification of content, and it is opt-in — the default path, which is what upstream's test exercises and what a user gets, checks nothing.\n\nThe `chan-file-content` assertion pins the lockfile's exact committed bytes rather than declaring a bare differential, for the same reason the exit code carries an `equals`: a differential alone passes when both sides are equally wrong, and this case's second half is precisely that deacon WROTE where the reference did not. `chan-stderr` is not declared — the two diagnostics say the same thing in different sentences, and comparing them would report prose.\n\nMined from the reference CLI's own e2e fixtures at `v0.87.0` ([#480](https://github.com/get2knowio/deacon/issues/480), batch 3 — the item batch 2 named \"the most landable of the deferrals\" and could not land because it had not been measured). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+      "notes": "GREEN since [#571](https://github.com/get2knowio/deacon/issues/571) closed; **RED ON PURPOSE** from the day it landed until then, with its assertions UNCHANGED across the fix. It stated the fixed behaviour on both channels from the start, so it turned green on the code and not on a case edit — the pattern batch 2's three red cases established.\n\nIt stays `live-differential`, and `case-build-lockfile-integrity-pin-enforced` is its `spec-expectation` twin: identical assertions, identical fixture, different lane. This one keeps confirming run by run that the reference still agrees; that one gates.\n\nThe claim is the one the lockfile exists for: **`integrity` is a content pin, and a Feature whose content does not match it must not be installed.** `parity/spec/113500f4/devcontainer-lockfile.md` states it as a goal in so many words — \"Improved security by detecting when a feature's release artifact changes after its checksum was first recorded in the lockfile ('trust on first use')\" — so this is not a spec-silent surface where the reference is merely the authority. Both the spec and the reference say deacon is the wrong side.\n\nMEASURED at oracle 0.87.0 on `fx-upstream-lockfile-oci-integrity`, whose committed `.devcontainer-lock.json` names the CORRECT `resolved` digest for `ghcr.io/devcontainers/features/git:1.3.2` and a deliberately wrong `integrity` differing from it in one hex character. The reference exits 1 with `{\"outcome\":\"error\"}` (`Could not resolve Feature manifest for 'ghcr.io/devcontainers/features/git:1.3.2'` → `ERR: Feature … could not be processed`) and leaves the file byte-unchanged. BEFORE the fix deacon exited 0, built the Feature-extended image, and **overwrote the corrupted `integrity` with the correct digest** — so a tampered lockfile was not merely ignored, it was silently repaired, and the next `git diff` was the only thing that would ever have said so. AFTER, deacon exits 1 without fetching the Feature's content and leaves the file byte-unchanged, because the pin is now the manifest LOOKUP KEY on deacon's side too.\n\nThe control that makes this a measurement rather than an inference: the SAME fixture with the correct `integrity` (`fx-upstream-lockfile-frozen`'s committed lockfile) builds successfully on the reference, exit 0. One hex character is the whole difference between the two runs.\n\nWhy the reference fails is transcribed from the bundle rather than guessed, because \"it verified a checksum\" would have been wrong. `integrity` is the LOOKUP KEY: `kb(ctx, ref, integrity)` → `ji`, which does `let r = e.version; t && (r = t)` and requests `…/v2/<path>/manifests/<integrity>` instead of the tag, then re-checks the returned `docker-content-digest` against it (`if (r && C !== r) throw new Error('Digest did not match for …')`). A wrong `integrity` therefore cannot resolve at all. That shape is now deacon's: `FeatureFetcher::fetch_feature_pinned` substitutes the pin for the tag in the manifest URL and re-checks the digest that comes back. Before the fix `oci/fetcher.rs` computed the manifest digest only to RECORD it, and `crates/core/src/lockfile.rs` had no consumer of `integrity` outside `--frozen-lockfile`'s document comparison and `outdated`/`upgrade` reporting.\n\n`--frozen-lockfile` is deliberately NOT in the argv, and is the near-miss worth naming: with it, deacon DOES exit 1 here (`Lockfile does not match.`), because the freshly-resolved entry differs from the corrupted one. That is a comparison of two documents, not a verification of content, and it is opt-in — the default path, which is what upstream's test exercises and what a user gets, checks nothing.\n\nThe `chan-file-content` assertion pins the lockfile's exact committed bytes rather than declaring a bare differential, for the same reason the exit code carries an `equals`: a differential alone passes when both sides are equally wrong, and this case's second half is precisely that deacon WROTE where the reference did not. `chan-stderr` is not declared — the two diagnostics say the same thing in different sentences, and comparing them would report prose.\n\nMined from the reference CLI's own e2e fixtures at `v0.87.0` ([#480](https://github.com/get2knowio/deacon/issues/480), batch 3 — the item batch 2 named \"the most landable of the deferrals\" and could not land because it had not been measured). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-build-lockfile-integrity-pin-enforced",
+      "behaviors": [
+        "bhv-lockfile-integrity-pins-feature-content"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}"
+          ],
+          "fixtures": [
+            "fx-upstream-lockfile-oci-integrity"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              ".devcontainer-lock.json": "{\n  \"features\": {\n    \"ghcr.io/devcontainers/features/git:1.3.2\": {\n      \"version\": \"1.3.2\",\n      \"resolved\": \"ghcr.io/devcontainers/features/git@sha256:63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014d\",\n      \"integrity\": \"sha256:63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014a\"\n    }\n  }\n}\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        ".devcontainer-lock.json"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The GATING half of `case-build-upstream-lockfile-oci-integrity`, which asserts the same two things about the same fixture and is `live-differential` — so `lane_of` sends it to `parity_docker` here and to `parity_differential` there. The pairing is the one `case-outdated-malformed-lockfile-rejected` / `-differential` established, and the reason for it is sharper on this behaviour than on that one: a regression that stopped honouring `integrity` would silently reinstate a security defect ([#571](https://github.com/get2knowio/deacon/issues/571)), and the nightly gates nothing. This case runs in the release gate and in every Docker-provisioned profile; its differential twin keeps confirming, run by run, that the reference still agrees.\n\nNothing about the ASSERTIONS differs between the two — that is deliberate. The re-laning rule is that a case may move lanes but may never have what it claims rewritten to fit the new lane, and the claims here were absolute from the day the red case landed (`equals: 1`, and the lockfile's exact bytes), so they need no adaptation to stand without an oracle beside them.\n\nThe `chan-file-content` pin is the load-bearing half. deacon's pre-#571 failure was not that it exited 0 — it was that it exited 0 having REWRITTEN the corrupted `integrity` to the digest it had just fetched, so the tampering was repaired and the only witness was a `git diff` nobody ran. An implementation that refused but still rewrote the file would satisfy the exit code alone."
+    },
+    {
+      "id": "case-build-lockfile-integrity-no-lockfile-bypasses-pin",
+      "behaviors": [
+        "bhv-lockfile-no-lockfile-flag-skips-the-pin"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--no-lockfile",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-upstream-lockfile-oci-integrity"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success"
+            }
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              ".devcontainer-lock.json": "{\n  \"features\": {\n    \"ghcr.io/devcontainers/features/git:1.3.2\": {\n      \"version\": \"1.3.2\",\n      \"resolved\": \"ghcr.io/devcontainers/features/git@sha256:63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014d\",\n      \"integrity\": \"sha256:63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014a\"\n    }\n  }\n}\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        ".devcontainer-lock.json"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The BOUNDARY of the `integrity` pin, on the same tampered fixture that proves the pin exists. `--no-lockfile` means \"do not READ\", not merely \"do not write\": the reference computes `A.noLockfile ? {lockfile: undefined} : await fI(t)` and threads that `undefined` into every Feature lookup, so a `--no-lockfile` run resolves by tag and a corrupted lockfile cannot fail it.\n\nMEASURED at oracle 0.87.0 on this exact workspace: the same fixture that exits 1 on a plain `build` exits 0 under `--no-lockfile` and produces a Feature-extended image. One flag is the whole difference between the two runs, which is what makes this a measurement of the carve-out rather than of the Feature.\n\nIt is here because a pin is the kind of fix that is easy to over-apply, and an over-applied one is invisible: it looks like security. Without this case the cheapest wrong implementation — read the lockfile unconditionally — passes every other lockfile case in the suite, since the only one that would notice is a `--no-lockfile` run against a lockfile that disagrees with reality, and that combination existed nowhere until this case.\n\n`--output-format json` is in the argv because `chan-structured-output` is: deacon's `build` prints a human summary otherwise, and the channel reports `stdout was not valid JSON` rather than anything about the flag under test — which is how this case first ran red.\n\nThree channels, each load-bearing. `chan-exit-code: 0` is the carve-out itself. `chan-structured-output` pinning `outcome: success` is what makes that 0 mean \"the image was built\" rather than \"something quietly declined to happen\". `chan-file-content` pinning the CORRUPTED bytes is the write half of the same flag: a run that resolved by tag and then repaired the lockfile would satisfy both other assertions while doing the thing `--no-lockfile` exists to prevent — and repairing it is exactly what deacon did on every path before [#571](https://github.com/get2knowio/deacon/issues/571)."
+    },
+    {
+      "id": "case-build-lockfile-unreadable-rejected",
+      "behaviors": [
+        "bhv-lockfile-unreadable-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "fs-heavy",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-lockfile-unreadable"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              ".devcontainer-lock.json": "{ this is not json\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        ".devcontainer-lock.json"
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The other consequence of reading the lockfile at all ([#571](https://github.com/get2knowio/deacon/issues/571)). Once `integrity` PINS resolution, a lockfile that cannot be parsed is not a cosmetic problem to be papered over by rewriting it — it is an input the run depends on and cannot have.\n\nMEASURED at oracle 0.87.0 on `fx-lockfile-unreadable`: the reference exits 1 with `{\"outcome\":\"error\",\"message\":\"Expected property name or '}' in JSON at position 2 …\"}` and leaves the file byte-unchanged. Its `readLockfile` (`fI`) swallows only `ENOENT`; a `SyntaxError` carries no `.code`, so the `throw e` rethrows it. BEFORE the fix deacon exited 0, built the Feature-extended image, and REPLACED the unparseable file with a freshly-resolved lockfile — the same silent repair the tampered-`integrity` case documents, reached by a different corruption.\n\n`spec-expectation` + `fs-heavy` puts this in the HERMETIC lane, and that is a claim rather than a convenience: the refusal happens while reading a local file, before deacon touches a registry or a daemon. `parity_hermetic` re-runs its own drivers inside a fresh network namespace, so a regression that moved this refusal after the Feature fetch or the base-image build would not merely fail the assertion — it would fail to reach it at all, loudly. `none` would have been the wrong group for the reason `case-build-upstream-lockfile-flags-mutually-exclusive` records: a `none` case runs against the COMMITTED fixture directory, and one edit to this argv is all it would take for a real build to write a `.devcontainer-lock.json` into `parity/fixtures/`.\n\n`chan-stderr` is deliberately not declared. Both CLIs report the position of the offending character, but they are two different JSON parsers describing the same byte, and comparing them would report a difference about serde vs V8 rather than about the behaviour. The exit code plus the file's surviving bytes is the whole claim — and the bytes matter more than the code here, since the defect this replaces was a successful run that overwrote them."
     }
   ]
 }

@@ -288,6 +288,10 @@ pub(crate) async fn execute_container_up(
                 Some(build_options),
                 host_ca_set,
                 &runtime.cli_docker(),
+                crate::commands::shared::lockfile::LockfilePolicy::from_flags(
+                    args.no_lockfile,
+                    args.frozen_lockfile,
+                ),
             )
             .await
             .with_context(|| "Failed to build feature-extended image")?
