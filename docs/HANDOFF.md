@@ -1,6 +1,6 @@
 # Session Handoff — Differential Parity Steady State
 
-Last updated: 2026-08-11, `main` at `b49da6d` (green; v0.3.0 shipped from
+Last updated: 2026-08-12, `main` at `e6f69fd` (green; v0.3.0 shipped from
 `d642e8d`). This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
@@ -8,14 +8,24 @@ changes, update this file in the same PR.
 
 ## Where things stand
 
-- **Back to zero open nonconformances.** `parity/SPEC_STATUS.md` records
-  **128 behaviors**: 0 open nonconformance, 9 follows-spec, 11 documented choice,
-  20 extension, 88 conformant-and-matching. The header census is CI-guarded
-  (`check_spec_status_census` in `crates/parity-harness/src/registry.rs`) — rows and
-  header must change together. The 2026-08-10/11 arc is the ledger working end to
-  end: #480 batch 2 measured two real lockfile defects, recorded them as three
-  red-on-purpose cases the day they were found (#556, #557), and both are now fixed
-  with those cases green **as authored** — no assertion was bent to reach zero.
+- **Two open nonconformances, both opened deliberately on 2026-08-12.**
+  `parity/SPEC_STATUS.md` records **132 behaviors**: 2 open nonconformance, 9
+  follows-spec, 11 documented choice, 20 extension, 90 conformant-and-matching. The
+  header census is CI-guarded (`check_spec_status_census` in
+  `crates/parity-harness/src/registry.rs`) — rows and header must change together.
+  **Zero is not the goal; an accurate ledger is.** The column went 0 → 2 because
+  #480 batch 3 measured two real defects (#571, #572) and landed them as
+  red-on-purpose cases the day it found them, which is the machinery working. The
+  2026-08-10/11 arc showed the other half of the same loop: batch 2's two defects
+  (#556, #557) are fixed with their cases green **as authored** — no assertion was
+  bent to reach zero.
+- **A recurring shape worth naming: batch 2 CLASSIFIED two items it had not
+  MEASURED, and both classifications were wrong in the same direction** — the work
+  was ordinary and the answers were not what the paperwork said. `lockfile-oci-integrity`
+  was carried as "deferred, most landable"; measured, it is a defect. The
+  compose-naming trio was carried as "blocked on a maintainer ruling"; it was never
+  blocked, and it held a second defect. Treat an inventory's *reasons* as claims
+  with the same standing as any other unmeasured claim.
 - **The differential nightly is green again.** Current verdict:
   `gh run list --workflow=parity.yml --branch=main`. A previous version of this
   file warned that the nightly was expected-red; that is now stale and the warning
@@ -46,6 +56,9 @@ changes, update this file in the same PR.
 
 | PR | What | Issues |
 |---|---|---|
+| #573 `e6f69fd` | #480 batch 3 — 4 fixtures, 4 cases, **two defects found by measuring what batch 2 had only classified**. `lockfile-oci-integrity`: deacon **never reads a lockfile's `integrity`** — a lockfile whose checksum does not match the Feature it names installs anyway, and deacon then REWRITES the field to the digest it just fetched, so a tampered lockfile is not ignored but silently repaired. The reference exits 1; `devcontainer-lockfile.md` names "trust on first use" as a goal of the file, so spec and reference agree deacon is the wrong side (rare). Transcribed, not guessed: `integrity` is the reference's manifest LOOKUP KEY (`ji` substitutes it for the tag, `aQ` re-checks `docker-content-digest`), not a checksum compared afterwards. Compose naming: `compose-with-name` and `-custom-yaml` MATCH (worth having — the existing Compose differential TOLERATES the project path, so nothing said what happens when a name IS authored), while `name: ${CUSTOM_NAME}` reaches Compose verbatim and `up` dies on `invalid project name`. Not fixed in-batch on purpose: the faithful fix reads `name` off `docker compose config`, making `derive_project_name` async and daemon-dependent, and hand-expanding `${VAR}` reimplements part of Compose's interpolation grammar — neither is "small and clearly correct". The seven codspace Feature-graph configs are now **definitively** deferred, not "worth re-running". `.gitignore`'s blanket `.env*` was silently swallowing a fixture whose `.env` IS the input under test | #571, #572 filed |
+| #570 `6b9f840` | the featureless `up --frozen-lockfile` carve-out finally has a row and a case. #565 changed it from exit 1 to exit 0 incidentally; both CLIs exit 0 and neither writes a lockfile, and the reference's reason is transcribed — `--frozen-lockfile` is read only inside `writeLockfile`, whose one caller returns early when `userFeaturesToArray` finds no Features, so the flag is never REACHED rather than satisfied. Deliberately `spec-expectation`, not `live-differential`: the differential lane is nightly-only and **gates nothing**, and a case whose whole point is that nothing gated this behavior belongs where it gates. Watched-to-fail by breaking the PRODUCT (dropping the `declares_features` gate), not the case — `chan-filesystem` correctly stayed GREEN through that break, which is why the case leans on exit code + result document instead | item 1 closed; #569 filed |
+| #568 `6d2b7a0` | CLAUDE.md's cross-cutting-audit bullet said `dockerComposeFile` resolves against the workspace folder; it resolves against the **config dir** (spec: "relative to the `devcontainer.json` file"; `ComposeManager::create_project` already implements and cites it). No product change — the guidance file was what was wrong, and it had already steered one fixture wrong. Contrast preserved by naming what genuinely IS workspace-relative there: the compose project name and working dir | #555 fixed |
 | #566 `b49da6d` | the derived Compose project name leads with the sanitized workspace-folder stem — `deacon_site_6fb1205c_532a7bdd`, not `deacon_6fb1205c_532a7bdd`. Ruling refined #265 on the ground that deacon's audience is terminal-first: there is NO VS Code integration path (no extension; the Dev Containers extension bundles and drives the reference CLI), and the one workflow that composes — Attach to Running Container — does not provision, so it cannot collide. Isolation still holds by construction (still outside `<folder>_devcontainer`); both hashes stay, each load-bearing (`workspaceHash` separates same-named checkouts, `configHash` drives the new-generation behavior #371/#551 rest on); empty stem falls back to hash-only. A one-time `up` diagnostic names superseded projects because Compose prefixes named VOLUMES with the project name — containers are swept, volumes never are. **Net find**: the parity harness's basename-marker sweeps could not see a pre-#564 `deacon_<hash>_<hash>_default` network at all; the stem makes deacon's own compose resources reclaimable, now asserted | #564 fixed |
 | #565 `334970b` | `build` consumes `--no-lockfile` / `--frozen-lockfile` at last (parsed since forever, consulted never — the source comment admitted it). Both now route with `up` through one `commands/shared/lockfile` (`LockfilePolicy::{Skip,Frozen,Write}`), so the two subcommands cannot drift; a duplicated EROFS/EACCES detector was deleted rather than a fourth copy added. Frozen refuses PRE-build, so nothing is built and nothing written | #556 fixed |
 | #563 `40d6fb6` | `up --frozen-lockfile` compares SEMANTICALLY and deacon emits the spec key order (`version, resolved, integrity`). deacon rejected every lockfile the reference writes — same 327 bytes, alphabetised keys. Both halves shipped together on purpose: the order change rewrites existing lockfiles once, and the tolerant comparison has to already exist when it does. Three duplicated `sort_json_object` copies collapsed into one `canonical_lockfile_value`; feature ids stay sorted (transcribed from `generateLockfile`, confirmed black-box), only entry keys stopped being | #557 fixed |
@@ -78,44 +91,66 @@ defects it concealed were filed as #526 and #527, both now fixed.
 Sharpest first. Every item below already has a measurement or a precise claim in
 its issue — read the issue before briefing an agent.
 
-Nothing is currently blocked on a maintainer ruling. All delegable:
+The 2026-08-11 queue was consumed entirely (#555, the featureless-lockfile row,
+#480 batch 3). What replaced it is three MEASURED findings, all filed the day they
+were found, plus one decision only the maintainer can make.
 
-1. **An UNRECORDED behavior needs a row and a case.** #565 changed `up
-   --frozen-lockfile` on a config that declares NO Features from exit 1 to exit 0,
-   incidentally, by gating the refusal on `declares_features` to match the
-   reference's `generateFeaturesConfig` early return. Measured directly on `main`
-   at `334970b` — reference exits 0 writing nothing, deacon now agrees; before the
-   change deacon exited 1. It was disclosed for review, and the `up
-   --frozen-lockfile` SPEC_STATUS row was updated, but that row documents the
-   WITH-Features case, so the featureless carve-out has **no row and no case
-   pinning it** and nothing stops it regressing. The standing ledger rule says
-   every measured difference gets both. Cheap: the fixture is a three-line
-   featureless `devcontainer.json`.
-2. **#480 batch 3** — start with `lockfile-oci-integrity`, which the batch-2
-   agent judged fully expressible on a first-party Feature but did not measure.
-   The updated remainder inventory is an issue comment on #480. **Reclassified
-   2026-08-11: the compose-project-naming group (3 configs) is ORDINARY work, not
-   blocked.** It was queued as needing a ruling on the assumption that it collides
-   with deacon's namespaced-project-name choice. It does not: `derive_project_name`
-   honors an explicit `COMPOSE_PROJECT_NAME` (sibling `.env`) and a compose-file
-   top-level `name:` ahead of any derivation, and all three fixtures declare the
-   name in the compose file. Expect `compose-with-name` and
-   `compose-with-name-and-custom-yaml` to match, and `compose-with-name-using-env-var`
-   (`name: ${CUSTOM_NAME}`) to expose a real defect — the parser is line-wise with
-   no interpolation, so deacon likely uses the literal `${CUSTOM_NAME}`. Code-read,
-   NOT yet measured.
-3. **#555** — one-line doc fix: CLAUDE.md's cross-cutting-audit bullet says
-   `dockerComposeFile` resolves against the workspace folder. It does not — spec
-   (`devcontainerjson-reference.md:56`) says "relative to the `devcontainer.json`
-   file", and `compose.rs` already implements that with the citation. Verified
-   independently; the guidance file is what is wrong. `docs/DIFFERENTIATORS.md`'s
-   sibling error was fixed in #566.
+**Fixes, sharpest first — the first is the most serious defect the campaign has
+found:**
+
+1. **#571 — deacon never verifies a lockfile's `integrity`, and silently REPAIRS a
+   tampered one.** A `.devcontainer-lock.json` whose `integrity` is wrong for the
+   digest its own `resolved` names installs anyway; deacon exits 0, builds the
+   Feature-extended image, and overwrites the bad field with the digest it just
+   fetched. The reference exits 1 leaving the file byte-unchanged — one hex
+   character is the whole difference (control run confirms). Confirmed
+   independently by code-read as well as by measurement: every `integrity` site in
+   the tree is a WRITE or `validate_sha256_digest`, which checks only the `sha256:`
+   prefix and a 64-hex-char length. **No site compares an on-disk `integrity` to a
+   fetched manifest digest.** Both authorities agree deacon is wrong here, which is
+   rare: `devcontainer-lockfile.md` names detection of exactly this ("trust on
+   first use") as a purpose of the file. `case-build-upstream-lockfile-oci-integrity`
+   is red-on-purpose and turns green on the fix.
+2. **#572 — `name: ${CUSTOM_NAME}` in a compose file is not interpolated.** deacon's
+   `parse_compose_file_for_project_name` is line-wise, so the literal reaches Compose
+   and `up` dies on `invalid project name "${CUSTOM_NAME}"` where the reference
+   succeeds with `custom-name-with-env-var`. **This one has a real design question
+   inside it** and the batch-3 agent deliberately did not fix it in-batch: the
+   faithful fix reads `name` off `docker compose config`, which makes
+   `derive_project_name` async and daemon-dependent, while hand-expanding `${VAR}`
+   reimplements part of Compose's interpolation grammar. Brief an agent to measure
+   the cost of the faithful path before choosing.
+3. **#569 — classification pending, and it is the maintainer's call.** The
+   pre-build `--frozen-lockfile` refusal misses Features supplied by
+   `--additional-features`, so deacon BUILDS the Feature-extended image and then
+   refuses, where the reference issues zero docker commands. Exit code and workspace
+   bytes already agree, so this is not a contract break — deacon just does the work
+   the flag exists to avoid and leaves a `deacon-devcontainer-features:*` image
+   behind. Cause transcribed: the reference's early return keys off the UNION of
+   config Features and `additionalFeatures` (`userFeaturesToArray`), deacon's mirror
+   passes `config.features()` alone, in both `up` and `build`. Against the standing
+   least-surprise bar a migrating user gets stray images and wasted build minutes,
+   and no invariant is in tension — the fix is one argument. Filed without a status
+   on purpose.
+
+**#480's first vein is close to exhausted.** All 34 remaining configs are deferred
+for content or environment reasons, and the seven codspace Feature-graph configs are
+now definitively out rather than "worth re-running". Only two unlocks remain and
+**both are maintainer decisions**, not work: (a) a "materialise this file empty"
+fixture step, wanted or not; (b) an in-place-config-rewrite fixture pattern for
+`upgrade --feature`, the one surface in the suite where the CLI edits the user's
+config. If neither is wanted, the issue's SECOND vein — real-world
+`devcontainer.json` files from public repos — is where the next batch's value is.
 
 Open question, not blocking: #566 implements the superseded-project diagnostic as
 **one message per `up`** listing every superseded project, rather than a persisted
 suppression marker — the condition is self-clearing, and persisting risks the one
 emission landing in a run nobody read. A small follow-up if persisted suppression
 was intended.
+
+Unresolved hygiene, noticed 2026-08-12 and not landed: `.claude/worktrees/` is
+untracked and unignored, so an agent doing a broad `git add` could commit an entire
+worktree. One line in `.gitignore`.
 
 Retired without work: **#402** closed obsolete 2026-08-07 — its subject (the
 discovery findings queue) was deleted with the conformance crate, and the parity
@@ -174,6 +209,17 @@ each learned from a real failure:
   8-of-10 read as all-of-8. Its own words: *"the `n > 0` guard I wrote is not a
   completeness check."* The predicate is `total >= 10 AND all pass`, twice
   consecutively. It nearly merged without the two jobs that matter most.
+- **One watcher per PR, and it belongs to the main session.** An agent that arms
+  its own check monitor wakes every few minutes to report partial counts,
+  duplicating the session's watcher and burning its context for nothing — one did
+  this five times on #570 while holding (correctly) at 8-of-10. Brief agents to
+  stop at "PR open, gate run locally, here is my report", and let the session watch
+  and merge. Their holding discipline is still the thing being tested; what is not
+  wanted is the narration.
+- **Do not trust a squash message's arithmetic after a rebase.** #573's commit body
+  says "128 → 131" because it was written before rebasing onto #570; the FILE says
+  132, and the file is what `check_spec_status_census` validates. Recount census
+  rows after any rebase rather than carrying header arithmetic forward.
 - **Rebuild before you measure.** `./target/debug/deacon` is not evidence of what
   is on `main`. Twice in one session a measurement against a stale binary produced
   a confidently wrong conclusion — once saying a landed fix was absent, once
