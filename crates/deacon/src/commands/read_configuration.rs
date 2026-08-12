@@ -2083,7 +2083,10 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                         let abs_config_dir = config_dir
                             .canonicalize()
                             .unwrap_or_else(|_| config_dir.to_path_buf());
-                        match manager.create_project(&config, &abs_workspace, &abs_config_dir) {
+                        match manager
+                            .create_project(&config, &abs_workspace, &abs_config_dir, &[])
+                            .await
+                        {
                             Ok(project) => {
                                 match manager
                                     .get_command(&project)

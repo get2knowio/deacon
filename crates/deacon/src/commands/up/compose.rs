@@ -99,7 +99,12 @@ pub(crate) async fn execute_compose_up(
     // Compose files resolve relative to the directory containing devcontainer.json
     // (the `.devcontainer` dir for the standard layout), not the workspace folder.
     let config_dir = config_path.parent().unwrap_or(workspace_folder);
-    let mut project = compose_manager.create_project(config, workspace_folder, config_dir)?;
+    // `--env-file`s go in up front: they participate in resolving an authored
+    // `name: ${VAR}` (#572), so a project created without them could land on a
+    // different name than the one `exec`/`down` compute later.
+    let mut project = compose_manager
+        .create_project(config, workspace_folder, config_dir, &args.env_file)
+        .await?;
 
     // #564. Compose prefixes every named volume with the project name, so any change to
     // the project name leaves the previous project's volumes intact but INVISIBLE to the
@@ -129,9 +134,6 @@ pub(crate) async fn execute_compose_up(
     {
         warn!("{advice}");
     }
-
-    // Add env files from CLI args
-    project.env_files = args.env_file.clone();
 
     // Spec parity (#100): stamp the same deacon identity labels the
     // single-container path uses onto every compose service. Without these, VS

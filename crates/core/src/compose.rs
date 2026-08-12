@@ -549,6 +549,39 @@ impl ComposeCommand {
         parse_external_volumes_from_config(&output)
     }
 
+    /// Ask Compose which project name it resolves this file set to.
+    ///
+    /// A compose document's top-level `name:` is a TEMPLATE — Compose interpolates it
+    /// from the process environment and the project's `.env` before using it, and then
+    /// normalizes the result (lowercase, illegal characters dropped). `name: ${CUSTOM_NAME}`
+    /// is therefore not a project name at all until Compose has evaluated it, and no
+    /// reader of the raw document can produce the right answer without reimplementing
+    /// Compose's interpolation grammar (`${VAR:-default}`, `${VAR:?err}`, `$VAR`, `$$`).
+    ///
+    /// So we ask Compose, exactly as the reference CLI does (its `Rp` project resolver
+    /// reads `name` off `docker compose config`'s output). This is a CLIENT-SIDE call:
+    /// `docker compose config` needs the `docker` binary and its compose plugin, both of
+    /// which every compose flow already requires, but NOT a reachable daemon — measured
+    /// with `DOCKER_HOST` pointed at a nonexistent socket, where `config` still exits 0.
+    ///
+    /// The returned name is whatever Compose resolves, which is an authored `name:` when
+    /// the document has one and the project-directory basename when it does not. This
+    /// method cannot tell those apart, so callers MUST establish authorship first (see
+    /// `derive_project_name`) — adopting Compose's directory default would silently
+    /// overrule deacon's own namespaced derivation (#265/#564).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `docker compose config` fails (no `docker` binary, an
+    /// unparseable document, or a `name:` that interpolates to empty — Compose itself
+    /// rejects that with "project name must not be empty") or when its JSON carries no
+    /// usable `name`.
+    #[instrument(skip(self))]
+    pub async fn extract_project_name(&self) -> Result<String> {
+        let output = self.execute(&["config", "--format", "json"]).await?;
+        parse_project_name_from_config(&output)
+    }
+
     /// Extract profiles for target services from compose configuration.
     ///
     /// Uses `docker compose config --format json` to get the merged configuration
@@ -660,6 +693,33 @@ fn parse_external_volumes_from_config(json_output: &str) -> Result<Vec<String>> 
         external_volumes.len()
     );
     Ok(external_volumes)
+}
+
+/// Read the resolved project name out of `docker compose config --format json` output.
+///
+/// Pure counterpart of [`ComposeCommand::extract_project_name`]; the subprocess lives
+/// there and the parsing lives here so the shape of Compose's answer is unit-testable
+/// without a `docker` binary.
+///
+/// Compose always emits a `name` on a successful `config`, so an absent or empty one is
+/// an error rather than a "no name authored" signal — a `name:` that interpolates to
+/// empty makes `config` itself fail with "project name must not be empty" long before
+/// we get here.
+fn parse_project_name_from_config(json_output: &str) -> Result<String> {
+    let config: serde_json::Value = serde_json::from_str(json_output).map_err(|e| {
+        DockerError::CLIError(format!("Failed to parse compose config JSON: {}", e))
+    })?;
+
+    config
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            DockerError::CLIError("docker compose config reported no project name".to_string())
+                .into()
+        })
 }
 
 /// Parse service profiles from docker compose config JSON output.
@@ -798,13 +858,26 @@ impl ComposeManager {
         Self { docker_path }
     }
 
-    /// Create a compose project from configuration
+    /// Create a compose project from configuration.
+    ///
+    /// `env_files` are the `--env-file` paths the caller will run Compose with. They are
+    /// stored on the project AND used while resolving the project name, because a
+    /// `--env-file` replaces Compose's default `.env` discovery and therefore changes
+    /// what an authored `name: ${VAR}` interpolates to. Taking them as a parameter
+    /// rather than letting callers assign the field afterwards is deliberate: `up`,
+    /// `exec` and `down` must all land on the SAME project name, and a name resolved
+    /// before the env files were attached would not.
+    ///
+    /// This is `async` because resolving an authored project name asks Compose to
+    /// interpolate it (see [`derive_project_name`]). Configurations that author no
+    /// `name:` never spawn a subprocess.
     #[instrument(skip(self))]
-    pub fn create_project(
+    pub async fn create_project(
         &self,
         config: &DevContainerConfig,
         base_path: &Path,
         config_dir: &Path,
+        env_files: &[PathBuf],
     ) -> Result<ComposeProject> {
         // Check if docker_compose_file is specified
         if config.docker_compose_file.is_none() {
@@ -851,8 +924,16 @@ impl ComposeManager {
         }
 
         // Deacon-namespaced project name, unique per devcontainer (workspace +
-        // config hash), so sibling devcontainers in one repo never collide.
-        let project_name = derive_project_name(base_path, config, &resolved_files);
+        // config hash), so sibling devcontainers in one repo never collide — unless the
+        // user authored a name, in which case Compose resolves it.
+        let project_name = derive_project_name(
+            &self.docker_path,
+            base_path,
+            config,
+            &resolved_files,
+            env_files,
+        )
+        .await?;
 
         Ok(ComposeProject {
             name: project_name,
@@ -860,7 +941,7 @@ impl ComposeManager {
             compose_files: resolved_files,
             service: service.clone(),
             run_services: config.run_services().to_vec(),
-            env_files: Vec::new(),
+            env_files: env_files.to_vec(),
             additional_mounts: Vec::new(), // Will be populated from CLI --mount flags
             profiles: Vec::new(),          // Will be populated from service profiles
             additional_env: IndexMap::new(),
@@ -1687,7 +1768,22 @@ fn parse_env_file_for_project_name(env_file_path: &Path) -> Option<String> {
     None
 }
 
-/// Parse compose file and extract top-level `name` if present.
+/// Detect whether a compose file AUTHORS a top-level `name`, returning the raw line's
+/// value.
+///
+/// This is an AUTHORSHIP detector, not a project-name resolver. The value it returns is
+/// the raw document text, which may well be a template (`name: ${CUSTOM_NAME}`) rather
+/// than a usable name — `derive_project_name` hands the resolution to Compose itself via
+/// [`ComposeCommand::extract_project_name`] and uses this only to decide whether to ask.
+///
+/// The split exists because Compose's own answer cannot tell the two apart: `docker
+/// compose config` reports a `name` whether or not the document authored one, falling
+/// back to the project-directory basename. The reference CLI has the same problem and
+/// solves it the same way — its `Rp` resolver re-reads the compose files whenever
+/// Compose's answer is the literal `devcontainer` (its own directory default) to decide
+/// whether a human wrote it. deacon's derived default is namespaced rather than
+/// directory-derived (#265/#564), so it has to ask the question for EVERY document
+/// instead of one special-cased name.
 fn parse_compose_file_for_project_name(compose_file_path: &Path) -> Option<String> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
@@ -1796,28 +1892,59 @@ pub fn sanitize_project_stem(raw: &str) -> String {
     out
 }
 
-fn derive_project_name(
+async fn derive_project_name(
+    docker_path: &str,
     base_path: &Path,
     config: &DevContainerConfig,
     compose_files: &[PathBuf],
-) -> String {
+    env_files: &[PathBuf],
+) -> Result<String> {
     // An explicit COMPOSE_PROJECT_NAME in a sibling `.env` is used verbatim
     // (no suffix) — this is a deliberate user override, so honor it exactly
     // as docker compose and the reference CLI would.
     let env_file_path = base_path.join(".env");
     if let Some(project_name) = parse_env_file_for_project_name(&env_file_path) {
         debug!("Using project name from .env file: {}", project_name);
-        return project_name;
+        return Ok(project_name);
     }
 
-    for compose_file in compose_files {
-        if let Some(project_name) = parse_compose_file_for_project_name(compose_file) {
-            debug!(
-                "Using project name from compose top-level `name`: {}",
-                project_name
-            );
-            return project_name;
-        }
+    // An AUTHORED top-level `name:` wins over any derivation — but the authored text is
+    // a TEMPLATE, so the value that goes on `--project-name` is Compose's, not ours
+    // (#572). Reading the line ourselves and passing it through produced
+    // `invalid project name "${CUSTOM_NAME}"` and no container at all, while the
+    // reference — which takes the name off `docker compose config` — brought the project
+    // up as `custom-name-with-env-var`. Asking Compose also gets its normalization for
+    // free (`Custom.Name Upper` → `customnameupper`), which is what the reference's own
+    // `Rg` sanitizer reproduces by hand.
+    if let Some(authored) = compose_files
+        .iter()
+        .find_map(|file| parse_compose_file_for_project_name(file))
+    {
+        let command = ComposeCommand::new(base_path.to_path_buf(), compose_files.to_vec())
+            .with_docker_path(docker_path.to_string())
+            .with_env_files(env_files.to_vec());
+
+        // No fallback to the raw line on failure. A `name:` we cannot evaluate has no
+        // safe reading: passing the template through is the defect this replaced, and
+        // quietly deriving a name instead would ignore what the author wrote and strand
+        // the project under a name they never asked for. The reference fails the same
+        // way — a failing `docker compose config` aborts its `up` with "An error
+        // occurred retrieving the Docker Compose configuration."
+        let resolved = command.extract_project_name().await.map_err(|err| {
+            DockerError::CLIError(format!(
+                "Compose file declares a top-level project name (`{authored}`) that Docker \
+                 Compose could not resolve. A compose `name:` is a template — Compose \
+                 interpolates it from the environment and the project's `.env` — so deacon \
+                 asks `docker compose config` for the resolved value instead of guessing. \
+                 Underlying failure: {err}"
+            ))
+        })?;
+
+        debug!(
+            "Using compose-resolved project name: {} (authored as `{}`)",
+            resolved, authored
+        );
+        return Ok(resolved);
     }
 
     // Auto-derived default: deacon-namespaced (#265) and unique per devcontainer.
@@ -1865,9 +1992,9 @@ fn derive_project_name(
         .map(|n| sanitize_project_stem(&n.to_string_lossy()))
         .unwrap_or_default();
     if stem.is_empty() {
-        return format!("deacon_{workspace_hash}_{config_hash}");
+        return Ok(format!("deacon_{workspace_hash}_{config_hash}"));
     }
-    format!("deacon_{stem}_{workspace_hash}_{config_hash}")
+    Ok(format!("deacon_{stem}_{workspace_hash}_{config_hash}"))
 }
 
 /// Which tool/generation named a Compose project deacon no longer derives for this
@@ -2035,8 +2162,8 @@ mod tests {
         assert!(args.contains(&"-d".to_string()));
     }
 
-    #[test]
-    fn test_create_project_resolves_compose_files_against_config_dir() {
+    #[tokio::test]
+    async fn test_create_project_resolves_compose_files_against_config_dir() {
         // Compose files must resolve relative to the directory containing
         // devcontainer.json (the `.devcontainer` dir for the standard layout),
         // NOT the workspace folder — matching the spec and the reference CLI.
@@ -2062,7 +2189,8 @@ mod tests {
 
         let manager = ComposeManager::new();
         let project = manager
-            .create_project(&config, &workspace, &config_dir)
+            .create_project(&config, &workspace, &config_dir, &[])
+            .await
             .unwrap();
 
         // Files resolved under `.devcontainer`, not the workspace root.
@@ -2077,8 +2205,8 @@ mod tests {
         assert_eq!(project.base_path, workspace);
     }
 
-    #[test]
-    fn test_create_project_absolute_compose_path_is_not_rebased() {
+    #[tokio::test]
+    async fn test_create_project_absolute_compose_path_is_not_rebased() {
         let temp_dir = TempDir::new().unwrap();
         let workspace = temp_dir.path().to_path_buf();
         let config_dir = workspace.join(".devcontainer");
@@ -2092,7 +2220,8 @@ mod tests {
         };
 
         let project = ComposeManager::new()
-            .create_project(&config, &workspace, &config_dir)
+            .create_project(&config, &workspace, &config_dir, &[])
+            .await
             .unwrap();
         assert_eq!(project.compose_files, vec![abs]);
     }
@@ -2280,16 +2409,33 @@ mod tests {
         assert_eq!(all_services, vec!["app"]);
     }
 
+    /// Test shim for the HERMETIC half of [`derive_project_name`] — the `.env` override
+    /// and the auto-derived default, neither of which touches Compose.
+    ///
+    /// Every caller of this helper either passes no compose files or short-circuits on a
+    /// `.env`, so no `docker compose config` subprocess is ever spawned. A caller that
+    /// authored a `name:` would need a real `docker` binary and belongs in
+    /// `crates/core/tests/integration_compose.rs` behind the docker group instead.
+    async fn derived_name(
+        base_path: &Path,
+        config: &DevContainerConfig,
+        compose_files: &[PathBuf],
+    ) -> String {
+        derive_project_name("docker", base_path, config, compose_files, &[])
+            .await
+            .expect("hermetic derivation must not fail")
+    }
+
     /// #265 + #564: the auto-derived project name is
     /// `deacon_<stem>_<workspace_hash>_<config_hash>` — the sanitized workspace-folder
     /// stem in front of the SAME two hashes `ContainerIdentity` computes — never the
     /// reference CLI's `<folder>_devcontainer` convention, so `devcontainer up` can
     /// still not mistake a deacon-owned compose project for its own.
-    #[test]
-    fn test_derive_project_name_is_deacon_namespaced_and_hash_based() {
+    #[tokio::test]
+    async fn test_derive_project_name_is_deacon_namespaced_and_hash_based() {
         let path = Path::new("/tmp/my-workspace");
         let config = DevContainerConfig::default();
-        let name = derive_project_name(path, &config, &[]);
+        let name = derived_name(path, &config, &[]).await;
         assert!(
             name.starts_with("deacon_"),
             "expected deacon_<stem>_<hash>_<hash>, got {name}"
@@ -2307,10 +2453,10 @@ mod tests {
     /// a hash. Both hashes stay — `workspace_hash` disambiguates two checkouts sharing a
     /// basename, `config_hash` is what makes an edited configuration a new generation
     /// (#371, #551 are built on it).
-    #[test]
-    fn test_derive_project_name_leads_with_the_workspace_stem() {
+    #[tokio::test]
+    async fn test_derive_project_name_leads_with_the_workspace_stem() {
         let config = DevContainerConfig::default();
-        let name = derive_project_name(Path::new("/home/dev/site"), &config, &[]);
+        let name = derived_name(Path::new("/home/dev/site"), &config, &[]).await;
         assert!(
             name.starts_with("deacon_site_"),
             "the workspace stem must lead the hashes, got {name}"
@@ -2328,11 +2474,11 @@ mod tests {
     /// Two checkouts of the same project under different parents share a BASENAME. The
     /// stem alone would collapse them onto one Compose project; `workspace_hash` is what
     /// keeps them apart, and it is still there.
-    #[test]
-    fn test_derive_project_name_same_stem_different_parents_still_differ() {
+    #[tokio::test]
+    async fn test_derive_project_name_same_stem_different_parents_still_differ() {
         let config = DevContainerConfig::default();
-        let a = derive_project_name(Path::new("/home/dev/work/api"), &config, &[]);
-        let b = derive_project_name(Path::new("/home/dev/tmp/api"), &config, &[]);
+        let a = derived_name(Path::new("/home/dev/work/api"), &config, &[]).await;
+        let b = derived_name(Path::new("/home/dev/tmp/api"), &config, &[]).await;
         assert!(a.starts_with("deacon_api_") && b.starts_with("deacon_api_"));
         assert_ne!(a, b, "same basename, different checkouts must not collide");
     }
@@ -2340,12 +2486,12 @@ mod tests {
     /// A folder whose basename sanitizes to nothing falls back to the hash-only form
     /// rather than emitting a `--project-name` `docker compose` rejects — the robustness
     /// claim `bhv-compose-project-name-robust` records, preserved verbatim through #564.
-    #[test]
-    fn test_derive_project_name_empty_stem_falls_back_to_hash_only() {
+    #[tokio::test]
+    async fn test_derive_project_name_empty_stem_falls_back_to_hash_only() {
         let config = DevContainerConfig::default();
         for path in ["/tmp/-", "/tmp/...", "/tmp/---"] {
             let path = Path::new(path);
-            let name = derive_project_name(path, &config, &[]);
+            let name = derived_name(path, &config, &[]).await;
             let expected = format!(
                 "deacon_{}_{}",
                 crate::container::ContainerIdentity::hash_workspace_path(path),
@@ -2356,7 +2502,7 @@ mod tests {
         // A workspace at the filesystem root has no basename at all.
         let root = Path::new("/");
         assert_eq!(
-            derive_project_name(root, &config, &[]),
+            derived_name(root, &config, &[]).await,
             format!(
                 "deacon_{}_{}",
                 crate::container::ContainerIdentity::hash_workspace_path(root),
@@ -2515,12 +2661,12 @@ mod tests {
     /// Same input path + config -> same project name (deterministic), and it
     /// must NOT collide with the reference CLI's `<folder>_devcontainer` form
     /// for any folder name.
-    #[test]
-    fn test_derive_project_name_deterministic_and_not_reference_form() {
+    #[tokio::test]
+    async fn test_derive_project_name_deterministic_and_not_reference_form() {
         let path = Path::new("/home/user/myapp");
         let config = DevContainerConfig::default();
-        let first = derive_project_name(path, &config, &[]);
-        let second = derive_project_name(path, &config, &[]);
+        let first = derived_name(path, &config, &[]).await;
+        let second = derived_name(path, &config, &[]).await;
         assert_eq!(first, second, "derivation must be deterministic");
         assert_ne!(
             first, "myapp_devcontainer",
@@ -2529,11 +2675,11 @@ mod tests {
     }
 
     /// Distinct workspace paths must not collide on the same project name.
-    #[test]
-    fn test_derive_project_name_differs_per_workspace() {
+    #[tokio::test]
+    async fn test_derive_project_name_differs_per_workspace() {
         let config = DevContainerConfig::default();
-        let a = derive_project_name(Path::new("/tmp/workspace-a"), &config, &[]);
-        let b = derive_project_name(Path::new("/tmp/workspace-b"), &config, &[]);
+        let a = derived_name(Path::new("/tmp/workspace-a"), &config, &[]).await;
+        let b = derived_name(Path::new("/tmp/workspace-b"), &config, &[]).await;
         assert_ne!(a, b);
     }
 
@@ -2544,8 +2690,8 @@ mod tests {
     /// `deacon up`/`down` in one would silently reconcile or tear down the
     /// other's compose project. The `config_hash` component disambiguates
     /// them, exactly as it does for the single-container `container_name`.
-    #[test]
-    fn test_derive_project_name_differs_by_config_for_same_path() {
+    #[tokio::test]
+    async fn test_derive_project_name_differs_by_config_for_same_path() {
         let path = Path::new("/tmp/shared-workspace");
         let config_a = DevContainerConfig {
             name: Some("api".to_string()),
@@ -2555,8 +2701,8 @@ mod tests {
             name: Some("web".to_string()),
             ..DevContainerConfig::default()
         };
-        let a = derive_project_name(path, &config_a, &[]);
-        let b = derive_project_name(path, &config_b, &[]);
+        let a = derived_name(path, &config_a, &[]).await;
+        let b = derived_name(path, &config_b, &[]).await;
         assert_ne!(
             a, b,
             "sibling devcontainers under one workspace path must not share a compose project name"
@@ -2565,8 +2711,8 @@ mod tests {
 
     /// An explicit `COMPOSE_PROJECT_NAME` in a sibling `.env` is honored
     /// verbatim — only the auto-derived branch changed under #265.
-    #[test]
-    fn test_derive_project_name_env_override_used_verbatim() {
+    #[tokio::test]
+    async fn test_derive_project_name_env_override_used_verbatim() {
         let temp_dir = TempDir::new().unwrap();
         std::fs::write(
             temp_dir.path().join(".env"),
@@ -2575,30 +2721,18 @@ mod tests {
         .unwrap();
         let config = DevContainerConfig::default();
         assert_eq!(
-            derive_project_name(temp_dir.path(), &config, &[]),
+            derived_name(temp_dir.path(), &config, &[]).await,
             "my-custom-project"
         );
     }
 
-    #[test]
-    fn test_derive_project_name_compose_top_level_name_used_verbatim() {
-        let temp_dir = TempDir::new().unwrap();
-        let compose_file = temp_dir.path().join("docker-compose.yml");
-        std::fs::write(
-            &compose_file,
-            "name: r4-explicit-project\nservices:\n  app:\n    image: alpine:3.18\n",
-        )
-        .unwrap();
-        let config = DevContainerConfig::default();
-
-        assert_eq!(
-            derive_project_name(temp_dir.path(), &config, &[compose_file]),
-            "r4-explicit-project"
-        );
-    }
-
-    #[test]
-    fn test_derive_project_name_env_override_wins_over_compose_name() {
+    /// The `.env` override short-circuits BEFORE the compose document is consulted, so
+    /// an authored `name:` never reaches Compose here. That ordering is what keeps this
+    /// test hermetic — `derived_name`'s docker path is never invoked — and it is also
+    /// the reference CLI's ordering (`Rp` returns on `COMPOSE_PROJECT_NAME` before it
+    /// ever looks at `composeConfig.name`).
+    #[tokio::test]
+    async fn test_derive_project_name_env_override_wins_over_compose_name() {
         let temp_dir = TempDir::new().unwrap();
         std::fs::write(
             temp_dir.path().join(".env"),
@@ -2614,9 +2748,95 @@ mod tests {
         let config = DevContainerConfig::default();
 
         assert_eq!(
-            derive_project_name(temp_dir.path(), &config, &[compose_file]),
+            derived_name(temp_dir.path(), &config, &[compose_file]).await,
             "my-custom-project"
         );
+    }
+
+    /// #572: an authored `name:` is resolved BY COMPOSE, and when Compose cannot be
+    /// reached there is no second-best answer — deacon errors instead of guessing.
+    ///
+    /// Both wrong guesses are worse than the error. Passing the raw line through is the
+    /// defect this replaced (`invalid project name "${CUSTOM_NAME}"`), and falling back
+    /// to the derived `deacon_*` default would ignore what the author wrote and strand
+    /// the project under a name they never asked for — a `down` computed the same way
+    /// would then match, but any `docker compose -p <authored>` they run by hand would
+    /// not. The reference fails here too: a failing `docker compose config` aborts its
+    /// `up` outright.
+    ///
+    /// Hermetic: the docker path is a name that cannot exist, so the spawn fails without
+    /// a daemon, a registry or a `docker` binary being involved.
+    #[tokio::test]
+    async fn test_derive_project_name_authored_name_errors_when_compose_unavailable() {
+        let temp_dir = TempDir::new().unwrap();
+        let compose_file = temp_dir.path().join("docker-compose.yml");
+        std::fs::write(
+            &compose_file,
+            "name: ${CUSTOM_NAME}\nservices:\n  app:\n    image: alpine:3.18\n",
+        )
+        .unwrap();
+        let config = DevContainerConfig::default();
+
+        let err = derive_project_name(
+            "deacon-no-such-docker-binary",
+            temp_dir.path(),
+            &config,
+            &[compose_file],
+            &[],
+        )
+        .await
+        .expect_err("an authored name deacon cannot resolve must not be guessed at");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("${CUSTOM_NAME}"),
+            "the error must quote what the author wrote: {message}"
+        );
+        assert!(
+            message.contains("docker compose config"),
+            "the error must name the mechanism that failed: {message}"
+        );
+        assert!(
+            !message.contains("deacon_"),
+            "no silent fall back to the derived default: {message}"
+        );
+    }
+
+    /// A document that authors NO `name:` never spawns a subprocess, so the derived
+    /// default stays reachable with no `docker` binary at all — the property that keeps
+    /// `bhv-compose-project-name-robust` independent of #572's Compose call.
+    #[tokio::test]
+    async fn test_derive_project_name_without_authored_name_needs_no_compose() {
+        let temp_dir = TempDir::new().unwrap();
+        let compose_file = temp_dir.path().join("docker-compose.yml");
+        std::fs::write(&compose_file, "services:\n  app:\n    image: alpine:3.18\n").unwrap();
+        let config = DevContainerConfig::default();
+
+        let name = derive_project_name(
+            "deacon-no-such-docker-binary",
+            temp_dir.path(),
+            &config,
+            &[compose_file],
+            &[],
+        )
+        .await
+        .expect("derivation must not depend on Compose when nobody authored a name");
+        assert!(name.starts_with("deacon_"), "got {name}");
+    }
+
+    /// The pure half of the resolution: Compose's answer is a JSON `name`.
+    #[test]
+    fn test_parse_project_name_from_config() {
+        assert_eq!(
+            parse_project_name_from_config(r#"{"name":"custom-name-with-env-var"}"#).unwrap(),
+            "custom-name-with-env-var"
+        );
+        // Compose always emits a name on success; an absent or blank one is a broken
+        // answer rather than "nobody authored one", so it must not be silently accepted
+        // (an empty `--project-name` is rejected by Compose anyway).
+        assert!(parse_project_name_from_config(r#"{"services":{}}"#).is_err());
+        assert!(parse_project_name_from_config(r#"{"name":"   "}"#).is_err());
+        assert!(parse_project_name_from_config("not json").is_err());
     }
 
     #[test]

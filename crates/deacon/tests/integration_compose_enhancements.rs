@@ -12,8 +12,8 @@ use serde_json::json;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-#[test]
-fn test_compose_multiservice_project_creation() {
+#[tokio::test]
+async fn test_compose_multiservice_project_creation() {
     // Test creating a project with multiple services
     let config = DevContainerConfig {
         name: Some("Multi-service Test".to_string()),
@@ -28,7 +28,8 @@ fn test_compose_multiservice_project_creation() {
     let compose_manager = ComposeManager::new();
 
     let project = compose_manager
-        .create_project(&config, temp_dir.path(), temp_dir.path())
+        .create_project(&config, temp_dir.path(), temp_dir.path(), &[])
+        .await
         .expect("Should create compose project");
 
     assert_eq!(project.service, "app");

@@ -1496,7 +1496,9 @@ async fn execute_compose_build(
     // `.devcontainer/`); `args.config_path` is only the explicit `--config` flag.
     let compose_manager = ComposeManager::new();
     let config_dir = config_path.parent().unwrap_or(workspace_folder);
-    let project = compose_manager.create_project(config, workspace_folder, config_dir)?;
+    let project = compose_manager
+        .create_project(config, workspace_folder, config_dir, &[])
+        .await?;
 
     // Validate service exists
     if !compose_manager
@@ -1593,7 +1595,9 @@ async fn execute_compose_build_with_features(
     let compose_manager = ComposeManager::new();
     // Compose files resolve relative to the config dir (spec parity).
     let config_dir = config_path.parent().unwrap_or(workspace_folder);
-    let project = compose_manager.create_project(config, workspace_folder, config_dir)?;
+    let project = compose_manager
+        .create_project(config, workspace_folder, config_dir, &[])
+        .await?;
     if !compose_manager
         .validate_service_exists(&project, service)
         .await?
