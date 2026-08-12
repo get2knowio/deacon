@@ -3030,6 +3030,261 @@
         "tempdir": true
       },
       "notes": "GREEN, and the control that gives the two RED `build` cases their meaning: `up` implements the lockfile gate that `build` does not, so the difference recorded by [#556](https://github.com/get2knowio/deacon/issues/556) is a MISSING WIRE on one subcommand rather than a missing capability.\n\nMEASURED at oracle 0.87.0 on this fixture: both CLIs exit 1 without creating a container, and neither writes `.devcontainer-lock.json`. deacon validates pre-build in `commands/up/mod.rs` and reports `Lockfile does not exist.` with the path it expected and how to generate one; the reference reports the same sentence as its result document's `message`. The two documents are shaped differently (deacon puts the sentence in `description` under a generic `message`), which is why `chan-structured-output` is NOT declared — it would report an error-envelope difference that this case is not about, and that shape is characterised elsewhere.\n\nThe filesystem claim is what makes the case more than an exit code: a run that refused AFTER writing the lockfile would satisfy `equals: 1` and have already done the thing `--frozen-lockfile` exists to prevent.\n\nBase `debian:bookworm-slim` (no `remoteUser`) — this case claims nothing about uid remapping and does not enter the reference's remap path.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 2 — the lockfile family). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-up-upstream-compose-with-name",
+      "behaviors": [
+        "bhv-compose-authored-project-name-honored"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-compose-with-name"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "composeProjectResources": {
+                "project": "custom-project-name"
+              }
+            }
+          }
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (both stop in ~200 ms on SIGTERM). Scoped to `cmd`; every other field stays compared.",
+          "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.entrypoint",
+          "rationale": "The other half of the keep-alive difference: the two CLIs deliver the same never-exit behavior through a different entrypoint/cmd split.",
+          "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labelNamespaces.devcontainer",
+          "rationale": "deacon stamps identity labels the reference does not set, so the `devcontainer` namespace's key SET differs. Scoped to that one namespace — the derived grouping is what makes a one-sided label visible (FR-052), and the per-key paths below stay named individually.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.configHash",
+          "rationale": "deacon sets `devcontainer.configHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.source",
+          "rationale": "deacon sets `devcontainer.source`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
+          "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labels.com.docker.compose.project.config_files",
+          "rationale": "The two CLIs deliver their generated Compose override differently — deacon on Compose's stdin (recorded as `-`), the reference as a file under `/tmp/devcontainercli-vscode/` — so Compose's own record of the file set differs. Exactly the difference `wvr-compose-project-file-set` characterizes and names.",
+          "waiverId": "wvr-compose-project-file-set"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labels.com.docker.compose.config-hash",
+          "rationale": "Compose hashes the merged file set, so this label differs as a direct consequence of the override-delivery difference above. The project NAME label is deliberately NOT tolerated — it is the claim.",
+          "waiverId": "wvr-compose-project-file-set"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "GREEN, and the case that shows deacon's namespaced Compose project name is a DEFAULT rather than an override. `bhv-compose-project-name-robust` (#265, refined by #564) is a documented choice about what deacon derives when nobody said; it never claimed the right to overrule an authored name, and this case is what keeps that distinction observable — `case-up-compose-project-resources-differential` tolerates `composeProjectResources.project` because its fixture authors no name, and a reader could reasonably have concluded deacon always wins there.\n\nMEASURED at oracle 0.87.0 on this fixture, both CLIs: `composeProjectName: \"custom-project-name\"`, taken verbatim from the compose file's top-level `name:`. deacon reaches it in `compose.rs::derive_project_name`, which consults an explicit `COMPOSE_PROJECT_NAME` in a sibling `.env` and then the compose file's `name:` BEFORE any derivation; the reference reaches it through its `Rp` resolver, which reads the name off `docker compose config`'s output. Different mechanisms, same answer — which is exactly what a differential is for.\n\nThe project name is pinned twice on purpose. The differential compares `chan-container-state` whole, so both `composeProjectResources.project` and Compose's own `com.docker.compose.project` label must agree; the `jsonSubset` assertion additionally pins deacon's side to the literal `custom-project-name`, because a differential alone would pass if BOTH CLIs regressed to deriving a name and happened to derive the same one. Neither project path appears in the tolerance list below — that omission is the claim.\n\nThe tolerances that ARE declared are the ones every Compose differential in this suite carries, and none of them touch the name: the keep-alive `cmd`/`entrypoint` split, deacon's identity labels, and Compose's `config_files`/`config-hash` pair, which record and hash the merged file set and therefore inherit the override-delivery difference `wvr-compose-project-file-set` characterizes. Only THREE identity labels are tolerated, not the five `ext-container-identity-labels` names: `devcontainer.name` and `devcontainer.config_name` are derived from an authored `\"name\"` property and this configuration declares none, so tolerating them would be stale bookkeeping rather than defensive breadth — measured, not assumed.\n\nMined from the reference CLI's own e2e fixtures at `v0.87.0` ([#480](https://github.com/get2knowio/deacon/issues/480), batch 3). The group was carried in the batch-2 inventory as \"blocked on a maintainer ruling\" on the assumption that it collided with the namespaced-name choice; it does not, and the reclassification is what unblocked it. Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md."
+    },
+    {
+      "id": "case-up-upstream-compose-with-name-custom-yaml",
+      "behaviors": [
+        "bhv-compose-authored-project-name-honored"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-compose-with-name-custom-yaml"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "composeProjectResources": {
+                "project": "custom-project-name-custom-yaml"
+              }
+            }
+          }
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.cmd",
+          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (both stop in ~200 ms on SIGTERM). Scoped to `cmd`; every other field stays compared.",
+          "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.entrypoint",
+          "rationale": "The other half of the keep-alive difference: the two CLIs deliver the same never-exit behavior through a different entrypoint/cmd split.",
+          "divergenceId": "bhv-container-keepalive-command"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labelNamespaces.devcontainer",
+          "rationale": "deacon stamps identity labels the reference does not set, so the `devcontainer` namespace's key SET differs. Scoped to that one namespace — the derived grouping is what makes a one-sided label visible (FR-052), and the per-key paths below stay named individually.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.configHash",
+          "rationale": "deacon sets `devcontainer.configHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.source",
+          "rationale": "deacon sets `devcontainer.source`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labels.devcontainer.workspaceHash",
+          "rationale": "deacon sets `devcontainer.workspaceHash`; the reference sets no such label (measured against the pinned oracle 0.87.0). One named key, never the `devcontainer.*` namespace.",
+          "divergenceId": "ext-container-identity-labels"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labels.com.docker.compose.project.config_files",
+          "rationale": "The two CLIs deliver their generated Compose override differently — deacon on Compose's stdin (recorded as `-`), the reference as a file under `/tmp/devcontainercli-vscode/` — so Compose's own record of the file set differs. Exactly the difference `wvr-compose-project-file-set` characterizes and names.",
+          "waiverId": "wvr-compose-project-file-set"
+        },
+        {
+          "behavior": "bhv-compose-authored-project-name-honored",
+          "context": [],
+          "observablePath": "chan-container-state.labels.com.docker.compose.config-hash",
+          "rationale": "Compose hashes the merged file set, so this label differs as a direct consequence of the override-delivery difference above. The project NAME label is deliberately NOT tolerated — it is the claim.",
+          "waiverId": "wvr-compose-project-file-set"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "GREEN. The same claim as `case-up-upstream-compose-with-name`, through a compose document that a general-purpose YAML reader cannot parse: the service declares `ports: !reset []`, and `!reset` is a Compose-SPECIFIC tag rather than standard YAML. Upstream keeps it as a separate fixture for that reason, and so does this suite — recovering an authored project name has to survive a document the recovering code does not fully understand.\n\nBoth CLIs survive it, for different reasons, and the difference is worth writing down because it is where the two implementations are least alike. The reference never parses the document at all: its `Rp` resolver reads `name` off `docker compose config`'s output, so Compose does the understanding. deacon reads the top-level `name:` LINE (`compose.rs::parse_compose_file_for_project_name`) and never looks at the rest, so an unparseable service block is invisible to it. Line-wise reading is why this fixture passes and why its `${CUSTOM_NAME}` sibling does not — see `case-up-upstream-compose-with-name-env-var`.\n\nMEASURED at oracle 0.87.0, both CLIs: `composeProjectName: \"custom-project-name-custom-yaml\"`. Tolerances and the double pin are identical to the sibling case and carry the same reasoning; neither project path is tolerated.\n\nMined from the reference CLI's own e2e fixtures at `v0.87.0` ([#480](https://github.com/get2knowio/deacon/issues/480), batch 3). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md."
+    },
+    {
+      "id": "case-up-upstream-compose-with-name-env-var",
+      "behaviors": [
+        "bhv-compose-authored-project-name-interpolated"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-compose-with-name-env-var"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "**RED ON PURPOSE** from the day it landed, and the deliberate record of [#572](https://github.com/get2knowio/deacon/issues/572). It asserts the FIXED behaviour, so it turns green on the fix and not on a case edit.\n\nThe claim is that a compose file's top-level `name:` is a TEMPLATE, not a literal. `name: ${CUSTOM_NAME}` with `CUSTOM_NAME=custom-name-with-env-var` in a sibling `.env` must become `custom-name-with-env-var`; `${CUSTOM_NAME}` is not itself a legal Compose project name, so a CLI that takes the line at face value cannot start the project at all.\n\nMEASURED at oracle 0.87.0 on this fixture. The reference exits 0 with `composeProjectName: \"custom-name-with-env-var\"`. deacon exits 1 before creating anything: `Docker compose command failed: invalid project name \"${CUSTOM_NAME}\": must consist only of lowercase alphanumeric characters, hyphens, and underscores as well as start with a letter or number` — it passed the raw template through as `--project-name` and Compose rejected it. Independently confirmed that Compose does interpolate here: `docker compose -f .devcontainer/docker-compose.yml config` reports `name: custom-name-with-env-var`.\n\nThe cause is structural, not a missed case. `compose.rs::parse_compose_file_for_project_name` is a LINE-WISE reader — it scans for an unindented `name:`, strips quotes, and returns the rest verbatim. There is no interpolation because there is no evaluator, and the reference has one for free by asking `docker compose config` (its `Rp` resolver reads `name` off that output). This is the same line-wise reader that makes the `!reset` sibling case pass — the strategy's strength and its defect are the same property.\n\n**Only `chan-exit-code` is declared, and that is sufficient rather than a compromise.** The container cannot start unless the project name is legal, and the only legal name reachable from this document is the interpolated one — so exit 0 here IS the interpolation claim. `chan-container-state` is deliberately not declared: while the defect stands deacon creates no container, so the Compose tolerances its sibling cases carry would every one of them be STALE, and the case would fail for bookkeeping alongside the divergence it exists to report.\n\nUpstream drives this fixture from two tests; only the first is carried, because the second (`CUSTOM_NAME=devcontainer`) exercises a branch specific to the reference's own resolver. See the fixture's UPSTREAM.md for that and for why the variable is supplied through `.env` rather than process environment.\n\nMined from the reference CLI's own e2e fixtures at `v0.87.0` ([#480](https://github.com/get2knowio/deacon/issues/480), batch 3). The batch-2 inventory listed this group as blocked on a maintainer ruling; it was not — an authored name was never in tension with deacon's derived default — and the reclassification is what let the defect be found."
     }
   ]
 }
