@@ -159,6 +159,123 @@ impl LockfileFeature {
     }
 }
 
+/// The content pins an on-disk lockfile imposes on Feature resolution, keyed by
+/// the Feature id **exactly as written** in `devcontainer.json` (which is the
+/// key `generateLockfile` writes and the key the reference looks up).
+///
+/// This is deliberately NOT a [`Lockfile`]. A lockfile is READ for two
+/// different purposes and the two want different strictness:
+///
+/// - `--frozen-lockfile` compares the file to what resolution produced, so it
+///   wants the fully-modeled, fully-validated [`read_lockfile`].
+/// - Resolution PINS from it (#571), and there the reference does nothing but
+///   `JSON.parse` and index `lockfile.features[id].integrity`. Applying
+///   deacon's structural validation here would fail builds the reference
+///   completes — a lockfile the reference itself wrote for a `direct-tarball`
+///   Feature has a `resolved` that is a URL, not an OCI reference with a
+///   digest, and [`read_lockfile`]'s `validate_oci_reference` rejects it. That
+///   is a surprise failure for a migrating user, on a path where deacon has no
+///   reason to be the stricter of the two.
+///
+/// So: parse strictly (a file that is not JSON is an error on both CLIs),
+/// model loosely, and validate exactly the one field that is about to be used.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LockfilePins {
+    pins: HashMap<String, String>,
+}
+
+impl LockfilePins {
+    /// The `sha256:` digest recorded for `user_feature_id`, if the lockfile
+    /// pinned one.
+    pub fn pin_for(&self, user_feature_id: &str) -> Option<&str> {
+        self.pins.get(user_feature_id).map(String::as_str)
+    }
+
+    /// Are there no pins at all? True for a missing, empty, or Feature-less
+    /// lockfile.
+    pub fn is_empty(&self) -> bool {
+        self.pins.is_empty()
+    }
+
+    /// How many Features are pinned.
+    pub fn len(&self) -> usize {
+        self.pins.len()
+    }
+}
+
+/// Read the `integrity` pins from the lockfile at `path`.
+///
+/// Mirrors the reference's `readLockfile` (`fI` in the 0.87.0 bundle) and the
+/// single use it makes of the result:
+///
+/// ```js
+/// async function fI(A) {
+///   try { let e = await XA(yQ(A));
+///     return e.toString().trim() === "" ? { initLockfile: true } : { lockfile: JSON.parse(e.toString()) };
+///   } catch (e) { if (e?.code === "ENOENT") return {}; throw e }
+/// }
+/// // …later, per Feature:
+/// let r = await kb(A, e, t?.features[e]?.integrity);
+/// ```
+///
+/// - A missing lockfile is not an error — there is simply nothing to pin.
+/// - An EMPTY file is not an error either (the reference's `initLockfile`
+///   branch): it pins nothing.
+/// - Anything else MUST parse as JSON; a corrupt lockfile is an error on both
+///   CLIs (measured at oracle 0.87.0: `build` on a workspace whose
+///   `.devcontainer-lock.json` is not JSON exits 1 and builds nothing).
+/// - A recorded `integrity` that is not a `sha256:<64-hex>` digest is rejected
+///   rather than ignored. It goes into a registry URL path, so passing
+///   arbitrary workspace-authored text through would let a lockfile steer the
+///   request somewhere else; and ignoring it would make corrupting the field
+///   into free text a way to *disable* the very check it exists to perform. The
+///   reference reaches the same exit code by a slower route — it requests the
+///   garbage as a manifest reference and fails to resolve it.
+pub async fn read_lockfile_pins(path: &Path) -> Result<LockfilePins> {
+    let contents = match fs::read_to_string(path).await {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(LockfilePins::default()),
+        Err(source) => {
+            return Err(LockfileError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+
+    if contents.trim().is_empty() {
+        return Ok(LockfilePins::default());
+    }
+
+    let document: serde_json::Value =
+        serde_json::from_str(&contents).map_err(|source| LockfileError::Json {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    let mut pins = HashMap::new();
+    let Some(features) = document.get("features").and_then(|f| f.as_object()) else {
+        return Ok(LockfilePins { pins });
+    };
+
+    for (feature_id, entry) in features {
+        let Some(integrity) = entry.get("integrity").and_then(|i| i.as_str()) else {
+            continue;
+        };
+        validate_sha256_digest(integrity).map_err(|msg| LockfileError::Validation {
+            message: format!(
+                "Invalid integrity field for feature '{}' in '{}': {}",
+                feature_id,
+                path.display(),
+                msg
+            ),
+        })?;
+        pins.insert(feature_id.clone(), integrity.to_string());
+    }
+
+    Ok(LockfilePins { pins })
+}
+
 /// Get lockfile path adjacent to config file
 ///
 /// Implements the lockfile naming convention:
@@ -1892,5 +2009,116 @@ mod tests {
         assert!(error.contains("Lockfile does not match."));
         assert!(error.contains("new-feature"));
         assert!(error.contains("old-feature"));
+    }
+
+    // ---- `read_lockfile_pins` (#571) ------------------------------------
+    //
+    // The pin read is deliberately NOT `read_lockfile`: it parses strictly and
+    // models loosely. These tests pin both halves of that, because either one
+    // sliding turns a security check into a migration hazard.
+
+    #[tokio::test]
+    async fn pins_are_empty_when_no_lockfile_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let pins = read_lockfile_pins(&temp.path().join(".devcontainer-lock.json"))
+            .await
+            .unwrap();
+        assert!(pins.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_empty_lockfile_pins_nothing_and_is_not_an_error() {
+        // The reference's `initLockfile` branch: `e.toString().trim() === ""`
+        // yields no lockfile rather than a parse failure.
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".devcontainer-lock.json");
+        tokio::fs::write(&path, "   \n").await.unwrap();
+        assert!(read_lockfile_pins(&path).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_lockfile_that_is_not_json_is_an_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".devcontainer-lock.json");
+        tokio::fs::write(&path, "{ this is not json").await.unwrap();
+        let err = read_lockfile_pins(&path).await.unwrap_err().to_string();
+        assert!(err.contains("JSON"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn pins_are_keyed_by_the_feature_id_as_written() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".devcontainer-lock.json");
+        tokio::fs::write(
+            &path,
+            r#"{"features":{"ghcr.io/devcontainers/features/git:1.3.2":{
+                 "version":"1.3.2",
+                 "resolved":"ghcr.io/devcontainers/features/git@sha256:63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014d",
+                 "integrity":"sha256:63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014d"}}}"#,
+        )
+        .await
+        .unwrap();
+        let pins = read_lockfile_pins(&path).await.unwrap();
+        assert_eq!(pins.len(), 1);
+        assert_eq!(
+            pins.pin_for("ghcr.io/devcontainers/features/git:1.3.2"),
+            Some("sha256:63c96e8ac33f5630300d8883e2ec3123278de70d318589af596ea1954846014d")
+        );
+        // The lockfile key is the id AS WRITTEN, so a differently-spelled
+        // reference for the same Feature is not a pin for it.
+        assert_eq!(pins.pin_for("ghcr.io/devcontainers/features/git"), None);
+    }
+
+    /// A lockfile the REFERENCE wrote for a `direct-tarball` Feature has a
+    /// `resolved` that is a URL, which [`read_lockfile`]'s structural
+    /// validation rejects. Pinning must still work on it: refusing here would
+    /// fail builds the reference completes, on a file deacon did not write.
+    #[tokio::test]
+    async fn pins_do_not_apply_the_structural_validation_read_lockfile_does() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".devcontainer-lock.json");
+        let text = r#"{"features":{"https://example.com/devcontainer-feature-foo.tgz":{
+             "version":"not-semver",
+             "resolved":"https://example.com/devcontainer-feature-foo.tgz",
+             "integrity":"sha256:1111111111111111111111111111111111111111111111111111111111111111"}}}"#;
+        tokio::fs::write(&path, text).await.unwrap();
+
+        assert!(
+            read_lockfile(&path).await.is_err(),
+            "the strict read is expected to reject this; if it stops doing so, \
+             this test is no longer proving the two reads differ"
+        );
+        let pins = read_lockfile_pins(&path).await.unwrap();
+        assert_eq!(
+            pins.pin_for("https://example.com/devcontainer-feature-foo.tgz"),
+            Some("sha256:1111111111111111111111111111111111111111111111111111111111111111")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_entry_without_an_integrity_pins_nothing_rather_than_failing() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".devcontainer-lock.json");
+        tokio::fs::write(&path, r#"{"features":{"foo":{"version":"1.0.0"}}}"#)
+            .await
+            .unwrap();
+        assert!(read_lockfile_pins(&path).await.unwrap().is_empty());
+    }
+
+    /// An `integrity` that is not a digest is REJECTED, not ignored. It is
+    /// interpolated into a registry URL path, and ignoring it would make
+    /// corrupting the field into free text a way to disable the check.
+    #[tokio::test]
+    async fn a_non_digest_integrity_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".devcontainer-lock.json");
+        tokio::fs::write(
+            &path,
+            r#"{"features":{"foo":{"version":"1.0.0","resolved":"x@sha256:y","integrity":"../../etc/passwd"}}}"#,
+        )
+        .await
+        .unwrap();
+        let err = read_lockfile_pins(&path).await.unwrap_err().to_string();
+        assert!(err.contains("Invalid integrity field"), "unexpected: {err}");
     }
 }

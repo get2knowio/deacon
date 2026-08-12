@@ -17,6 +17,7 @@ use super::merged_config::{
 };
 use super::ports::handle_port_events;
 use super::result::{EffectiveMount, UpContainerInfo};
+use crate::commands::shared::lockfile::LockfilePolicy;
 use anyhow::{Context, Result};
 use deacon_core::IndexMap;
 use deacon_core::compose::{ComposeCommand, ComposeManager, ComposeProject, ServiceShape};
@@ -440,6 +441,7 @@ pub(crate) async fn execute_compose_up(
             Some(&build_options),
             host_ca_set,
             &runtime.cli_docker(),
+            LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
         )
         .await?
     };
@@ -1043,6 +1045,7 @@ async fn install_features_for_compose(
     build_options: Option<&deacon_core::build::BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
+    lockfile_policy: LockfilePolicy,
 ) -> Result<Option<FeatureBuildOutput>> {
     let output = match resolve_compose_feature_image(
         config,
@@ -1054,6 +1057,7 @@ async fn install_features_for_compose(
         build_options,
         host_ca_set,
         cli,
+        lockfile_policy,
     )
     .await?
     {
@@ -1084,6 +1088,7 @@ pub(crate) async fn resolve_compose_feature_image(
     build_options: Option<&deacon_core::build::BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
+    lockfile_policy: LockfilePolicy,
 ) -> Result<Option<FeatureBuildOutput>> {
     // Nothing to install when features is missing or an empty object.
     let features_obj = match config.features().as_object() {
@@ -1137,6 +1142,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 build_options,
                 host_ca_set,
                 cli,
+                lockfile_policy,
             )
             .await
             .with_context(|| {
@@ -1214,6 +1220,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 build_options,
                 host_ca_set,
                 cli,
+                lockfile_policy,
             )
             .await
             .with_context(|| {

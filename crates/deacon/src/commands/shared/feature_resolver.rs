@@ -121,6 +121,17 @@ pub(crate) fn same_feature_already_resolved(
 /// - **Fails fast**: any unresolvable feature (missing local path, missing
 ///   `devcontainer-feature.json`, OCI fetch error, dependency cycle) is
 ///   propagated with context rather than silently dropped.
+///
+/// **Not pinned by the lockfile.** The install path resolves Features at the
+/// digest `.devcontainer-lock.json` records (#571,
+/// `up::features_build::resolve_and_stage_features`); this reader resolves by
+/// tag. The consumers here read metadata rather than install content, so the
+/// difference is only observable when a lockfile pins a floating tag and the
+/// tag has since moved — the reported metadata would then be the newer
+/// Feature's while `up` installs the pinned one. The reference threads its
+/// lockfile through the same `generateFeaturesConfig` for every subcommand, so
+/// this is a gap rather than a decision; it is unmeasured and deliberately not
+/// closed alongside #571, which was scoped to what installs.
 // Only reachable through `full`-gated CLI dispatch (e.g. run-user-commands), so
 // it is dead code in a `--no-default-features` MVP build; tests still exercise it.
 pub(crate) async fn resolve_features_ordered<C: HttpClient>(

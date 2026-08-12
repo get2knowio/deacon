@@ -7,6 +7,7 @@
 //!   base is a user-authored Dockerfile + context directory (compose `build:` shape)
 //! - `copy_dir_all` - Recursive directory copy helper
 
+use crate::commands::shared::lockfile::{LockfilePolicy, resolve_lockfile_pins};
 use anyhow::{Context, Result};
 use deacon_core::build::BuildOptions;
 use deacon_core::config::DevContainerConfig;
@@ -21,7 +22,7 @@ use deacon_core::features::{
     FeatureDependencyResolver, InstallationPlan, OptionSetKey, OptionValue, ResolvedFeature,
 };
 use deacon_core::host_ca::{CorporateCaSet, build_install_script};
-use deacon_core::lockfile::{Lockfile, LockfileFeature};
+use deacon_core::lockfile::{Lockfile, LockfileFeature, LockfilePins};
 use deacon_core::oci::{DownloadedFeature, FeatureRef, default_fetcher};
 use deacon_core::registry_parser::parse_registry_reference;
 use std::collections::{HashMap, HashSet};
@@ -91,6 +92,7 @@ struct StagedFeatures {
 /// When `build_options` is provided and not default, cache arguments are included
 /// in the generated build command. This enables cache-from/cache-to/no-cache/builder
 /// options to propagate to feature builds per spec (data-model.md).
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip(config, identity, build_options, cli))]
 pub(crate) async fn build_image_with_features(
     config: &DevContainerConfig,
@@ -100,6 +102,7 @@ pub(crate) async fn build_image_with_features(
     build_options: Option<&BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
+    lockfile_policy: LockfilePolicy,
 ) -> Result<FeatureBuildOutput> {
     info!("Building extended image with features");
 
@@ -126,7 +129,7 @@ pub(crate) async fn build_image_with_features(
         });
     }
 
-    let staged = resolve_and_stage_features(config, identity, config_path).await?;
+    let staged = resolve_and_stage_features(config, identity, config_path, lockfile_policy).await?;
 
     // Generate Dockerfile.
     //
@@ -255,6 +258,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     build_options: Option<&BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
+    lockfile_policy: LockfilePolicy,
 ) -> Result<FeatureBuildOutput> {
     // Optional `build.target` is honored as the upstream stage we extend. The
     // reference CLI rewrites the FROM matching `target`; we accomplish the
@@ -289,7 +293,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         .into());
     }
 
-    let staged = resolve_and_stage_features(config, identity, config_path).await?;
+    let staged = resolve_and_stage_features(config, identity, config_path, lockfile_policy).await?;
 
     // Generate the feature-install stage targeting the user's final stage by
     // literal name (NOT via an ARG-driven FROM): a Dockerfile that prepends
@@ -511,6 +515,55 @@ fn already_installed(
     })
 }
 
+/// Fetch one OCI Feature, pinned to the lockfile's `integrity` for
+/// `user_feature_id` when the lockfile recorded one (#571).
+///
+/// The pin is a LOOKUP KEY, not an after-the-fact comparison: see
+/// [`deacon_core::oci::FeatureFetcher::fetch_feature_pinned`].
+async fn fetch_feature_honoring_pins<C: deacon_core::oci::HttpClient>(
+    fetcher: &deacon_core::oci::FeatureFetcher<C>,
+    feature_ref: &FeatureRef,
+    user_feature_id: &str,
+    pins: &LockfilePins,
+) -> Result<DownloadedFeature> {
+    let pin = pins.pin_for(user_feature_id);
+    if let Some(digest) = pin {
+        debug!(
+            feature = %user_feature_id,
+            integrity = %digest,
+            "Resolving Feature at the digest the lockfile pins"
+        );
+    }
+    Ok(fetcher.fetch_feature_pinned(feature_ref, pin).await?)
+}
+
+/// Name the lockfile as the thing that shaped a failed fetch, since a registry
+/// asked for a digest it does not have answers with an ordinary 404 or 401 and
+/// nothing in that answer mentions a workspace file.
+///
+/// Deliberately does NOT assert that the content changed. A pinned request can
+/// also fail for the reasons an unpinned one does — the registry is
+/// unreachable, or the caller is not logged in — and the reference's own
+/// message for this case hedges the same way ("You may not have permission to
+/// access this Feature, or may not be logged in"). What is certain, and what
+/// the user cannot see otherwise, is which digest was asked for and why.
+fn pinned_fetch_error(
+    error: anyhow::Error,
+    user_feature_id: &str,
+    pins: &LockfilePins,
+) -> anyhow::Error {
+    let Some(digest) = pins.pin_for(user_feature_id) else {
+        return error;
+    };
+    error.context(format!(
+        "Feature '{}' could not be resolved at {}, the digest the lockfile pins it to. \
+         If the Feature's published content changed since the lockfile was written, this \
+         refusal is the lockfile doing its job: re-resolve it with `deacon upgrade`, or \
+         pass --no-lockfile to resolve by tag for this run.",
+        user_feature_id, digest
+    ))
+}
+
 /// Shared core: parse features from `config`, download them, resolve the
 /// installation plan, and stage feature directories into a deterministic temp
 /// directory so BuildKit can mount them as the
@@ -526,6 +579,7 @@ async fn resolve_and_stage_features(
     config: &DevContainerConfig,
     identity: &ContainerIdentity,
     config_path: &Path,
+    lockfile_policy: LockfilePolicy,
 ) -> Result<StagedFeatures> {
     let features_obj = config
         .features()
@@ -558,6 +612,14 @@ async fn resolve_and_stage_features(
 
     // Create feature fetcher (used for OCI refs only)
     let fetcher = default_fetcher()?;
+
+    // The content pins the on-disk lockfile imposes on this resolution (#571).
+    // Keyed by the Feature id AS WRITTEN, because that is the key
+    // `generateLockfile` writes and the key the reference looks up
+    // (`lockfile?.features[userFeatureId]?.integrity`) — for a declared Feature
+    // that is the `features` map key, and for an auto-installed `dependsOn`
+    // target it is the dependency key as the Feature's metadata spells it.
+    let pins = resolve_lockfile_pins(lockfile_policy, config_path).await?;
 
     // Parse, classify, and (for OCI refs) fetch features.
     //
@@ -691,7 +753,13 @@ async fn resolve_and_stage_features(
         if downloaded_features.contains_key(&entry.canonical_id) {
             continue; // local feature — nothing to fetch
         }
-        let downloaded = fetcher.fetch_feature(&entry.feature_ref).await?;
+        let user_id = user_id_by_canonical
+            .get(&entry.canonical_id)
+            .map(String::as_str)
+            .unwrap_or(entry.canonical_id.as_str());
+        let downloaded = fetch_feature_honoring_pins(&fetcher, &entry.feature_ref, user_id, &pins)
+            .await
+            .map_err(|e| pinned_fetch_error(e, user_id, &pins))?;
         downloaded_features.insert(entry.canonical_id.clone(), downloaded);
     }
 
@@ -808,7 +876,10 @@ async fn resolve_and_stage_features(
                     "Auto-installing transitive dependsOn feature"
                 );
                 if !downloaded_features.contains_key(&dep_canonical) {
-                    let downloaded = fetcher.fetch_feature(&dep_ref).await?;
+                    let downloaded =
+                        fetch_feature_honoring_pins(&fetcher, &dep_ref, &dep_key, &pins)
+                            .await
+                            .map_err(|e| pinned_fetch_error(e, &dep_key, &pins))?;
                     downloaded_features.insert(dep_canonical.clone(), downloaded);
                 }
                 (dep_canonical, dep_ref)
@@ -1485,9 +1556,10 @@ mod local_feature_resolution_tests {
 
         let identity = ContainerIdentity::new(temp.path(), &config);
 
-        let staged = resolve_and_stage_features(&config, &identity, &config_path)
-            .await
-            .expect("local feature should resolve successfully");
+        let staged =
+            resolve_and_stage_features(&config, &identity, &config_path, LockfilePolicy::Write)
+                .await
+                .expect("local feature should resolve successfully");
 
         // The installation plan should contain exactly one feature, whose
         // canonical id encodes the resolved absolute path.
@@ -1543,10 +1615,11 @@ mod local_feature_resolution_tests {
         let config: DevContainerConfig = serde_json::from_str(&raw).unwrap();
         let identity = ContainerIdentity::new(temp.path(), &config);
 
-        let err = resolve_and_stage_features(&config, &identity, &config_path)
-            .await
-            .err()
-            .expect("missing local feature path must error");
+        let err =
+            resolve_and_stage_features(&config, &identity, &config_path, LockfilePolicy::Write)
+                .await
+                .err()
+                .expect("missing local feature path must error");
         let msg = err.to_string();
         assert!(
             msg.contains("./missing-feature"),

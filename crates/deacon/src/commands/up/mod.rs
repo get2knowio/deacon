@@ -44,7 +44,7 @@ pub use result::{EffectiveMount, UpContainerInfo, UpError, UpResult, UpSuccess};
 #[allow(unused_imports)]
 pub use crate::commands::shared::NormalizedRemoteEnv;
 
-use crate::commands::shared::lockfile::{LockfilePolicy, ensure_frozen_lockfile_usable};
+use crate::commands::shared::lockfile::{LockfilePolicy, ensure_lockfile_usable};
 use crate::commands::shared::{
     ConfigLoadArgs, ConfigLoadResult, canonical_reconnect_identity, load_config,
 };
@@ -233,7 +233,7 @@ pub(crate) async fn execute_up_with_runtime(
     // Frozen-lockfile pre-build refusal (graduated in 1.0). Shared with `build`
     // (#556) so both subcommands refuse at the same point, with the same
     // upstream-aligned strings, and both leave the workspace untouched.
-    ensure_frozen_lockfile_usable(
+    ensure_lockfile_usable(
         LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
         &config_path,
         config.features(),
