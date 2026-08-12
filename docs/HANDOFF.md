@@ -1,24 +1,32 @@
 # Session Handoff — Differential Parity Steady State
 
-Last updated: 2026-08-12, `main` at `e6f69fd` (green; v0.3.0 shipped from
-`d642e8d`). This document is the cross-session
+Last updated: 2026-08-12, `main` at `8665036` (required checks green; the
+differential nightly is expected-red on exactly one case, see below; v0.3.0 shipped
+from `d642e8d`). This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
 changes, update this file in the same PR.
 
 ## Where things stand
 
-- **Two open nonconformances, both opened deliberately on 2026-08-12.**
-  `parity/SPEC_STATUS.md` records **132 behaviors**: 2 open nonconformance, 9
-  follows-spec, 11 documented choice, 20 extension, 90 conformant-and-matching. The
+- **One open nonconformance (#572), down from two the same day.**
+  `parity/SPEC_STATUS.md` records **134 behaviors**: 1 open nonconformance, 9
+  follows-spec, 11 documented choice, 20 extension, 93 conformant-and-matching. The
   header census is CI-guarded (`check_spec_status_census` in
   `crates/parity-harness/src/registry.rs`) — rows and header must change together.
-  **Zero is not the goal; an accurate ledger is.** The column went 0 → 2 because
-  #480 batch 3 measured two real defects (#571, #572) and landed them as
-  red-on-purpose cases the day it found them, which is the machinery working. The
-  2026-08-10/11 arc showed the other half of the same loop: batch 2's two defects
-  (#556, #557) are fixed with their cases green **as authored** — no assertion was
-  bent to reach zero.
+  **Zero is not the goal; an accurate ledger is.** The column went 0 → 2 → 1 within
+  one day: #480 batch 3 measured two real defects (#571, #572) and landed them as
+  red-on-purpose cases the day it found them, then #575 closed #571 with its case
+  turning green **as authored**. That is the full loop, twice over — batch 2's
+  #556/#557 did the same on 2026-08-10/11. No assertion has been bent to reach zero,
+  and the count moving in BOTH directions in a day is the ledger being live rather
+  than tidy.
+- **Closing a defect can ADD rows, and that is not inflation.** #575 took the
+  census 132 → 134 while closing an open nonconformance, because making deacon read
+  the lockfile made two further behaviors observable that were previously vacuous:
+  `--no-lockfile` suppresses the READ (not only the write), and an unparseable
+  lockfile now fails the build instead of being silently replaced. A fix that
+  reveals adjacent behavior should record it in the same commit.
 - **A recurring shape worth naming: batch 2 CLASSIFIED two items it had not
   MEASURED, and both classifications were wrong in the same direction** — the work
   was ordinary and the answers were not what the paperwork said. `lockfile-oci-integrity`
@@ -26,13 +34,17 @@ changes, update this file in the same PR.
   compose-naming trio was carried as "blocked on a maintainer ruling"; it was never
   blocked, and it held a second defect. Treat an inventory's *reasons* as claims
   with the same standing as any other unmeasured claim.
-- **The differential nightly is green again.** Current verdict:
-  `gh run list --workflow=parity.yml --branch=main`. A previous version of this
-  file warned that the nightly was expected-red; that is now stale and the warning
-  is removed. The standing rule it encoded still holds and is worth keeping in
-  mind: when a red case IS the deliberate record of an open nonconformance, the
-  check is whether the diverging set is exactly those cases and nothing else — and
-  the fix is to the product, never to the case.
+- **The differential nightly is expected-red, on exactly ONE case.** Since #573
+  landed the red-on-purpose records, `parity.yml` fails on `main`; after #575 the
+  diverging set is exactly `case-up-upstream-compose-with-name-env-var` (#572) and
+  nothing else — verified in #575's own run, where the other red case
+  (`case-build-upstream-lockfile-oci-integrity`) came back `agree` with both sides
+  exit 1. Current verdict: `gh run list --workflow=parity.yml --branch=main`. The
+  standing rule: when a red case IS the deliberate record of an open
+  nonconformance, the check is whether the diverging set is exactly those cases and
+  nothing else — and the fix is to the product, never to the case. **`parity.yml`
+  is not a required check** (see the check-watching rules); it surfaces on PRs as
+  `live-certification` and will read red until #572 closes.
 - **The pinned oracle** is `@devcontainers/cli@0.87.0`
   (`npm install -g @devcontainers/cli@0.87.0`). Docker and the oracle both work in
   this dev container — verify parity changes for real, never by reasoning alone.
@@ -51,11 +63,21 @@ changes, update this file in the same PR.
   Maintainer decides: keep, revert, or try the btrfs snapshotter. Until then,
   treat those local failures as environment-pinned, not regressions (#538's
   neutrality diff confirmed identical failure sets at HEAD and `main`).
+- **⚠️ Second local-only failure class, observed 2026-08-12:** uncached `apt`
+  installs inside BuildKit die with
+  `dpkg-deb: error: paste subprocess was killed by signal (Broken pipe)` →
+  `E: Sub-process /usr/bin/dpkg returned an error code (1)`. That takes out ~6
+  Docker-profile tests (`common-utils` / `ca-certificates` on `debian:bookworm-slim`).
+  **Reproduced with the REFERENCE CLI on the same base + Feature**, which is what
+  makes it the host and not deacon — run that control before spending a session on
+  it. CI is unaffected. A warm BuildKit cache hides it, so a suite that passed an
+  hour earlier proves nothing about it.
 
 ## Recent landings (this campaign, newest first)
 
 | PR | What | Issues |
 |---|---|---|
+| #575 `8665036` | **the lockfile's `integrity` is a content pin at last** — the most serious defect the campaign has found, closed. deacon never read the field: a lockfile whose checksum did not match the Feature it named installed anyway, and deacon then OVERWROTE the bad field with the digest it had just fetched, so a tampered lockfile was silently repaired. The fix is the reference's shape and NOT the obvious one — "compare the checksum after downloading" is both wrong and weaker. `integrity` is the manifest LOOKUP KEY (`ji`: `let r = e.version; t && (r = t)`; `aQ` re-checks `docker-content-digest`), so a Feature whose content no longer matches cannot be RESOLVED at all and there is no window in which it is downloaded, installed or written back. `FeatureFetcher::fetch_feature_pinned` is that request; declared Features and auto-installed `dependsOn` targets are both pinned, keyed by the id AS WRITTEN. Two carve-outs measured rather than assumed: `--no-lockfile` means "do not READ" (`A.noLockfile ? {lockfile: undefined} : await fI(t)`), `--frozen-lockfile` does NOT. **The consequence beyond tampering, measured on both CLIs: a lockfile pins a FLOATING tag** — `git:1` recorded at 1.3.2's digest installs 1.3.2 on both CLIs though `:1` resolves to 1.3.8 today; that IS "trust on first use", and `upgrade` is how the pin moves. Reading the lockfile also made an unreadable one matter (fails pre-build now, matching the reference), but the pin read is deliberately NOT the strict `read_lockfile`: it parses strictly and validates only the field it uses, because a lockfile the REFERENCE writes for a `direct-tarball` Feature has a `resolved` that deacon's `validate_oci_reference` rejects — refusing it would be a deacon-only surprise for a migrating user. A non-digest `integrity` IS rejected (it lands in a URL path; ignoring it would make corrupting the field a way to DISABLE the check). Red-on-purpose case turned green as authored, plus a `spec-expectation` twin so the behavior GATES (the differential lane does not) | #571 fixed |
 | #573 `e6f69fd` | #480 batch 3 — 4 fixtures, 4 cases, **two defects found by measuring what batch 2 had only classified**. `lockfile-oci-integrity`: deacon **never reads a lockfile's `integrity`** — a lockfile whose checksum does not match the Feature it names installs anyway, and deacon then REWRITES the field to the digest it just fetched, so a tampered lockfile is not ignored but silently repaired. The reference exits 1; `devcontainer-lockfile.md` names "trust on first use" as a goal of the file, so spec and reference agree deacon is the wrong side (rare). Transcribed, not guessed: `integrity` is the reference's manifest LOOKUP KEY (`ji` substitutes it for the tag, `aQ` re-checks `docker-content-digest`), not a checksum compared afterwards. Compose naming: `compose-with-name` and `-custom-yaml` MATCH (worth having — the existing Compose differential TOLERATES the project path, so nothing said what happens when a name IS authored), while `name: ${CUSTOM_NAME}` reaches Compose verbatim and `up` dies on `invalid project name`. Not fixed in-batch on purpose: the faithful fix reads `name` off `docker compose config`, making `derive_project_name` async and daemon-dependent, and hand-expanding `${VAR}` reimplements part of Compose's interpolation grammar — neither is "small and clearly correct". The seven codspace Feature-graph configs are now **definitively** deferred, not "worth re-running". `.gitignore`'s blanket `.env*` was silently swallowing a fixture whose `.env` IS the input under test | #571, #572 filed |
 | #570 `6b9f840` | the featureless `up --frozen-lockfile` carve-out finally has a row and a case. #565 changed it from exit 1 to exit 0 incidentally; both CLIs exit 0 and neither writes a lockfile, and the reference's reason is transcribed — `--frozen-lockfile` is read only inside `writeLockfile`, whose one caller returns early when `userFeaturesToArray` finds no Features, so the flag is never REACHED rather than satisfied. Deliberately `spec-expectation`, not `live-differential`: the differential lane is nightly-only and **gates nothing**, and a case whose whole point is that nothing gated this behavior belongs where it gates. Watched-to-fail by breaking the PRODUCT (dropping the `declares_features` gate), not the case — `chan-filesystem` correctly stayed GREEN through that break, which is why the case leans on exit code + result document instead | item 1 closed; #569 filed |
 | #568 `6d2b7a0` | CLAUDE.md's cross-cutting-audit bullet said `dockerComposeFile` resolves against the workspace folder; it resolves against the **config dir** (spec: "relative to the `devcontainer.json` file"; `ComposeManager::create_project` already implements and cites it). No product change — the guidance file was what was wrong, and it had already steered one fixture wrong. Contrast preserved by naming what genuinely IS workspace-relative there: the compose project name and working dir | #555 fixed |
@@ -92,26 +114,13 @@ Sharpest first. Every item below already has a measurement or a precise claim in
 its issue — read the issue before briefing an agent.
 
 The 2026-08-11 queue was consumed entirely (#555, the featureless-lockfile row,
-#480 batch 3). What replaced it is three MEASURED findings, all filed the day they
-were found, plus one decision only the maintainer can make.
+#480 batch 3), and #571 — the sharpest item of the batch that replaced it — closed
+the same day it was filed (#575). What remains is one defect with a real design
+question inside it, and one classification only the maintainer can make.
 
-**Fixes, sharpest first — the first is the most serious defect the campaign has
-found:**
+**Fixes, sharpest first:**
 
-1. **#571 — deacon never verifies a lockfile's `integrity`, and silently REPAIRS a
-   tampered one.** A `.devcontainer-lock.json` whose `integrity` is wrong for the
-   digest its own `resolved` names installs anyway; deacon exits 0, builds the
-   Feature-extended image, and overwrites the bad field with the digest it just
-   fetched. The reference exits 1 leaving the file byte-unchanged — one hex
-   character is the whole difference (control run confirms). Confirmed
-   independently by code-read as well as by measurement: every `integrity` site in
-   the tree is a WRITE or `validate_sha256_digest`, which checks only the `sha256:`
-   prefix and a 64-hex-char length. **No site compares an on-disk `integrity` to a
-   fetched manifest digest.** Both authorities agree deacon is wrong here, which is
-   rare: `devcontainer-lockfile.md` names detection of exactly this ("trust on
-   first use") as a purpose of the file. `case-build-upstream-lockfile-oci-integrity`
-   is red-on-purpose and turns green on the fix.
-2. **#572 — `name: ${CUSTOM_NAME}` in a compose file is not interpolated.** deacon's
+1. **#572 — `name: ${CUSTOM_NAME}` in a compose file is not interpolated.** deacon's
    `parse_compose_file_for_project_name` is line-wise, so the literal reaches Compose
    and `up` dies on `invalid project name "${CUSTOM_NAME}"` where the reference
    succeeds with `custom-name-with-env-var`. **This one has a real design question
@@ -119,8 +128,10 @@ found:**
    faithful fix reads `name` off `docker compose config`, which makes
    `derive_project_name` async and daemon-dependent, while hand-expanding `${VAR}`
    reimplements part of Compose's interpolation grammar. Brief an agent to measure
-   the cost of the faithful path before choosing.
-3. **#569 — classification pending, and it is the maintainer's call.** The
+   the cost of the faithful path before choosing. **It is also the only thing
+   keeping the differential nightly red**, so closing it makes the nightly a signal
+   again rather than a known-red job.
+2. **#569 — classification pending, and it is the maintainer's call.** The
    pre-build `--frozen-lockfile` refusal misses Features supplied by
    `--additional-features`, so deacon BUILDS the Feature-extended image and then
    refuses, where the reference issues zero docker commands. Exit code and workspace
@@ -141,6 +152,16 @@ fixture step, wanted or not; (b) an in-place-config-rewrite fixture pattern for
 `upgrade --feature`, the one surface in the suite where the CLI edits the user's
 config. If neither is wanted, the issue's SECOND vein — real-world
 `devcontainer.json` files from public repos — is where the next batch's value is.
+
+Known gap left open by #575, stated rather than hidden and NOT yet filed:
+`read-configuration` / `run-user-commands` resolve Features through
+`resolve_features_ordered`, which is **not** pinned by the lockfile. Those consumers
+read metadata rather than install content, so the difference is only observable when
+a lockfile pins a floating tag that has since moved — the reported metadata would be
+the newer Feature's while `up` installs the pinned one. The reference threads its
+lockfile through the same `generateFeaturesConfig` for every subcommand, so this is a
+gap rather than a decision. It is UNMEASURED; measure before filing, per the standing
+rule that an inventory's reasons are claims.
 
 Open question, not blocking: #566 implements the superseded-project diagnostic as
 **one message per `up`** listing every superseded project, rather than a persisted
@@ -202,6 +223,16 @@ each learned from a real failure:
   runs `mvp-integration` on a 2-core runner with a COLD cache — when it alone
   fails, suspect concurrency or cache state, not the runtime. Confirm the runtime
   is implicated before believing it is.
+- **The required set is KNOWABLE, not guessable.** Ask the repository rather than
+  counting rows: `gh api repos/get2knowio/deacon/branches/main/protection --jq
+  '.required_status_checks.contexts'` returns the ten names verbatim. This matters
+  because `gh pr checks` lists MORE than ten — `CodeQL`, `type-label`, `label`,
+  `action-semantic-pull-request` and `live-certification` also appear, and
+  `live-certification` (the parity workflow) is currently RED by design. A watcher
+  that counts "all checks" therefore never goes green, and one that counts to ten
+  without naming them can count the wrong ten. #575 was merged on the named set with
+  `mergeStateStatus: UNSTABLE`, which is exactly what MERGEABLE-with-a-failing-
+  non-required-check looks like.
 - **A green streak is only green against a COMPLETE check set.** The required set
   is **TEN**. Two consecutive all-green polls is NOT sufficient on its own: an
   agent polled `gh pr checks --required`, got eight because `Test (MVP integration)`
@@ -220,6 +251,16 @@ each learned from a real failure:
   says "128 → 131" because it was written before rebasing onto #570; the FILE says
   132, and the file is what `check_spec_status_census` validates. Recount census
   rows after any rebase rather than carrying header arithmetic forward.
+- **A red check is a claim too — find out WHOSE before re-running or reworking.**
+  #575's `Security (cargo deny)` failed with
+  `fatal: unable to access 'https://github.com/RustSec/advisory-db/': server
+  certificate verification failed` — a runner TLS failure fetching the advisory DB,
+  not a finding. Two cheap discriminators settled it before any re-run:
+  `git diff main -- '*Cargo*'` was empty, and `cargo deny check` locally reported
+  `advisories ok, bans ok, licenses ok, sources ok`. Read the failing STEP's log
+  (`gh api repos/.../actions/jobs/<id>/logs --allow-escape-sequences`) rather than
+  the summary; a job cannot be re-run while its parent run is still in progress, so
+  wait for `status=completed` then `gh run rerun <run> --failed`.
 - **Rebuild before you measure.** `./target/debug/deacon` is not evidence of what
   is on `main`. Twice in one session a measurement against a stale binary produced
   a confidently wrong conclusion — once saying a landed fix was absent, once
@@ -258,7 +299,18 @@ each learned from a real failure:
   `restrict_to_metadata_properties` (#526), marker `config_hash` stamping (#372).
 - `crates/deacon/src/commands/shared/identity.rs` —
   `canonical_reconnect_identity`; the hash-equality invariant test.
-- `crates/core/src/oci/{fetcher,mod}.rs` — `FEATURE_FETCH_TIMEOUT` (FR-023).
+- `crates/core/src/oci/fetcher.rs` — `fetch_feature_pinned` / `manifest_digest`'s
+  `pin` argument: the lockfile's `integrity` REPLACES the tag in the manifest URL
+  and is re-checked against `docker-content-digest` (#571). `FEATURE_FETCH_TIMEOUT`
+  (FR-023) lives here too.
+- `crates/core/src/lockfile.rs` — `LockfilePins` / `read_lockfile_pins`: the LOOSE
+  read, deliberately distinct from `read_lockfile`'s strict, fully-modeled one.
+  Adding validation here fails builds the reference completes.
+- `crates/deacon/src/commands/shared/lockfile.rs` — `resolve_lockfile_pins` and
+  `ensure_lockfile_usable` (renamed from `ensure_frozen_lockfile_usable` when the
+  read stopped being frozen-only); `LockfilePolicy` is threaded to
+  `up::features_build::resolve_and_stage_features` through all four feature-build
+  call sites.
 - `crates/parity-harness/src/registry.rs` — `check_spec_status_census`.
 
 The authoritative current state is always `parity/SPEC_STATUS.md` plus the latest
