@@ -122,23 +122,37 @@ its issue — read the issue before briefing an agent.
 campaign has characterized is fixed. What follows is UNFILED: three measured
 findings, one measured non-finding, and two maintainer decisions.
 
-**Unfiled findings — all three measured on 2026-08-13 by the #572 agent, all on the
-same seam (the compose project-name resolver), none fixed.** They are a coherent
-follow-up batch and would file well as one issue or three:
+**[#580](https://github.com/get2knowio/deacon/issues/580) — with no authored `name:`,
+deacon resolves `COMPOSE_PROJECT_NAME` from only one of the sources Compose uses.**
+Filed 2026-08-13. On the derivation path deacon looks in exactly one place, a `.env`
+in the workspace folder, so two sources the reference honors are invisible: the
+PROCESS ENVIRONMENT (`COMPOSE_PROJECT_NAME=env-wins deacon up` derives
+`deacon_m3_…` where the reference lands `env-wins`) and a `.env` BESIDE THE COMPOSE
+FILE (`.devcontainer/.env` → reference `from-configdir`, deacon derives). Both have
+one cause — `derive_project_name` never consults Compose when nothing is authored —
+so it is one issue. The authored-name path already AGREES on both, because #578
+routes it through `docker compose config` and Compose applies the variable itself.
 
-1. **deacon ignores the `COMPOSE_PROJECT_NAME` process environment variable.** It
-   reads only a `.env` file; the reference checks `env.COMPOSE_PROJECT_NAME` FIRST,
-   ahead of everything. Measured: `COMPOSE_PROJECT_NAME=env-wins deacon up` ignores
-   it entirely, while the reference lands the project on `env-wins`. This is step 1
-   of the reference's four-step `Rp` resolver and deacon implements steps 2–4.
-2. **A LITERAL authored name is not normalized.** The reference lowercases and
-   strips illegal characters in every branch (`Rg`), so `name: My_Project` works
-   there and fails on deacon. Note the asymmetry #578 introduced by accident:
-   INTERPOLATED names now get normalization free, because Compose does it before
-   deacon ever sees the string. Literals still go through the line-wise reader
-   untouched. That inconsistency is deacon-internal and worth closing.
-3. **`.env` is read from the wrong directory.** The reference reads it from the
-   CLI's cwd; deacon reads it from the workspace folder.
+**This entry replaces three findings the #572 agent reported, and the correction is
+the point.** Verified before filing, per the standing rule; of the three, **one
+survived and two were refuted**:
+
+- *"deacon ignores the `COMPOSE_PROJECT_NAME` process env var"* — TRUE only on the
+  derivation path. With a name authored, deacon honors it exactly like the reference.
+  The agent's own fix closed the broader claim and it did not re-measure afterwards.
+- *"a LITERAL authored name is not normalized — `name: My_Project` fails on deacon"*
+  — REFUTED. Both CLIs exit 0 with `my_project`. #578 routes every authored name
+  through `docker compose config`, so literals get normalization too; the predicted
+  asymmetry never existed.
+- *"the reference reads `.env` from the CLI's cwd"* — REFUTED, and this one also
+  corrects #572's transcription of the `Rp` resolver. With `.env` in the cwd and
+  nowhere else, the reference fell through to its step-4 default. The locations it
+  was observed honoring are the workspace folder and the compose file's directory.
+
+**The generalizable lesson: an agent that fixes a defect is the worst-placed
+observer of what its fix left behind.** Two of the three claims were true of the
+code the agent started from and false of the code it shipped. Re-measure adjacent
+findings against the MERGED result, not against the branch point.
 
 **A measured NON-finding, recorded so it is not rediscovered.** The gap #575 left
 open — that `read-configuration` / `run-user-commands` resolve Features unpinned by
@@ -214,6 +228,15 @@ each learned from a real failure:
   #527 (composition ruling: id-label discriminator) both exercised this.
 - **Watched-to-fail**: every new test and parity case is broken once and observed
   failing before it counts.
+- **Re-measure an agent's ADJACENT findings against the merged result before filing
+  them.** CLAUDE.md already says to verify agent claims empirically; 2026-08-13 gave
+  the reason a second time and named the mechanism. Three side-findings from the
+  #572 work were checked before filing and only ONE survived — the other two were
+  true of the code the agent branched from and false of the code it shipped, because
+  its own fix had closed them. An agent reports what it noticed while working; it
+  does not re-run those observations after its patch lands. One of the refuted
+  claims also falsified a line in #572's transcription of the reference resolver,
+  so a stale side-finding can poison a *different* issue's cause section too.
 - **Ledger honesty**: every measured deacon-vs-reference difference gets a GitHub
   issue and a `SPEC_STATUS.md` row the day it is found; rows and header census
   move in the same commit.
