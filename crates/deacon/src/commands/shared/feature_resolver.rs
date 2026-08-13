@@ -122,16 +122,59 @@ pub(crate) fn same_feature_already_resolved(
 ///   `devcontainer-feature.json`, OCI fetch error, dependency cycle) is
 ///   propagated with context rather than silently dropped.
 ///
-/// **Not pinned by the lockfile.** The install path resolves Features at the
-/// digest `.devcontainer-lock.json` records (#571,
+/// **Not pinned by the lockfile — and that MATCHES the reference.** The install
+/// path resolves Features at the digest `.devcontainer-lock.json` records (#571,
 /// `up::features_build::resolve_and_stage_features`); this reader resolves by
-/// tag. The consumers here read metadata rather than install content, so the
-/// difference is only observable when a lockfile pins a floating tag and the
-/// tag has since moved — the reported metadata would then be the newer
-/// Feature's while `up` installs the pinned one. The reference threads its
-/// lockfile through the same `generateFeaturesConfig` for every subcommand, so
-/// this is a gap rather than a decision; it is unmeasured and deliberately not
-/// closed alongside #571, which was scoped to what installs.
+/// tag. That asymmetry was recorded as a suspected gap when #571 landed, on the
+/// premise that "the reference threads its lockfile through the same
+/// `generateFeaturesConfig` for every subcommand". That premise is FALSE, and
+/// the correction is measured rather than reasoned.
+///
+/// TRANSCRIBED from the pinned oracle's bundle (`@devcontainers/cli@0.87.0`,
+/// `dist/spec-node/devContainersSpecCLI.js`). `read-configuration` (`Q5`) builds
+/// its `featuresConfiguration` through a dedicated helper, `lu`, which
+/// hard-codes the opt-out:
+///
+/// ```js
+/// async function lu(A,e,t,i,r,n){ … return UQ({extensionPath:i,cacheFolder:Q,cwd:g,
+///   output:s,env:C,skipFeatureAutoMapping:r,platform:I,noLockfile:!0},E,t,n)}
+/// ```
+///
+/// and `UQ` (`generateFeaturesConfig`) is where the pin would otherwise be read:
+///
+/// ```js
+/// let {lockfile:C} = A.noLockfile ? {lockfile:void 0} : await fI(t),
+///     I = async a => await yI(A,s,n,a,C);
+/// ```
+///
+/// So the reference does not merely *fail* to pin `read-configuration` — it
+/// passes `noLockfile: true` on purpose, and resolution there is by tag.
+/// `run-user-commands` (`C5`) never builds a `featuresConfig` at all: it calls
+/// `Tr(IA,ZA,void 0,GA,X)` and takes Feature metadata from the container's own
+/// `devcontainer.metadata` image label, which is already the pinned record of
+/// what was installed. deacon reproduces that skip via `#527`
+/// (`MetadataComposition::suppresses_caller_features`).
+///
+/// MEASURED at oracle 0.87.0 on a workspace declaring the floating
+/// `ghcr.io/devcontainers/features/git:1` with a `devcontainer-lock.json`
+/// pinning it to 1.3.2's digest
+/// (`sha256:63c96e8a…4846014d`), the shape #571 used:
+///
+/// - `devcontainer outdated` reports `"current":"1.3.2"` — the lockfile is
+///   well-formed, correctly keyed and recognised at that path.
+/// - `devcontainer build` leaves the lockfile byte-identical at 1.3.2 — the
+///   INSTALL path is pinned.
+/// - `devcontainer read-configuration --include-features-configuration` reports
+///   `"version":"1.3.8"` and `manifestDigest: sha256:fd75977d…` — the live tag,
+///   NOT the pin. deacon reports 1.3.8 from the same workspace. Identical.
+///
+/// The sharpest form: on `parity/fixtures/fx-upstream-lockfile-oci-integrity`,
+/// whose lockfile `integrity` is deliberately corrupt and where `build` exits 1
+/// on both CLIs, `read-configuration` exits **0** on both.
+///
+/// Pinning this reader would therefore CREATE a divergence, not close one.
+// Only reachable through `full`-gated CLI dispatch (e.g. run-user-commands), so
+// it is dead code in a `--no-default-features` MVP build; tests still exercise it.
 // Only reachable through `full`-gated CLI dispatch (e.g. run-user-commands), so
 // it is dead code in a `--no-default-features` MVP build; tests still exercise it.
 pub(crate) async fn resolve_features_ordered<C: HttpClient>(

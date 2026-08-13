@@ -819,3 +819,77 @@ fn test_lockfile_validation_multiple_features() {
         "All features matching should result in Matched"
     );
 }
+
+// =============================================================================
+// #569: the pre-build refusal must see Features supplied by --additional-features
+// =============================================================================
+
+/// `up --frozen-lockfile` must refuse BEFORE any daemon work even when the
+/// Features arrive via `--additional-features` rather than the configuration.
+///
+/// The reference consults `--frozen-lockfile` only inside `writeLockfile`
+/// (`mQ`), reached from the single caller `generateFeaturesConfig` (`UQ`),
+/// whose early return tests `userFeaturesToArray` (`xQ`) — and `xQ` takes the
+/// UNION of the configuration's Features and `additionalFeatures`:
+///
+/// ```js
+/// function xQ(A, e) {
+///   if (!Object.keys(A.features || {}).length && !Object.keys(e || {}).length) return;
+///   …
+/// }
+/// ```
+///
+/// deacon's gate read `config.features()` alone, so this exact invocation
+/// resolved the Feature and BUILT the Feature-extended image before refusing —
+/// measured at oracle 0.87.0, where the reference emits zero `Start: Run:
+/// docker …` lines for the same run.
+///
+/// **The docker-less `PATH` is the assertion, not a convenience.** The exit
+/// code and the error document already agreed with the reference before the
+/// fix; what differed was only *when* the refusal happened, and no parity
+/// channel observes an intermediate image left on the daemon. Emptying `PATH`
+/// turns that ordering into something a test can see: any daemon access fails
+/// loudly with `Docker is not installed or not accessible`, so reaching the
+/// lockfile message proves nothing touched Docker first. Watched to fail —
+/// before the fix this test received exactly that Docker error.
+#[test]
+fn frozen_lockfile_refuses_additional_features_before_touching_docker() {
+    let temp_dir = TempDir::new().unwrap();
+
+    // A configuration that declares NO Features of its own — the whole point.
+    create_devcontainer_config(temp_dir.path(), None);
+
+    let config_path = temp_dir.path().join(".devcontainer/devcontainer.json");
+    let lockfile_path = get_lockfile_path(&config_path);
+    assert!(
+        !lockfile_path.exists(),
+        "test setup: no lockfile may exist on disk"
+    );
+
+    let output = assert_cmd::Command::cargo_bin("deacon")
+        .expect("deacon binary")
+        .env("PATH", "/nonexistent-empty-dir")
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .arg("--frozen-lockfile")
+        .arg("--additional-features")
+        .arg(r#"{"ghcr.io/devcontainers/features/git:1.3.2":{}}"#)
+        .output()
+        .expect("run deacon up");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Lockfile does not exist."),
+        "the frozen gate must fire on the CLI-supplied Feature. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Docker is not installed"),
+        "reaching Docker at all means the gate ran too late (#569). stdout: {stdout}"
+    );
+    assert_eq!(output.status.code(), Some(1), "refusal exits 1");
+    assert!(
+        !lockfile_path.exists(),
+        "the refusal must not create the lockfile it refused over"
+    );
+}

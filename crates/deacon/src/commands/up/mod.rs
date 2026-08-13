@@ -230,9 +230,74 @@ pub(crate) async fn execute_up_with_runtime(
     check_for_disallowed_features(config.features())?;
     debug!("Validated features - no disallowed features found");
 
+    // Apply feature merging if CLI features are provided.
+    //
+    // This MUST precede the frozen-lockfile gate below (#569). The reference
+    // consults `--frozen-lockfile` only inside `writeLockfile` (`mQ`), reached
+    // from the single caller `generateFeaturesConfig` (`UQ`), whose early return
+    // tests `userFeaturesToArray` (`xQ`) — and `xQ` takes the UNION of the
+    // configuration's Features and `additionalFeatures`:
+    //
+    // ```js
+    // function xQ(A, e) {
+    //   if (!Object.keys(A.features || {}).length && !Object.keys(e || {}).length) return;
+    //   …
+    // }
+    // ```
+    //
+    // Running the merge first is what hands `ensure_lockfile_usable` that union,
+    // so the gate fires exactly where the reference's early return does. With
+    // the merge downstream of the gate, a configuration that declared no
+    // Features but received them via `--additional-features` slipped past the
+    // pre-build refusal and deacon built the Feature-extended image before
+    // refusing from the post-resolution check — the reference touches the daemon
+    // zero times (measured at oracle 0.87.0). `build` already ordered these two
+    // this way and was already correct; this makes `up` agree.
+    //
+    // The merge is placed AFTER `check_for_disallowed_features` deliberately:
+    // that check's scope (configuration-declared Features only) is unchanged.
+    // It is also after the `identity_config` snapshot above, so the container
+    // identity still hashes the as-loaded configuration.
+    if args.additional_features.is_some() || args.feature_install_order.is_some() {
+        // Say plainly that the overlay was dropped, so a caller passing both flags is
+        // never left wondering where its Features went.
+        if args.ignore_additional_features && args.additional_features.is_some() {
+            info!(
+                "--ignore-additional-features enabled: CLI-provided features \
+                 (--additional-features) will be ignored. Only features declared in \
+                 devcontainer.json will be used."
+            );
+        }
+
+        let merge_config = FeatureMergeConfig::new(
+            args.additional_features.clone(),
+            args.prefer_cli_features,
+            args.feature_install_order.clone(),
+            args.ignore_additional_features,
+        );
+
+        // Merge features
+        config.features = Some(FeatureMerger::merge_features(
+            config.features(),
+            &merge_config,
+        )?);
+        debug!("Applied feature merging");
+
+        // Update override feature install order if provided
+        if let Some(effective_order) = FeatureMerger::get_effective_install_order(
+            config.override_feature_install_order.as_ref(),
+            &merge_config,
+        )? {
+            config.override_feature_install_order = Some(effective_order);
+            debug!("Updated feature install order");
+        }
+    }
+
     // Frozen-lockfile pre-build refusal (graduated in 1.0). Shared with `build`
     // (#556) so both subcommands refuse at the same point, with the same
     // upstream-aligned strings, and both leave the workspace untouched.
+    //
+    // `config.features()` is the MERGED set as of #569 — see the merge above.
     ensure_lockfile_usable(
         LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
         &config_path,
@@ -406,42 +471,6 @@ pub(crate) async fn execute_up_with_runtime(
         }
     } else {
         debug!("No host requirements specified in configuration");
-    }
-
-    // Apply feature merging if CLI features are provided
-    if args.additional_features.is_some() || args.feature_install_order.is_some() {
-        // Say plainly that the overlay was dropped, so a caller passing both flags is
-        // never left wondering where its Features went.
-        if args.ignore_additional_features && args.additional_features.is_some() {
-            info!(
-                "--ignore-additional-features enabled: CLI-provided features \
-                 (--additional-features) will be ignored. Only features declared in \
-                 devcontainer.json will be used."
-            );
-        }
-
-        let merge_config = FeatureMergeConfig::new(
-            args.additional_features.clone(),
-            args.prefer_cli_features,
-            args.feature_install_order.clone(),
-            args.ignore_additional_features,
-        );
-
-        // Merge features
-        config.features = Some(FeatureMerger::merge_features(
-            config.features(),
-            &merge_config,
-        )?);
-        debug!("Applied feature merging");
-
-        // Update override feature install order if provided
-        if let Some(effective_order) = FeatureMerger::get_effective_install_order(
-            config.override_feature_install_order.as_ref(),
-            &merge_config,
-        )? {
-            config.override_feature_install_order = Some(effective_order);
-            debug!("Updated feature install order");
-        }
     }
 
     // Apply variable substitution prior to runtime operations (workspaceMount, mounts, runArgs, env, lifecycle)
