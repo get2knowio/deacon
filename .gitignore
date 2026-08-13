@@ -47,6 +47,9 @@ artifacts/nextest/full-timing.json
 .deacon/
 artifacts/nextest/full-timing.json
 .claude/settings.local.json
+# Agent worktrees. Each is a full checkout of this repo, so an agent running a broad
+# `git add` from the repo root could otherwise commit an entire second copy of the tree.
+.claude/worktrees/
 /.devcontainer-state
 /.deacon
 
