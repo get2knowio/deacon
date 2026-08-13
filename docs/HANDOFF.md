@@ -1,26 +1,26 @@
 # Session Handoff — Differential Parity Steady State
 
-Last updated: 2026-08-12, `main` at `8665036` (required checks green; the
-differential nightly is expected-red on exactly one case, see below; v0.3.0 shipped
-from `d642e8d`). This document is the cross-session
+Last updated: 2026-08-13, `main` at `7d643b1` (required checks green; the
+differential nightly is expected GREEN for the first time since #573, see below;
+v0.3.0 shipped from `d642e8d`). This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
 changes, update this file in the same PR.
 
 ## Where things stand
 
-- **One open nonconformance (#572), down from two the same day.**
-  `parity/SPEC_STATUS.md` records **134 behaviors**: 1 open nonconformance, 9
-  follows-spec, 11 documented choice, 20 extension, 93 conformant-and-matching. The
-  header census is CI-guarded (`check_spec_status_census` in
-  `crates/parity-harness/src/registry.rs`) — rows and header must change together.
-  **Zero is not the goal; an accurate ledger is.** The column went 0 → 2 → 1 within
-  one day: #480 batch 3 measured two real defects (#571, #572) and landed them as
-  red-on-purpose cases the day it found them, then #575 closed #571 with its case
-  turning green **as authored**. That is the full loop, twice over — batch 2's
-  #556/#557 did the same on 2026-08-10/11. No assertion has been bent to reach zero,
-  and the count moving in BOTH directions in a day is the ledger being live rather
-  than tidy.
+- **Zero open nonconformances.** `parity/SPEC_STATUS.md` records **135 behaviors**:
+  0 open nonconformance, 9 follows-spec, 11 documented choice, 20 extension, 95
+  conformant-and-matching. The header census is CI-guarded
+  (`check_spec_status_census` in `crates/parity-harness/src/registry.rs`) — rows and
+  header must change together. **Zero is not the goal; an accurate ledger is**, and
+  the way it was reached is the point: the column went 0 → 2 → 1 → 0 across two days
+  as #480 batch 3 measured two real defects (#571, #572), landed them as
+  red-on-purpose cases the day it found them, and both were then closed with their
+  cases turning green **as authored** (#575, #578). No assertion was bent to reach
+  zero. Expect the column to reopen — it has three times now, every time someone
+  measured something the paperwork had only reasoned about, and the unfiled findings
+  in the queue below are the next candidates.
 - **Closing a defect can ADD rows, and that is not inflation.** #575 took the
   census 132 → 134 while closing an open nonconformance, because making deacon read
   the lockfile made two further behaviors observable that were previously vacuous:
@@ -34,17 +34,18 @@ changes, update this file in the same PR.
   compose-naming trio was carried as "blocked on a maintainer ruling"; it was never
   blocked, and it held a second defect. Treat an inventory's *reasons* as claims
   with the same standing as any other unmeasured claim.
-- **The differential nightly is expected-red, on exactly ONE case.** Since #573
-  landed the red-on-purpose records, `parity.yml` fails on `main`; after #575 the
-  diverging set is exactly `case-up-upstream-compose-with-name-env-var` (#572) and
-  nothing else — verified in #575's own run, where the other red case
-  (`case-build-upstream-lockfile-oci-integrity`) came back `agree` with both sides
-  exit 1. Current verdict: `gh run list --workflow=parity.yml --branch=main`. The
-  standing rule: when a red case IS the deliberate record of an open
-  nonconformance, the check is whether the diverging set is exactly those cases and
-  nothing else — and the fix is to the product, never to the case. **`parity.yml`
-  is not a required check** (see the check-watching rules); it surfaces on PRs as
-  `live-certification` and will read red until #572 closes.
+- **The differential nightly should be GREEN again — the first time since #573.**
+  Both red-on-purpose records are now closed, and `live-certification` passed on
+  #578 and again on the rebased #577, which is the same workflow run against a
+  branch. That is strong evidence, not proof: confirm against the next real nightly
+  (`gh run list --workflow=parity.yml --branch=main`) before treating it as
+  established. **This matters more than the count does.** A job that is known-red
+  teaches nobody anything — every run needs a human to decide whether the red is the
+  expected red. Green restores it to a signal, so the next divergence stands out on
+  its own. The standing rule still applies whenever a case is red on purpose again:
+  the check is whether the diverging set is exactly those cases and nothing else,
+  and the fix is to the product, never to the case. **`parity.yml` is not a required
+  check** (see the check-watching rules); it surfaces on PRs as `live-certification`.
 - **The pinned oracle** is `@devcontainers/cli@0.87.0`
   (`npm install -g @devcontainers/cli@0.87.0`). Docker and the oracle both work in
   this dev container — verify parity changes for real, never by reasoning alone.
@@ -77,6 +78,8 @@ changes, update this file in the same PR.
 
 | PR | What | Issues |
 |---|---|---|
+| #577 `7d643b1` | **`up --frozen-lockfile` refuses BEFORE any daemon work when the Features arrive via `--additional-features`** — deacon resolved and BUILT the Feature-extended image, then refused; the reference issues zero docker commands. The fix is an ORDERING change, not a new gate: the `--additional-features` merge now runs before `ensure_lockfile_usable`, so the gate is handed the same UNION the reference's early return keys off (`userFeaturesToArray`). **The issue's own cause analysis was half wrong** and measurement caught it — it asserted `build` shared the shape; `build` already merged before the gate and was already correct, so only `up` changed. **No parity case, said plainly rather than papered over:** exit code, result-document substance and workspace bytes ALL agreed before the fix, and the one thing that differed — an intermediate image — is observable on no declared channel (`chan-image` reads the image an operation PRODUCED, and this one produces none). Pinned instead by a hermetic test that runs `up` with an EMPTIED `PATH`, so any daemon access fails loudly; reaching `Lockfile does not exist.` proves nothing touched Docker. Watched-to-fail. Also carries the correction below: the #575 "gap" was measured and is NOT real | #569 fixed |
+| #578 `bb06189` | **a compose file's top-level `name:` is interpolated at last** — `name: ${CUSTOM_NAME}` reached Compose verbatim and `up` died on `invalid project name`. **The issue's design question dissolved under measurement rather than being decided:** it framed the faithful fix as "async and daemon-dependent", but `docker compose config` returns the interpolated name with `DOCKER_HOST` pointed at a nonexistent socket (exit 0) — it is a CLIENT-SIDE call, so the added dependency is the `docker` binary + compose plugin every compose flow already needs. "What if Compose is unavailable" likewise had a measured reference answer instead of a design space: the reference aborts `up` outright, so deacon does too, with **no fallback**. An authored name is now read off `docker compose config`, where the reference's `Rp` resolver has always taken it. The line-wise reader survives only as an **authorship detector** — Compose reports a `name` whether or not one was authored (its directory default), so its answer alone cannot distinguish the two, and adopting the default would overrule deacon's namespaced derivation (#265/#564); the reference hits the identical wall and solves it identically. Configs authoring no `name:` spawn no subprocess. Second commit threads `build`'s previously-inert `--env-file` — the OPPOSITE of scope creep: without it `build` and `up` would derive DIFFERENT project names from the same config, an inconsistency this fix would itself have introduced. Red-on-purpose case green with its assertion byte-identical, plus a `spec-expectation` twin on the gating lane | #572 fixed |
 | #575 `8665036` | **the lockfile's `integrity` is a content pin at last** — the most serious defect the campaign has found, closed. deacon never read the field: a lockfile whose checksum did not match the Feature it named installed anyway, and deacon then OVERWROTE the bad field with the digest it had just fetched, so a tampered lockfile was silently repaired. The fix is the reference's shape and NOT the obvious one — "compare the checksum after downloading" is both wrong and weaker. `integrity` is the manifest LOOKUP KEY (`ji`: `let r = e.version; t && (r = t)`; `aQ` re-checks `docker-content-digest`), so a Feature whose content no longer matches cannot be RESOLVED at all and there is no window in which it is downloaded, installed or written back. `FeatureFetcher::fetch_feature_pinned` is that request; declared Features and auto-installed `dependsOn` targets are both pinned, keyed by the id AS WRITTEN. Two carve-outs measured rather than assumed: `--no-lockfile` means "do not READ" (`A.noLockfile ? {lockfile: undefined} : await fI(t)`), `--frozen-lockfile` does NOT. **The consequence beyond tampering, measured on both CLIs: a lockfile pins a FLOATING tag** — `git:1` recorded at 1.3.2's digest installs 1.3.2 on both CLIs though `:1` resolves to 1.3.8 today; that IS "trust on first use", and `upgrade` is how the pin moves. Reading the lockfile also made an unreadable one matter (fails pre-build now, matching the reference), but the pin read is deliberately NOT the strict `read_lockfile`: it parses strictly and validates only the field it uses, because a lockfile the REFERENCE writes for a `direct-tarball` Feature has a `resolved` that deacon's `validate_oci_reference` rejects — refusing it would be a deacon-only surprise for a migrating user. A non-digest `integrity` IS rejected (it lands in a URL path; ignoring it would make corrupting the field a way to DISABLE the check). Red-on-purpose case turned green as authored, plus a `spec-expectation` twin so the behavior GATES (the differential lane does not) | #571 fixed |
 | #573 `e6f69fd` | #480 batch 3 — 4 fixtures, 4 cases, **two defects found by measuring what batch 2 had only classified**. `lockfile-oci-integrity`: deacon **never reads a lockfile's `integrity`** — a lockfile whose checksum does not match the Feature it names installs anyway, and deacon then REWRITES the field to the digest it just fetched, so a tampered lockfile is not ignored but silently repaired. The reference exits 1; `devcontainer-lockfile.md` names "trust on first use" as a goal of the file, so spec and reference agree deacon is the wrong side (rare). Transcribed, not guessed: `integrity` is the reference's manifest LOOKUP KEY (`ji` substitutes it for the tag, `aQ` re-checks `docker-content-digest`), not a checksum compared afterwards. Compose naming: `compose-with-name` and `-custom-yaml` MATCH (worth having — the existing Compose differential TOLERATES the project path, so nothing said what happens when a name IS authored), while `name: ${CUSTOM_NAME}` reaches Compose verbatim and `up` dies on `invalid project name`. Not fixed in-batch on purpose: the faithful fix reads `name` off `docker compose config`, making `derive_project_name` async and daemon-dependent, and hand-expanding `${VAR}` reimplements part of Compose's interpolation grammar — neither is "small and clearly correct". The seven codspace Feature-graph configs are now **definitively** deferred, not "worth re-running". `.gitignore`'s blanket `.env*` was silently swallowing a fixture whose `.env` IS the input under test | #571, #572 filed |
 | #570 `6b9f840` | the featureless `up --frozen-lockfile` carve-out finally has a row and a case. #565 changed it from exit 1 to exit 0 incidentally; both CLIs exit 0 and neither writes a lockfile, and the reference's reason is transcribed — `--frozen-lockfile` is read only inside `writeLockfile`, whose one caller returns early when `userFeaturesToArray` finds no Features, so the flag is never REACHED rather than satisfied. Deliberately `spec-expectation`, not `live-differential`: the differential lane is nightly-only and **gates nothing**, and a case whose whole point is that nothing gated this behavior belongs where it gates. Watched-to-fail by breaking the PRODUCT (dropping the `declares_features` gate), not the case — `chan-filesystem` correctly stayed GREEN through that break, which is why the case leans on exit code + result document instead | item 1 closed; #569 filed |
@@ -113,36 +116,51 @@ defects it concealed were filed as #526 and #527, both now fixed.
 Sharpest first. Every item below already has a measurement or a precise claim in
 its issue — read the issue before briefing an agent.
 
-The 2026-08-11 queue was consumed entirely (#555, the featureless-lockfile row,
-#480 batch 3), and #571 — the sharpest item of the batch that replaced it — closed
-the same day it was filed (#575). What remains is one defect with a real design
-question inside it, and one classification only the maintainer can make.
+**The queue is empty of filed work.** The 2026-08-11 queue was consumed entirely
+(#555, the featureless-lockfile row, #480 batch 3); the batch that replaced it —
+#571, #572, #569 — is now closed too (#575, #578, #577). Every filed issue the
+campaign has characterized is fixed. What follows is UNFILED: three measured
+findings, one measured non-finding, and two maintainer decisions.
 
-**Fixes, sharpest first:**
+**Unfiled findings — all three measured on 2026-08-13 by the #572 agent, all on the
+same seam (the compose project-name resolver), none fixed.** They are a coherent
+follow-up batch and would file well as one issue or three:
 
-1. **#572 — `name: ${CUSTOM_NAME}` in a compose file is not interpolated.** deacon's
-   `parse_compose_file_for_project_name` is line-wise, so the literal reaches Compose
-   and `up` dies on `invalid project name "${CUSTOM_NAME}"` where the reference
-   succeeds with `custom-name-with-env-var`. **This one has a real design question
-   inside it** and the batch-3 agent deliberately did not fix it in-batch: the
-   faithful fix reads `name` off `docker compose config`, which makes
-   `derive_project_name` async and daemon-dependent, while hand-expanding `${VAR}`
-   reimplements part of Compose's interpolation grammar. Brief an agent to measure
-   the cost of the faithful path before choosing. **It is also the only thing
-   keeping the differential nightly red**, so closing it makes the nightly a signal
-   again rather than a known-red job.
-2. **#569 — classification pending, and it is the maintainer's call.** The
-   pre-build `--frozen-lockfile` refusal misses Features supplied by
-   `--additional-features`, so deacon BUILDS the Feature-extended image and then
-   refuses, where the reference issues zero docker commands. Exit code and workspace
-   bytes already agree, so this is not a contract break — deacon just does the work
-   the flag exists to avoid and leaves a `deacon-devcontainer-features:*` image
-   behind. Cause transcribed: the reference's early return keys off the UNION of
-   config Features and `additionalFeatures` (`userFeaturesToArray`), deacon's mirror
-   passes `config.features()` alone, in both `up` and `build`. Against the standing
-   least-surprise bar a migrating user gets stray images and wasted build minutes,
-   and no invariant is in tension — the fix is one argument. Filed without a status
-   on purpose.
+1. **deacon ignores the `COMPOSE_PROJECT_NAME` process environment variable.** It
+   reads only a `.env` file; the reference checks `env.COMPOSE_PROJECT_NAME` FIRST,
+   ahead of everything. Measured: `COMPOSE_PROJECT_NAME=env-wins deacon up` ignores
+   it entirely, while the reference lands the project on `env-wins`. This is step 1
+   of the reference's four-step `Rp` resolver and deacon implements steps 2–4.
+2. **A LITERAL authored name is not normalized.** The reference lowercases and
+   strips illegal characters in every branch (`Rg`), so `name: My_Project` works
+   there and fails on deacon. Note the asymmetry #578 introduced by accident:
+   INTERPOLATED names now get normalization free, because Compose does it before
+   deacon ever sees the string. Literals still go through the line-wise reader
+   untouched. That inconsistency is deacon-internal and worth closing.
+3. **`.env` is read from the wrong directory.** The reference reads it from the
+   CLI's cwd; deacon reads it from the workspace folder.
+
+**A measured NON-finding, recorded so it is not rediscovered.** The gap #575 left
+open — that `read-configuration` / `run-user-commands` resolve Features unpinned by
+the lockfile — was measured on 2026-08-13 and **is not a defect**. The premise was
+the unverified part and it was false: the reference does NOT thread its lockfile
+through `generateFeaturesConfig` for every subcommand. `read-configuration` goes
+through a dedicated helper that hard-codes `noLockfile: !0`, and
+`run-user-commands` builds no features config at all (it reads the container's
+`devcontainer.metadata` label, which deacon already mirrors via #527). Measured with
+`git:1` pinned at 1.3.2's digest against a live `:1` of 1.3.8: `build` stays pinned
+on both CLIs, `read-configuration` reports 1.3.8 on BOTH. Sharpest form — on the
+deliberately-corrupt-`integrity` fixture where `build` exits 1 on both sides,
+`read-configuration` exits 0 on both. **Pinning that reader would CREATE a
+divergence.** `read-configuration`'s own richer variant was checked separately, also
+unpinned, also matching. The stale doc comment at `feature_resolver.rs` is corrected.
+
+**One more difference, pre-existing and NOT a pin problem** (found while measuring
+the above, unfiled): when a container lacks the `devcontainer.local_folder` label,
+`run-user-commands` resolves declared Features from the registry while the reference
+resolves none. That is a SUPERSET rather than a mismatch, it is #527-characterized,
+and pinning it by the lockfile would move deacon AWAY from the reference. Wants a
+decision, not a fix.
 
 **#480's first vein is close to exhausted.** All 34 remaining configs are deferred
 for content or environment reasons, and the seven codspace Feature-graph configs are
@@ -153,25 +171,16 @@ fixture step, wanted or not; (b) an in-place-config-rewrite fixture pattern for
 config. If neither is wanted, the issue's SECOND vein — real-world
 `devcontainer.json` files from public repos — is where the next batch's value is.
 
-Known gap left open by #575, stated rather than hidden and NOT yet filed:
-`read-configuration` / `run-user-commands` resolve Features through
-`resolve_features_ordered`, which is **not** pinned by the lockfile. Those consumers
-read metadata rather than install content, so the difference is only observable when
-a lockfile pins a floating tag that has since moved — the reported metadata would be
-the newer Feature's while `up` installs the pinned one. The reference threads its
-lockfile through the same `generateFeaturesConfig` for every subcommand, so this is a
-gap rather than a decision. It is UNMEASURED; measure before filing, per the standing
-rule that an inventory's reasons are claims.
-
 Open question, not blocking: #566 implements the superseded-project diagnostic as
 **one message per `up`** listing every superseded project, rather than a persisted
 suppression marker — the condition is self-clearing, and persisting risks the one
 emission landing in a run nobody read. A small follow-up if persisted suppression
 was intended.
 
-Unresolved hygiene, noticed 2026-08-12 and not landed: `.claude/worktrees/` is
-untracked and unignored, so an agent doing a broad `git add` could commit an entire
-worktree. One line in `.gitignore`.
+Hygiene item CLOSED 2026-08-13: `.claude/worktrees/` is now in `.gitignore`. It had
+been noticed on 2026-08-12 and carried unlanded; two agents ran in worktrees the next
+day, which made the "an agent doing a broad `git add` commits an entire second copy of
+the tree" risk live rather than theoretical.
 
 Retired without work: **#402** closed obsolete 2026-08-07 — its subject (the
 discovery findings queue) was deleted with the conformance crate, and the parity
@@ -246,11 +255,45 @@ each learned from a real failure:
   this five times on #570 while holding (correctly) at 8-of-10. Brief agents to
   stop at "PR open, gate run locally, here is my report", and let the session watch
   and merge. Their holding discipline is still the thing being tested; what is not
-  wanted is the narration.
+  wanted is the narration. **Observed again 2026-08-13**, five more times, on #578:
+  the agent held correctly at every partial count and re-emitted its entire final
+  report on each stop. The brief said "report back"; it did not say "report once".
+  Say so explicitly.
 - **Do not trust a squash message's arithmetic after a rebase.** #573's commit body
   says "128 → 131" because it was written before rebasing onto #570; the FILE says
   132, and the file is what `check_spec_status_census` validates. Recount census
   rows after any rebase rather than carrying header arithmetic forward.
+- **Git will merge the census block CLEANLY and WRONGLY.** Rebasing #577 onto #578,
+  both of which had incremented "conformant and matching" by one for UNRELATED
+  reasons (#578 reclassified a row, #577 added one), git took the total from one
+  side and the matching count from the other and produced 135/0/9/11/20/**94** — a
+  set that sums to 134. No conflict marker, because the two edits touched different
+  LINES of the same list. The census test catches it, which is the argument for
+  running `cargo nextest run -p parity-harness` after any rebase that touches
+  `SPEC_STATUS.md` rather than eyeballing the block. Counts are arithmetic, not
+  additive text: reconcile them by re-deriving from the rows, never by accepting
+  either side.
+- **A stale claim OUTSIDE the conflict region merges silently, and that is worse
+  than a conflict.** The same rebase left the featureless-lockfile row still saying
+  #569 was "measured, classification pending" and still describing deacon's gate as
+  reading the configuration alone — both falsified by the very commit being rebased,
+  neither flagged, because the text sat far from the changed rows. After a rebase,
+  grep the ledger for the issue numbers the change closes and read every hit. A
+  status is a claim; a merge that preserves a false one has done real damage.
+- **Merge ORDER is a decision when one PR fixes the check that makes another look
+  broken.** #577 sat at `mergeStateStatus: UNSTABLE` purely because
+  `live-certification` was red on it — and #578 was the fix for that lane. Merging
+  #578 first meant #577's rebase inherited a green lane and neither merge needed a
+  protection bypass. Check for this relationship before reaching for `--admin`.
+- **An issue's DESIGN QUESTION is a claim with the same standing as any other.**
+  #572 was filed rather than fixed because the faithful path was judged "async and
+  daemon-dependent"; one command dissolved it —
+  `DOCKER_HOST=unix:///nonexistent/docker.sock docker compose config` exits 0,
+  because it is a client-side call. The adjacent "what if the tool is unavailable"
+  was not a design space either: the reference has a measured answer (it aborts).
+  Reasoning about the COST of a fix goes stale exactly like reasoning about
+  behavior, and gets the same treatment — measure it before accepting the trade-off
+  that keeps an issue open.
 - **A red check is a claim too — find out WHOSE before re-running or reworking.**
   #575's `Security (cargo deny)` failed with
   `fatal: unable to access 'https://github.com/RustSec/advisory-db/': server
@@ -311,6 +354,18 @@ each learned from a real failure:
   read stopped being frozen-only); `LockfilePolicy` is threaded to
   `up::features_build::resolve_and_stage_features` through all four feature-build
   call sites.
+- `crates/core/src/compose.rs` — `ComposeCommand::extract_project_name` (shells
+  `docker compose config`) + the pure `parse_project_name_from_config`;
+  `derive_project_name` and `create_project` are now **async** and take the env
+  files, threaded as a parameter rather than assigned afterwards so `up`/`exec`/
+  `down`/`build` cannot land on different names (#572). The line-wise reader is
+  retained ONLY as an authorship detector — deleting it would let Compose's
+  directory default overrule the namespaced derivation (#265/#564).
+- `crates/deacon/src/commands/up/mod.rs` — the `--additional-features` merge runs
+  BEFORE `ensure_lockfile_usable` (#569). The ordering is load-bearing and carries
+  a comment saying so; it also sits after `check_for_disallowed_features` and after
+  the `identity_config` snapshot deliberately, so neither that check's scope nor
+  container identity moves.
 - `crates/parity-harness/src/registry.rs` — `check_spec_status_census`.
 
 The authoritative current state is always `parity/SPEC_STATUS.md` plus the latest
