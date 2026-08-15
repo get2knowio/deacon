@@ -538,6 +538,145 @@ pub fn check_spec_status_census(markdown: &str) -> Vec<String> {
     problems
 }
 
+/// An open GitHub issue, reduced to the three fields the ledger-coverage check reads.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct LedgerIssue {
+    pub number: u64,
+    pub title: String,
+    /// Label names. `gh issue list --json labels` emits objects; the caller flattens.
+    #[serde(default)]
+    pub labels: Vec<String>,
+}
+
+/// The label whose stated meaning IS the ledger obligation: "Real divergence from the
+/// reference CLI."
+pub const LEDGER_ISSUE_LABEL: &str = "parity-drift";
+
+/// Conventional-commit scopes that describe tooling rather than deacon's observable
+/// behavior. A `fix(...)` in one of these owes no behavior row.
+///
+/// Deliberately SHORT and closed. Every scope added here is a hole in the check, so the
+/// bar is "this scope cannot name a deacon-vs-reference difference", not "this issue
+/// happened not to need a row".
+const NON_BEHAVIORAL_SCOPES: &[&str] = &[
+    "ci",
+    "build",
+    "docs",
+    "doc",
+    "test",
+    "tests",
+    "chore",
+    "deps",
+    "dependencies",
+    "examples",
+    "handoff",
+];
+
+/// Does this open issue owe `parity/SPEC_STATUS.md` a row?
+///
+/// **The label alone is not the selector, and that is the whole point.** The
+/// [`LEDGER_ISSUE_LABEL`] convention was applied through #557 and then quietly lapsed:
+/// #564, #569, #571, #572 and #580 all carry no label at all. A check keyed only on the
+/// label would therefore have passed on the very incident that motivated it. So the title
+/// is read too — this repository already writes issue titles as conventional commits, and
+/// a `fix(<scope>)` or `parity(<scope>)` title is a claim about deacon's behavior whether
+/// or not anybody remembered to click a label.
+fn owes_a_behavior_row(issue: &LedgerIssue) -> bool {
+    if issue.labels.iter().any(|label| label == LEDGER_ISSUE_LABEL) {
+        return true;
+    }
+
+    let title = issue.title.trim();
+    if title.starts_with("parity(") || title.starts_with("parity:") || title.starts_with("fix:") {
+        return true;
+    }
+    match title.strip_prefix("fix(").and_then(|r| r.split_once(')')) {
+        Some((scope, _)) => !NON_BEHAVIORAL_SCOPES.contains(&scope.trim()),
+        None => false,
+    }
+}
+
+/// Does `row` cite issue `number`, as `#580` or as an `…/issues/580` link?
+///
+/// The trailing-digit test is load-bearing: without it `#58` matches inside `#580` and a
+/// missing row is reported as covered by an unrelated one.
+fn row_cites_issue(row: &str, number: u64) -> bool {
+    let n = number.to_string();
+    [format!("#{n}"), format!("issues/{n}")]
+        .iter()
+        .any(|pattern| {
+            let mut from = 0;
+            while let Some(offset) = row[from..].find(pattern.as_str()) {
+                let end = from + offset + pattern.len();
+                if !row[end..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_digit())
+                {
+                    return true;
+                }
+                from = end;
+            }
+            false
+        })
+}
+
+/// Every open issue that asserts a deacon-vs-reference difference must be cited by a
+/// behavior ROW in `parity/SPEC_STATUS.md`. Returns human-readable problems (empty = OK).
+///
+/// **Why this exists, precisely.** "Ledger honesty" has been a campaign rule from the
+/// start: a measured difference gets an issue AND a row the day it is found. On
+/// 2026-08-13 [#580](https://github.com/get2knowio/deacon/issues/580) got the issue and no
+/// row, so for two days the Summary read "0 open nonconformance" while a measured,
+/// reproduced, unfixed defect sat in the tracker. Nothing caught it and nothing could:
+/// [`check_spec_status_census`] compares the header against the rows, which is arithmetic
+/// over what IS written and says nothing about what is missing. **The one number in that
+/// document with CI behind it was the one that cannot tell you whether the rows are
+/// complete.** This check supplies the other half by enumerating obligations from a source
+/// the ledger does not control.
+///
+/// It is therefore the only check in this module that needs the network, which is why the
+/// live issue list is a PARAMETER: the decision stays a pure function with hermetic tests,
+/// and a thin caller (`src/bin/ledger-issue-coverage.rs`) supplies the `gh` output. The
+/// hermetic lane's no-network promise is untouched.
+///
+/// Rows are matched exactly as the census matches them — a `|`-delimited line whose second
+/// cell prefix-matches a known status — so "cited in a row" cannot be satisfied by a
+/// passing mention in the Summary narrative. The obligation is a ROW; that is what was
+/// missing.
+pub fn check_ledger_covers_issues(open_issues: &[LedgerIssue], markdown: &str) -> Vec<String> {
+    let rows: Vec<&str> = markdown
+        .lines()
+        .filter(|line| {
+            line.trim_start()
+                .strip_prefix('|')
+                .and_then(|rest| rest.split('|').nth(1))
+                .is_some_and(|cell| {
+                    let cell = cell.trim().trim_matches('*').trim();
+                    SPEC_STATUS_LABELS
+                        .iter()
+                        .any(|(label, _)| cell.starts_with(label))
+                })
+        })
+        .collect();
+
+    open_issues
+        .iter()
+        .filter(|issue| owes_a_behavior_row(issue))
+        .filter(|issue| !rows.iter().any(|row| row_cites_issue(row, issue.number)))
+        .map(|issue| {
+            format!(
+                "SPEC_STATUS.md: open issue #{} (`{}`) asserts a deacon-vs-reference \
+                 difference but no behavior row cites it — add the row in the commit that \
+                 files the issue, or, if it owes none, say so on the issue and drop the \
+                 `{LEDGER_ISSUE_LABEL}` label / retitle it out of `fix(`",
+                issue.number,
+                issue.title.trim()
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,6 +746,113 @@ Of **3 recorded behaviors**:
                 .any(|p| p.contains("no `Of **N recorded behaviors**` line")),
             "a missing Summary must be flagged"
         );
+    }
+
+    fn issue(number: u64, title: &str, labels: &[&str]) -> LedgerIssue {
+        LedgerIssue {
+            number,
+            title: title.to_string(),
+            labels: labels.iter().map(|l| l.to_string()).collect(),
+        }
+    }
+
+    const LEDGER: &str = "\
+Of **2 recorded behaviors**:
+
+- **0** — open nonconformance
+- **0** — deacon extension
+- **2** — conformant and matching
+- **0** — deacon follows the spec where the CLI does not
+- **0** — documented choice
+
+Narrative prose mentioning #900 outside any row.
+
+| Behavior | Status | Evidence | Notes |
+|---|---|---|---|
+| something | matches the reference | 1 scenario | closes [#123](https://github.com/get2knowio/deacon/issues/123) |
+| something else | matches the reference | 1 scenario | see #58 for the sibling |
+";
+
+    /// The obligation is discharged by a ROW, whether the citation is a bare `#123` or a
+    /// full issue link.
+    #[test]
+    fn ledger_coverage_accepts_an_issue_cited_by_a_row() {
+        assert!(
+            check_ledger_covers_issues(
+                &[issue(123, "fix(compose): a real difference", &[])],
+                LEDGER
+            )
+            .is_empty()
+        );
+        assert!(
+            check_ledger_covers_issues(&[issue(58, "parity(up): a real difference", &[])], LEDGER)
+                .is_empty()
+        );
+    }
+
+    /// The #580 incident, replayed. An unlabelled `fix(<behavioral scope>)` issue with no
+    /// row is exactly what slipped through, so this is the case that must fail.
+    #[test]
+    fn ledger_coverage_catches_the_580_shape() {
+        let problems = check_ledger_covers_issues(
+            &[issue(
+                580,
+                "fix(compose): with no authored `name:`, deacon resolves COMPOSE_PROJECT_NAME \
+                 from only one of the sources Compose uses",
+                &[],
+            )],
+            LEDGER,
+        );
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+        assert!(problems[0].contains("#580"), "{problems:#?}");
+    }
+
+    /// A mention in the Summary narrative does NOT discharge the obligation. The rule is a
+    /// row; anything looser would have been satisfied by prose while the ledger stayed
+    /// wrong.
+    #[test]
+    fn ledger_coverage_ignores_citations_outside_a_row() {
+        let problems =
+            check_ledger_covers_issues(&[issue(900, "fix(up): narrated but unrowed", &[])], LEDGER);
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+    }
+
+    /// `#58` must not be read as covering `#580`, or a missing row is reported as covered
+    /// by an unrelated one.
+    #[test]
+    fn ledger_coverage_does_not_match_an_issue_number_prefix() {
+        let problems = check_ledger_covers_issues(&[issue(5, "fix(up): five", &[])], LEDGER);
+        assert_eq!(
+            problems.len(),
+            1,
+            "`#5` must not match `#58`: {problems:#?}"
+        );
+    }
+
+    /// The label selects on its own — that is its stated meaning — even when the title is
+    /// a `chore(` that would otherwise be exempt.
+    #[test]
+    fn ledger_coverage_selects_on_the_label_alone() {
+        let problems = check_ledger_covers_issues(
+            &[issue(777, "chore(parity): tooling", &[LEDGER_ISSUE_LABEL])],
+            LEDGER,
+        );
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+    }
+
+    /// Issues that owe nothing are silent: feature work, tooling scopes, and a
+    /// `fix(<non-behavioral scope>)`. A check that demanded a row from every open issue
+    /// would be turned off within a week.
+    #[test]
+    fn ledger_coverage_exempts_issues_that_owe_no_row() {
+        let exempt = [
+            issue(1, "feat(up): add a flag", &["enhancement"]),
+            issue(2, "chore(parity): mine upstream fixtures", &[]),
+            issue(3, "fix(ci): the windows lane is flaky", &[]),
+            issue(4, "fix(docs): a typo", &[]),
+            issue(5, "Spike: feasibility of a Podman CI lane", &[]),
+        ];
+        assert!(check_ledger_covers_issues(&exempt, LEDGER).is_empty());
     }
 
     #[test]

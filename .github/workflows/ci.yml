@@ -69,6 +69,62 @@ jobs:
     - name: Run doctests
       run: cargo test --doc --workspace
 
+  # Every OPEN issue asserting a deacon-vs-reference difference must be cited by a behavior
+  # row in parity/SPEC_STATUS.md. This is the half `check_spec_status_census` cannot cover:
+  # that check compares the Summary header against the rows, which is arithmetic over what
+  # IS written and is silent about what is missing. #580 was filed on 2026-08-13 with no
+  # row, so the ledger read "0 open nonconformance" for two days with a measured, unfixed
+  # defect in the tracker, and nothing failed.
+  #
+  # A separate job rather than a step in `lint` on purpose: this is the one check here that
+  # needs the GitHub API, and folding it into an already-REQUIRED job would let an API
+  # outage block every pull request on something unrelated to the code.
+  #
+  # NOT a required check until branch protection says so — adding it there is the
+  # maintainer's call.
+  ledger-coverage:
+    name: Ledger (issue coverage)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    # `--limit 1000` is a deliberate ceiling far above this repository's steady state
+    # (~15 open issues). `gh issue list` truncates SILENTLY at its limit, and a truncated
+    # list would drop obligations without saying so — the one failure mode this job cannot
+    # be allowed to have. Raise it before it can bind, never trim it to "what we need".
+    #
+    # `gh` owns the credentials and the pagination; the Rust side owns the decision. The
+    # binary exits 1 when an obligation is undischarged and 2 when it could not run at all
+    # (unreadable ledger, unparseable or EMPTY issue list) — an empty list is a failed
+    # query, never a vacuous pass.
+    - name: Check every open parity issue has a SPEC_STATUS.md row
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh issue list --state open --limit 1000 \
+          --json number,title,labels \
+          --jq '[.[] | {number, title, labels: [.labels[].name]}]' \
+          | cargo run -q -p parity-harness --bin ledger-issue-coverage
+
   msrv:
     name: MSRV (cargo check)
     if: github.event_name != 'schedule'
