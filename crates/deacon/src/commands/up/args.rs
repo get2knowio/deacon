@@ -504,6 +504,24 @@ pub struct UpArgs {
     pub host_ca_activation: deacon_core::host_ca::HostCaActivation,
 }
 
+impl UpArgs {
+    /// How wide this `up`'s supersede sweep may reach (#584).
+    ///
+    /// `--override-config` REPLACES the workspace's document, so the container
+    /// it replaces is a generation and must be stopped whatever file it names.
+    /// Everything else — discovery and `--config` alike — names one document
+    /// among the workspace's possible several, and may only supersede its own
+    /// earlier generations. Lives here so the single-container and compose
+    /// paths cannot drift apart on it.
+    pub(crate) fn supersede_scope(&self) -> deacon_core::container::SupersedeScope {
+        if self.override_config_path.is_some() {
+            deacon_core::container::SupersedeScope::Workspace
+        } else {
+            deacon_core::container::SupersedeScope::Document
+        }
+    }
+}
+
 impl Default for UpArgs {
     fn default() -> Self {
         Self {

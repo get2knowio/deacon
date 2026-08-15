@@ -1,6 +1,6 @@
 # Session Handoff — Differential Parity Steady State
 
-Last updated: 2026-08-15, `main` at `f6b7c10` (required checks green; the
+Last updated: 2026-08-15, `main` at `14ec091` (required checks green; the
 differential nightly is CONFIRMED green, see below; v0.3.0 shipped from `d642e8d`). This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
@@ -20,6 +20,30 @@ changes, update this file in the same PR.
   zero. Expect the column to reopen — it has three times now, every time someone
   measured something the paperwork had only reasoned about, and the unfiled findings
   in the queue below are the next candidates.
+- **The guard earned its keep within the hour, on an issue nobody planned.**
+  #583 landed the ledger-coverage check at `14ec091`; the next mining pass filed
+  [#584](https://github.com/get2knowio/deacon/issues/584) and the guard went red on
+  the very next local run, naming it. That is the loop working from the ISSUE side —
+  the side the ledger does not control — and it fired on a real obligation rather
+  than a rehearsal.
+- **#584: `up --config` stopped a sibling config's container, found by mining `exec`.**
+  The supersede sweep (#371) selected on `devcontainer.source=deacon` AND
+  `devcontainer.local_folder` and stopped everything else, so a SECOND document
+  brought up in one workspace was swept as though it were a later generation of the
+  first. Measured at oracle 0.87.0: the reference leaves both running; deacon left
+  the first `exited`, and `deacon exec` then answered `No running container found`
+  where `devcontainer exec` printed `hi`. Fixed by discriminating on
+  `devcontainer.config_file`, which is COARSER than `configHash` and therefore
+  exactly right: an edited document keeps its path, a sibling never does. The one
+  case a path cannot decide is `--override-config` — a different file that means a
+  REPLACEMENT — so the caller now states the scope (`SupersedeScope::{Document,Workspace}`)
+  rather than the sweep inferring it. **The lesson is about the paperwork, not the
+  code**: every justification in the doc comment and the `SPEC_STATUS` row was about
+  GENERATIONS OF ONE DOCUMENT, while the row's own wording ("any container a previous
+  `up` created for the same workspace") was broader than its reasoning — and the code
+  matched the wording. The untested breadth is where the surprise lived. Watch for
+  this shape elsewhere: a row whose summary sentence is wider than the argument
+  underneath it.
 - **The ledger was wrong for two days, and the rule it broke was already written
   down.** "Ledger honesty" below has said since the campaign began that a measured
   difference gets an issue AND a `SPEC_STATUS.md` row the day it is found. #580 got
@@ -95,6 +119,7 @@ changes, update this file in the same PR.
 
 | PR | What | Issues |
 |---|---|---|
+| #585 | **`up --config` no longer stops a sibling config's container** — the supersede sweep (#371) selected on `devcontainer.source=deacon` AND `devcontainer.local_folder` and stopped every other match, so a SECOND document in one workspace was swept as a later generation of the first. Measured at oracle 0.87.0: the reference leaves both running, deacon left the first `exited`, and `deacon exec` then answered `No running container found` where `devcontainer exec` printed `hi`. Now discriminated on `devcontainer.config_file` — COARSER than `configHash`, which is why it is right: an edited document keeps its path, a sibling never does. `--override-config` is the case a path cannot decide (different file, REPLACEMENT semantics), so the caller states `SupersedeScope::{Document,Workspace}` instead of the sweep guessing; the #371 leak stays closed, verified live on both orderings. **Watched RED at `14ec091` on `chan-temporal`, never on `chan-exit-code`** — `up` reported success while stopping the container, so an exit-code-only case would have passed. **Found by mining (#480) the reference's `exec` e2e fixtures**, which is where two documents in one workspace came from; deacon's own suite had never put them there. Known gap written down rather than left to be rediscovered: an `--override-config` container outlives its override | #584 fixed |
 | #582 | **`COMPOSE_PROJECT_NAME` is honored from every source Compose reads it from** — deacon read one of three, and the two it missed sit on either side of it. Measured matrix at oracle 0.87.0, one source at a time: process env → reference `env-wins`, deacon derived; workspace `.env` → agree; `.devcontainer/.env` → reference `from-configdir`, deacon derived; both `.env` files → agree on `from-workspace`; **process env AND workspace `.env` → reference `env-wins`, deacon `from-workspace`**. That last row is the one the issue did not have, and it is why the fix is an ORDERED search rather than three reads: adding the missing sources without the order trades a missing-source defect for a precedence one. **It also kills the obvious fix** — delegating to `docker compose config` like the authored-`name:` branch answers `from-configdir` when both files exist, because Compose cannot see the workspace `.env` at all; the sources are read directly instead, and the no-authored-name path still spawns no subprocess. `--env-file` REPLACES Compose's default `.env` discovery rather than adding to it (reasoned from Compose's documented behavior, marked as such in the code, not measured). **One symptom is not expressible as a case and is not claimed by one**: an `Operation` has no field for process env vars, so the process-env source and its precedence are pinned in Rust — which is why `derive_project_name` takes the value as a parameter instead of reading `std::env::var` (`unsafe_code = "deny"` rules out `set_var`). Two gating cases + 6 hermetic unit tests; the configdir case watched RED by reverting the fix, after `DEACON_PARITY_DEACON_BIN` turned out not to reach a test-binary lane | #580 fixed |
 | #577 `7d643b1` | **`up --frozen-lockfile` refuses BEFORE any daemon work when the Features arrive via `--additional-features`** — deacon resolved and BUILT the Feature-extended image, then refused; the reference issues zero docker commands. The fix is an ORDERING change, not a new gate: the `--additional-features` merge now runs before `ensure_lockfile_usable`, so the gate is handed the same UNION the reference's early return keys off (`userFeaturesToArray`). **The issue's own cause analysis was half wrong** and measurement caught it — it asserted `build` shared the shape; `build` already merged before the gate and was already correct, so only `up` changed. **No parity case, said plainly rather than papered over:** exit code, result-document substance and workspace bytes ALL agreed before the fix, and the one thing that differed — an intermediate image — is observable on no declared channel (`chan-image` reads the image an operation PRODUCED, and this one produces none). Pinned instead by a hermetic test that runs `up` with an EMPTIED `PATH`, so any daemon access fails loudly; reaching `Lockfile does not exist.` proves nothing touched Docker. Watched-to-fail. Also carries the correction below: the #575 "gap" was measured and is NOT real | #569 fixed |
 | #578 `bb06189` | **a compose file's top-level `name:` is interpolated at last** — `name: ${CUSTOM_NAME}` reached Compose verbatim and `up` died on `invalid project name`. **The issue's design question dissolved under measurement rather than being decided:** it framed the faithful fix as "async and daemon-dependent", but `docker compose config` returns the interpolated name with `DOCKER_HOST` pointed at a nonexistent socket (exit 0) — it is a CLIENT-SIDE call, so the added dependency is the `docker` binary + compose plugin every compose flow already needs. "What if Compose is unavailable" likewise had a measured reference answer instead of a design space: the reference aborts `up` outright, so deacon does too, with **no fallback**. An authored name is now read off `docker compose config`, where the reference's `Rp` resolver has always taken it. The line-wise reader survives only as an **authorship detector** — Compose reports a `name` whether or not one was authored (its directory default), so its answer alone cannot distinguish the two, and adopting the default would overrule deacon's namespaced derivation (#265/#564); the reference hits the identical wall and solves it identically. Configs authoring no `name:` spawn no subprocess. Second commit threads `build`'s previously-inert `--env-file` — the OPPOSITE of scope creep: without it `build` and `up` would derive DIFFERENT project names from the same config, an inconsistency this fix would itself have introduced. Red-on-purpose case green with its assertion byte-identical, plus a `spec-expectation` twin on the gating lane | #572 fixed |
