@@ -31,6 +31,10 @@ changes, update this file in the same PR.
   worth naming: filing feels like recording, and it is the half that leaves a trace
   somewhere else. (#580 is closed and its row is `matches the reference`, so the
   column is legitimately 0 again — but it was not while the issue was open.)
+  **This is now guarded** — see "Ledger honesty" below — by a check that enumerates
+  obligations from the ISSUE side, which is the only side the ledger does not
+  control. The guard was watched failing against the real #580 state rather than a
+  synthetic one.
 - **Closing a defect can ADD rows, and that is not inflation.** #575 took the
   census 132 → 134 while closing an open nonconformance, because making deacon read
   the lockfile made two further behaviors observable that were previously vacuous:
@@ -256,7 +260,26 @@ each learned from a real failure:
   so a stale side-finding can poison a *different* issue's cause section too.
 - **Ledger honesty**: every measured deacon-vs-reference difference gets a GitHub
   issue and a `SPEC_STATUS.md` row the day it is found; rows and header census
-  move in the same commit.
+  move in the same commit. **Enforced since 2026-08-15, after the rule was broken
+  by #580.** `check_ledger_covers_issues` (registry.rs) requires every OPEN issue
+  that asserts a difference to be cited by a behavior ROW — a mention in the
+  Summary narrative does not discharge it, because the obligation is a row and a
+  row is what was missing. The selector deliberately does **not** rest on the
+  `parity-drift` label: that convention was applied through #557 and then lapsed,
+  and #564/#569/#571/#572/#580 all carry no label at all, so a label-only check
+  would have passed on the very incident that motivated it. It selects on the
+  label OR a `fix(<behavioral scope>)` / `parity(…)` title, with a short closed
+  list of non-behavioral scopes (`ci`, `docs`, `build`, `test`, …) as the only
+  exemption. The live issue list is a PARAMETER, so the decision stays a pure
+  function with hermetic tests and the hermetic lane keeps its no-network promise;
+  `src/bin/ledger-issue-coverage.rs` is the thin caller and the `Ledger (issue
+  coverage)` job in `ci.yml` supplies `gh` output. **Watched failing against the
+  real incident**, not a synthetic one: replayed with #580's actual title against
+  `git show f6b7c10:parity/SPEC_STATUS.md`, it exits 1 and names the issue; against
+  today's ledger it exits 0. An EMPTY issue list is exit 2, not a pass — a broken
+  `gh` query returns `[]` and exits 0, and a guard that reports success after
+  checking nothing is the defect it exists to prevent. It is **not a required check
+  until branch protection says so**; adding it there is a maintainer call.
 - **Merges are API-verified** (`gh pr view --json state,mergeCommit`), never
   trusted from an agent's report. If `--delete-branch` trips on a worktree-held
   ref, delete via `gh api -X DELETE repos/get2knowio/deacon/git/refs/heads/<branch>`.
