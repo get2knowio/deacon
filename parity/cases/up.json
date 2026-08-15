@@ -2453,6 +2453,106 @@
       "notes": "The compose twin of `case-up-image-metadata-same-phase-differential`, and the reason there are two.\n\n#467 is NOT a compose defect. It lives in the merge that folds an image's `devcontainer.metadata` into the configuration — `merge_image_metadata_after_image_ready` — which `up`'s single-container path, `up`'s compose path (since #448) and `container_metadata::resolve_config_against_container` (`exec` and `run-user-commands`, since #405) all share. It reproduced IDENTICALLY on both `up` paths when it was filed, which is what identified it as a config-merge defect rather than an `up`-path one. A single-path case would misattribute a future regression to whichever path it happened to cover, so both paths are pinned and the two fixtures differ ONLY in how the container is brought up.\n\nSame three phases and the same reasoning as the sibling: `onCreate` and `postCreate` declared on BOTH sides (and `postCreate` in two different command forms), `postStart` by the IMAGE ONLY so a double-run is visible, and an assertion over the whole log rather than any one line.\n\nThe marker path is absolute (`/workspace/lifecycle.log`) where the sibling's is relative: deacon injects no workspace mount of its own on the compose path, so the hook's working directory is whatever the service provides. Naming the bind-mount path outright keeps this case measuring the merge rather than the lifecycle CWD resolution that `case-up-compose-lifecycle-phases` already covers.\n\nSTRENGTHENED after the fix landed (#467 follow-up): the fixture label carried ONE entry, which pins the collision but says nothing about the order BETWEEN metadata entries — and the merge rule is a \"Collected list\", so the label is an ordered array and that order is part of the claim. It now carries TWO entries, both declaring `onCreateCommand`, so `img1-onCreate` preceding `img2-onCreate` is the cross-entry assertion; an implementation that collected the entries into a set, reversed them, or read only the first or last would have satisfied the single-entry fixture. Cross-entry ordering had been pinned only by unit tests asserting `ImageMetadata { index: 0 }` / `{ index: 1 }`, never end-to-end against the oracle. The other two phases moved one per entry, so every property the single-entry revision pinned — the string-vs-string collision, the string-vs-ARRAY collision, and the image-only phase running exactly once — is unchanged."
     },
     {
+      "id": "case-up-compose-project-name-env-configdir-spec",
+      "behaviors": [
+        "bhv-compose-project-name-env-var-sources"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-compose-project-name-env-configdir"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "composeProjectResources": {
+                "project": "from-configdir"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The GATING record of [#580](https://github.com/get2knowio/deacon/issues/580). `COMPOSE_PROJECT_NAME` lives in `.devcontainer/.env`, beside the compose file — which is Compose's OWN default `.env` discovery location, because deacon passes `-f <configdir>/docker-compose.yml` and no `--project-directory`, making the compose file's directory the project directory. deacon read only the workspace folder's `.env`, so it never saw this one and fell through to its derived `deacon_<stem>_<hash>_<hash>` default.\n\nMEASURED at oracle 0.87.0 against deacon at `f6b7c10`, on a compose document authoring NO top-level `name:`, one source at a time:\n\n| where `COMPOSE_PROJECT_NAME` is set | reference | deacon |\n|---|---|---|\n| process environment | `env-wins` | derived `deacon_proc_*` |\n| workspace-folder `.env` | `from-workspace` | `from-workspace` |\n| `.devcontainer/.env` (beside the compose file) | `from-configdir` | derived `deacon_cfg_*` |\n| both `.env` files | `from-workspace` | `from-workspace` |\n| process env AND workspace `.env` | `env-wins` | `from-workspace` |\n\nThis case needs no oracle, so it runs on `parity_docker` — a required PR check and part of the release verify job. `from-configdir` is reachable only by reading that file: the derived default looks nothing like it, so the assertion cannot be satisfied by accident. Watched RED by temporarily reverting the fix in `compose.rs` and re-running the lane, where it failed on the project name and not on the exit code — the pre-fix run comes up fine, just under the wrong name. **The revert is the mechanism on purpose**: `DEACON_PARITY_DEACON_BIN` does NOT reach this lane. That override is read by `prereq::deacon_binary`, which serves the harness BINS; every parity TEST binary resolves the CLI through `env!(\"CARGO_BIN_EXE_deacon\")`, so pointing the variable at a saved pre-fix build silently exercises the freshly-built one and the case passes — which is exactly what it did on the first attempt here.\n\n**One of the three symptoms is not expressible on this lane and is deliberately not claimed here.** An `Operation` declares `argv`, `fixtures` and `stdin` and has no field for process environment variables, so the process-env row of the matrix above — both that it is honored at all and that it OUTRANKS a workspace `.env` — cannot be asserted by a case without extending the harness model. It is pinned in Rust instead, by `compose.rs`'s `derive_project_name` unit tests, which take the process-env value as a parameter for exactly this reason (`unsafe_code = \"deny\"` rules out `set_var`, so an injected parameter is the only testable shape). Saying so is the point: a lane that silently covered two thirds of an issue would read as covering it."
+    },
+    {
+      "id": "case-up-compose-project-name-env-workspace-wins-spec",
+      "behaviors": [
+        "bhv-compose-project-name-env-var-sources"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-compose-project-name-env-workspace-wins"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "composeProjectResources": {
+                "project": "from-workspace"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The PRECEDENCE half of [#580](https://github.com/get2knowio/deacon/issues/580), and the reason its sibling `case-up-compose-project-name-env-configdir-spec` cannot be read as \"deacon should just ask Compose\". Both `.env` files declare `COMPOSE_PROJECT_NAME`; the reference answers `from-workspace`, so the workspace folder's `.env` OUTRANKS the one Compose itself would discover beside the compose file. A fix that delegated the whole question to `docker compose config` would answer `from-configdir` here and be wrong in a way the configdir case alone would call correct.\n\nMEASURED at oracle 0.87.0 against deacon at `f6b7c10`, on a compose document authoring NO top-level `name:`, one source at a time:\n\n| where `COMPOSE_PROJECT_NAME` is set | reference | deacon |\n|---|---|---|\n| process environment | `env-wins` | derived `deacon_proc_*` |\n| workspace-folder `.env` | `from-workspace` | `from-workspace` |\n| `.devcontainer/.env` (beside the compose file) | `from-configdir` | derived `deacon_cfg_*` |\n| both `.env` files | `from-workspace` | `from-workspace` |\n| process env AND workspace `.env` | `env-wins` | `from-workspace` |\n\nUnlike its sibling this case passed BEFORE the fix as well — deacon already read the workspace `.env` first. That is what makes it worth having: it is the pin that stops the new lower-priority sources from being inserted above the one that already worked. Watched green with the fix temporarily reverted and green with it applied, which is the whole claim. See its sibling for why the watch is a source revert rather than `DEACON_PARITY_DEACON_BIN`."
+    },
+    {
       "id": "case-up-upstream-lifecycle-hooks-inline",
       "behaviors": [
         "bhv-up-lifecycle-hooks-from-features-and-configuration"
