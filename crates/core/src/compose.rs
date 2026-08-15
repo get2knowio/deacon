@@ -926,12 +926,23 @@ impl ComposeManager {
         // Deacon-namespaced project name, unique per devcontainer (workspace +
         // config hash), so sibling devcontainers in one repo never collide — unless the
         // user authored a name, in which case Compose resolves it.
+        // `COMPOSE_PROJECT_NAME` is COMPOSE's environment variable, not a deacon flag, so
+        // the CLAUDE.md rule that flag-backed vars must be declared with clap's `env =`
+        // does not reach it — there is no `--project-name` flag on deacon to back it, and
+        // inventing one would add surface the reference does not have. It is read here,
+        // at the single seam where a project name is resolved, and threaded down as a
+        // parameter so `derive_project_name` stays testable: `unsafe_code = "deny"` rules
+        // out `set_var` in a unit test, and a global read would make the precedence rules
+        // in `explicit_compose_project_name` unassertable.
+        let process_env_project_name = std::env::var("COMPOSE_PROJECT_NAME").ok();
+
         let project_name = derive_project_name(
             &self.docker_path,
             base_path,
             config,
             &resolved_files,
             env_files,
+            process_env_project_name.as_deref(),
         )
         .await?;
 
@@ -1892,19 +1903,85 @@ pub fn sanitize_project_stem(raw: &str) -> String {
     out
 }
 
+/// Find an explicit `COMPOSE_PROJECT_NAME`, consulting the sources in the order the
+/// reference CLI does (#580).
+///
+/// deacon used to look in exactly ONE place — a `.env` in the workspace folder — which is
+/// the middle of three. MEASURED at oracle 0.87.0 on a document authoring no `name:`,
+/// setting the variable in one place at a time:
+///
+/// | set in | reference | deacon before |
+/// |---|---|---|
+/// | the process environment | `env-wins` | derived `deacon_*` |
+/// | the workspace folder's `.env` | `from-workspace` | `from-workspace` |
+/// | `.devcontainer/.env`, beside the compose file | `from-configdir` | derived `deacon_*` |
+/// | both `.env` files | `from-workspace` | `from-workspace` |
+/// | the process environment AND the workspace `.env` | `env-wins` | `from-workspace` |
+///
+/// The last row is why this is an ORDERED search rather than three independent reads: the
+/// two sources deacon was missing sit on either side of the one it had, so adding them
+/// without the order would trade a missing-source bug for a precedence bug.
+///
+/// The third source is Compose's own default `.env` discovery. Compose reads a `.env` from
+/// the PROJECT DIRECTORY, which — absent `--project-directory`, which deacon never passes —
+/// is the directory of the first `-f` file. For the standard layout that is `.devcontainer`,
+/// which is also why `fx-upstream-compose-with-name-env-var` can interpolate `${CUSTOM_NAME}`
+/// from a `.env` deacon itself never reads. A `--env-file` REPLACES that discovery, so when
+/// the caller has env files they are searched instead, last-wins (Compose merges them in
+/// order and a later file overrides an earlier one).
+///
+/// Values are taken verbatim, matching the reference and matching what deacon already did
+/// with the workspace `.env`. Compose would normalize a name it resolved itself, but neither
+/// CLI normalizes an explicitly declared `COMPOSE_PROJECT_NAME` — it is a user's deliberate
+/// override, and Compose rejects an illegal one loudly rather than silently rewriting it.
+fn explicit_compose_project_name(
+    base_path: &Path,
+    compose_files: &[PathBuf],
+    env_files: &[PathBuf],
+    process_env: Option<&str>,
+) -> Option<String> {
+    if let Some(name) = process_env.map(str::trim).filter(|name| !name.is_empty()) {
+        debug!("Using project name from the COMPOSE_PROJECT_NAME environment variable");
+        return Some(name.to_string());
+    }
+
+    if let Some(name) = parse_env_file_for_project_name(&base_path.join(".env")) {
+        debug!("Using project name from the workspace folder's .env: {name}");
+        return Some(name);
+    }
+
+    if env_files.is_empty() {
+        let project_dir = compose_files.first().and_then(|file| file.parent())?;
+        let name = parse_env_file_for_project_name(&project_dir.join(".env"))?;
+        debug!("Using project name from the compose project directory's .env: {name}");
+        Some(name)
+    } else {
+        let name = env_files
+            .iter()
+            .rev()
+            .find_map(|file| parse_env_file_for_project_name(file))?;
+        debug!("Using project name from an --env-file: {name}");
+        Some(name)
+    }
+}
+
 async fn derive_project_name(
     docker_path: &str,
     base_path: &Path,
     config: &DevContainerConfig,
     compose_files: &[PathBuf],
     env_files: &[PathBuf],
+    process_env_project_name: Option<&str>,
 ) -> Result<String> {
-    // An explicit COMPOSE_PROJECT_NAME in a sibling `.env` is used verbatim
-    // (no suffix) — this is a deliberate user override, so honor it exactly
-    // as docker compose and the reference CLI would.
-    let env_file_path = base_path.join(".env");
-    if let Some(project_name) = parse_env_file_for_project_name(&env_file_path) {
-        debug!("Using project name from .env file: {}", project_name);
+    // An explicit COMPOSE_PROJECT_NAME is used verbatim (no suffix) — this is a deliberate
+    // user override, so honor it exactly as docker compose and the reference CLI would.
+    // See `explicit_compose_project_name` for where it is looked for and why in that order.
+    if let Some(project_name) = explicit_compose_project_name(
+        base_path,
+        compose_files,
+        env_files,
+        process_env_project_name,
+    ) {
         return Ok(project_name);
     }
 
@@ -2421,7 +2498,7 @@ mod tests {
         config: &DevContainerConfig,
         compose_files: &[PathBuf],
     ) -> String {
-        derive_project_name("docker", base_path, config, compose_files, &[])
+        derive_project_name("docker", base_path, config, compose_files, &[], None)
             .await
             .expect("hermetic derivation must not fail")
     }
@@ -2753,6 +2830,157 @@ mod tests {
         );
     }
 
+    /// Build a workspace with a compose file in a `.devcontainer` child, plus whichever
+    /// `.env` files the caller names, and return `(workspace, compose_file)`.
+    ///
+    /// The nesting is the point: Compose's project directory is the directory of the first
+    /// `-f` file, so `.devcontainer/.env` and `<workspace>/.env` are two DIFFERENT sources
+    /// and a flat fixture could not tell them apart.
+    fn compose_workspace(env_files: &[(&str, &str)]) -> (TempDir, PathBuf) {
+        let temp_dir = TempDir::new().unwrap();
+        let config_dir = temp_dir.path().join(".devcontainer");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let compose_file = config_dir.join("docker-compose.yml");
+        std::fs::write(&compose_file, "services:\n  app:\n    image: alpine:3.18\n").unwrap();
+        for (relative, name) in env_files {
+            std::fs::write(
+                temp_dir.path().join(relative),
+                format!("COMPOSE_PROJECT_NAME={name}\n"),
+            )
+            .unwrap();
+        }
+        (temp_dir, compose_file)
+    }
+
+    /// #580: the process environment is the FIRST source, ahead of the workspace `.env`
+    /// deacon used to treat as the only one.
+    ///
+    /// This is the row of the measured matrix that the parity lane cannot assert — an
+    /// `Operation` has no field for environment variables — so it is pinned here instead.
+    /// The value arrives as a parameter rather than through `std::env::var` precisely so
+    /// this test can exist: `unsafe_code = "deny"` rules out `set_var`, and a test that
+    /// mutated the process environment would race every other test in the binary anyway.
+    #[test]
+    fn test_explicit_project_name_prefers_the_process_environment() {
+        let (temp_dir, compose_file) = compose_workspace(&[
+            (".env", "from-workspace"),
+            (".devcontainer/.env", "from-configdir"),
+        ]);
+
+        assert_eq!(
+            explicit_compose_project_name(temp_dir.path(), &[compose_file], &[], Some("env-wins")),
+            Some("env-wins".to_string())
+        );
+    }
+
+    /// A blank or whitespace-only `COMPOSE_PROJECT_NAME` is not an override. Compose
+    /// rejects an empty project name outright ("project name must not be empty"), so
+    /// treating an exported-but-empty variable as a declaration would turn a stray
+    /// `export COMPOSE_PROJECT_NAME=` into a hard failure with no name to report.
+    #[test]
+    fn test_explicit_project_name_ignores_a_blank_process_environment_value() {
+        let (temp_dir, compose_file) = compose_workspace(&[(".env", "from-workspace")]);
+
+        assert_eq!(
+            explicit_compose_project_name(temp_dir.path(), &[compose_file], &[], Some("   ")),
+            Some("from-workspace".to_string())
+        );
+    }
+
+    /// #580: a `.env` BESIDE THE COMPOSE FILE is the third source — Compose's own default
+    /// discovery, which deacon never consulted. This is the case where deacon fell all the
+    /// way through to its derived `deacon_*` default while the reference answered
+    /// `from-configdir`.
+    #[test]
+    fn test_explicit_project_name_reads_the_compose_project_directory_env() {
+        let (temp_dir, compose_file) =
+            compose_workspace(&[(".devcontainer/.env", "from-configdir")]);
+
+        assert_eq!(
+            explicit_compose_project_name(temp_dir.path(), &[compose_file], &[], None),
+            Some("from-configdir".to_string())
+        );
+    }
+
+    /// #580, the ordering half: with BOTH `.env` files declaring a name the workspace
+    /// folder's wins. Measured against the reference, which answers `from-workspace` here.
+    ///
+    /// This is what rules out the simpler fix of handing the whole question to `docker
+    /// compose config` — Compose would answer `from-configdir`, because the workspace
+    /// `.env` is not in its project directory at all.
+    #[test]
+    fn test_explicit_project_name_workspace_env_outranks_the_compose_directory() {
+        let (temp_dir, compose_file) = compose_workspace(&[
+            (".env", "from-workspace"),
+            (".devcontainer/.env", "from-configdir"),
+        ]);
+
+        assert_eq!(
+            explicit_compose_project_name(temp_dir.path(), &[compose_file], &[], None),
+            Some("from-workspace".to_string())
+        );
+    }
+
+    /// `--env-file` REPLACES Compose's default `.env` discovery rather than adding to it,
+    /// so the compose directory's `.env` must not be read when the caller supplied env
+    /// files — and when several are supplied the LAST one wins, which is how Compose
+    /// merges them.
+    #[test]
+    fn test_explicit_project_name_env_files_replace_the_default_discovery() {
+        let (temp_dir, compose_file) =
+            compose_workspace(&[(".devcontainer/.env", "from-configdir")]);
+        let first = temp_dir.path().join("first.env");
+        let second = temp_dir.path().join("second.env");
+        std::fs::write(&first, "COMPOSE_PROJECT_NAME=from-first\n").unwrap();
+        std::fs::write(&second, "COMPOSE_PROJECT_NAME=from-second\n").unwrap();
+
+        assert_eq!(
+            explicit_compose_project_name(
+                temp_dir.path(),
+                std::slice::from_ref(&compose_file),
+                &[first, second],
+                None
+            ),
+            Some("from-second".to_string())
+        );
+
+        // With env files that declare nothing, the compose directory's `.env` stays
+        // unread — Compose would not read it either — and the caller derives.
+        let silent = temp_dir.path().join("silent.env");
+        std::fs::write(&silent, "UNRELATED=1\n").unwrap();
+        assert_eq!(
+            explicit_compose_project_name(temp_dir.path(), &[compose_file], &[silent], None),
+            None
+        );
+    }
+
+    /// The explicit override short-circuits ahead of the authored-`name:` branch, so a
+    /// process-environment declaration never spawns `docker compose config`. Asserted with
+    /// a docker path that cannot exist: if the branch were reached, the derivation would
+    /// fail rather than answer.
+    #[tokio::test]
+    async fn test_derive_project_name_process_env_short_circuits_before_compose() {
+        let (temp_dir, compose_file) = compose_workspace(&[]);
+        std::fs::write(
+            &compose_file,
+            "name: authored-literal\nservices:\n  app:\n    image: alpine:3.18\n",
+        )
+        .unwrap();
+        let config = DevContainerConfig::default();
+
+        let name = derive_project_name(
+            "deacon-no-such-docker-binary",
+            temp_dir.path(),
+            &config,
+            &[compose_file],
+            &[],
+            Some("env-wins"),
+        )
+        .await
+        .expect("an explicit COMPOSE_PROJECT_NAME must not depend on Compose");
+        assert_eq!(name, "env-wins");
+    }
+
     /// #572: an authored `name:` is resolved BY COMPOSE, and when Compose cannot be
     /// reached there is no second-best answer — deacon errors instead of guessing.
     ///
@@ -2783,6 +3011,7 @@ mod tests {
             &config,
             &[compose_file],
             &[],
+            None,
         )
         .await
         .expect_err("an authored name deacon cannot resolve must not be guessed at");
@@ -2818,6 +3047,7 @@ mod tests {
             &config,
             &[compose_file],
             &[],
+            None,
         )
         .await
         .expect("derivation must not depend on Compose when nobody authored a name");

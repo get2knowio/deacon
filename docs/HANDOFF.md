@@ -1,16 +1,15 @@
 # Session Handoff — Differential Parity Steady State
 
-Last updated: 2026-08-13, `main` at `7d643b1` (required checks green; the
-differential nightly is expected GREEN for the first time since #573, see below;
-v0.3.0 shipped from `d642e8d`). This document is the cross-session
+Last updated: 2026-08-15, `main` at `f6b7c10` (required checks green; the
+differential nightly is CONFIRMED green, see below; v0.3.0 shipped from `d642e8d`). This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
 changes, update this file in the same PR.
 
 ## Where things stand
 
-- **Zero open nonconformances.** `parity/SPEC_STATUS.md` records **135 behaviors**:
-  0 open nonconformance, 9 follows-spec, 11 documented choice, 20 extension, 95
+- **Zero open nonconformances.** `parity/SPEC_STATUS.md` records **136 behaviors**:
+  0 open nonconformance, 9 follows-spec, 11 documented choice, 20 extension, 96
   conformant-and-matching. The header census is CI-guarded
   (`check_spec_status_census` in `crates/parity-harness/src/registry.rs`) — rows and
   header must change together. **Zero is not the goal; an accurate ledger is**, and
@@ -21,6 +20,17 @@ changes, update this file in the same PR.
   zero. Expect the column to reopen — it has three times now, every time someone
   measured something the paperwork had only reasoned about, and the unfiled findings
   in the queue below are the next candidates.
+- **The ledger was wrong for two days, and the rule it broke was already written
+  down.** "Ledger honesty" below has said since the campaign began that a measured
+  difference gets an issue AND a `SPEC_STATUS.md` row the day it is found. #580 got
+  the issue and no row, so the ledger read "0 open nonconformance" while a measured,
+  reproduced, unfixed defect sat in the tracker. Nothing caught it, and nothing
+  could: the census guard checks the header against the ROWS, which is arithmetic,
+  not truth — **the one number in this document with CI behind it is the one that
+  cannot tell you whether the rows are complete.** The failure mode is specific and
+  worth naming: filing feels like recording, and it is the half that leaves a trace
+  somewhere else. (#580 is closed and its row is `matches the reference`, so the
+  column is legitimately 0 again — but it was not while the issue was open.)
 - **Closing a defect can ADD rows, and that is not inflation.** #575 took the
   census 132 → 134 while closing an open nonconformance, because making deacon read
   the lockfile made two further behaviors observable that were previously vacuous:
@@ -34,12 +44,15 @@ changes, update this file in the same PR.
   compose-naming trio was carried as "blocked on a maintainer ruling"; it was never
   blocked, and it held a second defect. Treat an inventory's *reasons* as claims
   with the same standing as any other unmeasured claim.
-- **The differential nightly should be GREEN again — the first time since #573.**
-  Both red-on-purpose records are now closed, and `live-certification` passed on
-  #578 and again on the rebased #577, which is the same workflow run against a
-  branch. That is strong evidence, not proof: confirm against the next real nightly
-  (`gh run list --workflow=parity.yml --branch=main`) before treating it as
-  established. **This matters more than the count does.** A job that is known-red
+- **The differential nightly is GREEN again — confirmed 2026-08-15, and no longer
+  an outstanding claim.** It has now succeeded twice on a `main` carrying both
+  fixes: 2026-08-13 at `1491b84` and 2026-08-14 at `f6b7c10`. The last red run was
+  2026-08-12 at `8ab4e14`, which was the expected red. The previous handoff called
+  this "strong evidence, not proof" on the strength of `live-certification` passing
+  on the branches, and said to confirm against a real nightly before treating it as
+  established — this is that confirmation, and the distinction was worth keeping:
+  `live-certification` is the same workflow, but a branch run is not the thing the
+  claim was about. **This matters more than the count does.** A job that is known-red
   teaches nobody anything — every run needs a human to decide whether the red is the
   expected red. Green restores it to a signal, so the next divergence stands out on
   its own. The standing rule still applies whenever a case is red on purpose again:
@@ -78,6 +91,7 @@ changes, update this file in the same PR.
 
 | PR | What | Issues |
 |---|---|---|
+| #582 | **`COMPOSE_PROJECT_NAME` is honored from every source Compose reads it from** — deacon read one of three, and the two it missed sit on either side of it. Measured matrix at oracle 0.87.0, one source at a time: process env → reference `env-wins`, deacon derived; workspace `.env` → agree; `.devcontainer/.env` → reference `from-configdir`, deacon derived; both `.env` files → agree on `from-workspace`; **process env AND workspace `.env` → reference `env-wins`, deacon `from-workspace`**. That last row is the one the issue did not have, and it is why the fix is an ORDERED search rather than three reads: adding the missing sources without the order trades a missing-source defect for a precedence one. **It also kills the obvious fix** — delegating to `docker compose config` like the authored-`name:` branch answers `from-configdir` when both files exist, because Compose cannot see the workspace `.env` at all; the sources are read directly instead, and the no-authored-name path still spawns no subprocess. `--env-file` REPLACES Compose's default `.env` discovery rather than adding to it (reasoned from Compose's documented behavior, marked as such in the code, not measured). **One symptom is not expressible as a case and is not claimed by one**: an `Operation` has no field for process env vars, so the process-env source and its precedence are pinned in Rust — which is why `derive_project_name` takes the value as a parameter instead of reading `std::env::var` (`unsafe_code = "deny"` rules out `set_var`). Two gating cases + 6 hermetic unit tests; the configdir case watched RED by reverting the fix, after `DEACON_PARITY_DEACON_BIN` turned out not to reach a test-binary lane | #580 fixed |
 | #577 `7d643b1` | **`up --frozen-lockfile` refuses BEFORE any daemon work when the Features arrive via `--additional-features`** — deacon resolved and BUILT the Feature-extended image, then refused; the reference issues zero docker commands. The fix is an ORDERING change, not a new gate: the `--additional-features` merge now runs before `ensure_lockfile_usable`, so the gate is handed the same UNION the reference's early return keys off (`userFeaturesToArray`). **The issue's own cause analysis was half wrong** and measurement caught it — it asserted `build` shared the shape; `build` already merged before the gate and was already correct, so only `up` changed. **No parity case, said plainly rather than papered over:** exit code, result-document substance and workspace bytes ALL agreed before the fix, and the one thing that differed — an intermediate image — is observable on no declared channel (`chan-image` reads the image an operation PRODUCED, and this one produces none). Pinned instead by a hermetic test that runs `up` with an EMPTIED `PATH`, so any daemon access fails loudly; reaching `Lockfile does not exist.` proves nothing touched Docker. Watched-to-fail. Also carries the correction below: the #575 "gap" was measured and is NOT real | #569 fixed |
 | #578 `bb06189` | **a compose file's top-level `name:` is interpolated at last** — `name: ${CUSTOM_NAME}` reached Compose verbatim and `up` died on `invalid project name`. **The issue's design question dissolved under measurement rather than being decided:** it framed the faithful fix as "async and daemon-dependent", but `docker compose config` returns the interpolated name with `DOCKER_HOST` pointed at a nonexistent socket (exit 0) — it is a CLIENT-SIDE call, so the added dependency is the `docker` binary + compose plugin every compose flow already needs. "What if Compose is unavailable" likewise had a measured reference answer instead of a design space: the reference aborts `up` outright, so deacon does too, with **no fallback**. An authored name is now read off `docker compose config`, where the reference's `Rp` resolver has always taken it. The line-wise reader survives only as an **authorship detector** — Compose reports a `name` whether or not one was authored (its directory default), so its answer alone cannot distinguish the two, and adopting the default would overrule deacon's namespaced derivation (#265/#564); the reference hits the identical wall and solves it identically. Configs authoring no `name:` spawn no subprocess. Second commit threads `build`'s previously-inert `--env-file` — the OPPOSITE of scope creep: without it `build` and `up` would derive DIFFERENT project names from the same config, an inconsistency this fix would itself have introduced. Red-on-purpose case green with its assertion byte-identical, plus a `spec-expectation` twin on the gating lane | #572 fixed |
 | #575 `8665036` | **the lockfile's `integrity` is a content pin at last** — the most serious defect the campaign has found, closed. deacon never read the field: a lockfile whose checksum did not match the Feature it named installed anyway, and deacon then OVERWROTE the bad field with the digest it had just fetched, so a tampered lockfile was silently repaired. The fix is the reference's shape and NOT the obvious one — "compare the checksum after downloading" is both wrong and weaker. `integrity` is the manifest LOOKUP KEY (`ji`: `let r = e.version; t && (r = t)`; `aQ` re-checks `docker-content-digest`), so a Feature whose content no longer matches cannot be RESOLVED at all and there is no window in which it is downloaded, installed or written back. `FeatureFetcher::fetch_feature_pinned` is that request; declared Features and auto-installed `dependsOn` targets are both pinned, keyed by the id AS WRITTEN. Two carve-outs measured rather than assumed: `--no-lockfile` means "do not READ" (`A.noLockfile ? {lockfile: undefined} : await fI(t)`), `--frozen-lockfile` does NOT. **The consequence beyond tampering, measured on both CLIs: a lockfile pins a FLOATING tag** — `git:1` recorded at 1.3.2's digest installs 1.3.2 on both CLIs though `:1` resolves to 1.3.8 today; that IS "trust on first use", and `upgrade` is how the pin moves. Reading the lockfile also made an unreadable one matter (fails pre-build now, matching the reference), but the pin read is deliberately NOT the strict `read_lockfile`: it parses strictly and validates only the field it uses, because a lockfile the REFERENCE writes for a `direct-tarball` Feature has a `resolved` that deacon's `validate_oci_reference` rejects — refusing it would be a deacon-only surprise for a migrating user. A non-digest `integrity` IS rejected (it lands in a URL path; ignoring it would make corrupting the field a way to DISABLE the check). Red-on-purpose case turned green as authored, plus a `spec-expectation` twin so the behavior GATES (the differential lane does not) | #571 fixed |
@@ -118,41 +132,36 @@ its issue — read the issue before briefing an agent.
 
 **The queue is empty of filed work.** The 2026-08-11 queue was consumed entirely
 (#555, the featureless-lockfile row, #480 batch 3); the batch that replaced it —
-#571, #572, #569 — is now closed too (#575, #578, #577). Every filed issue the
-campaign has characterized is fixed. What follows is UNFILED: three measured
-findings, one measured non-finding, and two maintainer decisions.
+#571, #572, #569 — is now closed too (#575, #578, #577), and so is #580, the one
+finding that survived verification out of that batch's three side-observations.
+Every filed issue the campaign has characterized is fixed. What follows is the
+record of the closed one, one measured non-finding, one unfiled difference, and two
+maintainer decisions.
 
-**[#580](https://github.com/get2knowio/deacon/issues/580) — with no authored `name:`,
-deacon resolves `COMPOSE_PROJECT_NAME` from only one of the sources Compose uses.**
-Filed 2026-08-13. On the derivation path deacon looks in exactly one place, a `.env`
-in the workspace folder, so two sources the reference honors are invisible: the
-PROCESS ENVIRONMENT (`COMPOSE_PROJECT_NAME=env-wins deacon up` derives
-`deacon_m3_…` where the reference lands `env-wins`) and a `.env` BESIDE THE COMPOSE
-FILE (`.devcontainer/.env` → reference `from-configdir`, deacon derives). Both have
-one cause — `derive_project_name` never consults Compose when nothing is authored —
-so it is one issue. The authored-name path already AGREES on both, because #578
-routes it through `docker compose config` and Compose applies the variable itself.
+**[#580](https://github.com/get2knowio/deacon/issues/580) — CLOSED 2026-08-15.**
+Filed 2026-08-13, fixed two days later. deacon read `COMPOSE_PROJECT_NAME` from
+exactly one place, a `.env` in the workspace folder, which turned out to be the
+MIDDLE of the three sources Compose reads. **Fixing it found a fourth thing the
+issue did not have, again by measuring rather than reading**: with the variable set
+BOTH in the process environment and in the workspace `.env`, the reference answers
+the process environment and deacon answered the `.env` — so this was a PRECEDENCE
+defect as well as a missing-source one, and the two missing sources sit on either
+side of the one deacon had. A fix that added them without the order would have
+traded one defect for another. It also ruled out the obvious fix: delegating to
+`docker compose config`, as the authored-`name:` branch does, answers
+`from-configdir` when both `.env` files exist, because Compose cannot see the
+workspace `.env` at all — correct in the scenario the issue described and wrong the
+moment you add the file the issue did not mention. Full measured matrix in the
+`SPEC_STATUS.md` row.
 
-**This entry replaces three findings the #572 agent reported, and the correction is
-the point.** Verified before filing, per the standing rule; of the three, **one
-survived and two were refuted**:
-
-- *"deacon ignores the `COMPOSE_PROJECT_NAME` process env var"* — TRUE only on the
-  derivation path. With a name authored, deacon honors it exactly like the reference.
-  The agent's own fix closed the broader claim and it did not re-measure afterwards.
-- *"a LITERAL authored name is not normalized — `name: My_Project` fails on deacon"*
-  — REFUTED. Both CLIs exit 0 with `my_project`. #578 routes every authored name
-  through `docker compose config`, so literals get normalization too; the predicted
-  asymmetry never existed.
-- *"the reference reads `.env` from the CLI's cwd"* — REFUTED, and this one also
-  corrects #572's transcription of the `Rp` resolver. With `.env` in the cwd and
-  nowhere else, the reference fell through to its step-4 default. The locations it
-  was observed honoring are the workspace folder and the compose file's directory.
-
-**The generalizable lesson: an agent that fixes a defect is the worst-placed
-observer of what its fix left behind.** Two of the three claims were true of the
-code the agent started from and false of the code it shipped. Re-measure adjacent
-findings against the MERGED result, not against the branch point.
+**The three findings this replaced are still the model, and the lesson is still the
+point.** Of the three the #572 agent reported, one survived (this issue) and two
+were refuted — a literal name not being normalized, and the reference reading `.env`
+from the CLI's cwd, the latter also correcting #572's own transcription of `Rp`.
+Both refuted claims were true of the code the agent started from and false of the
+code it shipped. **An agent that fixes a defect is the worst-placed observer of what
+its fix left behind**: re-measure adjacent findings against the MERGED result, not
+against the branch point.
 
 **A measured NON-finding, recorded so it is not rediscovered.** The gap #575 left
 open — that `read-configuration` / `run-user-commands` resolve Features unpinned by
@@ -227,7 +236,15 @@ each learned from a real failure:
   Rulings are the maintainer's, made individually. #524 (premise refuted) and
   #527 (composition ruling: id-label discriminator) both exercised this.
 - **Watched-to-fail**: every new test and parity case is broken once and observed
-  failing before it counts.
+  failing before it counts. **For a parity LANE, the break must be to the product
+  source, not to the binary the harness picks.** `DEACON_PARITY_DEACON_BIN` does not
+  reach the lanes: it is read by `prereq::deacon_binary`, which serves the harness
+  BINS, while every parity TEST binary resolves the CLI through
+  `env!("CARGO_BIN_EXE_deacon")` — cargo's freshly-built artifact. Pointing the
+  variable at a saved pre-fix build therefore exercises the FIXED binary and the case
+  passes, which reads exactly like "the case cannot see the defect". Observed on
+  2026-08-15 and caught only because a case that must have been red was green.
+  Temporarily revert the fix in the source, run the lane, restore.
 - **Re-measure an agent's ADJACENT findings against the merged result before filing
   them.** CLAUDE.md already says to verify agent claims empirically; 2026-08-13 gave
   the reason a second time and named the mechanism. Three side-findings from the
@@ -383,7 +400,13 @@ each learned from a real failure:
   files, threaded as a parameter rather than assigned afterwards so `up`/`exec`/
   `down`/`build` cannot land on different names (#572). The line-wise reader is
   retained ONLY as an authorship detector — deleting it would let Compose's
-  directory default overrule the namespaced derivation (#265/#564).
+  directory default overrule the namespaced derivation (#265/#564). [#580](https://github.com/get2knowio/deacon/issues/580) added
+  `explicit_compose_project_name` ahead of both branches: the ORDERED search for a
+  declared `COMPOSE_PROJECT_NAME` (process env → workspace `.env` → the compose
+  project directory's `.env`, or the supplied `--env-file`s instead of that last
+  one). The process-env value arrives as a parameter from `create_project` rather
+  than being read where it is used, so the precedence is unit-testable without
+  `set_var`.
 - `crates/deacon/src/commands/up/mod.rs` — the `--additional-features` merge runs
   BEFORE `ensure_lockfile_usable` (#569). The ordering is load-bearing and carries
   a comment saying so; it also sits after `check_for_disallowed_features` and after

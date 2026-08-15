@@ -1,0 +1,4 @@
+services:
+  app:
+    image: debian:bookworm-slim
+    command: sleep infinity
