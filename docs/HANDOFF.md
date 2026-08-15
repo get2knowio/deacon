@@ -1,8 +1,7 @@
 # Session Handoff — Differential Parity Steady State
 
 Last updated: 2026-08-15, `main` at `f6b7c10` (required checks green; the
-differential nightly is expected GREEN for the first time since #573, see below;
-v0.3.0 shipped from `d642e8d`). This document is the cross-session
+differential nightly is CONFIRMED green, see below; v0.3.0 shipped from `d642e8d`). This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
 changes, update this file in the same PR.
@@ -45,12 +44,15 @@ changes, update this file in the same PR.
   compose-naming trio was carried as "blocked on a maintainer ruling"; it was never
   blocked, and it held a second defect. Treat an inventory's *reasons* as claims
   with the same standing as any other unmeasured claim.
-- **The differential nightly should be GREEN again — the first time since #573.**
-  Both red-on-purpose records are now closed, and `live-certification` passed on
-  #578 and again on the rebased #577, which is the same workflow run against a
-  branch. That is strong evidence, not proof: confirm against the next real nightly
-  (`gh run list --workflow=parity.yml --branch=main`) before treating it as
-  established. **This matters more than the count does.** A job that is known-red
+- **The differential nightly is GREEN again — confirmed 2026-08-15, and no longer
+  an outstanding claim.** It has now succeeded twice on a `main` carrying both
+  fixes: 2026-08-13 at `1491b84` and 2026-08-14 at `f6b7c10`. The last red run was
+  2026-08-12 at `8ab4e14`, which was the expected red. The previous handoff called
+  this "strong evidence, not proof" on the strength of `live-certification` passing
+  on the branches, and said to confirm against a real nightly before treating it as
+  established — this is that confirmation, and the distinction was worth keeping:
+  `live-certification` is the same workflow, but a branch run is not the thing the
+  claim was about. **This matters more than the count does.** A job that is known-red
   teaches nobody anything — every run needs a human to decide whether the red is the
   expected red. Green restores it to a signal, so the next divergence stands out on
   its own. The standing rule still applies whenever a case is red on purpose again:
