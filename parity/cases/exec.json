@@ -678,6 +678,282 @@
         "tempdir": true
       },
       "notes": "FR-040 unsupported class for `exec`: the invocation is well-formed and the container is running, but the named executable does not exist inside it. Both CLIs must surface the container's own failure rather than substitute one of their own, and the exit code is where that shows."
+    },
+    {
+      "id": "case-exec-exit-code-passthrough",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-tty"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "exit 123"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 123
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`exec` is a transport: the command's exit code is the CLI's exit code, unchanged. 123 is chosen for being unmistakably the COMMAND's — not 0, not 1, and not 127, which a missing binary produces on its own and which `case-exec-unsupported-missing-command` already covers. The distinction that matters is 'forwards the exact code' versus 'reports failure as 1', and only a specific, arbitrary code can tell them apart.\n\nMined from the reference's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0, 'should return exit code without terminal'), where it is pinned twice — once piped and once under a PTY. Measured on this sequence at oracle 0.87.0 before the case was written: both CLIs exit 123.\n\nDELIBERATELY `spec-expectation` rather than `live-differential`, which is where 11 of the 13 pre-existing `exec` cases sit. The precedent is #570's: the differential lane runs nightly and GATES NOTHING, so a behavior worth protecting from regression belongs in a lane that gates every pull request. The reference measurement is what established the expectation; pinning deacon's own side is what enforces it. Nothing is lost by not re-running the reference here — the oracle is pinned at 0.87.0, so its answer cannot drift underneath us without a deliberate bump."
+    },
+    {
+      "id": "case-exec-remote-env-empty-value",
+      "behaviors": [
+        "bhv-exec-command-parity"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-tty"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--remote-env",
+            "PARITY_SET=value",
+            "--remote-env",
+            "PARITY_EMPTY=",
+            "--",
+            "sh",
+            "-c",
+            "printf 'set=[%s]\\n' \"$PARITY_SET\"; if [ -n \"${PARITY_EMPTY+present}\" ]; then printf 'empty=present:[%s]\\n' \"$PARITY_EMPTY\"; else echo 'empty=ABSENT'; fi"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "set=[value]\nempty=present:[]"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`--remote-env NAME=` sets NAME to the EMPTY STRING; it does not decline to set it. The two outcomes are invisible to `printf \"$NAME\"` — both print nothing — so the probe uses `${NAME+present}`, which expands only when the variable EXISTS. Getting this wrong in either direction is a silent behavior change for anything that tests a variable's presence rather than its value, which is ordinary shell practice.\n\nMined from `src/test/cli.exec.base.ts` at v0.87.0 ('should pass along --remote-env'), which pins `--remote-env FOO=BAR --remote-env BAZ=` and asserts `env.BAZ === ''` — an assertion that only holds if the key is present with an empty value. `case-exec-remote-env-propagation` already covers the ordinary `FOO=BAR` half; the empty-value tail is what was missing, and it is the half with an edge in it.\n\nBoth flags are passed in one invocation on purpose: a parser that mishandles the empty value could also swallow the pair that follows it, and asserting both in one line catches that. Measured at oracle 0.87.0: both CLIs report `set=[value]` and `empty=present:[]`. `spec-expectation` for the reason given in `case-exec-exit-code-passthrough`."
+    },
+    {
+      "id": "case-exec-default-workspace-folder",
+      "behaviors": [
+        "bhv-exec-default-workspace-folder"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-tty"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--",
+            "sh",
+            "-c",
+            "echo default-workspace-ok"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "default-workspace-ok"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "With no `--workspace-folder`, `exec` targets the container for the CURRENT DIRECTORY. This is the shape a developer actually types — `cd` into the project and run `deacon exec …` — and every other `exec` case passes the flag explicitly, so nothing covered it.\n\nIt costs nothing to express: the runner already invokes each operation with its cwd set to the case's isolated workspace (`runner.rs`, `run_and_capture(… &workspace …)`), so OMITTING the flag is the whole test. That is also the case's one fragility, recorded here because it is not visible in the argv: if the runner ever stops anchoring cwd to the workspace, this case starts failing for a reason that has nothing to do with `exec`.\n\nMined from `src/test/cli.exec.base.ts` at v0.87.0, which covers it twice — 'should exec with default workspace folder (current directory)' and the negative 'should fail gracefully when no config in current directory and no container-id'. Measured at oracle 0.87.0: both CLIs succeed. `spec-expectation` for the reason given in `case-exec-exit-code-passthrough`."
+    },
+    {
+      "id": "case-exec-config-selects-document",
+      "behaviors": [
+        "bhv-exec-config-selects-document"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/.devcontainer/subfolder/devcontainer.json"
+          ],
+          "fixtures": [
+            "fx-exec-config-subfolder"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/.devcontainer/subfolder/devcontainer.json",
+            "--",
+            "sh",
+            "-c",
+            "printf 'config=[%s]\\n' \"$PARITY_EXEC_CONFIG\""
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "config=[subfolder]"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`exec --config` selects WHICH document in the workspace to act on, and its `remoteEnv` is what the executed command sees. The fixture's two documents differ only in that one value — root says `root`, subfolder says `subfolder` — so the assertion cannot pass by accident: reading the discovered document instead of the named one produces `config=[root]`, and reading neither produces `config=[]`. A fixture with only the subfolder document would have passed all three ways.\n\nMined from `src/test/cli.exec.base.ts` at v0.87.0 ('should exec with config in subfolder'), which does exactly this — `up --config …/subfolder/devcontainer.json` then `exec --config …` reading a `remoteEnv` the subfolder document alone declares.\n\nThis is the shape that surfaced [#584](https://github.com/get2knowio/deacon/issues/584): putting two documents in one workspace is what exposed the supersede sweep stopping siblings. This case does NOT assert that — `case-up-sibling-config-both-running` does, on the container census where it belongs. Here the second document exists only so that naming one is a real choice. Measured at oracle 0.87.0: both CLIs print `config=[subfolder]`."
+    },
+    {
+      "id": "case-exec-missing-workspace-rejected",
+      "behaviors": [
+        "bhv-exec-missing-workspace-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}/path-that-does-not-exist",
+            "--",
+            "sh",
+            "-c",
+            "echo unreachable"
+          ],
+          "fixtures": [
+            "fx-exec-tty"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "Failed to resolve workspace path"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "A `--workspace-folder` that does not exist fails with exit 1 rather than a panic, a zero exit, or a shell-level code. `case-exec-malformed-config-rejected` covers a config that exists and is unparseable; this covers the path not being there at all, which reaches a different code path (workspace resolution, before any config load).\n\nMined from `src/test/cli.exec.base.ts` at v0.87.0, which asserts `error.code === 1` and a `Dev container config (…) not found.` message.\n\nHERMETIC, not `docker-shared` — the only `exec` case that is. The failure happens during workspace resolution, BEFORE any config load and before any daemon contact, so the case needs nothing and belongs in the lane that runs on every profile including `dev-fast` and on all three operating systems, rather than in one that waits for a daemon. Precedent is `case-errors-decl-bad-config-path-decision`, which is the same shape for `read-configuration`. Verified under `unshare -rn` with the rest of `parity_hermetic`.\n\nBoth channels pin DEACON's answer rather than compare it, which is what `spec-expectation` means and is why the diagnostic can be asserted here at all: the two CLIs word this differently — deacon says `Failed to resolve workspace path '<abs>': path does not exist or cannot be accessed`, the reference `Dev container config (<abs>/.devcontainer/devcontainer.json) not found.` Both name the problem and both exit 1, and deacon's names the directory it could not resolve rather than a file it never looked for, which is the more accurate of the two. So the wording difference is not a divergence to fix, and pinning deacon's own phrasing costs nothing while stopping the diagnostic from quietly evaporating into a bare exit code. A `live-differential` here would need a tolerance to say only that the two disagree about wording, which is worth less than what this asserts."
     }
   ]
 }

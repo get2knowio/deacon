@@ -1,0 +1,5 @@
+{
+	"name": "ParityExecConfigRoot",
+	"image": "alpine:3.19",
+	"remoteEnv": { "PARITY_EXEC_CONFIG": "root" }
+}
