@@ -1,7 +1,7 @@
 # Session Handoff — Differential Parity Steady State
 
-Last updated: 2026-08-16, `main` at `46dd252` (required checks green; the
-differential nightly is CONFIRMED green, see below; v0.3.0 shipped from `d642e8d`). This document is the cross-session
+Last updated: 2026-08-16, `main` at `b9ad27c` (required checks green; the
+differential nightly is CONFIRMED green, see below; **v0.4.0 cut from `b9ad27c`** — v0.3.0 shipped from `d642e8d`). This document is the cross-session
 handoff for the ongoing parity/quality campaign: where the project stands, how the
 work is being run, and what is queued next. When a queue item lands or a rule
 changes, update this file in the same PR.
@@ -124,10 +124,23 @@ changes, update this file in the same PR.
   authoring our own expectations, not comparing. Worth stating once so the next session
   does not go looking for the fixtures.
 
+- **v0.4.0 cut from `b9ad27c`.** Eleven user-facing fixes since v0.3.0, and the MINOR
+  bump rather than a patch is deliberate: three of them can turn a previously-succeeding
+  run into a failure or change what it targets. Lockfile `integrity` is now enforced as a
+  content pin (#575) — a stale or tampered lockfile used to be silently REPAIRED and now
+  fails the build; `build` actually consumes `--no-lockfile` / `--frozen-lockfile` (#565),
+  which it previously accepted and ignored; and `COMPOSE_PROJECT_NAME` precedence changed
+  which project name gets derived (#582, #566), so a user can find deacon addressing a
+  different compose project than before. Every one is a bug fix and nothing was added or
+  removed, so `0.3.1` would have been literally accurate and would have let a `~0.3.0` pin
+  pick all three up silently. Under 0.x the minor is the channel for "observable behavior
+  moved", and that is the fact worth transmitting.
+
 ## Recent landings (this campaign, newest first)
 
 | PR | What | Issues |
 |---|---|---|
+| #588 | **`cargo run -- <subcommand>` works again at the workspace root.** #583 added the ledger guard as a second `[[bin]]`, and cargo then refuses a bare `cargo run` — an invocation documented in eight places across CLAUDE.md, AGENTS.md and README.md. Moved to `examples/`, runnable the same way and still covered by `cargo clippy --all-targets` (VERIFIED by planting an `unused_variable` and watching clippy report it; the first probe used a leading underscore, reported nothing, and would have read as 'clippy skips examples' if I had stopped there). Two alternatives were MEASURED and rejected rather than reasoned about: `default-members = ["crates/deacon"]` fixes `cargo run` and silently narrows both `cargo clippy --all-targets` (CI runs it without `--workspace`) and every `cargo nextest run --profile …` to one package — the parity lanes live in `parity-harness`, so they would select NOTHING, green and vacuous; and `required-features` does not remove a target from disambiguation at all | #583 regression fixed |
 | #589 | **`Operation::stdinFile` — the parity model can pipe stdin, and the bytes survive** (#586). The predecessor was an inline `stdin: Option<String>` DECLARED in the case schema and dropped on the floor by the executor (`Stdio::null()`), so a case could have asserted a stdin-dependent behavior while the child read `/dev/null` — and passed, because the assertion was on something else. No case used it, so nothing was mis-asserting; it was a loaded footgun in the tool that exists to catch exactly this. Replaced by a workspace-relative FILE, because the surface it exists for is byte fidelity and a JSON string cannot carry NUL or invalid UTF-8. The file descriptor is handed to the child rather than the payload being read and re-written, so nothing in the harness can re-encode it. Unlocks `case-exec-binary-stdin-roundtrip` — upstream's 'stream binary data', all 256 byte values through `exec` — asserted as a container-computed `cksum` (`1313719201 256`) because `chan-stdout` is a normalized TEXT channel those bytes cannot survive; that covers the INBOUND half and the ledger row says so rather than implying more. Watched-to-fail by restoring `Stdio::null()`: the byte test goes red, the other two stay green. A missing payload now FAILS the invocation — the predecessor's whole defect was failing quietly. Census 139 → 140 | #586 fixed |
 | #587 | **`exec` mining batch from the reference's own e2e suite (#480)** — five cases from `src/test/cli.exec.base.ts` at v0.87.0, all measured agreeing at oracle 0.87.0 first: exit-code passthrough (`exit 123` — the pre-existing row CLAIMED propagation while every case behind it exited 0 or 127, and 127 is the shell's own answer, so 'forwards the exact code' and 'reports failure as 1' were indistinguishable), `--remote-env NAME=` as set-to-empty rather than not-set (invisible to `printf`, visible to `${NAME+present}`), the default workspace folder (cwd — the shape a developer actually types, and every other exec case passed the flag), `--config` selecting the document, and a missing workspace folder exiting 1. All five `spec-expectation` on #570's precedent: the differential lane gates nothing. **Watched-to-fail as a batch** — all five assertions mutated in one run, all five went red on the expected channel. Census 136 → 139. Two upstream behaviors are NOT expressible and are filed rather than skipped silently (#586): binary stdin round-trip and the PTY cases | #586 filed |
 | #585 | **`up --config` no longer stops a sibling config's container** — the supersede sweep (#371) selected on `devcontainer.source=deacon` AND `devcontainer.local_folder` and stopped every other match, so a SECOND document in one workspace was swept as a later generation of the first. Measured at oracle 0.87.0: the reference leaves both running, deacon left the first `exited`, and `deacon exec` then answered `No running container found` where `devcontainer exec` printed `hi`. Now discriminated on `devcontainer.config_file` — COARSER than `configHash`, which is why it is right: an edited document keeps its path, a sibling never does. `--override-config` is the case a path cannot decide (different file, REPLACEMENT semantics), so the caller states `SupersedeScope::{Document,Workspace}` instead of the sweep guessing; the #371 leak stays closed, verified live on both orderings. **Watched RED at `14ec091` on `chan-temporal`, never on `chan-exit-code`** — `up` reported success while stopping the container, so an exit-code-only case would have passed. **Found by mining (#480) the reference's `exec` e2e fixtures**, which is where two documents in one workspace came from; deacon's own suite had never put them there. Known gap written down rather than left to be rediscovered: an `--override-config` container outlives its override | #584 fixed |
