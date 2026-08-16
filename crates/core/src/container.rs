@@ -1427,6 +1427,33 @@ where
     }
 }
 
+/// How wide the supersede sweep reaches (#584).
+///
+/// The two variants exist because deacon's two config-selecting flags mean
+/// different things, and the sweep is only safe when it respects the
+/// difference. Inferring it from the config path alone cannot work: an
+/// `--override-config` names a different file *and* replaces the workspace's
+/// document, so it looks exactly like a sibling and behaves exactly like a
+/// generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupersedeScope {
+    /// Sweep only containers created from the SAME `devcontainer.json` path.
+    ///
+    /// The default, and what discovery and `--config` both get. An edited
+    /// document keeps its path and changes its `configHash`, so generations
+    /// still match; a second document brought up with `--config` never does,
+    /// and is left running the way the reference CLI leaves it (#584).
+    Document,
+    /// Sweep every deacon container in the workspace, whatever document it
+    /// names.
+    ///
+    /// What `--override-config` gets: the flag says "use this configuration
+    /// for this workspace INSTEAD of its own", which is a replacement rather
+    /// than a second document. Scoping this by path would leave the replaced
+    /// container running and reopen the #371 leak.
+    Workspace,
+}
+
 /// Which container the caller just brought up, so the supersede sweep can
 /// exclude it. See [`stop_superseded_containers`].
 #[derive(Debug, Clone, Copy, Default)]
@@ -1471,6 +1498,33 @@ pub struct CurrentContainer<'a> {
 ///   whole point: a superseded container is by definition one whose
 ///   `configHash` drifted, so the config-pinned selector cannot see it.
 ///
+/// Those two labels bound the query the daemon runs; under
+/// [`SupersedeScope::Document`] they are not the whole test. Each surviving
+/// candidate must also name the SAME `devcontainer.config_file` as the current
+/// identity (#584). The workspace pair alone conflates two situations that look
+/// identical to it and are not: a later generation of one document (superseded —
+/// stop it) and a SECOND document brought up in the same workspace with
+/// `--config` (a sibling — leave it alone). Every justification above is about
+/// generations, and the reference CLI runs sibling configs concurrently, so
+/// sweeping them was a divergence with no argument behind it. `config_file` is
+/// the right discriminator precisely because it is coarser than `configHash`:
+/// editing a document changes the hash and keeps the path, so generations still
+/// match, while a sibling never does.
+///
+/// `--override-config` is the case the path cannot decide, which is why the
+/// caller states the scope instead of the sweep guessing — see
+/// [`SupersedeScope::Workspace`].
+///
+/// # Known gap
+///
+/// An `--override-config` container outlives the override: a later plain `up`
+/// runs under [`SupersedeScope::Document`], sees a candidate naming the override
+/// file, and spares it. That ordering leaks one stopped-able container and is
+/// not covered by a scenario. Closing it needs a durable record of HOW a
+/// container's configuration was supplied — a label, not an inference — and that
+/// is a larger change than #584 warranted. Stated here rather than left to be
+/// rediscovered.
+///
 /// Filtering happens daemon-side (`docker ps --filter label=…`, AND semantics),
 /// so a container missing either label is never returned. From that set the
 /// container the caller just brought up is excluded by id and/or by compose
@@ -1511,6 +1565,7 @@ pub async fn stop_superseded_containers<D>(
     docker: &D,
     identity: &ContainerIdentity,
     current: CurrentContainer<'_>,
+    scope: SupersedeScope,
 ) -> Vec<String>
 where
     D: crate::docker::Docker + ?Sized,
@@ -1518,6 +1573,34 @@ where
     let Some(local_folder) = identity.local_folder.as_ref() else {
         debug!("No local_folder on identity; skipping superseded-container sweep");
         return Vec::new();
+    };
+
+    // A superseded container is a LATER GENERATION OF THE SAME DOCUMENT, so under
+    // `Document` scope the sweep is pinned to the config file this `up` used
+    // (#584). Without this the candidate set is "every deacon container in this
+    // workspace", which also catches SIBLINGS — a second document brought up in
+    // the same workspace via `--config`, which the reference CLI supports and
+    // leaves running. Stopping one is not hygiene; it discards running state the
+    // user never asked to discard.
+    //
+    // When the identity has no config file there is nothing to compare against,
+    // so the sweep is skipped for the same reason it is skipped without a
+    // `local_folder`: refusing to guess is the safe direction — and skipped
+    // BEFORE the query, since a candidate set that cannot be classified is not
+    // worth asking the daemon for.
+    let current_config_file = match scope {
+        SupersedeScope::Workspace => None,
+        SupersedeScope::Document => {
+            let Some(path) = identity
+                .config_file
+                .as_ref()
+                .map(|path| path.display().to_string())
+            else {
+                debug!("No config_file on identity; skipping superseded-container sweep");
+                return Vec::new();
+            };
+            Some(path)
+        }
     };
 
     // Both labels are required; `list_containers` splits on `,` into one
@@ -1562,25 +1645,43 @@ where
         // is `None`, so every project a candidate names is by definition
         // superseded. The cost is one inspect per candidate on a path where
         // candidates are few (they are already pinned to this workspace).
-        let project = match docker.inspect_container(&container.id).await {
-            Ok(Some(info)) => info.labels.get(LABEL_COMPOSE_PROJECT).cloned(),
+        // The same inspect answers BOTH questions: which document this candidate
+        // was created from (#584) and which compose project it belongs to (#551).
+        let labels = match docker.inspect_container(&container.id).await {
+            Ok(Some(info)) => info.labels,
             Ok(None) => continue, // vanished between list and inspect
             Err(e) => {
                 debug!(
                     container_id = %container.id,
                     "Could not inspect candidate for supersede sweep: {e}"
                 );
-                // Without the label we cannot tell a sibling of the current
-                // project from a superseded one, so sparing it is the safe
-                // direction — unless this `up` has no project at all, in which
-                // case there is nothing it could be a sibling of and the
-                // pre-#551 behaviour (stop it, by label alone) still holds.
-                if current.compose_project.is_some() {
-                    continue;
-                }
-                None
+                // Without labels this candidate cannot be shown to be a later
+                // generation of the current document, and stopping a container
+                // on a guess is the one outcome worth avoiding here. Sparing it
+                // costs a container that keeps running until the next `up`
+                // inspects it successfully; the alternative costs a user's
+                // running state. Before #584 the non-compose branch fell through
+                // and stopped it by label alone, which is precisely the guess.
+                continue;
             }
         };
+
+        // A different document is a SIBLING, not a generation — spared, and with
+        // it any compose project it owns, which is why this precedes the project
+        // expansion rather than filtering `to_stop` afterwards. A candidate
+        // predating the label (older deacon) also lands here and is spared, the
+        // same safe direction as the inspect failure above.
+        if let Some(current_config_file) = current_config_file.as_ref()
+            && labels.get(LABEL_CONFIG_FILE) != Some(current_config_file)
+        {
+            debug!(
+                container_id = %container.id,
+                "Candidate belongs to a different config file; not superseded"
+            );
+            continue;
+        }
+
+        let project = labels.get(LABEL_COMPOSE_PROJECT).cloned();
         match project.as_deref() {
             Some(p) if Some(p) == current.compose_project => continue,
             Some(p) => {
@@ -1660,7 +1761,19 @@ mod supersede_tests {
         stopped: Mutex<Vec<String>>,
     }
 
+    /// A candidate created from THIS `up`'s document — the only kind the sweep may
+    /// stop. Every test that expects a stop uses this, so a candidate that is
+    /// superseded says so in the fixture rather than by omission.
     fn info(id: &str, state: &str, labels: &[(&str, &str)]) -> ContainerInfo {
+        let mut with_config = vec![(LABEL_CONFIG_FILE, CONFIG)];
+        with_config.extend_from_slice(labels);
+        info_raw(id, state, &with_config)
+    }
+
+    /// A candidate with exactly the labels given and nothing implied — for the
+    /// sibling and unlabelled cases, where the ABSENCE of a matching
+    /// `devcontainer.config_file` is the whole point.
+    fn info_raw(id: &str, state: &str, labels: &[(&str, &str)]) -> ContainerInfo {
         ContainerInfo {
             id: id.to_string(),
             names: vec![id.to_string()],
@@ -1726,15 +1839,25 @@ mod supersede_tests {
     }
 
     const WS: &str = "/tmp/ws-supersede";
+    const CONFIG: &str = "/tmp/ws-supersede/.devcontainer/devcontainer.json";
+    const SIBLING_CONFIG: &str = "/tmp/ws-supersede/.devcontainer/subfolder/devcontainer.json";
+    const OVERRIDE_CONFIG: &str = "/tmp/elsewhere/override.json";
 
     fn identity_for(local_folder: Option<&str>) -> ContainerIdentity {
+        identity_with_config(local_folder, Some(CONFIG))
+    }
+
+    fn identity_with_config(
+        local_folder: Option<&str>,
+        config_file: Option<&str>,
+    ) -> ContainerIdentity {
         ContainerIdentity {
             workspace_hash: "ws000000".to_string(),
             config_hash: "cfgnew00".to_string(),
             name: Some("demo".to_string()),
             custom_name: None,
             local_folder: local_folder.map(PathBuf::from),
-            config_file: None,
+            config_file: config_file.map(PathBuf::from),
             host_ca_bundle_path: None,
             host_ca_subjects: None,
             additional_labels: HashMap::new(),
@@ -1774,6 +1897,7 @@ mod supersede_tests {
                 container_id: Some("current"),
                 compose_project: None,
             },
+            SupersedeScope::Document,
         )
         .await;
 
@@ -1792,6 +1916,7 @@ mod supersede_tests {
             &docker,
             &identity_for(Some(WS)),
             CurrentContainer::default(),
+            SupersedeScope::Document,
         )
         .await;
 
@@ -1825,6 +1950,7 @@ mod supersede_tests {
                 container_id: Some("current"),
                 compose_project: None,
             },
+            SupersedeScope::Document,
         )
         .await;
 
@@ -1832,6 +1958,149 @@ mod supersede_tests {
         assert!(
             docker.selectors_seen.lock().unwrap().is_empty(),
             "no local_folder means no query at all"
+        );
+    }
+
+    /// #584: a SECOND document brought up in the same workspace (`--config`) is a
+    /// sibling, not a later generation, and the reference CLI runs the two
+    /// concurrently. Before this, the workspace label pair matched it and `up`
+    /// stopped a container the user never asked it to stop — reported as success,
+    /// because stopping is post-provisioning hygiene that cannot fail the run.
+    #[tokio::test]
+    async fn a_sibling_config_in_the_same_workspace_is_spared() {
+        let docker = RecordingDocker {
+            listings: vec![(
+                workspace_selector(),
+                vec![
+                    info("current", "running", &[]),
+                    info("older-generation", "running", &[]),
+                    info_raw("sibling", "running", &[(LABEL_CONFIG_FILE, SIBLING_CONFIG)]),
+                ],
+            )],
+            ..Default::default()
+        };
+
+        let stopped = stop_superseded_containers(
+            &docker,
+            &identity_for(Some(WS)),
+            CurrentContainer {
+                container_id: Some("current"),
+                compose_project: None,
+            },
+            SupersedeScope::Document,
+        )
+        .await;
+
+        assert_eq!(
+            stopped,
+            vec!["older-generation".to_string()],
+            "the generation of THIS document is superseded; the sibling document is not"
+        );
+    }
+
+    /// The other half of #584, and the reason the scope is stated by the caller
+    /// rather than inferred: `--override-config` names a DIFFERENT file and means a
+    /// REPLACEMENT, so under `Document` scope it would look exactly like the sibling
+    /// above and the replaced container would keep running — the #371 leak, reopened.
+    /// `Workspace` scope sweeps by workspace alone, which is what the sweep did for
+    /// every case before this change.
+    #[tokio::test]
+    async fn an_override_config_supersedes_whatever_document_it_replaced() {
+        let docker = RecordingDocker {
+            listings: vec![(
+                workspace_selector(),
+                vec![
+                    info_raw(
+                        "current-override",
+                        "running",
+                        &[(LABEL_CONFIG_FILE, OVERRIDE_CONFIG)],
+                    ),
+                    info("replaced", "running", &[]),
+                ],
+            )],
+            ..Default::default()
+        };
+
+        let stopped = stop_superseded_containers(
+            &docker,
+            &identity_with_config(Some(WS), Some(OVERRIDE_CONFIG)),
+            CurrentContainer {
+                container_id: Some("current-override"),
+                compose_project: None,
+            },
+            SupersedeScope::Workspace,
+        )
+        .await;
+
+        assert_eq!(
+            stopped,
+            vec!["replaced".to_string()],
+            "an override replaces the workspace's document, so the container it \
+             replaced is superseded even though the two name different files"
+        );
+    }
+
+    /// A container predating the `devcontainer.config_file` label cannot be shown to
+    /// be a generation of the current document, and the sweep does not stop what it
+    /// cannot identify. It stays running until an `up` that can classify it.
+    #[tokio::test]
+    async fn a_candidate_without_a_config_file_label_is_spared() {
+        let docker = RecordingDocker {
+            listings: vec![(
+                workspace_selector(),
+                vec![
+                    info("current", "running", &[]),
+                    info_raw("unlabelled-old", "running", &[]),
+                ],
+            )],
+            ..Default::default()
+        };
+
+        let stopped = stop_superseded_containers(
+            &docker,
+            &identity_for(Some(WS)),
+            CurrentContainer {
+                container_id: Some("current"),
+                compose_project: None,
+            },
+            SupersedeScope::Document,
+        )
+        .await;
+
+        assert!(
+            stopped.is_empty(),
+            "an unidentifiable candidate is spared, not swept: {stopped:?}"
+        );
+    }
+
+    /// The counterpart to `without_a_local_folder_…`: with no config file on the
+    /// identity there is nothing to compare a candidate against, so the sweep
+    /// declines to look rather than falling back to the workspace-wide selector.
+    #[tokio::test]
+    async fn without_a_config_file_nothing_is_queried_or_stopped() {
+        let docker = RecordingDocker {
+            listings: vec![(
+                workspace_selector(),
+                vec![info("older-running", "running", &[])],
+            )],
+            ..Default::default()
+        };
+
+        let stopped = stop_superseded_containers(
+            &docker,
+            &identity_with_config(Some(WS), None),
+            CurrentContainer {
+                container_id: Some("current"),
+                compose_project: None,
+            },
+            SupersedeScope::Document,
+        )
+        .await;
+
+        assert!(stopped.is_empty());
+        assert!(
+            docker.selectors_seen.lock().unwrap().is_empty(),
+            "no config_file means no query at all"
         );
     }
 
@@ -1880,6 +2149,7 @@ mod supersede_tests {
                 container_id: Some("current-app"),
                 compose_project: Some(new_project),
             },
+            SupersedeScope::Document,
         )
         .await;
 
@@ -1934,6 +2204,7 @@ mod supersede_tests {
                 container_id: Some("current-single"),
                 compose_project: None,
             },
+            SupersedeScope::Document,
         )
         .await;
 
@@ -1983,6 +2254,7 @@ mod supersede_tests {
                 container_id: Some("current-app"),
                 compose_project: Some(current),
             },
+            SupersedeScope::Document,
         )
         .await;
 
@@ -2021,6 +2293,7 @@ mod supersede_tests {
                 container_id: Some("current-app"),
                 compose_project: Some(current),
             },
+            SupersedeScope::Document,
         )
         .await;
 

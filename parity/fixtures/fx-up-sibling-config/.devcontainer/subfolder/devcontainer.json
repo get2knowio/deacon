@@ -1,0 +1,4 @@
+{
+	"name": "ParityUpSiblingSecondary",
+	"image": "alpine:3.19"
+}

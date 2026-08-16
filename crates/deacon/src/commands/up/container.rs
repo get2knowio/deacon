@@ -719,6 +719,7 @@ pub(crate) async fn execute_container_up(
             container_id: Some(&container_result.container_id),
             compose_project: None,
         },
+        args.supersede_scope(),
     )
     .await;
 

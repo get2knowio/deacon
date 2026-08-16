@@ -299,6 +299,7 @@ pub(crate) async fn execute_compose_up(
                         container_id: Some(&container_id),
                         compose_project: Some(&project.name),
                     },
+                    args.supersede_scope(),
                 )
                 .await;
 
@@ -682,6 +683,7 @@ pub(crate) async fn execute_compose_up(
             container_id: Some(&primary_container_id),
             compose_project: Some(&project.name),
         },
+        args.supersede_scope(),
     )
     .await;
 
