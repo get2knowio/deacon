@@ -1483,6 +1483,513 @@
         "tempdir": true
       },
       "notes": "The other consequence of reading the lockfile at all ([#571](https://github.com/get2knowio/deacon/issues/571)). Once `integrity` PINS resolution, a lockfile that cannot be parsed is not a cosmetic problem to be papered over by rewriting it — it is an input the run depends on and cannot have.\n\nMEASURED at oracle 0.87.0 on `fx-lockfile-unreadable`: the reference exits 1 with `{\"outcome\":\"error\",\"message\":\"Expected property name or '}' in JSON at position 2 …\"}` and leaves the file byte-unchanged. Its `readLockfile` (`fI`) swallows only `ENOENT`; a `SyntaxError` carries no `.code`, so the `throw e` rethrows it. BEFORE the fix deacon exited 0, built the Feature-extended image, and REPLACED the unparseable file with a freshly-resolved lockfile — the same silent repair the tampered-`integrity` case documents, reached by a different corruption.\n\n`spec-expectation` + `fs-heavy` puts this in the HERMETIC lane, and that is a claim rather than a convenience: the refusal happens while reading a local file, before deacon touches a registry or a daemon. `parity_hermetic` re-runs its own drivers inside a fresh network namespace, so a regression that moved this refusal after the Feature fetch or the base-image build would not merely fail the assertion — it would fail to reach it at all, loudly. `none` would have been the wrong group for the reason `case-build-upstream-lockfile-flags-mutually-exclusive` records: a `none` case runs against the COMMITTED fixture directory, and one edit to this argv is all it would take for a real build to write a `.devcontainer-lock.json` into `parity/fixtures/`.\n\n`chan-stderr` is deliberately not declared. Both CLIs report the position of the offending character, but they are two different JSON parsers describing the same byte, and comparing them would report a difference about serde vs V8 rather than about the behaviour. The exit code plus the file's surviving bytes is the whole claim — and the bytes matter more than the code here, since the defect this replaces was a successful run that overwrote them."
+    },
+    {
+      "id": "case-build-upstream-compose-platform-refused",
+      "behaviors": [
+        "bhv-build-compose-rejects-image-only-flags"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--platform",
+            "linux/amd64",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-compose"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error",
+              "message": "Cannot use --platform with Docker Compose configurations"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "A Compose configuration cannot honour `--platform`: the platform belongs to a single image build and a Compose project builds whatever its services declare. Both CLIs refuse rather than accept-and-ignore, which is the failure mode that matters — a flag taken and dropped is the silent-fallback shape constitution IV rules out, and it is invisible to an exit code alone.\n\nMEASURED at oracle 0.87.0 on `fx-build-compose`: both CLIs exit 1 and both print an error document. The WORDING differs (`--platform or --push not supported.` against deacon's `Cannot use --platform with Docker Compose configurations`), and that is exactly why this is `spec-expectation` rather than `live-differential`: a differential on the result document would report a message-text disagreement forever and would need a tolerance to say nothing more than 'they phrase it differently'. Pinning deacon's own document says more and costs less. deacon's wording names the flag AND the configuration shape that cannot take it; the reference's names two flags, only one of which was passed.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, 'should fail with docker-compose and --platform not supported'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5.\n\nLANE CORRECTED BEFORE MERGE, and the correction is the interesting part. This case was authored HERMETIC on the reasoning that a refusal about the configuration's SHAPE cannot need a daemon, and it was verified locally by running it with `DOCKER_HOST` pointed at a socket that does not exist, and again with the `docker` binary off `PATH` — both still produced the Compose refusal. Both probes were wrong for the same reason: this machine has a working daemon, and neither the bogus socket nor the missing binary stopped deacon's BuildKit-availability probe from answering. On the macOS and Windows `dev-fast` runners, which have NO daemon at all, deacon answers `{\"outcome\":\"error\",\"message\":\"BuildKit is required for --platform\"}` instead — it probes BuildKit before it looks at the configuration shape, so the Compose refusal is never reached. `docker-shared` is therefore the honest group; it still gates every pull request through `parity_docker` and the release gate. The measured fact is kept rather than the tidy claim: **a check that runs before another check is a prerequisite, whatever it is about**, and a hermetic verification performed on a machine that has the resource proves nothing.",
+      "resourceGroup": "docker-shared"
+    },
+    {
+      "id": "case-build-upstream-compose-cache-to-refused",
+      "behaviors": [
+        "bhv-build-compose-rejects-image-only-flags"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--cache-to",
+            "type=local,dest=${WORKSPACE}/cache",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-compose"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error",
+              "message": "Cannot use --cache-to with Docker Compose configurations"
+            }
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-build",
+          "assertion": {
+            "absent": "cache"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "cache"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The second half of the same rule as `case-build-upstream-compose-platform-refused`, kept as its own case because the two flags are refused by different code and a fix that wired only one would leave the other silently accepted. Upstream keeps them apart for the same reason.\n\nThe `chan-filesystem` assertion is what makes this more than an exit code: `--cache-to type=local,dest=…` names a directory the run would CREATE, so a CLI that refused only after handing the flag to the builder would leave it behind. Refusing and writing nothing are two claims and only one of them is an exit code.\n\nMEASURED at oracle 0.87.0 on `fx-build-compose`: both CLIs exit 1, both print an error document, neither writes the destination. Wording differs (`--cache-to not supported.`), which is why this pins deacon's document rather than comparing the two — see the sibling case for the argument.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, 'should fail with docker-compose and --cache-to not supported'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5.\n\nLANE CORRECTED BEFORE MERGE, and the correction is the interesting part. This case was authored HERMETIC on the reasoning that a refusal about the configuration's SHAPE cannot need a daemon, and it was verified locally by running it with `DOCKER_HOST` pointed at a socket that does not exist, and again with the `docker` binary off `PATH` — both still produced the Compose refusal. Both probes were wrong for the same reason: this machine has a working daemon, and neither the bogus socket nor the missing binary stopped deacon's BuildKit-availability probe from answering. On the macOS and Windows `dev-fast` runners, which have NO daemon at all, deacon answers `{\"outcome\":\"error\",\"message\":\"BuildKit is required for --cache-to\"}` instead — it probes BuildKit before it looks at the configuration shape, so the Compose refusal is never reached. `docker-shared` is therefore the honest group; it still gates every pull request through `parity_docker` and the release gate. The measured fact is kept rather than the tidy claim: **a check that runs before another check is a prerequisite, whatever it is about**, and a hermetic verification performed on a machine that has the resource proves nothing.",
+      "resourceGroup": "docker-shared"
+    },
+    {
+      "id": "case-build-upstream-push-output-mutually-exclusive",
+      "behaviors": [
+        "bhv-build-push-output-mutually-exclusive"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--push",
+            "--output",
+            "type=oci,dest=${WORKSPACE}/export.tar",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error",
+              "message": "Cannot use both --push and --output"
+            }
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-build",
+          "assertion": {
+            "absent": "export.tar"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "export.tar"
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`--push` and `--output` are both destinations for the built image and they are mutually exclusive: one hands the result to a registry, the other writes it to a path. Taking both would mean silently picking one.\n\nMEASURED at oracle 0.87.0 on `fx-build-flags`: both CLIs exit 1 before building anything and neither writes the export. deacon says `Cannot use both --push and --output`, the reference `--push true cannot be used with --output.` — the same refusal in different words, so `spec-expectation` for the reason given in `case-build-upstream-compose-platform-refused`.\n\n`chan-filesystem` carries the half the exit code cannot: refusing is one claim, writing nothing on the way out is another, and a CLI that validated the combination only after starting the export would satisfy the first while failing the second. HERMETIC — the check is pure argument validation, verified with `DOCKER_HOST` pointed at a nonexistent socket.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, 'should fail with --push true and --output'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5."
+    },
+    {
+      "id": "case-build-upstream-missing-config-rejected",
+      "behaviors": [
+        "bhv-build-missing-config-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-build",
+          "assertion": {
+            "contains": "Configuration file not found"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`build` on a workspace with no `devcontainer.json` fails with exit 1 and names the file it could not find. Nothing covered this for `build`: the existing no-config cases belong to `read-configuration` (two), `doctor` and `down`, and `build` reaches config resolution by its own path.\n\nMEASURED at oracle 0.87.0 on `fx-errors-missing-config`: both CLIs exit 1 and both name the absolute path of the document they looked for. The reference puts that on STDOUT as `{\"outcome\":\"error\",\"message\":\"Dev container config (…) not found.\"}`; deacon puts the diagnostic on stderr and prints nothing on stdout even under `--output-format json`. That difference is [#594](https://github.com/get2knowio/deacon/issues/594), tracked by its own row — this case deliberately asserts only the half that is correct today, so it is green from the day it lands and stays green after the JSON gap closes.\n\nHERMETIC: config resolution fails before any daemon contact, verified with `DOCKER_HOST` pointed at a nonexistent socket. The lane is a claim, not a convenience — a regression that contacted the daemon before reading the workspace would fail here rather than pass.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, 'should fail with \"not found\" error when config is not found' and 'should fail gracefully when no workspace-folder and no config in current directory'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5."
+    },
+    {
+      "id": "case-build-upstream-multi-image-name",
+      "behaviors": [
+        "bhv-build-multiple-image-names"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "deacon-parity-multi-first:v1",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonEquals": {
+              "outcome": "success",
+              "imageName": [
+                "deacon-parity-multi-first:v1",
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "labels": {
+                "parity.build.token": "conformance-build-flags"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`--image-name` is repeatable: every name given becomes a tag on the one built image, and the result document lists them in the order they were passed. Every other `build` case in the suite passes the flag exactly once, so the repeatable half was carried by the argument parser alone.\n\nThe tag ORDER is the claim, and it needs `jsonEquals` to express — `jsonSubset` treats an array as an order-insensitive 'contains', so a subset assertion here would pass on a CLI that reversed the list. The document has exactly two keys, which is what makes an equality assertion on the whole of it possible.\n\nThe tokenized `${IMAGE_TAG}` is deliberately the SECOND name rather than the first. `chan-image` inspects only the tag the runner issued, so putting it last is what proves the later names are real tags on a real image and not just echoes in the result document — the exact failure this project has shipped once before, where `--image-name` was reported correctly and pointed at the pre-Feature base. A case that asserted only the array would pass on a CLI that reported two names and tagged one.\n\nMEASURED at oracle 0.87.0 on `fx-build-flags`: both CLIs exit 0 and both report `imageName` as the two names in order; `docker images` shows one tag per name.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, the three 'should succeed with multiple --image-name parameters …' cases), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5."
+    },
+    {
+      "id": "case-build-upstream-cache-from-not-found",
+      "behaviors": [
+        "bhv-build-cache-from-unresolvable-is-not-fatal"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--cache-from",
+            "ghcr.io/devcontainers/notFound",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "labels": {
+                "parity.build.token": "conformance-build-flags"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "A `--cache-from` reference that does not resolve is a MISS, not an error: the build proceeds and produces the image. This is the shape CI actually runs — a pipeline names the cache image for the target branch, and on a first build for a new branch that image does not exist yet. Upstream's own comment on the test says so ('example scenario: CI builds for PRs'), which is why the case is worth having rather than being filed under 'flag accepted'.\n\nThe reference `ghcr.io/devcontainers/notFound` is kept VERBATIM from upstream and is deliberately not repinned: the claim is about a name that cannot be resolved, so a name that resolves would destroy it, and unlike a Feature reference there is no third-party CONTENT here to go stale — the only thing the case depends on is the repository continuing not to exist.\n\n`chan-image` is what stops this from passing vacuously. Exit 0 and `outcome: success` are also what a CLI that silently skipped the build would print; the label comes from the Dockerfile, so it is evidence an image was actually built.\n\nMEASURED at oracle 0.87.0 on `fx-build-flags`: both CLIs exit 0, both report success, both produce the image. `docker-shared` rather than hermetic — the case reaches ghcr.io by construction, and a Docker-grouped case already has network.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, 'should execute successfully with valid image config and extra cacheFrom'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5."
+    },
+    {
+      "id": "case-build-upstream-cwd-default-workspace",
+      "behaviors": [
+        "bhv-build-default-workspace-folder"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "labels": {
+                "parity.build.token": "conformance-build-flags"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "With no `--workspace-folder`, `build` resolves the configuration from the CURRENT DIRECTORY. This is the shape a developer types — `cd` into the project, run `deacon build` — and every other `build` case in the suite passes the flag explicitly, so nothing covered it.\n\nIt costs nothing to express: the runner already invokes each operation with its cwd set to the case's isolated workspace, so OMITTING the flag is the whole test. That is also the case's one fragility, recorded here because it is invisible in the argv — if the runner ever stops anchoring cwd to the workspace, this case starts failing for a reason that has nothing to do with `build`. The sibling `case-exec-default-workspace-folder` (batch 4) carries the same note for the same reason.\n\nMEASURED at oracle 0.87.0 on `fx-build-flags`: both CLIs exit 0 and build the image from the cwd's configuration. The IMAGE NAMES differ by construction and are not compared — deacon derives `deacon-build:<hash>` and the reference `vsc-<folder>-<hash>` — which is one more reason this is `spec-expectation`.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, 'should use current directory for build when no workspace-folder provided'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5."
+    },
+    {
+      "id": "case-build-upstream-buildkit-never-platform-refused",
+      "behaviors": [
+        "bhv-build-platform-requires-buildkit"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--buildkit",
+            "never",
+            "--platform",
+            "linux/amd64",
+            "--image-name",
+            "${IMAGE_TAG}"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "nonZero": true
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED ON PURPOSE — [#592](https://github.com/get2knowio/deacon/issues/592). `--platform` is a BuildKit capability: the legacy builder cannot target a platform at all. Asked for both `--buildkit never` and a platform, a CLI has exactly two honest answers, and building for the WRONG platform while reporting success is neither.\n\nMEASURED at oracle 0.87.0 on `fx-build-flags`, on an aarch64 host: the reference exits 1 with `{\"outcome\":\"error\",\"message\":\"--platform or --push require BuildKit enabled.\"}` and builds nothing. deacon exits 0, prints `{\"outcome\": \"success\"}`, and produces an image — for the HOST architecture, because the legacy builder ignored the flag. The user asked for `linux/amd64` and got arm64 with a zero exit: the silent-fallback shape constitution IV rules out, and the same class as #492 (`build.options` parsed and dropped) and #556 (the lockfile flags parsed and dropped) one surface over.\n\nThe assertion is the exit code alone, and that is deliberate rather than lazy. The two CLIs word the refusal differently, so declaring `chan-structured-output` would make the differential report a message-text disagreement forever; the wording is pinned instead by the `spec-expectation` sibling that lands with the fix. `nonZero` rather than `equals: 1` because what this case is about is REFUSING — the specific code is the fix's business.\n\n`live-differential` puts it in the nightly, which gates nothing, so it can be red from the day it lands. The precedent is `case-build-upstream-lockfile-frozen-missing`: the assertion here is what turns green on the fix, and it must not be edited when that happens.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, 'should fail with BuildKit never and --platform'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5."
+    },
+    {
+      "id": "case-build-upstream-platform-image-config",
+      "behaviors": [
+        "bhv-build-platform-image-config"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--platform",
+            "linux/arm64",
+            "--image-name",
+            "${IMAGE_TAG}"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED ON PURPOSE — [#593](https://github.com/get2knowio/deacon/issues/593). `--platform` on an IMAGE-reference configuration, as opposed to the Dockerfile configuration `case-build-platform-flag` already covers. The two take different code paths in deacon and only one of them works.\n\nMEASURED at oracle 0.87.0 on `fx-up-basic`, on an aarch64 host, with `--platform linux/amd64` (foreign there): the reference exits 0 and produces a genuine amd64 image (`docker inspect --format '{{.Architecture}}'` says `amd64`). deacon exits 1 with `failed to resolve source metadata for docker.io/library/deacon-build-run:<n>-0: pull access denied`. deacon builds the base as a local intermediate tag and then does `FROM deacon-build-run:<n>-0` under `--platform`; the local tag exists only for the host platform, so BuildKit goes looking for the foreign variant in a registry that has never heard of it. The Dockerfile path does not chain that way and cross-builds correctly — VERIFIED in the same session, same host, `--platform linux/amd64` on `fx-build-flags` exits 0 and produces an amd64 image.\n\nTHE PLATFORM VALUE IS ARCH-RELATIVE AND THE CASE IS ONLY MEANINGFUL WHERE THE REQUESTED PLATFORM IS FOREIGN. It is written `linux/arm64` because the lane it runs in — the nightly, on `ubuntu-latest` — is x86_64, where arm64 is the foreign one; on an aarch64 developer machine this case is native and therefore vacuous, and the measurement above is the mirror image of it. No emulation is required either way: the fixture is `{\"image\": \"alpine:3.19\"}` with no Features and no `RUN`, so nothing foreign is ever EXECUTED — the failure is at reference resolution, before any instruction runs. Recorded because a case that is vacuous on some substrates and not others must say so out loud.\n\nThe exit code alone, for the same reason as the sibling above: the image NAMES differ between the two CLIs by construction, so a document or image comparison would diverge on something this case is not about. The `spec-expectation` sibling that pins the produced image's architecture lands with the fix.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, 'should succeed (image) with supported --platform'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5."
     }
   ]
 }
