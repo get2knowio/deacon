@@ -259,6 +259,10 @@ pub(crate) async fn execute_ops(
         full.extend(argv);
         let args: Vec<&str> = full.iter().map(String::as_str).collect();
 
+        // Resolved against the workspace, so the payload arrives the way every other
+        // byte-exact input does: as a fixture file this op already materialized (#586).
+        let stdin_file = op.stdin_file.as_ref().map(|rel| workspace.join(rel));
+
         let raw_case = format!("{}__{}", case.id, op.id);
         let inv = run_and_capture(
             side,
@@ -267,6 +271,7 @@ pub(crate) async fn execute_ops(
             program,
             &args,
             &workspace,
+            stdin_file.as_deref(),
             exec_kind(&op.subcommand).bound(),
             cfg.report_root,
         )
