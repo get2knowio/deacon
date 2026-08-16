@@ -138,6 +138,9 @@ pub async fn exec_deacon(
         deacon_path,
         args,
         cwd,
+        // The convenience wrappers never pipe stdin: only the case runner has an
+        // Operation to read `stdinFile` from (#586).
+        None,
         kind.bound(),
         &crate::report_root(),
     )
@@ -160,6 +163,9 @@ pub async fn exec_oracle(
         oracle_path,
         args,
         cwd,
+        // The convenience wrappers never pipe stdin: only the case runner has an
+        // Operation to read `stdinFile` from (#586).
+        None,
         kind.bound(),
         &crate::report_root(),
     )
@@ -180,6 +186,7 @@ pub async fn run_and_capture(
     program: &Path,
     args: &[&str],
     cwd: &Path,
+    stdin_file: Option<&Path>,
     bound: Duration,
     report_root: &Path,
 ) -> Result<Invocation, HarnessError> {
@@ -190,10 +197,36 @@ pub async fn run_and_capture(
     let stdout_abs = report_root.join(&stdout_rel);
     let stderr_abs = report_root.join(&stderr_rel);
 
+    // stdin is `null` unless the operation names a payload file (#586). Opening it
+    // HERE, rather than reading it into memory and writing to the child's pipe, is
+    // what keeps the bytes untouched: the file descriptor is handed to the child, so
+    // nothing in this process can lose a NUL or re-encode invalid UTF-8 on the way —
+    // which is the entire property the one case that uses this asserts.
+    //
+    // A payload that cannot be opened FAILS the invocation rather than silently
+    // falling back to `null`. The previous inline field failed exactly that way and
+    // was never noticed.
+    let stdin = match stdin_file {
+        None => std::process::Stdio::null(),
+        Some(path) => match std::fs::File::open(path) {
+            Ok(file) => std::process::Stdio::from(file),
+            Err(e) => {
+                crate::atomic_write(&stdout_abs, b"").await?;
+                let message = format!("could not open stdin payload {}: {e}", path.display());
+                crate::atomic_write(&stderr_abs, message.as_bytes()).await?;
+                return Err(HarnessError::OracleFailure {
+                    case: case.to_string(),
+                    status: message,
+                    stderr_path: stderr_abs,
+                });
+            }
+        },
+    };
+
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(args)
         .current_dir(cwd)
-        .stdin(std::process::Stdio::null())
+        .stdin(stdin)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
@@ -306,6 +339,7 @@ mod tests {
             &ok,
             &[],
             dir.path(),
+            None,
             Duration::from_secs(30),
             &root,
         )
@@ -328,6 +362,7 @@ mod tests {
             &garbage,
             &[],
             dir.path(),
+            None,
             Duration::from_secs(30),
             &root,
         )
@@ -368,6 +403,7 @@ mod tests {
             &stub,
             &[],
             dir.path(),
+            None,
             Duration::from_secs(30),
             &root,
         )
@@ -406,6 +442,7 @@ mod tests {
             &stub,
             &[],
             dir.path(),
+            None,
             Duration::from_secs(30),
             &root,
         )
@@ -443,6 +480,7 @@ mod tests {
             &stub,
             &[],
             dir.path(),
+            None,
             Duration::from_millis(200),
             &root,
         )

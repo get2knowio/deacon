@@ -954,6 +954,63 @@
         "tempdir": true
       },
       "notes": "A `--workspace-folder` that does not exist fails with exit 1 rather than a panic, a zero exit, or a shell-level code. `case-exec-malformed-config-rejected` covers a config that exists and is unparseable; this covers the path not being there at all, which reaches a different code path (workspace resolution, before any config load).\n\nMined from `src/test/cli.exec.base.ts` at v0.87.0, which asserts `error.code === 1` and a `Dev container config (…) not found.` message.\n\nHERMETIC, not `docker-shared` — the only `exec` case that is. The failure happens during workspace resolution, BEFORE any config load and before any daemon contact, so the case needs nothing and belongs in the lane that runs on every profile including `dev-fast` and on all three operating systems, rather than in one that waits for a daemon. Precedent is `case-errors-decl-bad-config-path-decision`, which is the same shape for `read-configuration`. Verified under `unshare -rn` with the rest of `parity_hermetic`.\n\nBoth channels pin DEACON's answer rather than compare it, which is what `spec-expectation` means and is why the diagnostic can be asserted here at all: the two CLIs word this differently — deacon says `Failed to resolve workspace path '<abs>': path does not exist or cannot be accessed`, the reference `Dev container config (<abs>/.devcontainer/devcontainer.json) not found.` Both name the problem and both exit 1, and deacon's names the directory it could not resolve rather than a file it never looked for, which is the more accurate of the two. So the wording difference is not a divergence to fix, and pinning deacon's own phrasing costs nothing while stopping the diagnostic from quietly evaporating into a bare exit code. A `live-differential` here would need a tolerance to say only that the two disagree about wording, which is worth less than what this asserts."
+    },
+    {
+      "id": "case-exec-binary-stdin-roundtrip",
+      "behaviors": [
+        "bhv-exec-stdin-byte-fidelity"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-binary-stdin"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "cksum"
+          ],
+          "stdinFile": "stdin.bin"
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "1313719201 256"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`exec` streams host stdin into the container BYTE FOR BYTE. The payload is all 256 byte values, so it contains NUL and is not valid UTF-8 anywhere near its middle — the shapes a lossy `String::from_utf8_lossy` on the way in would silently rewrite, and the shapes a line-oriented copy would reframe.\n\nMined from `src/test/cli.exec.base.ts` at v0.87.0 ('stream binary data'), which builds the same 256-byte buffer and asserts `res.stdout.equals(stdin)` through `exec … cat`.\n\nTHE ASSERTION IS A CHECKSUM COMPUTED IN THE CONTAINER, NOT THE BYTES THEMSELVES, and the difference is worth stating because it bounds what this case proves. `chan-stdout` is a normalized TEXT channel; 256 arbitrary bytes cannot survive it, so upstream's `cat` round-trip is not directly expressible. `cksum` moves the evidence to a channel that can carry it: `1313719201 256` is the CRC and the length, so a corrupted byte changes the checksum and a dropped or added one changes both. What that covers is the INBOUND half — host stdin to the container. The outbound half (container stdout back to the caller, byte-exact) stays unasserted here, because asserting it needs a byte-level channel the model does not have. Measured by hand at oracle 0.87.0 in both directions and both CLIs round-trip the full 256 bytes identically (`sha256` of input and output equal), so the unasserted half is known-good today rather than unexamined — it is simply not GUARDED.\n\nThe checksum was measured, not derived: `cksum` on the host and busybox `cksum` inside `alpine:3.19` both answer `1313719201 256` for this payload.\n\nThis case is why [#586](https://github.com/get2knowio/deacon/issues/586) existed. `Operation.stdinFile` is new: the field it replaced (`stdin`, an inline JSON string) was declared in the schema and DROPPED by the executor, so this case could not have been written, and any case that had tried would have passed with the child reading `/dev/null`. A file rather than a string because a JSON string cannot carry these bytes at all."
     }
   ]
 }

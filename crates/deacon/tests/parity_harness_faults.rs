@@ -239,6 +239,7 @@ async fn d_crash_stub_is_oracle_failure() {
         &stub,
         &[],
         dir.path(),
+        None,
         Duration::from_secs(30),
         &root,
     )
@@ -289,6 +290,7 @@ async fn e_garbage_output_is_malformed() {
         &stub,
         &[],
         dir.path(),
+        None,
         Duration::from_secs(30),
         &root,
     )
@@ -333,6 +335,7 @@ async fn f_hang_stub_times_out_with_partial_output() {
         &stub,
         &[],
         dir.path(),
+        None,
         Duration::from_millis(250),
         &root,
     )

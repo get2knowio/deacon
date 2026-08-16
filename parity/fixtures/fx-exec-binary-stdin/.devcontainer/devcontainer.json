@@ -1,0 +1,4 @@
+{
+	"name": "ParityExecBinaryStdin",
+	"image": "alpine:3.19"
+}

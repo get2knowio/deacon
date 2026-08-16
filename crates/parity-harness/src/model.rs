@@ -777,9 +777,21 @@ pub struct Operation {
     /// Fixture ids this op materializes into the workspace.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fixtures: Vec<String>,
-    /// Optional stdin payload.
+    /// Workspace-relative path to a file piped to the operation's stdin (#586).
+    ///
+    /// A FILE rather than an inline string because the surface this exists for is
+    /// byte fidelity: upstream's `exec` suite streams 256 arbitrary bytes through
+    /// `exec … cat` and asserts the output is identical, and a JSON string cannot
+    /// carry NUL or invalid UTF-8. Resolved after the op's fixtures are
+    /// materialized, so the payload ships as an ordinary fixture file — pinned
+    /// `-text` by `.gitattributes` like every other fixture whose BYTES are the
+    /// expectation.
+    ///
+    /// This replaced an inline `stdin: Option<String>` that the executor silently
+    /// dropped: it was declared in the schema, never reached the child process, and
+    /// no case used it, so nothing was mis-asserting and nothing would have said so.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stdin: Option<String>,
+    pub stdin_file: Option<String>,
     /// For negative cases: the failure phase the op is expected to fail in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expect_failure_phase: Option<FailurePhase>,

@@ -74,6 +74,7 @@ async fn preserves_all_four_raw_files_and_fragment_paths_resolve() {
         &deacon_stub,
         &[],
         dir.path(),
+        None,
         Duration::from_secs(30),
         &root,
     )
@@ -86,6 +87,7 @@ async fn preserves_all_four_raw_files_and_fragment_paths_resolve() {
         &oracle_stub,
         &[],
         dir.path(),
+        None,
         Duration::from_secs(30),
         &root,
     )
@@ -187,6 +189,7 @@ async fn nonzero_exit_still_preserves_raw_and_does_not_pass() {
         &stub,
         &[],
         dir.path(),
+        None,
         Duration::from_secs(30),
         &root,
     )
@@ -236,6 +239,7 @@ async fn read_only_raw_dir_fails_the_run_not_pass() {
         &stub,
         &[],
         dir.path(),
+        None,
         Duration::from_secs(30),
         &root,
     )
@@ -387,5 +391,106 @@ fn not_captured_evidence_stays_not_captured_through_normalization() {
         !normalized.present,
         "a channel that could not be observed must stay distinguishable from one \
          observed as empty"
+    );
+}
+
+/// #586: `Operation::stdinFile` must reach the child process with its bytes intact.
+///
+/// The field it replaced was declared in the case schema and dropped by the executor,
+/// so a case could have asserted a stdin-dependent behavior while the child read
+/// `/dev/null` — and passed, because the assertion was on something else. This test is
+/// the guard against that returning: it pipes all 256 byte values (NUL and invalid
+/// UTF-8 included, which is why the payload is a FILE and not a JSON string) through a
+/// stub that copies stdin to stdout, and compares the captured artifact byte for byte.
+#[tokio::test]
+async fn a_stdin_payload_reaches_the_child_with_its_bytes_intact() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().join("report");
+    let binary = "stdin_bin";
+    let case = "case-stdin";
+
+    let payload: Vec<u8> = (0u8..=255).collect();
+    let payload_path = dir.path().join("payload.bin");
+    std::fs::write(&payload_path, &payload).expect("write payload");
+
+    let stub = write_stub(dir.path(), "cat_stub", "#!/bin/sh\nexec cat\n");
+
+    let inv = run_and_capture(
+        Side::Deacon,
+        binary,
+        case,
+        &stub,
+        &[],
+        dir.path(),
+        Some(payload_path.as_path()),
+        Duration::from_secs(30),
+        &root,
+    )
+    .await
+    .expect("capture with stdin");
+
+    assert_eq!(inv.exit_code, Some(0));
+    let captured = std::fs::read(inv.stdout_path()).expect("read captured stdout");
+    assert_eq!(
+        captured,
+        payload,
+        "stdout must be byte-identical to the stdin payload; got {} bytes",
+        captured.len()
+    );
+}
+
+/// The other half: with no payload declared, stdin stays `null`. A child that reads
+/// stdin must see EOF immediately rather than inheriting the test runner's, which would
+/// make a case's behavior depend on how the suite was invoked.
+#[tokio::test]
+async fn without_a_payload_stdin_is_null() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().join("report");
+    let stub = write_stub(dir.path(), "cat_stub", "#!/bin/sh\nexec cat\n");
+
+    let inv = run_and_capture(
+        Side::Deacon,
+        "stdin_bin",
+        "case-null-stdin",
+        &stub,
+        &[],
+        dir.path(),
+        None,
+        Duration::from_secs(30),
+        &root,
+    )
+    .await
+    .expect("capture without stdin");
+
+    assert_eq!(inv.exit_code, Some(0));
+    let captured = std::fs::read(inv.stdout_path()).expect("read captured stdout");
+    assert!(captured.is_empty(), "expected EOF, got {captured:?}");
+}
+
+/// A payload that cannot be opened FAILS the invocation. The predecessor field's whole
+/// defect was failing silently, so the replacement must not have a quiet path either.
+#[tokio::test]
+async fn a_missing_stdin_payload_fails_the_invocation() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().join("report");
+    let stub = write_stub(dir.path(), "cat_stub", "#!/bin/sh\nexec cat\n");
+
+    let err = run_and_capture(
+        Side::Deacon,
+        "stdin_bin",
+        "case-missing-stdin",
+        &stub,
+        &[],
+        dir.path(),
+        Some(&dir.path().join("does-not-exist.bin")),
+        Duration::from_secs(30),
+        &root,
+    )
+    .await
+    .expect_err("a missing payload must not be silently ignored");
+
+    assert!(
+        format!("{err}").contains("could not open stdin payload"),
+        "the diagnostic must name the cause: {err}"
     );
 }
