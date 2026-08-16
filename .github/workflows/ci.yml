@@ -112,10 +112,14 @@ jobs:
     # list would drop obligations without saying so — the one failure mode this job cannot
     # be allowed to have. Raise it before it can bind, never trim it to "what we need".
     #
-    # `gh` owns the credentials and the pagination; the Rust side owns the decision. The
-    # binary exits 1 when an obligation is undischarged and 2 when it could not run at all
+    # `gh` owns the credentials and the pagination; the Rust side owns the decision. It
+    # exits 1 when an obligation is undischarged and 2 when it could not run at all
     # (unreadable ledger, unparseable or EMPTY issue list) — an empty list is a failed
     # query, never a vacuous pass.
+    #
+    # `--example`, not `--bin`: a second `[[bin]]` anywhere in the workspace makes a bare
+    # `cargo run -- <subcommand>` ambiguous, and that is the documented developer loop.
+    # See the guard's own module docs for why this target lives in `examples/`.
     - name: Check every open parity issue has a SPEC_STATUS.md row
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -123,7 +127,7 @@ jobs:
         gh issue list --state open --limit 1000 \
           --json number,title,labels \
           --jq '[.[] | {number, title, labels: [.labels[].name]}]' \
-          | cargo run -q -p parity-harness --bin ledger-issue-coverage
+          | cargo run -q -p parity-harness --example ledger-issue-coverage
 
   msrv:
     name: MSRV (cargo check)

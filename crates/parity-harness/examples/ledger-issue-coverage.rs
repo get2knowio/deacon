@@ -10,11 +10,29 @@
 //! Usage (see `.github/workflows/ci.yml`):
 //!
 //! ```text
-//! gh issue list --state open --limit 200 \
+//! gh issue list --state open --limit 1000 \
 //!   --json number,title,labels \
 //!   --jq '[.[] | {number, title, labels: [.labels[].name]}]' \
-//!   | cargo run -q -p parity-harness --bin ledger-issue-coverage
+//!   | cargo run -q -p parity-harness --example ledger-issue-coverage
 //! ```
+//!
+//! # Why this is an `example` and not a `bin`
+//!
+//! A second `[[bin]]` anywhere in the workspace makes a bare `cargo run -- <subcommand>`
+//! ambiguous — cargo refuses and lists both binaries. That invocation is the documented
+//! developer loop (`cargo run -- up`, CLAUDE.md and AGENTS.md), and it broke the moment
+//! this guard first landed as `src/bin/`. An `examples/` target is runnable the same way
+//! (`--example` instead of `--bin`), stays covered by `cargo clippy --all-targets`
+//! (verified: a deliberate `unused_variable` here is reported), and does not join the
+//! `cargo run` namespace.
+//!
+//! The alternatives were worse. `default-members = ["crates/deacon"]` fixes `cargo run`
+//! and silently narrows `cargo clippy --all-targets` and every `cargo nextest run
+//! --profile …` to one package — the parity lanes would select NOTHING, which is the
+//! exact silent-scope-reduction failure `.config/nextest.toml` already has a rule about.
+//! `required-features` does not help: the target still counts for disambiguation
+//! (measured, not assumed). Rewriting eight documented `cargo run --` invocations to
+//! `-p deacon` fixes nothing for anyone typing from memory.
 //!
 //! stdin is the issue list because `gh` is the tool that already has the credentials and
 //! the pagination; re-implementing either against the REST API in Rust would add a token
