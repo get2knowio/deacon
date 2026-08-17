@@ -114,7 +114,7 @@ jobs:
       # precondition here, and checking it in `prereq::require_buildkit()`, dissolves the
       # need for that assertion shape entirely.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Verify BuildKit is available
         # Fail LOUD and early rather than letting a `build` case report a divergence that
