@@ -1055,6 +1055,7 @@ mod tests {
             ],
             cache_to: Some("type=registry,ref=myrepo/cache:latest".to_string()),
             builder: Some("mybuilder".to_string()),
+            platform: None,
             output_mode: crate::build::BuildOutputMode::default(),
         };
 

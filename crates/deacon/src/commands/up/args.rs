@@ -617,6 +617,9 @@ pub(crate) fn build_options_from_args(args: &UpArgs) -> BuildOptions {
         cache_to: args.cache_to.clone(),
         // builder is not currently exposed in the up CLI; reserved for future addition
         builder: None,
+        // `up` has no `--platform`; the field exists so a build that `FROM`s a
+        // locally built image can inherit `deacon build`'s (#593).
+        platform: None,
         // Resolved at the CLI tier from verbosity + TTY + log-format.
         output_mode: args.build_output_mode,
     }

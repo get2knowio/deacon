@@ -113,7 +113,14 @@ changes, update this file in the same PR.
   **Reproduced with the REFERENCE CLI on the same base + Feature**, which is what
   makes it the host and not deacon — run that control before spending a session on
   it. CI is unaffected. A warm BuildKit cache hides it, so a suite that passed an
-  hour earlier proves nothing about it.
+  hour earlier proves nothing about it. **The dpkg error varies with the daemon's
+  mood and the variant does not change the diagnosis** — observed 2026-08-18 as
+  `unable to install new version of '<path>': Invalid cross-device link` →
+  `dpkg: too many errors, stopping`, taking out the same three
+  `common-utils` tests. The cheapest control is smaller than the reference CLI and
+  settles it in seconds: `docker build` a two-line Dockerfile that does
+  `apt-get update && apt-get install -y openssh-client wget` on
+  `debian:bookworm-slim`. If that fails, nothing above it is worth investigating.
 
 - **`down` cannot be mined, and that is structural.** The reference CLI has no `down`
   subcommand (`up`, `set-up`, `build`, `run-user-commands`, `read-configuration`,

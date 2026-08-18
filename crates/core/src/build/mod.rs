@@ -50,6 +50,7 @@ pub enum BuildOutputMode {
 /// - `cache_from`: ordered list of cache sources supplied by user; preserved order used when invoking BuildKit/buildx
 /// - `cache_to`: optional cache destination supplied by user
 /// - `builder`: optional buildx/builder selection applied to Dockerfile and feature builds
+/// - `platform`: optional target platform, inherited by any build that `FROM`s a locally built image
 /// - Scope: applies to the entire `up` run and must be threaded to both Dockerfile and feature builds
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildOptions {
@@ -66,6 +67,16 @@ pub struct BuildOptions {
     /// Optional buildx builder name to use for builds.
     /// When set, builds use `docker buildx build --builder <name>`.
     pub builder: Option<String>,
+
+    /// Target platform for the build (`--platform`).
+    ///
+    /// Carried here so that a build whose `FROM` names an image deacon just
+    /// built LOCALLY requests the same platform that image was built for. Without
+    /// it BuildKit resolves the base for the host platform, misses in the local
+    /// store, and falls through to a registry that has never heard of the tag
+    /// ([#593](https://github.com/get2knowio/deacon/issues/593)).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
 
     /// How build output is rendered to the user. Does not participate in
     /// [`Self::is_default`] / [`Self::to_docker_args`] — the executor consumes it
@@ -91,7 +102,10 @@ impl BuildOptions {
     /// When this returns true, build execution should verify BuildKit availability
     /// before proceeding and emit a fail-fast error if unavailable.
     pub fn requires_buildkit(&self) -> bool {
-        !self.cache_from.is_empty() || self.cache_to.is_some() || self.builder.is_some()
+        !self.cache_from.is_empty()
+            || self.cache_to.is_some()
+            || self.builder.is_some()
+            || self.platform.is_some()
     }
 
     /// Returns true if no cache/builder options are set.
@@ -103,6 +117,7 @@ impl BuildOptions {
             && self.cache_from.is_empty()
             && self.cache_to.is_none()
             && self.builder.is_none()
+            && self.platform.is_none()
     }
 
     /// Generates the Docker build arguments for cache options.
@@ -129,6 +144,11 @@ impl BuildOptions {
         if let Some(builder) = &self.builder {
             args.push("--builder".to_string());
             args.push(builder.clone());
+        }
+
+        if let Some(platform) = &self.platform {
+            args.push("--platform".to_string());
+            args.push(platform.clone());
         }
 
         args
@@ -537,11 +557,12 @@ mod tests {
             ],
             cache_to: Some("type=registry,ref=repo/cache:latest".to_string()),
             builder: Some("mybuilder".to_string()),
+            platform: Some("linux/amd64".to_string()),
             output_mode: BuildOutputMode::default(),
         };
         let args = opts.to_docker_args();
 
-        assert_eq!(args.len(), 9);
+        assert_eq!(args.len(), 11);
         assert_eq!(args[0], "--no-cache");
         assert_eq!(args[1], "--cache-from");
         assert_eq!(args[2], "type=registry,ref=repo/cache:v1");
@@ -551,6 +572,26 @@ mod tests {
         assert_eq!(args[6], "type=registry,ref=repo/cache:latest");
         assert_eq!(args[7], "--builder");
         assert_eq!(args[8], "mybuilder");
+        assert_eq!(args[9], "--platform");
+        assert_eq!(args[10], "linux/amd64");
+    }
+
+    /// The features/stamp builds emit `to_docker_args()` only when the options are
+    /// not default, so a platform-only `BuildOptions` has to report itself as
+    /// non-default or the flag never reaches the build that needs it (#593).
+    #[test]
+    fn a_platform_alone_makes_build_options_non_default() {
+        let opts = BuildOptions {
+            platform: Some("linux/arm64".to_string()),
+            ..Default::default()
+        };
+        assert!(!opts.is_default());
+        assert!(opts.requires_buildkit());
+        assert_eq!(
+            opts.to_docker_args(),
+            vec!["--platform".to_string(), "linux/arm64".to_string()]
+        );
+        assert!(BuildOptions::default().is_default());
     }
 
     #[test]
