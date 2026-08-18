@@ -2109,6 +2109,59 @@
         "tempdir": true
       },
       "notes": "The absolute half of [#593](https://github.com/get2knowio/deacon/issues/593), landing with the fix beside the `live-differential` `case-build-upstream-platform-image-config` that pins the AGREEMENT.\n\n`chan-image` asserts the `devcontainer.metadata` label rather than the image's architecture, and the choice is the point. The label is written by the very pass that was broken: deacon builds the base, then runs a SECOND build whose `FROM` names it in order to stamp the label, and that second build carried no `--platform`. BuildKit resolved the base for the HOST platform, missed in the local store, and fell through to a registry that had never heard of `deacon-build-run:*`. So the label is not incidental evidence that a build happened — it is the output of the exact pass that failed, and it disappears if that pass regresses. The architecture would be the more obvious assertion and a weaker one; `chan-image` does not carry it, and growing the channel to reach a fixture is what the suite's own rule warns against.\n\nTHE PLATFORM VALUE IS ARCH-RELATIVE, exactly as its sibling's is, and for the same reason: the bug only appears when the requested platform is FOREIGN, since a native request is satisfied by the local store. `linux/arm64` is foreign where this gates (`ubuntu-latest`, x86_64) and native on an aarch64 developer machine, where the case therefore proves nothing. MEASURED on aarch64 with the mirror value `linux/amd64`: before the fix deacon exited 1 with `pull access denied` for `docker.io/library/deacon-build-run:<n>-0`; after it, exit 0, `.Architecture` == `amd64`, and this label byte-identical to the one a build with no `--platform` writes.\n\nScope worth recording, because the issue's title understates it: the discriminator is not the configuration SHAPE but whether a second build runs at all. A Dockerfile configuration carrying `containerEnv` fails identically, and so does any configuration with Features — measured, all three, before and after. `fx-build-flags` escapes only because it declares nothing to record, so the stamp pass returns early and no second build happens, which is why `case-build-platform-flag` stayed green throughout."
+    },
+    {
+      "id": "case-build-json-error-document-on-failure",
+      "behaviors": [
+        "bhv-build-json-error-document"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "fs-heavy",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-lockfile-unreadable"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error"
+            }
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-build",
+          "assertion": {
+            "contains": "Failed to read lockfile"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Closes the scenario debt [#594](https://github.com/get2knowio/deacon/issues/594) left behind: `build --output-format json` printed a result document on SUCCESS and nothing at all on failure, so a caller doing `| jq -r .outcome` got an empty stdout exactly when it most needed the message — while a perfectly good diagnostic sat on stderr, and while `deacon up` and the reference CLI both printed one either way.\n\nThe failure class is chosen, not convenient. `build`'s PRE-FLIGHT refusals already printed the document before the fix — `--push` with `--output`, the Compose flags, the BuildKit gate — so a case built on one of those would have passed against the defect. This one is detected while doing work (reading a lockfile off disk, after the configuration has loaded), which is the half a caller cannot route around: a pre-flight refusal is a bug in their own command line, a work failure is the thing they asked to be told about.\n\nThree channels, each carrying something the others cannot. `chan-exit-code` was already correct before the fix and is here to keep it correct. `chan-structured-output` needs stdout to PARSE as JSON at all, which is the whole defect — the harness reports `structured output not captured` when it does not, so an empty stdout fails here rather than passing vacuously. `chan-stdout: contains` pins that the document carries the actual REASON: `{\"outcome\":\"error\"}` with an empty message would satisfy the other two while telling the user nothing, and that is the cheapest wrong implementation of this fix. A substring rather than the whole message on purpose — the message names an absolute path inside the case's own temp workspace.\n\nMEASURED at oracle 0.87.0 across four failure classes before the fix (a Dockerfile `RUN` that exits non-zero, an image reference no registry serves, this unparseable lockfile, and a workspace with no `devcontainer.json`): both CLIs exit 1 in all four, the reference printed a document every time and deacon printed none. All four now print one. This is `spec-expectation` rather than `live-differential` because the two CLIs word every one of those messages differently — a differential would report that disagreement forever and need a tolerance to say nothing more than that they phrase it differently.\n\n`fs-heavy` and therefore HERMETIC, matching `case-build-lockfile-unreadable-rejected` on the same fixture: the refusal happens while reading a local file, before any registry or daemon contact, so a regression that moved it after the Feature fetch would fail to reach the assertion at all inside `parity_hermetic`'s network namespace."
     }
   ]
 }

@@ -445,6 +445,66 @@ pub struct ContextFile {
     pub mtime: u64,
 }
 
+/// A failure whose `{"outcome": "error", …}` result document has already been
+/// written, carrying the message the binary's own top-level handler should print.
+///
+/// `execute_build` renders one document for every failure (#594), and the
+/// pre-flight refusals compose a RICHER one than an error chain can — each names
+/// what to do about it in `description`. So they write their own and mark it, and
+/// the wrapper leaves them alone rather than printing a second, worse document
+/// after the good one. Two documents on stdout would break the output contract as
+/// surely as zero did.
+///
+/// The marker IS the message rather than a context wrapped around one, so that
+/// nothing internal reaches the user: an `anyhow` context would make the
+/// top-level handler print a `Caused by: result document already written` line
+/// under an otherwise clean text-mode diagnostic.
+#[derive(Debug)]
+struct ReportedFailure(String);
+
+impl std::fmt::Display for ReportedFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ReportedFailure {}
+
+/// Write a build failure the way the requested output format asks for.
+///
+/// JSON mode puts the document on STDOUT (it is the command's result) and text
+/// mode puts the diagnostic on stderr — the output-streams contract, unchanged.
+fn write_error_document(output_format: &OutputFormat, error: &result::BuildError) {
+    if matches!(output_format, OutputFormat::Json) {
+        match serde_json::to_string(error) {
+            Ok(json) => println!("{}", json),
+            // Nothing in `BuildError` can fail to serialize, but swallowing the
+            // failure would leave stdout empty, which is the defect this exists to
+            // fix. Say so rather than say nothing.
+            Err(e) => eprintln!("Error: could not render the result document: {}", e),
+        }
+    } else {
+        eprintln!("Error: {}", error.message());
+        if let Some(desc) = error.description() {
+            eprintln!("{}", desc);
+        }
+    }
+}
+
+/// Write a pre-flight refusal's document and return the error to propagate.
+///
+/// One helper rather than four copies: every refusal has to print the same shape
+/// in the same two modes and mark it as printed, and the copies had already
+/// drifted apart in whether they used `?` on the serialization.
+fn report_and_fail(
+    output_format: &OutputFormat,
+    error: result::BuildError,
+    cause: impl Into<String>,
+) -> anyhow::Error {
+    write_error_document(output_format, &error);
+    anyhow!(ReportedFailure(cause.into()))
+}
+
 /// Why BuildKit will not run this build's PRIMARY invocation, if it will not.
 ///
 /// Distinct from [`deacon_core::build::buildkit::is_buildkit_available`], which
@@ -496,25 +556,16 @@ async fn validate_buildkit_requirement(
     disabled_by: Option<&str>,
 ) -> Result<()> {
     if let Some(cause) = disabled_by {
-        let error = result::BuildError::with_description(
-            format!("BuildKit is required for {}", flag_name),
-            format!(
-                "{} disables BuildKit; remove it or remove {}",
-                cause, flag_name
+        return Err(report_and_fail(
+            output_format,
+            result::BuildError::with_description(
+                format!("BuildKit is required for {}", flag_name),
+                format!(
+                    "{} disables BuildKit; remove it or remove {}",
+                    cause, flag_name
+                ),
             ),
-        );
-        if matches!(output_format, OutputFormat::Json) {
-            println!("{}", serde_json::to_string(&error)?);
-        } else {
-            eprintln!("Error: {}", error.message());
-            if let Some(desc) = error.description() {
-                eprintln!("{}", desc);
-            }
-        }
-        return Err(anyhow!(
-            "BuildKit is required for {} but {} disabled it",
-            feature_name,
-            cause
+            format!("BuildKit is required for {feature_name} but {cause} disabled it"),
         ));
     }
     match deacon_core::build::buildkit::is_buildkit_available().await {
@@ -522,21 +573,14 @@ async fn validate_buildkit_requirement(
             // BuildKit available, proceed
             Ok(())
         }
-        Ok(false) => {
-            let error = result::BuildError::with_description(
+        Ok(false) => Err(report_and_fail(
+            output_format,
+            result::BuildError::with_description(
                 format!("BuildKit is required for {}", flag_name),
                 format!("Enable BuildKit or remove {} flag", flag_name),
-            );
-            if matches!(output_format, OutputFormat::Json) {
-                println!("{}", serde_json::to_string(&error)?);
-            } else {
-                eprintln!("Error: {}", error.message());
-                if let Some(desc) = error.description() {
-                    eprintln!("{}", desc);
-                }
-            }
-            Err(anyhow!("BuildKit is required for {}", feature_name))
-        }
+            ),
+            format!("BuildKit is required for {feature_name}"),
+        )),
         Err(e) => {
             // Failed to detect BuildKit
             Err(anyhow!("Failed to detect BuildKit: {}", e))
@@ -572,7 +616,45 @@ async fn validate_buildkit_requirement(
 /// }
 /// ```
 #[instrument(skip(args))]
-pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
+pub async fn execute_build(args: BuildArgs) -> Result<()> {
+    let output_format = args.output_format.clone();
+    let outcome = execute_build_inner(args).await;
+    if let Err(err) = &outcome {
+        // #594: a failure gets a result document too. Before this, `build
+        // --output-format json` printed one on success and NOTHING on failure,
+        // so a caller doing `| jq -r .outcome` got an empty stdout exactly when
+        // it most needed the message — while the diagnostic sat on stderr, and
+        // while `deacon up` and the reference CLI both printed one either way.
+        //
+        // Only in JSON mode. In text mode the diagnostic is already on stderr,
+        // and the binary's own top-level handler renders the chain; printing
+        // here as well would say everything twice.
+        if matches!(output_format, OutputFormat::Json)
+            && !err.chain().any(|e| e.is::<ReportedFailure>())
+        {
+            write_error_document(&output_format, &error_document(err));
+        }
+    }
+    outcome
+}
+
+/// Render an arbitrary build failure as the result document.
+///
+/// `message` is the outermost context — what deacon was doing — and
+/// `description` is the chain beneath it, which is where the actionable detail
+/// lives (`Configuration file not found: …`, a builder's stderr, a lockfile's
+/// parse error). Neither alone is enough: the outermost is too vague to act on
+/// and the innermost has lost the operation it belongs to.
+fn error_document(err: &anyhow::Error) -> result::BuildError {
+    let causes: Vec<String> = err.chain().skip(1).map(|c| c.to_string()).collect();
+    if causes.is_empty() {
+        result::BuildError::new(err.to_string())
+    } else {
+        result::BuildError::with_description(err.to_string(), causes.join(": "))
+    }
+}
+
+async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
     info!("Starting build command execution");
     debug!("Build args: {:?}", args);
 
@@ -618,19 +700,14 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
 
     // Validate push/output mutual exclusivity early
     if args.push && args.output.is_some() {
-        let error = result::BuildError::with_description(
-            "Cannot use both --push and --output",
-            "They are mutually exclusive. Use --push to push to registry or --output to export locally",
-        );
-        if matches!(args.output_format, OutputFormat::Json) {
-            println!("{}", serde_json::to_string(&error)?);
-        } else {
-            eprintln!("Error: {}", error.message());
-            if let Some(desc) = error.description() {
-                eprintln!("{}", desc);
-            }
-        }
-        return Err(anyhow!("Push and output are mutually exclusive"));
+        return Err(report_and_fail(
+            &args.output_format,
+            result::BuildError::with_description(
+                "Cannot use both --push and --output",
+                "They are mutually exclusive. Use --push to push to registry or --output to export locally",
+            ),
+            "Push and output are mutually exclusive",
+        ));
     }
 
     // Whether something explicitly switched BuildKit off for the primary build.
@@ -693,24 +770,16 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
 
         for (flag_active, flag_name) in unsupported_flags {
             if flag_active {
-                let error = result::BuildError::with_description(
-                    format!(
-                        "Cannot use {} with Docker Compose configurations",
-                        flag_name
+                return Err(report_and_fail(
+                    &args.output_format,
+                    result::BuildError::with_description(
+                        format!(
+                            "Cannot use {} with Docker Compose configurations",
+                            flag_name
+                        ),
+                        "Docker Compose does not support this flag during build",
                     ),
-                    "Docker Compose does not support this flag during build",
-                );
-                if matches!(args.output_format, OutputFormat::Json) {
-                    println!("{}", serde_json::to_string(&error)?);
-                } else {
-                    eprintln!("Error: {}", error.message());
-                    if let Some(desc) = error.description() {
-                        eprintln!("{}", desc);
-                    }
-                }
-                return Err(anyhow!(
-                    "{} is not supported with Docker Compose configurations",
-                    flag_name
+                    format!("{flag_name} is not supported with Docker Compose configurations"),
                 ));
             }
         }
