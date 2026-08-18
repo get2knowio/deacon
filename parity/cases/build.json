@@ -1990,6 +1990,125 @@
         "tempdir": true
       },
       "notes": "RED ON PURPOSE — [#593](https://github.com/get2knowio/deacon/issues/593). `--platform` on an IMAGE-reference configuration, as opposed to the Dockerfile configuration `case-build-platform-flag` already covers. The two take different code paths in deacon and only one of them works.\n\nMEASURED at oracle 0.87.0 on `fx-up-basic`, on an aarch64 host, with `--platform linux/amd64` (foreign there): the reference exits 0 and produces a genuine amd64 image (`docker inspect --format '{{.Architecture}}'` says `amd64`). deacon exits 1 with `failed to resolve source metadata for docker.io/library/deacon-build-run:<n>-0: pull access denied`. deacon builds the base as a local intermediate tag and then does `FROM deacon-build-run:<n>-0` under `--platform`; the local tag exists only for the host platform, so BuildKit goes looking for the foreign variant in a registry that has never heard of it. The Dockerfile path does not chain that way and cross-builds correctly — VERIFIED in the same session, same host, `--platform linux/amd64` on `fx-build-flags` exits 0 and produces an amd64 image.\n\nTHE PLATFORM VALUE IS ARCH-RELATIVE AND THE CASE IS ONLY MEANINGFUL WHERE THE REQUESTED PLATFORM IS FOREIGN. It is written `linux/arm64` because the lane it runs in — the nightly, on `ubuntu-latest` — is x86_64, where arm64 is the foreign one; on an aarch64 developer machine this case is native and therefore vacuous, and the measurement above is the mirror image of it. No emulation is required either way: the fixture is `{\"image\": \"alpine:3.19\"}` with no Features and no `RUN`, so nothing foreign is ever EXECUTED — the failure is at reference resolution, before any instruction runs. Recorded because a case that is vacuous on some substrates and not others must say so out loud.\n\nThe exit code alone, for the same reason as the sibling above: the image NAMES differ between the two CLIs by construction, so a document or image comparison would diverge on something this case is not about. The `spec-expectation` sibling that pins the produced image's architecture lands with the fix.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, 'should succeed (image) with supported --platform'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5."
+    },
+    {
+      "id": "case-build-buildkit-never-platform-refused-spec",
+      "behaviors": [
+        "bhv-build-platform-requires-buildkit"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--buildkit",
+            "never",
+            "--platform",
+            "linux/amd64",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error",
+              "message": "BuildKit is required for --platform",
+              "description": "--buildkit never disables BuildKit; remove it or remove --platform"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The WORDING half of [#592](https://github.com/get2knowio/deacon/issues/592), which its `live-differential` sibling `case-build-upstream-buildkit-never-platform-refused` deliberately cannot assert: the two CLIs word the refusal differently (`--platform or --push require BuildKit enabled.` against deacon's), so a differential on the document would report that disagreement forever. The sibling pins that the two AGREE on refusing; this pins WHAT deacon says.\n\nThe `description` is asserted rather than left free because it is the part that tells the user which of two very different situations they are in. deacon has two refusals behind one message: BuildKit is absent from the host, or BuildKit is present and something switched it off. Naming the switch (`--buildkit never`, or `DOCKER_BUILDKIT=0`) is the difference between an actionable message and `Enable BuildKit`, which is advice the user has already followed.\n\nHERMETIC, and this one is safe to claim — unlike the two Compose refusals in this file, whose hermetic claim was wrong and had to be corrected. The difference is structural, not a matter of degree: `buildkit_disabled` reads the flag and one environment variable and performs NO I/O, and it is consulted before `is_buildkit_available` (which does shell out) and before the configuration is loaded. There is no probe to answer differently on a machine that happens to have a daemon. Verified all the same: with `DOCKER_BUILDKIT=0` and no flag, the same refusal names `DOCKER_BUILDKIT=0` instead, which only the short-circuit can produce.\n\nMined from the reference's own e2e suite (`src/test/cli.build.test.ts` at v0.87.0, 'should fail with BuildKit never and --platform'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 5; landed with the fix."
+    },
+    {
+      "id": "case-build-platform-image-config-metadata",
+      "behaviors": [
+        "bhv-build-platform-image-config"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--platform",
+            "linux/arm64",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "labels": {
+                "devcontainer.metadata": "[{\"containerEnv\":{\"CONF_TOKEN\":\"us5\"}}]"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The absolute half of [#593](https://github.com/get2knowio/deacon/issues/593), landing with the fix beside the `live-differential` `case-build-upstream-platform-image-config` that pins the AGREEMENT.\n\n`chan-image` asserts the `devcontainer.metadata` label rather than the image's architecture, and the choice is the point. The label is written by the very pass that was broken: deacon builds the base, then runs a SECOND build whose `FROM` names it in order to stamp the label, and that second build carried no `--platform`. BuildKit resolved the base for the HOST platform, missed in the local store, and fell through to a registry that had never heard of `deacon-build-run:*`. So the label is not incidental evidence that a build happened — it is the output of the exact pass that failed, and it disappears if that pass regresses. The architecture would be the more obvious assertion and a weaker one; `chan-image` does not carry it, and growing the channel to reach a fixture is what the suite's own rule warns against.\n\nTHE PLATFORM VALUE IS ARCH-RELATIVE, exactly as its sibling's is, and for the same reason: the bug only appears when the requested platform is FOREIGN, since a native request is satisfied by the local store. `linux/arm64` is foreign where this gates (`ubuntu-latest`, x86_64) and native on an aarch64 developer machine, where the case therefore proves nothing. MEASURED on aarch64 with the mirror value `linux/amd64`: before the fix deacon exited 1 with `pull access denied` for `docker.io/library/deacon-build-run:<n>-0`; after it, exit 0, `.Architecture` == `amd64`, and this label byte-identical to the one a build with no `--platform` writes.\n\nScope worth recording, because the issue's title understates it: the discriminator is not the configuration SHAPE but whether a second build runs at all. A Dockerfile configuration carrying `containerEnv` fails identically, and so does any configuration with Features — measured, all three, before and after. `fx-build-flags` escapes only because it declares nothing to record, so the stamp pass returns early and no second build happens, which is why `case-build-platform-flag` stayed green throughout."
     }
   ]
 }

@@ -445,12 +445,78 @@ pub struct ContextFile {
     pub mtime: u64,
 }
 
-/// Helper function to validate BuildKit availability with consistent error handling
+/// Why BuildKit will not run this build's PRIMARY invocation, if it will not.
+///
+/// Distinct from [`deacon_core::build::buildkit::is_buildkit_available`], which
+/// asks whether the host HAS BuildKit. Both questions have to be answered, and
+/// answering only the first is what let `--buildkit never --platform <arch>`
+/// build for the host architecture and exit 0 ([#592]).
+///
+/// It is also distinct from [`should_use_buildkit`], which cannot be reused here:
+/// that returns `false` both when the user disabled BuildKit and when they simply
+/// did not ask for it, and the second case still runs BuildKit on any modern
+/// Docker — the primary build sets no `DOCKER_BUILDKIT` at all and the daemon's
+/// own default applies. Gating on it would refuse the ordinary
+/// `deacon build --platform linux/amd64`, which works.
+///
+/// So the question this answers is narrower and decidable: did something
+/// EXPLICITLY turn BuildKit off?
+///
+/// [#592]: https://github.com/get2knowio/deacon/issues/592
+fn buildkit_disabled(buildkit_option: Option<&BuildKitOption>) -> Option<&'static str> {
+    if matches!(buildkit_option, Some(BuildKitOption::Never)) {
+        return Some("--buildkit never");
+    }
+    // `--buildkit auto` and an unset flag both defer to the environment, and the
+    // primary build passes that environment through untouched.
+    match std::env::var("DOCKER_BUILDKIT") {
+        Ok(value) if value == "0" || value.eq_ignore_ascii_case("false") => {
+            Some("DOCKER_BUILDKIT=0")
+        }
+        _ => None,
+    }
+}
+
+/// Helper function to validate BuildKit availability with consistent error handling.
+///
+/// `disabled_by` is `Some(cause)` when BuildKit is present but switched off for
+/// this build. Only the flags the PRIMARY build carries are gated that way —
+/// `--platform`, which the legacy builder ignores while reporting success, and
+/// `--cache-to`, which it rejects with a bare `unknown flag`. `--push` and
+/// `--output` are deliberately NOT gated: single-platform builds defer both to
+/// their own pass ([`defers_publish`]), which runs `docker push` / `docker buildx
+/// build` regardless of how the primary build ran, so they work under
+/// `--buildkit never` today and refusing them would break a working invocation to
+/// no end. The reference refuses `--push` there; deacon honouring it is a superset
+/// in the direction that gives the caller what they asked for.
 async fn validate_buildkit_requirement(
     output_format: &OutputFormat,
     feature_name: &str,
     flag_name: &str,
+    disabled_by: Option<&str>,
 ) -> Result<()> {
+    if let Some(cause) = disabled_by {
+        let error = result::BuildError::with_description(
+            format!("BuildKit is required for {}", flag_name),
+            format!(
+                "{} disables BuildKit; remove it or remove {}",
+                cause, flag_name
+            ),
+        );
+        if matches!(output_format, OutputFormat::Json) {
+            println!("{}", serde_json::to_string(&error)?);
+        } else {
+            eprintln!("Error: {}", error.message());
+            if let Some(desc) = error.description() {
+                eprintln!("{}", desc);
+            }
+        }
+        return Err(anyhow!(
+            "BuildKit is required for {} but {} disabled it",
+            feature_name,
+            cause
+        ));
+    }
     match deacon_core::build::buildkit::is_buildkit_available().await {
         Ok(true) => {
             // BuildKit available, proceed
@@ -567,24 +633,30 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
         return Err(anyhow!("Push and output are mutually exclusive"));
     }
 
+    // Whether something explicitly switched BuildKit off for the primary build.
+    // Consulted only by the two flags that invocation carries (#592).
+    let buildkit_off = buildkit_disabled(args.buildkit.as_ref());
+
     // Validate BuildKit requirements for --push
     if args.push {
-        validate_buildkit_requirement(&args.output_format, "push", "--push").await?;
+        validate_buildkit_requirement(&args.output_format, "push", "--push", None).await?;
     }
 
     // Validate BuildKit requirements for --output
     if args.output.is_some() {
-        validate_buildkit_requirement(&args.output_format, "output", "--output").await?;
+        validate_buildkit_requirement(&args.output_format, "output", "--output", None).await?;
     }
 
     // Validate BuildKit requirements for --platform
     if args.platform.is_some() {
-        validate_buildkit_requirement(&args.output_format, "platform", "--platform").await?;
+        validate_buildkit_requirement(&args.output_format, "platform", "--platform", buildkit_off)
+            .await?;
     }
 
     // Validate BuildKit requirements for --cache-to
     if !args.cache_to.is_empty() {
-        validate_buildkit_requirement(&args.output_format, "cache-to", "--cache-to").await?;
+        validate_buildkit_requirement(&args.output_format, "cache-to", "--cache-to", buildkit_off)
+            .await?;
     }
 
     // Load configuration using shared helper for consistency with up/exec
@@ -901,7 +973,20 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
                     &workspace_folder,
                     &config_path,
                     host_ca_set.as_ref(),
-                    args.build_output_mode,
+                    // The output mode makes feature-install steps render the way
+                    // `up` renders them; the platform is load-bearing rather than
+                    // cosmetic. This build's `FROM` names the image the primary
+                    // build just produced, so it has to ask for the same platform
+                    // that image was built for — otherwise BuildKit resolves the
+                    // base for the HOST platform, misses in the local store, and
+                    // falls through to a registry that has never heard of
+                    // `deacon-build-run:*` (#593). Cache and builder options stay
+                    // default here.
+                    deacon_core::build::BuildOptions {
+                        output_mode: args.build_output_mode,
+                        platform: args.platform.clone(),
+                        ..Default::default()
+                    },
                     lockfile_policy,
                 )
                 .await?;
@@ -953,6 +1038,7 @@ pub async fn execute_build(mut args: BuildArgs) -> Result<()> {
                 } else {
                     None
                 },
+                args.platform.as_deref(),
             )
             .await?;
             // Keep the reported labels describing the image that was actually produced;
@@ -1690,6 +1776,9 @@ async fn execute_compose_build_with_features(
         raw_config,
         &feature_build.resolved_features,
         None,
+        // Compose rejects `--platform` upstream of this call, so there is never a
+        // platform to inherit here.
+        None,
     )
     .await?;
     if let Some(label) = label {
@@ -1932,11 +2021,10 @@ async fn apply_features_and_lockfile(
     workspace_folder: &Path,
     config_path: &Path,
     host_ca_set: Option<&CorporateCaSet>,
-    build_output_mode: deacon_core::build::BuildOutputMode,
+    build_options: deacon_core::build::BuildOptions,
     policy: LockfilePolicy,
 ) -> Result<(String, Option<PathBuf>, Vec<ResolvedFeature>)> {
     use crate::commands::up::features_build::build_image_with_features;
-    use deacon_core::build::BuildOptions;
     use deacon_core::container::ContainerIdentity;
 
     info!(
@@ -1955,13 +2043,6 @@ async fn apply_features_and_lockfile(
     // with `up`'s feature-extended images on the same host.
     let mut identity = ContainerIdentity::new(workspace_folder, &synth_config);
     identity.workspace_hash = format!("{}-build", identity.workspace_hash);
-
-    // Carry the resolved build-output mode so feature-install steps render the
-    // same way `up` does (cache/builder options stay default here).
-    let build_options = BuildOptions {
-        output_mode: build_output_mode,
-        ..Default::default()
-    };
 
     let feature_build = build_image_with_features(
         &synth_config,
@@ -2022,6 +2103,7 @@ async fn stamp_devcontainer_metadata_label(
     raw_config: &DevContainerConfig,
     features: &[ResolvedFeature],
     export: Option<&str>,
+    platform: Option<&str>,
 ) -> Result<(String, Option<String>)> {
     // `FROM` must name a tag: a bare `sha256:` digest makes BuildKit resolve it as
     // the remote repository `docker.io/library/sha256` (#391).
@@ -2083,6 +2165,14 @@ async fn stamp_devcontainer_metadata_label(
                 build_args.push("type=docker".to_string());
             }
         }
+    }
+    // The `FROM` names the image the caller just built. When that build targeted a
+    // platform, this one must name it too: BuildKit otherwise resolves the base for
+    // the HOST platform, misses in the local store, and reports a registry
+    // authorization failure for a repository deacon invented (#593).
+    if let Some(platform) = platform {
+        build_args.push("--platform".to_string());
+        build_args.push(platform.to_string());
     }
     build_args.extend([
         // The `FROM` names an image that exists only in the local daemon store, so
@@ -3358,6 +3448,49 @@ mod tests {
         // Test None with no env var (should default to false)
         temp_env::with_var_unset("DOCKER_BUILDKIT", || {
             assert!(!should_use_buildkit(None));
+        });
+    }
+
+    /// `buildkit_disabled` answers "was BuildKit switched OFF", which is not the
+    /// question `should_use_buildkit` answers (#592).
+    #[test]
+    fn buildkit_disabled_reports_only_an_explicit_off_switch() {
+        // `--buildkit never` wins over anything the environment says.
+        temp_env::with_var("DOCKER_BUILDKIT", Some("1"), || {
+            assert_eq!(
+                buildkit_disabled(Some(&BuildKitOption::Never)),
+                Some("--buildkit never")
+            );
+        });
+
+        // An explicitly falsey environment disables it for `auto` and for no flag
+        // at all, because the primary build passes that environment through.
+        for value in ["0", "false", "FALSE"] {
+            temp_env::with_var("DOCKER_BUILDKIT", Some(value), || {
+                assert_eq!(
+                    buildkit_disabled(Some(&BuildKitOption::Auto)),
+                    Some("DOCKER_BUILDKIT=0"),
+                    "DOCKER_BUILDKIT={value} should read as disabled"
+                );
+                assert_eq!(buildkit_disabled(None), Some("DOCKER_BUILDKIT=0"));
+            });
+        }
+
+        // The case that separates this from `should_use_buildkit`, and the reason
+        // the gate cannot reuse it: nothing asked for BuildKit and nothing turned
+        // it off, so the daemon's own default applies — which on any modern Docker
+        // is BuildKit. `should_use_buildkit(None)` is FALSE here; refusing
+        // `--platform` on that basis would break the ordinary `deacon build
+        // --platform linux/amd64`, which works.
+        temp_env::with_var_unset("DOCKER_BUILDKIT", || {
+            assert!(!should_use_buildkit(None));
+            assert_eq!(buildkit_disabled(None), None);
+            assert_eq!(buildkit_disabled(Some(&BuildKitOption::Auto)), None);
+        });
+
+        temp_env::with_var("DOCKER_BUILDKIT", Some("1"), || {
+            assert_eq!(buildkit_disabled(None), None);
+            assert_eq!(buildkit_disabled(Some(&BuildKitOption::Auto)), None);
         });
     }
 
