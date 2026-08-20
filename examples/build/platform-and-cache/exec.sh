@@ -13,7 +13,24 @@ cleanup() {
 	docker images --filter "label=example.type=platform-and-cache" -q | xargs -r docker rmi -f >/dev/null 2>&1 || true
 }
 
-trap cleanup EXIT
+# Runtime artifacts `deacon up` / `deacon build` may write into this example's
+# workspace. Removing only these generated paths leaves the directory exactly as
+# committed (#179); the committed `.devcontainer/` config is never touched.
+clean_workspace_artifacts() {
+	rm -rf \
+		"${SCRIPT_DIR}/.devcontainer-state" \
+		"${SCRIPT_DIR}/.devcontainer/build-cache" \
+		"${SCRIPT_DIR}/.deacon" \
+		"${SCRIPT_DIR}/.deacon-temp-build"
+	# The lockfile sits beside the config and gains a leading dot when the
+	# config basename has one (`.devcontainer.json` -> `.devcontainer-lock.json`).
+	rm -f \
+		"${SCRIPT_DIR}/devcontainer-lock.json" \
+		"${SCRIPT_DIR}/.devcontainer-lock.json" \
+		"${SCRIPT_DIR}/.devcontainer/devcontainer-lock.json" \
+		"${SCRIPT_DIR}/.devcontainer/.devcontainer-lock.json"
+}
+trap 'cleanup; clean_workspace_artifacts' EXIT
 
 cd "$SCRIPT_DIR"
 

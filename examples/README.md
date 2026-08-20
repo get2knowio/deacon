@@ -2,6 +2,22 @@
 
 Each subdirectory under `examples/` is fully self‑contained: copy or `cd` into it and run the shown commands without referencing assets elsewhere in the repo.
 
+### Self-cleaning contract
+
+Every `exec.sh` leaves its directory exactly as committed. Container-backed
+examples clean up their containers, images and volumes, and every `up`/`build`
+script additionally arms an `EXIT` trap (`clean_workspace_artifacts`) that removes
+the runtime artifacts deacon can write into the workspace — `.devcontainer-state/`,
+`.devcontainer/build-cache/`, `.deacon/`, `.deacon-temp-build/`, and the generated
+`devcontainer-lock.json` (which takes the config's leading dot, so a workspace-root
+`.devcontainer.json` yields `.devcontainer-lock.json`). Because it runs from a trap,
+a failing scenario cleans up too.
+
+The trap removes only those generated paths — never the committed
+`.devcontainer/` config or fixtures. Each script carries its own copy of the
+function on purpose: there is deliberately **no** shared sourced helper library,
+so a directory stays copy-and-run self-contained.
+
 ### Status: which examples pass today
 
 Several of the newer examples are intentionally designed as **canaries** — they exercise spec-mandated behavior that deacon doesn't fully implement yet. If you run them today and they fail, it's by design.

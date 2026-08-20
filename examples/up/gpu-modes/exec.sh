@@ -24,6 +24,25 @@ extract_container_id() {
 	printf '%s' "$1" | "$PYTHON_BIN" -c 'import json, sys; data = json.load(sys.stdin); print(data.get("containerId", ""))'
 }
 
+# Runtime artifacts `deacon up` / `deacon build` may write into this example's
+# workspace. Removing only these generated paths leaves the directory exactly as
+# committed (#179); the committed `.devcontainer/` config is never touched.
+clean_workspace_artifacts() {
+	rm -rf \
+		"${SCRIPT_DIR}/.devcontainer-state" \
+		"${SCRIPT_DIR}/.devcontainer/build-cache" \
+		"${SCRIPT_DIR}/.deacon" \
+		"${SCRIPT_DIR}/.deacon-temp-build"
+	# The lockfile sits beside the config and gains a leading dot when the
+	# config basename has one (`.devcontainer.json` -> `.devcontainer-lock.json`).
+	rm -f \
+		"${SCRIPT_DIR}/devcontainer-lock.json" \
+		"${SCRIPT_DIR}/.devcontainer-lock.json" \
+		"${SCRIPT_DIR}/.devcontainer/devcontainer-lock.json" \
+		"${SCRIPT_DIR}/.devcontainer/.devcontainer-lock.json"
+}
+trap clean_workspace_artifacts EXIT
+
 cd "$SCRIPT_DIR"
 
 # README: "Explicit CPU-Only Runs (Mode: none)" — default behavior, no GPU requests

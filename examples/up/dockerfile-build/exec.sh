@@ -34,6 +34,33 @@ cleanup_container() {
 	fi
 }
 
+# Runtime artifacts `deacon up` / `deacon build` may write into this example's
+# workspace. Removing only these generated paths leaves the directory exactly as
+# committed (#179); the committed `.devcontainer/` config is never touched.
+clean_workspace_artifacts() {
+	rm -rf \
+		"${SCRIPT_DIR}/.devcontainer-state" \
+		"${SCRIPT_DIR}/.devcontainer/build-cache" \
+		"${SCRIPT_DIR}/.deacon" \
+		"${SCRIPT_DIR}/.deacon-temp-build"
+	# The lockfile sits beside the config and gains a leading dot when the
+	# config basename has one (`.devcontainer.json` -> `.devcontainer-lock.json`).
+	rm -f \
+		"${SCRIPT_DIR}/devcontainer-lock.json" \
+		"${SCRIPT_DIR}/.devcontainer-lock.json" \
+		"${SCRIPT_DIR}/.devcontainer/devcontainer-lock.json" \
+		"${SCRIPT_DIR}/.devcontainer/.devcontainer-lock.json"
+}
+
+# CACHE_DIR is created further down; clearing it from the trap (rather than at the
+# end of the script) means a failed scenario still removes it.
+cleanup_cache_dir() {
+	if [ -n "${CACHE_DIR:-}" ]; then
+		rm -rf "$CACHE_DIR"
+	fi
+}
+trap 'cleanup_cache_dir; clean_workspace_artifacts' EXIT
+
 cd "$SCRIPT_DIR"
 
 echo "== Basic Build and Up ==" >&2
@@ -67,5 +94,3 @@ out_cache_from="$(run "$DEACON_BIN" up --workspace-folder "$SCRIPT_DIR" --remove
 	--cache-from "type=local,src=${CACHE_DIR}" \
 	"$@")"
 cleanup_container "$(extract_container_id "$out_cache_from")"
-
-rm -rf "$CACHE_DIR"

@@ -64,6 +64,12 @@ artifacts/nextest/full-timing.json
 # runs. The intentionally-committed lockfile-demo lives at an example root (not
 # in a .devcontainer/ dir), so this scoped rule leaves it tracked.
 **/.devcontainer/devcontainer-lock.json
+# The lockfile takes the config's leading dot: a workspace-root `.devcontainer.json`
+# yields a workspace-root `.devcontainer-lock.json` (see `lockfile_path_for_config`),
+# which the scoped rule above does not match. That spelling is ALWAYS generated —
+# nothing under examples/ commits one — so it is ignored unscoped, with the parity
+# fixture exemption below covering the one place it is version-controlled INPUT.
+**/.devcontainer-lock.json
 # ...but a parity fixture's lockfile is test INPUT, not a generated artifact:
 # a case asserts what the lockfile makes the CLI report. Without this exemption
 # `git add -A` skips it silently, the fixture works locally (the file is in the
@@ -77,6 +83,7 @@ artifacts/nextest/full-timing.json
 # so the rule looked like it was working right up until the next NEW fixture
 # lockfile was silently skipped. Keep this glob in step with the data root.
 !parity/fixtures/**/devcontainer-lock.json
+!parity/fixtures/**/.devcontainer-lock.json
 
 # Beads / Dolt files (added by bd init)
 .dolt/
