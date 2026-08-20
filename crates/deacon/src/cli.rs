@@ -276,7 +276,8 @@ pub enum Commands {
         /// Skip postAttach lifecycle phase
         #[arg(long)]
         skip_post_attach: bool,
-        /// Skip non-blocking commands (postStart & postAttach phases)
+        /// Stop after the lifecycle phase `waitFor` names (default:
+        /// updateContentCommand), skipping every phase after it (#604).
         #[arg(long)]
         skip_non_blocking_commands: bool,
         /// Default user environment probe mode when config omits userEnvProbe.
@@ -718,7 +719,8 @@ pub enum Commands {
         /// Skip postAttach lifecycle phase
         #[arg(long)]
         skip_post_attach: bool,
-        /// Skip non-blocking commands (postStart & postAttach phases)
+        /// Stop after the lifecycle phase `waitFor` names (default:
+        /// updateContentCommand), skipping every phase after it (#604).
         #[arg(long)]
         skip_non_blocking_commands: bool,
         /// Stop after updateContentCommand (prebuild mode)
