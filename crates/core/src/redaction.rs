@@ -516,16 +516,21 @@ impl<W: Write> Write for RedactingWriter<W> {
     fn flush(&mut self) -> io::Result<()> {
         // Process any remaining buffered content as a final line
         if !self.buffer.is_empty() {
-            let remaining: Vec<u8> = self.buffer.drain(..).collect();
+            // `mem::take` rather than `drain(..).collect()`: both empty the buffer, but the
+            // drain form allocates a second Vec for bytes we already own (clippy::drain_collect,
+            // denied as of the 1.98 toolchain). Taking the buffer also lets the non-UTF-8 arm
+            // recover the original bytes from the error, so the `.clone()` this used to need in
+            // order to keep them alive across `String::from_utf8` is gone too.
+            let remaining = std::mem::take(&mut self.buffer);
 
-            match String::from_utf8(remaining.clone()) {
+            match String::from_utf8(remaining) {
                 Ok(remaining_str) => {
                     let redacted =
                         redact_with_registry(&remaining_str, &self.config, &self.registry);
                     self.inner.write_all(redacted.as_bytes())?;
                 }
-                Err(_) => {
-                    self.inner.write_all(&remaining)?;
+                Err(err) => {
+                    self.inner.write_all(err.as_bytes())?;
                 }
             }
         }
