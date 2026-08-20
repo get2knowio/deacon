@@ -1062,6 +1062,9 @@ async fn install_features_for_compose(
         host_ca_set,
         cli,
         lockfile_policy,
+        // `up` records `devcontainer.metadata` on the CONTAINER it creates, not on
+        // this intermediate image, so it asks for no label here.
+        None,
     )
     .await?
     {
@@ -1093,6 +1096,7 @@ pub(crate) async fn resolve_compose_feature_image(
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
     lockfile_policy: LockfilePolicy,
+    metadata_raw_config: Option<&DevContainerConfig>,
 ) -> Result<Option<FeatureBuildOutput>> {
     // Nothing to install when features is missing or an empty object.
     let features_obj = match config.features().as_object() {
@@ -1147,6 +1151,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 host_ca_set,
                 cli,
                 lockfile_policy,
+                metadata_raw_config,
             )
             .await
             .with_context(|| {
@@ -1225,6 +1230,10 @@ pub(crate) async fn resolve_compose_feature_image(
                 host_ca_set,
                 cli,
                 lockfile_policy,
+                metadata_raw_config,
+                // A compose service's `build.args` are applied by compose itself
+                // when it renders the service; nothing extra to forward here.
+                &[],
             )
             .await
             .with_context(|| {

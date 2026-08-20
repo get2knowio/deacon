@@ -251,3 +251,103 @@ fn concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag() {
         );
     }
 }
+
+/// #595: the builder the user selected is the one that runs, so an exporter only
+/// a non-docker driver can serve is reachable.
+///
+/// deacon used to build the base to a daemon-local tag and then chain a Feature
+/// build and a metadata-stamp build that `FROM`ed it. A `docker-container` driver
+/// builder runs in an isolated BuildKit container that cannot read the daemon's
+/// image store, so deacon pinned `--builder default` to make the chain work — and
+/// that pin silently overrode the user's choice for EVERY build, taking OCI
+/// export, local cache export and multi-platform output with it. The chain is
+/// gone; the pin is gone with it.
+///
+/// `BUILDX_BUILDER` selects the builder for this invocation only; `docker buildx
+/// use` would mutate host-global state that concurrent tests share. Worth knowing,
+/// because the two are NOT equivalent to the Docker CLI: measured at CLI 29.7.2,
+/// plain `docker build` honours `BUILDX_BUILDER` but ignores `docker buildx use`
+/// and runs on the daemon's own "default" instance. Both routes are honoured now
+/// that the build goes through `docker buildx build`.
+///
+/// What this case can and cannot catch, stated because the difference is not
+/// obvious: on a daemon WITHOUT the containerd image store — the common case, and
+/// GitHub's runners — the old pinned pass could not serve `type=oci` at all and
+/// this fails outright. On a daemon WITH it (this repo's dev container) the docker
+/// driver can serve the exporter, so the assertion that survives is the weaker
+/// one: the build must report the builder it was told to use.
+#[test]
+fn build_honors_a_container_driver_builder_and_can_oci_export() {
+    let builder = format!("deacon-t595-{}", std::process::id());
+
+    let created = std::process::Command::new("docker")
+        .args([
+            "buildx",
+            "create",
+            "--name",
+            &builder,
+            "--driver",
+            "docker-container",
+        ])
+        .output();
+    match created {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            eprintln!(
+                "skipping: could not create a docker-container builder ({})",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+            return;
+        }
+        Err(e) => {
+            eprintln!("skipping: docker buildx unavailable ({e})");
+            return;
+        }
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    write_devcontainer(&temp_dir, "FROM alpine:3.19\nLABEL deacon.test=build-595\n");
+    let tar_path = temp_dir.path().join("oci-out.tar");
+
+    let output = Command::cargo_bin("deacon")
+        .unwrap()
+        .current_dir(&temp_dir)
+        .env("BUILDX_BUILDER", &builder)
+        .arg("build")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .arg("--output")
+        .arg(format!("type=oci,dest={}", tar_path.display()))
+        .arg("--output-format")
+        .arg("json")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let _ = std::process::Command::new("docker")
+        .args(["buildx", "rm", &builder])
+        .output();
+
+    if !output.status.success() && is_docker_unavailable(&stderr) {
+        eprintln!("skipping: docker unavailable ({})", stderr.trim());
+        return;
+    }
+
+    assert!(
+        output.status.success(),
+        "an OCI export on the selected container-driver builder must succeed; stderr:\n{stderr}"
+    );
+    // The builder identity is the whole point: a pinned `default` would report the
+    // docker driver here, and on a daemon without the containerd image store the
+    // export would have failed outright.
+    assert!(
+        stderr.contains(&builder),
+        "the build must run on the selected builder `{builder}`; stderr:\n{stderr}"
+    );
+    assert!(
+        tar_path.exists(),
+        "the --output build reported success but wrote no tar at {}",
+        tar_path.display()
+    );
+}

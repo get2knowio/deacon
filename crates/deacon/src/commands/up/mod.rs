@@ -483,20 +483,40 @@ pub(crate) async fn execute_up_with_runtime(
 
     // Build image from Dockerfile if needed (when no image specified but build object present)
     // T007: Pass build_options to apply cache-from/cache-to/buildx settings
+    //
+    // With Features declared, this build is deliberately NOT run here: the Feature
+    // stage is spliced onto the end of the user's own Dockerfile and both are built
+    // in one BuildKit invocation further down. Building the base to a daemon-local
+    // tag first and then `FROM`-ing it is what forced deacon to pin the
+    // docker-driver builder, since no other driver can read that store (#391/#595).
+    let features_declared = config
+        .features()
+        .as_object()
+        .is_some_and(|features| !features.is_empty());
+    let mut deferred_dockerfile_build = None;
     if config.image.is_none() && !config.uses_compose() {
         if let Some(build_config) = extract_build_config_from_devcontainer(&config, &config_path)? {
-            info!("Building image from Dockerfile configuration");
-            let built_image_id = {
-                // Pause the spinner so the build's streaming renderer owns stderr.
-                let _pause =
-                    crate::commands::shared::progress::SpinnerPause::new(&args.progress_tracker);
-                build_image_from_config(&build_config, &build_options, &runtime.cli_docker())
-                    .await?
-            };
+            if features_declared {
+                debug!(
+                    "Deferring the Dockerfile build so the Feature stage can be built with it \
+                     in one invocation"
+                );
+                deferred_dockerfile_build = Some(build_config);
+            } else {
+                info!("Building image from Dockerfile configuration");
+                let built_image_id = {
+                    // Pause the spinner so the build's streaming renderer owns stderr.
+                    let _pause = crate::commands::shared::progress::SpinnerPause::new(
+                        &args.progress_tracker,
+                    );
+                    build_image_from_config(&build_config, &build_options, &runtime.cli_docker())
+                        .await?
+                };
 
-            // Update config to use the built image
-            config.image = Some(built_image_id.clone());
-            info!("Successfully built image: {}", built_image_id);
+                // Update config to use the built image
+                config.image = Some(built_image_id.clone());
+                info!("Successfully built image: {}", built_image_id);
+            }
         }
     }
 
@@ -570,6 +590,7 @@ pub(crate) async fn execute_up_with_runtime(
             &cache_folder,
             &build_options,
             host_ca_set.as_ref(),
+            deferred_dockerfile_build.as_ref(),
         )
         .await?
     };
