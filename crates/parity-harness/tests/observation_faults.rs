@@ -180,6 +180,82 @@ fn a_successful_docker_op_that_discovered_no_container_is_an_observation_fault()
 }
 
 // ---------------------------------------------------------------------------------
+// #480: the container stop/start primitive. Stopping NOTHING is a fault, not a no-op —
+// a case declaring `stopContainerBefore` is asserting a restart, and an operation that
+// silently ran against a fresh container would measure a first create while reporting
+// as a restart. These drive the same injectable-program seam as the probes above.
+// ---------------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn stopping_no_running_container_is_a_fault_not_a_no_op() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // `docker ps` succeeds and matches nothing: the probe RAN and there is nothing running.
+    let none = unix_stub::write(dir.path(), "docker-none", "exit 0\n");
+    let err = parity_harness::runner::stop_running_containers_with(
+        &none.to_string_lossy(),
+        "case-restart",
+        std::path::Path::new("/tmp/ws"),
+    )
+    .expect_err("a restart with nothing running must fail loud rather than measure a first create");
+    assert!(
+        matches!(err, HarnessError::ObservationFault { .. }),
+        "expected an ObservationFault, got {err:?}"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("case-restart") && msg.contains("stopContainerBefore"),
+        "the fault must name the case and the flag that asked for the stop: {msg}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_nonzero_docker_stop_is_an_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // `ps` yields an id, then `stop` fails. The stub branches on its first argument so one
+    // program can play both calls — which is also what proves `stop` is reached at all.
+    let failing = unix_stub::write(
+        dir.path(),
+        "docker-stop-fails",
+        "if [ \"$1\" = ps ]; then printf 'c1\\n'; exit 0; fi\nprintf 'nope\\n' >&2\nexit 4\n",
+    );
+    let err = parity_harness::runner::stop_running_containers_with(
+        &failing.to_string_lossy(),
+        "case-restart",
+        std::path::Path::new("/tmp/ws"),
+    )
+    .expect_err("a non-zero `docker stop` must fail loud");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("docker stop") && msg.contains("nope"),
+        "the error must name the failing command and carry its stderr: {msg}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_successful_stop_returns_the_ids_it_stopped() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ok = unix_stub::write(
+        dir.path(),
+        "docker-stop-ok",
+        "if [ \"$1\" = ps ]; then printf 'b\\na\\n'; exit 0; fi\nexit 0\n",
+    );
+    let ids = parity_harness::runner::stop_running_containers_with(
+        &ok.to_string_lossy(),
+        "case-restart",
+        std::path::Path::new("/tmp/ws"),
+    )
+    .expect("a successful stop reports what it stopped");
+    assert_eq!(
+        ids,
+        vec!["a".to_string(), "b".to_string()],
+        "the stopped ids come back sorted+deduped, like the probe that found them"
+    );
+}
+
+// ---------------------------------------------------------------------------------
 // D-2 + D-3 over the real runner, driven by stub binaries (Unix: POSIX-shell stubs).
 // ---------------------------------------------------------------------------------
 

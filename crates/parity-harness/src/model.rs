@@ -763,6 +763,13 @@ pub enum OracleType {
     InvariantMetamorphic,
 }
 
+/// `skip_serializing_if` predicate for a defaulted `bool` flag: absent and `false` must
+/// round-trip to the same document, or every committed case's `caseHash` moves the first
+/// time a new flag is added.
+fn is_false(flag: &bool) -> bool {
+    !*flag
+}
+
 /// A single action the runner performs, ordered within a [`TestCase`] (data-model §2).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -792,6 +799,32 @@ pub struct Operation {
     /// no case used it, so nothing was mis-asserting and nothing would have said so.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stdin_file: Option<String>,
+    /// Stop this side's RUNNING containers before the operation is invoked (#480).
+    ///
+    /// The one container-lifecycle primitive in the operation vocabulary, and it exists for
+    /// a claim that cannot be made without it: upstream's `cli.exec.base.ts` asserts that a
+    /// completed `postCreateCommand` does NOT re-run when a stopped container is brought
+    /// back up, while `postStartCommand` and `postAttachCommand` DO. Both halves need a
+    /// container that is stopped rather than removed, and `down` is not a substitute — it
+    /// removes, so the next `up` recreates and `postCreate` re-runs by definition.
+    ///
+    /// Deliberately a MODIFIER on a real operation rather than an operation of its own.
+    /// There is no dispatch in the runner's loop — every operation is a CLI spawn — and a
+    /// pseudo-subcommand would have had to invent one, would not be a deacon subcommand,
+    /// and would record no `ProcessOutcome`, which silently turns `chan-exit-code` into
+    /// not-captured for any expectation that omits `operation` (those default to the LAST
+    /// operation). As a modifier the stop happens *inside* the op that restarts, so the
+    /// case reads as what it is: "this `up` runs against a stopped container".
+    ///
+    /// Scoped to the side's OWN workspace label, so the two sides of a differential — which
+    /// run in sequence over two distinct temp workspaces — can never stop each other's
+    /// containers. Compose sidecars carry no `devcontainer.local_folder` label, so on a
+    /// Compose case this stops the dev service container and leaves the sidecars up: that is
+    /// upstream's "stop individual container" shape, and it is the shape asserted here.
+    ///
+    /// A stopped container is still reclaimed: both cleanup sweeps use `docker ps -a`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stop_container_before: bool,
     /// For negative cases: the failure phase the op is expected to fail in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expect_failure_phase: Option<FailurePhase>,

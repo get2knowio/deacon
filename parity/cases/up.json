@@ -3703,6 +3703,191 @@
         "tempdir": true
       },
       "notes": "The EXECUTION half of the object-form `initializeCommand`. Its parse half has been covered since batch 1 by `case-readconfig-upstream-initialize-command-object`, whose own notes say the quiet part out loud — \"the operation is a configuration read, so nothing is executed on either side and the case measures the parse alone.\" This case is upstream's actual assertion for that fixture (`'should create testMarker files'`), which the batch-1 pass vendored the config for and did not land: both members of the parallel object must RUN, on the HOST, with `${localWorkspaceFolder}` substituted into each — three claims a parse cannot make.\n\nMEASURED at oracle 0.87.0: the reference logs `Running 'touch-test1' from initializeCommand...` and `Running 'touch-test2'...` interleaved and leaves both markers; deacon, given `--trust-workspace`, exits 0 and leaves both markers. Both sides agree.\n\nSPEC-EXPECTATION RATHER THAN LIVE-DIFFERENTIAL, AND THE REASON IS THE POINT. deacon gates every host-side lifecycle hook behind the workspace-trust check (`crates/core/src/trust.rs`), a deacon-specific extension the reference has no equivalent for; measured on this fixture WITHOUT the flag, deacon exits 1 with `WorkspaceUntrusted` while the reference exits 0 and runs the hooks. The runner sends ONE argv to both sides by construction, so there is no invocation that trusts deacon and is still legal for the reference — `--trust-workspace` is not a reference flag. A differential here could therefore only record that the trust gate exists, which `bhv-trust-host-hook-gate` already records. Asserting deacon's own side is the only thing left that says anything about `initializeCommand`, and it is also the more useful claim: it is the first case in the suite that executes a host hook at all, so it pins the TRUSTED path — the one a developer actually takes — which nothing previously exercised end to end.\n\nBeing spec-expectation, it needs no oracle and runs on `parity_docker`, which gates pull requests and the release.\n\nFixture vendored in batch 1 from `src/test/configs/image-with-parallel-initialize-command`; see its UPSTREAM.md. Mined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 6."
+    },
+    {
+      "id": "case-up-restart-timing-single-container",
+      "behaviors": [
+        "bhv-up-restart-reruns-start-not-create"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-create",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-skip-post-create-phases"
+          ]
+        },
+        {
+          "id": "op-up-restart",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "stopContainerBefore": true
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-create"
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-restart"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up-restart",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-phases.txt": "onCreate\nupdateContent\npostCreate\npostStart\npostAttach\npostStart\npostAttach\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "**A completed `postCreateCommand` does NOT re-run when a stopped container is brought back up; `postStartCommand` and `postAttachCommand` DO.** The single most-repeated claim in `cli.exec.base.ts` — upstream asserts it five times over different configuration shapes — and until this case NOTHING in the suite asserted it in any form. It is the property that makes the create-phase marker mechanism worth having at all: an implementation that re-ran `postCreate` on every restart would re-install, re-seed and re-migrate on every machine reboot, and would still exit 0 every time.\n\nThe observation is ONE append-only file across BOTH `up` invocations, which is what lets a single compared value carry the whole claim. Measured at oracle 0.87.0 on `fx-up-skip-post-create-phases`: both CLIs exit 0 from both operations, both reattach to the SAME container id, and both leave\n\n    onCreate\\nupdateContent\\npostCreate\\npostStart\\npostAttach\\npostStart\\npostAttach\\n\n\nSeven lines, with `onCreate`, `updateContent` and `postCreate` appearing EXACTLY ONCE and `postStart`/`postAttach` twice. Every plausible wrong implementation writes a different file: re-running the create phases gives ten lines, skipping the start phases on restart gives five, and recreating the container instead of restarting it gives ten AND a different container id. `jsonSubset` on the single key is an exact-content match, so none of those pass.\n\nENABLED BY THE ONE CONTAINER-LIFECYCLE PRIMITIVE IN THE OPERATION VOCABULARY. `stopContainerBefore` stops this side's running containers immediately before the operation spawns, so the `up` it sits on runs against a STOPPED container rather than a fresh one. Nothing else in the model can express that: `down` REMOVES, so the next `up` recreates and `postCreate` re-runs by definition, which is the negation of the claim. The primitive is scoped to the side's own workspace label, and the two sides of a differential run in sequence over two distinct temp workspaces, so neither can stop the other's container. Stopping nothing is a fail-loud `ObservationFault`, not a no-op — an operation that silently ran against a fresh container would measure a first create while reporting as a restart, which is the vacuous-assertion failure mode `docs/PARITY.md` warns about, one layer below the assertion.\n\nThe assertion is carried IN ADDITION to the differential (FR-043): a comparison alone would stay green if BOTH CLIs started re-running `postCreate`, at which point the record meant to say which side is right would say nothing — and this is a claim the spec supports independently, since a lifecycle phase named for container CREATION cannot correctly run on a restart.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0, 'should have all command markers at appropriate times'), [#480](https://github.com/get2knowio/deacon/issues/480)."
+    },
+    {
+      "id": "case-up-restart-timing-compose",
+      "behaviors": [
+        "bhv-up-restart-reruns-start-not-create"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-create",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-restart-phases"
+          ]
+        },
+        {
+          "id": "op-up-restart",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "stopContainerBefore": true
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-create"
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-restart"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up-restart",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-phases.txt": "onCreate\nupdateContent\npostCreate\npostStart\npostAttach\npostStart\npostAttach\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The COMPOSE arm of `bhv-up-restart-reruns-start-not-create`, and not a duplicate of its single-container sibling: the compose path reaches the restart through an entirely different mechanism — `docker compose up` against an existing project rather than `docker start` against a container — and it is the path on which deacon has historically diverged (#448's metadata merge, #265/#564's project naming, #572's name interpolation all bit compose and not the single-container path). A create/restart distinction that held for one and not the other would be invisible without this.\n\nIt is specifically upstream's **'stop individual container'** shape. Compose sidecars carry no `devcontainer.local_folder` label, so the primitive stops the dev SERVICE container and leaves the rest of the project up — which is exactly what upstream's `devContainerStop({ containerId })` variant does. The whole-project variant (`docker compose --project-name X stop`) asserts the same expected markers, so it would buy a second container build per nightly and no new information; it is deliberately not landed.\n\nMEASURED at oracle 0.87.0 on `fx-up-compose-restart-phases`: both CLIs exit 0 from both operations, both reattach to the SAME container id, and both leave the same seven lines as the single-container case — `postCreate` exactly once, `postStart`/`postAttach` twice.\n\nThe fixture is authored rather than reused. `fx-up-compose-lifecycle-phases` already covers the compose lifecycle, but it cannot carry THIS claim: its `postStartCommand` writes with `>` to separate files, so a second run overwrites rather than appends and the re-run — the entire observable here — leaves no trace. Its hooks also vary the command FORM (string / array / object), which is its own claim and would confound this one.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0, 'docker-compose with post*Commands specified (stop individual container)'), [#480](https://github.com/get2knowio/deacon/issues/480)."
+    },
+    {
+      "id": "case-up-restart-skip-post-attach",
+      "behaviors": [
+        "bhv-up-skip-post-attach-defers-only-attach"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-create",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-attach"
+          ],
+          "fixtures": [
+            "fx-up-skip-post-create-phases"
+          ]
+        },
+        {
+          "id": "op-up-restart",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-attach"
+          ],
+          "stopContainerBefore": true
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-create"
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-restart"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up-restart",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-phases.txt": "onCreate\nupdateContent\npostCreate\npostStart\npostStart\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The two gates COMPOSED, which is upstream's own second arm of 'should not run postAttachCommand when --skip-post-attach is given' and the arm `case-up-upstream-skip-post-attach` could not express before the stop/start primitive existed. A flag and a restart are each covered alone; what this adds is that they hold TOGETHER — the restart still suppresses `postCreate`, and the flag still suppresses `postAttach`, on the run where both apply.\n\nThat is worth its own case because the two are implemented in different places and the obvious defect is one silently disabling the other: a restart path that re-derived which phases to run, rather than reusing the gated list, would run `postAttach` on the second `up` while the first correctly skipped it — and every single-`up` case in the suite would stay green.\n\nMEASURED at oracle 0.87.0: both CLIs exit 0 from both operations, both reattach to the same container, and both leave\n\n    onCreate\\nupdateContent\\npostCreate\\npostStart\\npostStart\\n\n\nFive lines. `postStart` twice — once per `up`, the restart phase doing its job; `postCreate` once — the restart gate holding; `postAttach` NEVER — the flag holding across both. All three claims are carried by one exact-content match, and each of the three failure modes lengthens or shortens the file differently.\n\nENABLED BY THE ONE CONTAINER-LIFECYCLE PRIMITIVE IN THE OPERATION VOCABULARY. `stopContainerBefore` stops this side's running containers immediately before the operation spawns, so the `up` it sits on runs against a STOPPED container rather than a fresh one. Nothing else in the model can express that: `down` REMOVES, so the next `up` recreates and `postCreate` re-runs by definition, which is the negation of the claim. The primitive is scoped to the side's own workspace label, and the two sides of a differential run in sequence over two distinct temp workspaces, so neither can stop the other's container. Stopping nothing is a fail-loud `ObservationFault`, not a no-op — an operation that silently ran against a fresh container would measure a first create while reporting as a restart, which is the vacuous-assertion failure mode `docs/PARITY.md` warns about, one layer below the assertion.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480)."
     }
   ]
 }
