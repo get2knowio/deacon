@@ -315,10 +315,16 @@ pub(crate) async fn merge_image_metadata_after_image_ready(
 /// to the user config alone. We don't fail the build — configs whose features
 /// never read `_REMOTE_USER` are unaffected — but the warning makes the gap
 /// visible instead of silent.
+/// `dockerfile_user` is the `USER` the Dockerfile being built declares, when the
+/// caller has one to offer. It takes the place of the base image's baked-in
+/// `USER` — upstream's `imageBuildInfo.user` is
+/// `findUserStatement(…) || imageDetails.Config.User || 'root'` — and, like it,
+/// still yields to a `containerUser` the config or the image metadata declares.
 pub(crate) async fn resolve_feature_install_env(
     docker: &impl Docker,
     base_image: &str,
     config: &DevContainerConfig,
+    dockerfile_user: Option<&str>,
 ) -> FeatureInstallEnv {
     let info = match docker.ensure_image_available(base_image).await {
         Ok(Some(info)) => Some(info),
@@ -344,12 +350,12 @@ pub(crate) async fn resolve_feature_install_env(
     };
 
     let Some(info) = info else {
-        return resolve_feature_install_env_from_image(base_image, None, None, config);
+        return resolve_feature_install_env_from_image(base_image, None, dockerfile_user, config);
     };
 
     // The image was inspected successfully, so an absent `Config.User` really
     // does mean `root` (upstream: `imageDetails.Config.User || 'root'`).
-    let image_user = info.user.as_deref().unwrap_or("root");
+    let image_user = dockerfile_user.unwrap_or_else(|| info.user.as_deref().unwrap_or("root"));
 
     let env = resolve_feature_install_env_from_image(
         base_image,
@@ -626,13 +632,21 @@ pub(crate) fn feature_metadata_entry(feature: &ResolvedFeature) -> serde_json::V
 /// the entries rather than the serialized label: `up` stamps `[]` on the container
 /// regardless (see [`build_container_metadata_label`]), while `build` writes no
 /// label at all — both measured against the pinned oracle 0.87.0.
+/// `image_ref` is `None` when there is no image to inherit from — a Dockerfile
+/// whose base cannot be resolved to a concrete name (`FROM scratch`, an unset
+/// `ARG`). The Feature and config entries are still recorded; only the inherited
+/// ones are absent, which is what "nothing to inherit" means.
 pub(crate) async fn container_metadata_entries(
     docker: &impl Docker,
-    image_ref: &str,
+    image_ref: Option<&str>,
     config: &DevContainerConfig,
     features: &[ResolvedFeature],
 ) -> Vec<serde_json::Value> {
-    let mut entries: Vec<serde_json::Value> = match docker.inspect_image(image_ref).await {
+    let inspected = match image_ref {
+        Some(r) => docker.inspect_image(r).await,
+        None => Ok(None),
+    };
+    let mut entries: Vec<serde_json::Value> = match inspected {
         Ok(Some(info)) => match info.labels.get("devcontainer.metadata") {
             Some(label) => match serde_json::from_str::<serde_json::Value>(label) {
                 Ok(serde_json::Value::Array(a)) => a,
@@ -679,7 +693,7 @@ pub(crate) async fn build_container_metadata_label(
     config: &DevContainerConfig,
     features: &[ResolvedFeature],
 ) -> Option<String> {
-    let entries = container_metadata_entries(docker, image_ref, config, features).await;
+    let entries = container_metadata_entries(docker, Some(image_ref), config, features).await;
     serde_json::to_string(&serde_json::Value::Array(entries)).ok()
 }
 

@@ -540,15 +540,17 @@ fn buildkit_disabled(buildkit_option: Option<&BuildKitOption>) -> Option<&'stati
 /// Helper function to validate BuildKit availability with consistent error handling.
 ///
 /// `disabled_by` is `Some(cause)` when BuildKit is present but switched off for
-/// this build. Only the flags the PRIMARY build carries are gated that way —
-/// `--platform`, which the legacy builder ignores while reporting success, and
-/// `--cache-to`, which it rejects with a bare `unknown flag`. `--push` and
-/// `--output` are deliberately NOT gated: single-platform builds defer both to
-/// their own pass ([`defers_publish`]), which runs `docker push` / `docker buildx
-/// build` regardless of how the primary build ran, so they work under
-/// `--buildkit never` today and refusing them would break a working invocation to
-/// no end. The reference refuses `--push` there; deacon honouring it is a superset
-/// in the direction that gives the caller what they asked for.
+/// this build. Only the flags the PRIMARY build carries are gated that way:
+/// `--platform`, which the legacy builder ignores while reporting success;
+/// `--cache-to`, which it rejects with a bare `unknown flag`; and, since #595,
+/// `--output`, which now rides that build rather than a deferred `docker buildx
+/// build` pass and is equally unknown to the legacy builder.
+///
+/// `--push` stays deliberately NOT gated: a single-platform build still defers it
+/// ([`defers_publish`]) to a `docker push` over the local image, which works
+/// however the build itself ran, so refusing it would break a working invocation
+/// to no end. The reference refuses `--push` there; deacon honouring it is a
+/// superset in the direction that gives the caller what they asked for.
 async fn validate_buildkit_requirement(
     output_format: &OutputFormat,
     feature_name: &str,
@@ -711,7 +713,7 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
     }
 
     // Whether something explicitly switched BuildKit off for the primary build.
-    // Consulted only by the two flags that invocation carries (#592).
+    // Consulted only by the flags the primary invocation carries (#592).
     let buildkit_off = buildkit_disabled(args.buildkit.as_ref());
 
     // Validate BuildKit requirements for --push
@@ -719,9 +721,13 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
         validate_buildkit_requirement(&args.output_format, "push", "--push", None).await?;
     }
 
-    // Validate BuildKit requirements for --output
+    // Validate BuildKit requirements for --output. `buildkit_off` applies here
+    // since #595: `--output` rides the primary build now, and the legacy builder
+    // has no such flag. It used to be deferred to a `docker buildx build` pass
+    // that ran whatever the primary build did, which is why it was ungated.
     if args.output.is_some() {
-        validate_buildkit_requirement(&args.output_format, "output", "--output", None).await?;
+        validate_buildkit_requirement(&args.output_format, "output", "--output", buildkit_off)
+            .await?;
     }
 
     // Validate BuildKit requirements for --platform
@@ -845,12 +851,13 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
     let config_hash = calculate_config_hash(&build_config, &workspace_folder)?;
     debug!("Configuration hash: {}", config_hash);
 
-    // PR-4c: feature installation during build.
+    // Feature installation during build.
     //
     // Feature installation is supported for all configuration shapes:
-    // - Dockerfile and image-reference builds layer features via a post-build
-    //   pass (run the base build → `deacon-build:<hash>` tagged image →
-    //   `build_image_with_features` FROMs that tag). See below.
+    // - Dockerfile and image-reference builds splice the Feature stages into the
+    //   SAME Dockerfile the base is described by and build both in ONE BuildKit
+    //   invocation (`execute_single_container_build`). Nothing is handed between
+    //   passes through a daemon-local tag, so any buildx driver can run it (#595).
     // - Compose builds resolve the target service's shape and build a
     //   feature-extended image via `execute_compose_build_with_features`
     //   (the same `resolve_compose_feature_image` helper the `up` flow uses).
@@ -937,6 +944,7 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
     }
 
     // Dispatch to appropriate build function based on configuration type
+    let mut feature_lockfile: Option<PathBuf> = None;
     let result = if config.uses_compose() {
         if features_present {
             // Compose + features: build the feature-extended image for the target
@@ -963,17 +971,28 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
             )
             .await
         }
-    } else if config.image.is_some() {
-        execute_image_reference_build(&config, &args, &workspace_folder, &labels).await
     } else {
-        execute_docker_build(
-            &build_config,
+        match execute_single_container_build(
+            &config,
+            &load_result.raw_config,
             &args,
+            &build_config,
             &config_hash,
             &workspace_folder,
+            &config_path,
             &labels,
+            host_ca_set.as_ref(),
+            features_present,
+            lockfile_policy,
         )
         .await
+        {
+            Ok((result, lockfile)) => {
+                feature_lockfile = lockfile;
+                Ok(result)
+            }
+            Err(e) => Err(e),
+        }
     };
     let build_duration = build_start_time.elapsed();
 
@@ -999,127 +1018,14 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
         }
     }
 
-    // PR-4c: post-build feature install. When features are present we run a
-    // second BuildKit pass that FROMs the just-built image and layers the
-    // feature install stages on top, then write the lockfile next to the
-    // config file. This matches `up`'s feature flow (`build_image_with_features`)
-    // which also returns a `Lockfile` ready for `write_lockfile`.
-    // Compose + features is fully handled in the dispatch above
-    // (`execute_compose_build_with_features` already built, tagged, and wrote the
-    // lockfile), so only the Dockerfile / image-reference shapes need this
-    // generic post-build layering pass.
-    // The reference every post-build pass FROMs. It must be a real TAG, not the
-    // bare `sha256:...` image ID: the feature-install Dockerfile uses
-    // `FROM ${_DEV_CONTAINERS_BASE_IMAGE}`, and BuildKit interprets a bare
-    // `sha256:<digest>` as the remote repo `docker.io/library/sha256:<digest>`
-    // (pull-access-denied), whereas a local tag resolves to the just-built image.
-    //
-    // Prefer the run-private tag over the deterministic `deacon-build:<hash>`
-    // one: the latter is content-derived and therefore shared with any
-    // concurrent build of the same content, which can re-point it at ITS image
-    // between our build and these passes (#470).
-    let build_ref = result
-        .private_ref
-        .clone()
-        .or_else(|| result.tags.first().cloned())
-        .unwrap_or_else(|| result.image_id.clone());
-
-    let deferred_publish = defers_publish(&args);
-
-    // The passes below are the ones that need a stable handle on the just-built
-    // image, so they run inside a block whose outcome is held rather than
-    // propagated: the run-private tag must be dropped on the failure path too,
-    // or every build that errors after the primary pass (the `--push` to an
-    // unreachable registry, say) leaves a `deacon-build-run:*` tag behind (#470).
+    // A deferred `--push` happens here (#440). The image already carries its
+    // `devcontainer.metadata` label — that is written by the build itself now,
+    // not by a second pass — so all that is left is to publish what the user
+    // named. It is held rather than propagated so the run-private tag is dropped
+    // on the failure path too, or a push to an unreachable registry leaves a
+    // `deacon-build-run:*` tag behind (#470).
     let post_build = async {
-        let (image_id, feature_lockfile, resolved_features) =
-            if features_present && !config.uses_compose() {
-                // Layer features on top of the just-built image.
-                let base_ref = build_ref.clone();
-                let (feature_image, lockfile, resolved_features) = apply_features_and_lockfile(
-                    &config,
-                    &base_ref,
-                    &workspace_folder,
-                    &config_path,
-                    host_ca_set.as_ref(),
-                    // The output mode makes feature-install steps render the way
-                    // `up` renders them; the platform is load-bearing rather than
-                    // cosmetic. This build's `FROM` names the image the primary
-                    // build just produced, so it has to ask for the same platform
-                    // that image was built for — otherwise BuildKit resolves the
-                    // base for the HOST platform, misses in the local store, and
-                    // falls through to a registry that has never heard of
-                    // `deacon-build-run:*` (#593). Cache and builder options stay
-                    // default here.
-                    deacon_core::build::BuildOptions {
-                        output_mode: args.build_output_mode,
-                        platform: args.platform.clone(),
-                        ..Default::default()
-                    },
-                    lockfile_policy,
-                )
-                .await?;
-
-                // Re-point the base build's tags (the deterministic `deacon-build:<hash>`
-                // tag plus any `--image-name`s) at the feature-extended image. Without
-                // this, `--image-name` would still resolve to the pre-feature base image
-                // and the installed features would be invisible to consumers that pull
-                // the named tag. The run-private tag moves with them so the stamp pass
-                // below still FROMs a reference nobody else can re-point (#470).
-                for tag in result.tags.iter().chain(result.private_ref.iter()) {
-                    retag_image(&feature_image, tag).await?;
-                }
-
-                (feature_image, lockfile, resolved_features)
-            } else {
-                (result.image_id.clone(), None, Vec::new())
-            };
-
-        // #436/#440: record `devcontainer.metadata` on the image this build produced —
-        // the entries a later `up` from that image, or VS Code / Zed / envbuilder,
-        // read to learn what the image carries. Compose builds produce their image
-        // through the compose path above and stamp it there (they have the resolved
-        // Features on hand), so they are not covered here.
-        //
-        // `--push`/`--output` builds are stamped too: their publish step is deferred
-        // until after this pass so the image is local when it runs (#440). The single
-        // exception is a multi-platform export, which BuildKit will not `--load`.
-        let stampable = !config.uses_compose() && !exports_directly(&args);
-        let mut metadata = result.metadata.clone();
-        let image_id = if !stampable {
-            if !config.uses_compose() && exports_directly(&args) {
-                warn!(
-                    "A multi-platform --push/--output build leaves no local image to record \
-                     `devcontainer.metadata` on; the published image carries no metadata label"
-                );
-            }
-            image_id
-        } else {
-            let (reported, label) = stamp_devcontainer_metadata_label(
-                &image_id,
-                result.private_ref.as_deref(),
-                &result.tags,
-                &load_result.raw_config,
-                &resolved_features,
-                // When the export is deferred, this pass is also the exporter.
-                if deferred_publish {
-                    args.output.as_deref()
-                } else {
-                    None
-                },
-                args.platform.as_deref(),
-            )
-            .await?;
-            // Keep the reported labels describing the image that was actually produced;
-            // `metadata` was captured from the base build, before this label existed.
-            if let Some(label) = label {
-                metadata.insert("devcontainer.metadata".to_string(), label);
-            }
-            reported
-        };
-
-        // #440: a deferred push happens here, after the image carries its label.
-        if deferred_publish && args.push {
+        if defers_publish(&args) && args.push {
             // Push what the user named. deacon's own `deacon-build:<hash>` bookkeeping
             // tag has no registry component, so pushing it targets Docker Hub (#438);
             // it is only reached when `--image-name` named nothing else to push, which
@@ -1131,24 +1037,23 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
             };
             push_built_image(targets).await?;
         }
-
-        Ok::<_, anyhow::Error>((image_id, feature_lockfile, metadata))
+        Ok::<_, anyhow::Error>(())
     }
     .await;
 
-    // Unconditional: the tag has done its job whether those passes succeeded or not.
+    // Unconditional: the tag has done its job whether that push succeeded or not.
     if let Some(private) = &result.private_ref {
         drop_run_private_tag(private).await;
     }
-    let (image_id, feature_lockfile, metadata) = post_build?;
+    post_build?;
 
     let final_result = BuildResult {
-        image_id,
+        image_id: result.image_id,
+        metadata: result.metadata,
         tags: result.tags,
         // Ephemeral and just dropped: never reported, never cached.
         private_ref: None,
         build_duration: build_duration.as_secs_f64(),
-        metadata,
         config_hash: config_hash.clone(),
         injected_ca_subjects: host_ca_set
             .as_ref()
@@ -1600,7 +1505,28 @@ async fn is_image_available(image_id: &str) -> Result<bool> {
     }
 }
 
-/// Detect if BuildKit should be used based on CLI flag and environment
+/// Whether the primary build runs through `docker buildx build` — which honours
+/// the buildx builder the user selected — rather than `docker build`, which always
+/// runs on the daemon's own "default" instance and ignores that selection (#595).
+///
+/// The gate is [`buildkit_disabled`], deliberately, and NOT
+/// [`should_use_buildkit`]. The latter is false when nothing ASKED for BuildKit,
+/// and that case still runs BuildKit on any modern Docker — deciding the
+/// invocation form on it would put the ordinary `deacon build` back on the legacy
+/// builder, which is the very defect #595 reports, reached by another route. Only
+/// an explicit off-switch (`--buildkit never`, `DOCKER_BUILDKIT=0`) reaches
+/// `docker build`, which is the sole route to the legacy builder.
+fn uses_buildx(buildkit_option: Option<&BuildKitOption>) -> bool {
+    buildkit_disabled(buildkit_option).is_none()
+}
+
+/// Detect if BuildKit should be used based on CLI flag and environment.
+///
+/// Narrower than [`uses_buildx`]: this answers whether the caller ASKED for
+/// BuildKit, which decides whether to hand the child an explicit
+/// `DOCKER_BUILDKIT` and whether the BuildKit-only input flags (`--secret`,
+/// `--ssh`) are allowed. It is false when nothing asked and nothing refused, so it
+/// must not be used to decide how the build is invoked.
 fn should_use_buildkit(buildkit_option: Option<&BuildKitOption>) -> bool {
     match buildkit_option {
         Some(BuildKitOption::Auto) => {
@@ -1798,6 +1724,13 @@ async fn execute_compose_build_with_features(
         // command is tracked separately (issue #30 deferred items).
         &deacon_core::docker::CliDocker::new(),
         LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
+        // #436: record `devcontainer.metadata` on the image this build produces.
+        // The label rides the Feature build itself rather than a second build that
+        // would have to `FROM` a daemon-local tag — the chain that made deacon pin
+        // `--builder default` and override the user's builder (#595). `raw_config`
+        // is the configuration as authored, because the label travels with the
+        // image (#373).
+        Some(raw_config),
     )
     .await?
     .ok_or_else(|| anyhow!("Compose feature build produced no image (no features declared?)"))?;
@@ -1828,34 +1761,12 @@ async fn execute_compose_build_with_features(
     for (key, value) in labels {
         metadata.insert(key.clone(), value.clone());
     }
-
-    // #440: stamp `devcontainer.metadata` on the feature-extended image, through
-    // the SAME construction every other build shape uses. It happens here rather
-    // than in `execute_build` because this is where the resolved Features — one
-    // metadata entry each — are on hand. `--push`/`--output` are rejected for
-    // Compose configurations upstream of this call, so the label is always
-    // stamped onto a local image.
-    // FROM the compose feature image's own tag rather than the deterministic
-    // `deacon-build:<hash>` one: it is namespaced by workspace hash, so unlike the
-    // content-derived tag it cannot be re-pointed by a concurrent build (#470).
-    let (image_id, label) = stamp_devcontainer_metadata_label(
-        &feature_build.image_tag,
-        Some(feature_build.image_tag.as_str()),
-        &all_tags,
-        raw_config,
-        &feature_build.resolved_features,
-        None,
-        // Compose rejects `--platform` upstream of this call, so there is never a
-        // platform to inherit here.
-        None,
-    )
-    .await?;
-    if let Some(label) = label {
-        metadata.insert("devcontainer.metadata".to_string(), label);
+    if let Some(label) = &feature_build.metadata_label {
+        metadata.insert("devcontainer.metadata".to_string(), label.clone());
     }
 
     Ok(BuildResult {
-        image_id,
+        image_id: feature_build.image_tag,
         tags: all_tags,
         // See the sibling compose result above: no run-private tag here (#470).
         private_ref: None,
@@ -1891,85 +1802,289 @@ impl Drop for TempDirGuard {
     }
 }
 
-/// Execute image-reference build by creating a Dockerfile from the base image
-#[instrument(skip(config, args, workspace_folder, labels))]
-async fn execute_image_reference_build(
+/// What a single-container build adds on top of the base Dockerfile the
+/// configuration describes: Feature layers, and the `devcontainer.metadata` the
+/// produced image must carry.
+///
+/// All of it rides the ONE BuildKit invocation that produces the image. deacon
+/// used to run three chained builds — base, then Features `FROM` the base's local
+/// tag, then a metadata stamp `FROM` that — and every link but the first named an
+/// image that exists only in the local daemon store. A `docker-container` driver
+/// builder cannot read that store, so deacon pinned `--builder default` to make
+/// the chain work, silently overriding the builder the user selected and taking
+/// OCI export, local cache export and multi-platform output with it (#595); the
+/// same chain is why a foreign `--platform` could not resolve its own base (#593).
+/// With one build there is nothing to hand over and nothing to pin.
+#[derive(Debug, Default)]
+struct BuildOverlay {
+    /// Replaces `-f`: the merged document holding the base Dockerfile's own
+    /// stages followed by the Feature-install stage.
+    dockerfile_path: Option<PathBuf>,
+    /// Replaces `build.target`: the build must stop at the Feature stage.
+    target: Option<String>,
+    /// `--build-context` pairs the Feature RUN-mounts resolve against.
+    extra_args: Vec<String>,
+    /// The `devcontainer.metadata` value, computed BEFORE the build so BuildKit
+    /// writes it in the pass that produces the image.
+    metadata_label: Option<String>,
+    /// Feature ids, for the build renderer's step labels.
+    feature_ids: Vec<String>,
+}
+
+/// Build a single-container configuration — a user-authored Dockerfile or a bare
+/// image reference — in one BuildKit invocation, Features and metadata included.
+///
+/// Returns the build result and the lockfile path the Feature resolution wrote,
+/// if any.
+///
+/// Shape handling mirrors the reference CLI: an image-reference configuration is
+/// a one-line `FROM <image>` Dockerfile in a temp context, a Dockerfile
+/// configuration is the user's own document, and either way the Feature stages
+/// are appended to that document rather than layered by a second build.
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip(config, raw_config, args, build_config, labels, host_ca_set))]
+async fn execute_single_container_build(
     config: &DevContainerConfig,
+    raw_config: &DevContainerConfig,
     args: &BuildArgs,
+    build_config: &BuildConfig,
+    config_hash: &str,
     workspace_folder: &Path,
+    config_path: &Path,
     labels: &[(String, String)],
-) -> Result<BuildResult> {
-    let image = config
-        .image
-        .as_ref()
-        .ok_or_else(|| anyhow!("Image reference configuration must specify an image"))?;
+    host_ca_set: Option<&CorporateCaSet>,
+    features_present: bool,
+    lockfile_policy: LockfilePolicy,
+) -> Result<(BuildResult, Option<PathBuf>)> {
+    use crate::commands::up::features_build::{
+        FEATURE_TARGET_STAGE, base_stage_for_features, merge_dockerfile_with_feature_stage,
+        prepare_feature_layer,
+    };
+    use deacon_core::container::ContainerIdentity;
+    use deacon_core::docker::Docker;
+    use deacon_core::dockerfile_utils::{find_user_statement, resolve_base_image};
 
-    info!("Building from image reference: {}", image);
+    let cli = deacon_core::docker::CliDocker::new();
 
-    // Create a temporary Dockerfile that extends the base image. This build
-    // context lives in the system temp dir (keyed by the workspace hash to avoid
-    // concurrent-build collisions), NOT in the project — a `deacon build` must
-    // leave no stray files in the user's repository (#280). It holds only the
-    // generated Dockerfile, so Docker can read it from anywhere.
-    let workspace_hash =
-        deacon_core::container::ContainerIdentity::new(workspace_folder, config).workspace_hash;
-    let temp_dir = std::env::temp_dir().join(format!("deacon-temp-build-{}", workspace_hash));
-    tokio::fs::create_dir_all(&temp_dir).await?;
-    // Guard cleanup against early `?` returns, panics, and unwinds — the explicit
-    // async cleanup below only covers the happy path. SIGKILL can't be handled
-    // in-process; the next run's `create_dir_all` is idempotent.
-    let _temp_guard = TempDirGuard::new(temp_dir.clone());
-
-    // Build Dockerfile content with base image
-    let mut dockerfile_content = format!("FROM {}\n\n", image);
-
-    // Add labels
-    if !labels.is_empty() {
-        dockerfile_content.push_str("# User-specified labels\n");
-        for (key, value) in labels {
-            // Escape quotes in label values
-            let escaped_value = value.replace('"', "\\\"");
-            dockerfile_content.push_str(&format!("LABEL \"{}\"=\"{}\"\n", key, escaped_value));
+    // The base Dockerfile this build starts from, plus the hash that names its
+    // deterministic tag. An image-reference configuration has no Dockerfile of its
+    // own, so synthesize one into a temp context — NOT into the project, which a
+    // `deacon build` must leave untouched (#280).
+    let _temp_guard;
+    let (effective, inner_hash) = match &config.image {
+        Some(image) => {
+            info!("Building from image reference: {}", image);
+            let workspace_hash = ContainerIdentity::new(workspace_folder, config).workspace_hash;
+            let temp_dir =
+                std::env::temp_dir().join(format!("deacon-temp-build-{}", workspace_hash));
+            tokio::fs::create_dir_all(&temp_dir).await?;
+            // Guard cleanup against early `?` returns, panics, and unwinds. SIGKILL
+            // can't be handled in-process; the next run's `create_dir_all` is idempotent.
+            _temp_guard = Some(TempDirGuard::new(temp_dir.clone()));
+            let dockerfile_path = temp_dir.join("Dockerfile");
+            // No labels and no `devcontainer.metadata` written here (#436): the
+            // user's `--label`s ride the build invocation, and the metadata label
+            // is computed below from the entries this base image already carries.
+            tokio::fs::write(&dockerfile_path, format!("FROM {}\n", image)).await?;
+            (
+                BuildConfig {
+                    dockerfile: "Dockerfile".to_string(),
+                    dockerfile_path,
+                    context: ".".to_string(),
+                    context_folder: temp_dir,
+                    target: None,
+                    build_args: HashMap::new(),
+                    options: Vec::new(),
+                },
+                format!("image-ref-{}", image.replace([':', '/'], "-")),
+            )
         }
-        dockerfile_content.push('\n');
-    }
-
-    // No `devcontainer.metadata` LABEL here (#436): `name`/`image` are not
-    // metadata properties, and writing a value here would also mask the entries
-    // this base image inherits from `image`. The real label is stamped on the
-    // final image by `stamp_devcontainer_metadata_label`, which reads those
-    // inherited entries back off the built image.
-
-    // Features (if any) are layered on top of this base by the post-build
-    // `apply_features_and_lockfile` pass in `execute_build`: this synthetic
-    // image is tagged `deacon-build:<hash>` by `execute_docker_build` below,
-    // and that tag becomes the `FROM` base for the feature-install stage.
-
-    let dockerfile_path = temp_dir.join("Dockerfile");
-    tokio::fs::write(&dockerfile_path, dockerfile_content).await?;
-
-    // Create a BuildConfig for this temporary Dockerfile
-    let build_config = BuildConfig {
-        dockerfile: "Dockerfile".to_string(),
-        dockerfile_path,
-        context: ".".to_string(),
-        context_folder: temp_dir.to_path_buf(),
-        target: None,
-        build_args: HashMap::new(),
-        options: Vec::new(),
+        None => {
+            _temp_guard = None;
+            (build_config.clone(), config_hash.to_string())
+        }
     };
 
-    // Generate config hash for this image reference build
-    let config_hash = format!("image-ref-{}", image.replace([':', '/'], "-"));
+    let base_content = tokio::fs::read_to_string(&effective.dockerfile_path)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to read Dockerfile '{}'",
+                effective.dockerfile_path.display()
+            )
+        })?;
 
-    // Execute the docker build
-    let result =
-        execute_docker_build(&build_config, args, &config_hash, workspace_folder, labels).await;
+    // The EXTERNAL image this build derives from — what contributes inherited
+    // `devcontainer.metadata` and the baked-in `USER` that `_CONTAINER_USER`
+    // defaults to. For an image-reference configuration it is the reference
+    // itself; for a Dockerfile it is whatever its target stage ultimately
+    // `FROM`s, which is exactly what the reference resolves (`findBaseImage`).
+    let base_image_ref = match &config.image {
+        Some(image) => Some(image.clone()),
+        None => resolve_base_image(
+            &base_content,
+            &effective.build_args,
+            effective.target.as_deref(),
+        ),
+    };
 
-    // Clean up temporary directory
-    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    let mut overlay = BuildOverlay::default();
+    let mut resolved_features: Vec<ResolvedFeature> = Vec::new();
+    let mut lockfile_written = None;
 
-    result
+    if features_present {
+        // Refuse before resolving anything. Installing Features needs buildx's
+        // named build contexts, so a disabled BuildKit cannot do it — and finding
+        // that out after downloading every Feature and writing a lockfile would be
+        // work done for a build that was never going to run.
+        if !uses_buildx(args.buildkit.as_ref()) {
+            return Err(DockerError::CLIError(
+                "Installing Features requires BuildKit, which the current settings disable"
+                    .to_string(),
+            )
+            .into());
+        }
+
+        let (staged_content, base_stage) =
+            base_stage_for_features(&base_content, effective.target.as_deref()).with_context(
+                || {
+                    format!(
+                        "Failed to locate a base stage in Dockerfile '{}' to install Features on",
+                        effective.dockerfile_path.display()
+                    )
+                },
+            )?;
+
+        // Spec parity (#89): the four env vars every `install.sh` is guaranteed.
+        // `remoteUser` is commonly declared by the base image's metadata rather
+        // than the config, and the Dockerfile may `USER` its way somewhere else
+        // again, so consult both before falling back to the config alone.
+        let dockerfile_user = find_user_statement(
+            &base_content,
+            &effective.build_args,
+            effective.target.as_deref(),
+        );
+        let feature_install_env = match &base_image_ref {
+            Some(image) => {
+                crate::commands::up::merged_config::resolve_feature_install_env(
+                    &cli,
+                    image,
+                    config,
+                    dockerfile_user.as_deref(),
+                )
+                .await
+            }
+            // Nothing inspectable to derive from (`FROM scratch`, an unset `ARG`):
+            // the config and whatever the Dockerfile itself declares are all there is.
+            None => deacon_core::dockerfile_generator::FeatureInstallEnv::resolve(
+                config.remote_user.as_deref(),
+                config.container_user.as_deref(),
+                dockerfile_user.as_deref(),
+            ),
+        };
+
+        // Namespace the staging directory by workspace+config so it does not
+        // collide with `up`'s feature staging on the same host.
+        let mut identity = ContainerIdentity::new(workspace_folder, config);
+        identity.workspace_hash = format!("{}-build", identity.workspace_hash);
+
+        let prepared = prepare_feature_layer(
+            config,
+            &identity,
+            config_path,
+            &base_stage,
+            feature_install_env,
+            host_ca_set,
+            lockfile_policy,
+        )
+        .await?;
+
+        let merged = merge_dockerfile_with_feature_stage(&staged_content, &prepared);
+        let staging_root = crate::commands::shared::feature_resolver::feature_staging_root(
+            &identity.workspace_hash,
+        );
+        tokio::fs::create_dir_all(&staging_root).await?;
+        let merged_path = staging_root.join("Dockerfile.extended");
+        tokio::fs::write(&merged_path, merged.as_bytes()).await?;
+        debug!(
+            dockerfile = %merged_path.display(),
+            base_stage = %base_stage,
+            "Wrote the merged base + Feature Dockerfile for a single build"
+        );
+
+        // Apply the lockfile policy the flags selected (#556). The default writes
+        // next to the config file (spec §6 naming rule); `--no-lockfile` writes
+        // nothing; `--frozen-lockfile` compares and fails on any difference.
+        lockfile_written =
+            apply_lockfile_policy(lockfile_policy, config_path, &prepared.lockfile).await?;
+
+        overlay.feature_ids = prepared
+            .resolved_features
+            .iter()
+            .map(|f| f.id.clone())
+            .collect();
+        resolved_features = prepared.resolved_features;
+        overlay.extra_args = prepared.build_contexts;
+        overlay.dockerfile_path = Some(merged_path);
+        overlay.target = Some(FEATURE_TARGET_STAGE.to_string());
+    }
+
+    // #436: `devcontainer.metadata` — the entries a later `up` from this image, or
+    // VS Code / Zed / envbuilder, read to learn what it carries. Computed here,
+    // BEFORE the build, from the base image's own entries plus one per Feature
+    // plus the config pick, and written by the build itself. Reading it off the
+    // base rather than off the finished image is what makes the single-invocation
+    // shape possible, and is what the reference does.
+    if let Some(image) = &base_image_ref {
+        // Best-effort: the entries are additive, so an image that cannot be
+        // pulled contributes none rather than failing the build.
+        if let Err(e) = cli.ensure_image_available(image).await {
+            debug!(
+                image = %image,
+                error = %e,
+                "Could not make the base image available for metadata inspection; \
+                 proceeding with no inherited devcontainer.metadata entries"
+            );
+        }
+    }
+    let entries = crate::commands::up::merged_config::container_metadata_entries(
+        &cli,
+        base_image_ref.as_deref(),
+        raw_config,
+        &resolved_features,
+    )
+    .await;
+    if entries.is_empty() {
+        debug!("No devcontainer.metadata entries to record; leaving the label unset");
+    } else {
+        overlay.metadata_label = Some(
+            serde_json::to_string(&serde_json::Value::Array(entries))
+                .context("Failed to serialize the devcontainer.metadata label")?,
+        );
+    }
+
+    let mut result = execute_docker_build(
+        &effective,
+        args,
+        &inner_hash,
+        workspace_folder,
+        labels,
+        &overlay,
+    )
+    .await?;
+
+    // Keep the reported labels describing what the build actually wrote. When the
+    // image is not local (a multi-platform export) there is nothing to inspect, so
+    // report the label deacon asked BuildKit for.
+    if let Some(label) = &overlay.metadata_label {
+        result
+            .metadata
+            .entry("devcontainer.metadata".to_string())
+            .or_insert_with(|| label.clone());
+    }
+    result.injected_ca_subjects = host_ca_set.map(|s| s.subjects.clone()).unwrap_or_default();
+
+    Ok((result, lockfile_written))
 }
 
 /// Monotonic counter making [`run_private_tag`] unique across concurrent builds
@@ -2060,279 +2175,30 @@ async fn retag_image(source: &str, target: &str) -> Result<()> {
     Ok(())
 }
 
-/// PR-4c: layer features on top of the just-built image and write the
-/// lockfile next to the config file.
+/// Whether this build's `--push` happens AFTER the build, from the local daemon,
+/// rather than being handed to BuildKit (#440).
 ///
-/// Synthesizes a config that points at the just-built `image_id` and reuses
-/// `up`'s `build_image_with_features` helper to:
-/// 1. Resolve + download every feature declared in `config.features`,
-/// 2. Generate an extension Dockerfile (`FROM <built_image> AS dev_containers_target_stage`
-///    + one BuildKit RUN-mount per feature),
-/// 3. Build the extended image via `docker buildx build`,
-/// 4. Hand back a `FeatureBuildOutput` whose `lockfile` field is keyed by
-///    the user-provided feature ID (matching upstream `generateLockfile`).
-///
-/// The returned `Lockfile` is then handed to `policy` — the SAME decision `up`
-/// makes ([`crate::commands::shared::lockfile::apply_lockfile_policy`]), so the
-/// bytes on disk never depend on which subcommand resolved the Features (#556).
-/// On read-only workspaces (`EROFS`/`EACCES`) the write is downgraded to a WARN
-/// so a read-only CI mount doesn't fail the build.
-///
-/// Returns `(new_image_id, Some(lockfile_path), resolved_features)` on success;
-/// the path is `None` when the policy wrote nothing (`--no-lockfile`,
-/// `--frozen-lockfile`, or a read-only workspace). The resolved Features are
-/// what `devcontainer.metadata` records one entry per (#436), so they travel
-/// back to the caller that stamps the label.
-#[instrument(skip(config))]
-async fn apply_features_and_lockfile(
-    config: &DevContainerConfig,
-    built_image_id: &str,
-    workspace_folder: &Path,
-    config_path: &Path,
-    host_ca_set: Option<&CorporateCaSet>,
-    build_options: deacon_core::build::BuildOptions,
-    policy: LockfilePolicy,
-) -> Result<(String, Option<PathBuf>, Vec<ResolvedFeature>)> {
-    use crate::commands::up::features_build::build_image_with_features;
-    use deacon_core::container::ContainerIdentity;
-
-    info!(
-        built_image = %built_image_id,
-        "Layering features on top of build output"
-    );
-
-    // Synthesize a single-container config that points at the just-built
-    // image. `build_image_with_features` reads `config.image`,
-    // `config.features`, and `config.override_feature_install_order`; other
-    // fields are ignored, so cloning + retargeting `image` is sufficient.
-    let mut synth_config = config.clone();
-    synth_config.image = Some(built_image_id.to_string());
-
-    // Namespace the produced tag by workspace+config so it does not collide
-    // with `up`'s feature-extended images on the same host.
-    let mut identity = ContainerIdentity::new(workspace_folder, &synth_config);
-    identity.workspace_hash = format!("{}-build", identity.workspace_hash);
-
-    let feature_build = build_image_with_features(
-        &synth_config,
-        &identity,
-        workspace_folder,
-        config_path,
-        Some(&build_options),
-        host_ca_set,
-        // `deacon build` is docker-only today; podman parity for the build
-        // command is tracked separately (issue #30 deferred items).
-        &deacon_core::docker::CliDocker::new(),
-        policy,
-    )
-    .await
-    .context("Failed to build feature-extended image from build output")?;
-
-    info!(
-        feature_image = %feature_build.image_tag,
-        "Successfully built feature-extended image"
-    );
-
-    // Apply the lockfile policy the flags selected (#556). The default writes
-    // next to the config file (spec §6 naming rule); `--no-lockfile` writes
-    // nothing; `--frozen-lockfile` compares and fails on any difference.
-    let written = apply_lockfile_policy(policy, config_path, &feature_build.lockfile).await?;
-
-    Ok((
-        feature_build.image_tag,
-        written,
-        feature_build.resolved_features,
-    ))
-}
-
-/// Stamp the `devcontainer.metadata` label the reference records on the image a
-/// build produces (#436). Returns the reference to report for that image and the
-/// label value written, if any.
-///
-/// The value comes from the SAME construction `up` stamps on containers —
-/// [`crate::commands::up::merged_config::container_metadata_entries`]: the entries
-/// the image already carries, then one per installed Feature, then the config
-/// pick. `raw_config` is the configuration as authored (pre-substitution), because
-/// this label travels with the image (#373).
-///
-/// It is a separate, metadata-only build (`FROM <image>` + `--label`) rather than
-/// a `--label` on the build that produced the image: the Feature entries are only
-/// known after the feature-layering pass, and the inherited entries are read back
-/// off the built image. When there is nothing to record, the reference writes no
-/// label at all — so neither do we, and no extra build runs.
-///
-/// `export` carries a deferred `--output` spec (#440). When set, this pass is
-/// also the exporter — it runs even with nothing to record, because skipping it
-/// would mean exporting nothing at all — and BuildKit writes the export instead
-/// of loading the result into the local daemon.
-async fn stamp_devcontainer_metadata_label(
-    reported_image: &str,
-    build_ref: Option<&str>,
-    tags: &[String],
-    raw_config: &DevContainerConfig,
-    features: &[ResolvedFeature],
-    export: Option<&str>,
-    platform: Option<&str>,
-) -> Result<(String, Option<String>)> {
-    // `FROM` must name a tag: a bare `sha256:` digest makes BuildKit resolve it as
-    // the remote repository `docker.io/library/sha256` (#391).
-    //
-    // `build_ref` is the caller's run-private tag when it has one — a name no
-    // concurrent build can re-point (#470). Falling back to `tags.first()` (the
-    // deterministic `deacon-build:<hash>` tag, already re-pointed at the
-    // feature-extended image when there was one) keeps the Compose path, which
-    // owns its own tagging, working unchanged.
-    let Some(from_ref) = build_ref.or_else(|| tags.first().map(String::as_str)) else {
-        return Ok((reported_image.to_string(), None));
-    };
-
-    let cli = deacon_core::docker::CliDocker::new();
-    let entries = crate::commands::up::merged_config::container_metadata_entries(
-        &cli, from_ref, raw_config, features,
-    )
-    .await;
-    let metadata = if entries.is_empty() {
-        debug!("No devcontainer.metadata entries to record; leaving the label unset");
-        None
-    } else {
-        Some(
-            serde_json::to_string(&serde_json::Value::Array(entries))
-                .context("Failed to serialize the devcontainer.metadata label")?,
-        )
-    };
-    if metadata.is_none() && export.is_none() {
-        return Ok((reported_image.to_string(), None));
-    }
-
-    let temp_dir = tempfile::tempdir().context("Failed to create devcontainer.metadata context")?;
-    let dockerfile_path = temp_dir.path().join("Dockerfile");
-    tokio::fs::write(&dockerfile_path, format!("FROM {}\n", from_ref))
-        .await
-        .context("Failed to write the devcontainer.metadata Dockerfile")?;
-
-    // Every tag that must resolve to the produced image, plus the reported
-    // reference when it is a tag of its own (the feature-extended image's).
-    let mut targets: Vec<&str> = tags.iter().map(String::as_str).collect();
-    let reported_is_digest = reported_image.starts_with("sha256:");
-    if !reported_is_digest && !targets.contains(&reported_image) {
-        targets.push(reported_image);
-    }
-
-    let mut build_args = vec!["buildx".to_string(), "build".to_string()];
-    match export {
-        None => build_args.push("--load".to_string()),
-        Some(spec) => {
-            build_args.push("--output".to_string());
-            build_args.push(spec.to_string());
-            // Also load, so the local tags (`--image-name` and the deterministic
-            // one) name the STAMPED image rather than the unstamped one the
-            // primary build loaded. `--load` alone is dropped as a duplicate of
-            // an explicit `type=docker` spec, so name the exporter directly —
-            // and only when the user's own spec is not already that exporter.
-            if !exports_to_daemon(spec) {
-                build_args.push("--output".to_string());
-                build_args.push("type=docker".to_string());
-            }
-        }
-    }
-    // The `FROM` names the image the caller just built. When that build targeted a
-    // platform, this one must name it too: BuildKit otherwise resolves the base for
-    // the HOST platform, misses in the local store, and reports a registry
-    // authorization failure for a repository deacon invented (#593).
-    if let Some(platform) = platform {
-        build_args.push("--platform".to_string());
-        build_args.push(platform.to_string());
-    }
-    build_args.extend([
-        // The `FROM` names an image that exists only in the local daemon store, so
-        // pin the docker-driver builder (same reason as `generate_build_args`, #391).
-        "--builder".to_string(),
-        "default".to_string(),
-        "-f".to_string(),
-        dockerfile_path.display().to_string(),
-    ]);
-    if let Some(metadata) = &metadata {
-        build_args.push("--label".to_string());
-        build_args.push(format!("devcontainer.metadata={}", metadata));
-    }
-    for target in &targets {
-        build_args.push("-t".to_string());
-        build_args.push((*target).to_string());
-    }
-    build_args.push(temp_dir.path().display().to_string());
-
-    // Nothing to render: this build copies no layers and only rewrites the image
-    // config, so its output is captured for diagnostics rather than shown.
-    let io = deacon_core::docker_retry::BuildIo::Captured(None);
-    let reported = match export {
-        None => {
-            let stamped = cli
-                .build_image(&build_args, io)
-                .await
-                .context("Failed to stamp the devcontainer.metadata label on the built image")?;
-            debug!(
-                image = %stamped,
-                "Stamped devcontainer.metadata on the built image"
-            );
-            // The tags now name the stamped image; only a caller reporting a raw
-            // digest needs the new one.
-            if reported_is_digest {
-                stamped
-            } else {
-                reported_image.to_string()
-            }
-        }
-        Some(spec) => {
-            // `build_image` always appends `--iidfile`, which the `local` and
-            // `tar` exporters reject outright — and an export leaves no local
-            // image whose id could be reported anyway, so drive the build
-            // directly and keep reporting what the local build produced.
-            deacon_core::docker_retry::run_build_with_retry(
-                std::path::Path::new(cli.runtime_path()),
-                &build_args,
-                io,
-            )
-            .await
-            .with_context(|| format!("Failed to export the built image to '{}'", spec))?;
-            debug!(export = %spec, "Exported the built image");
-            reported_image.to_string()
-        }
-    };
-    Ok((reported, metadata))
-}
-
-/// Whether this build's push/export is deferred until AFTER the image it
-/// produces has been stamped with `devcontainer.metadata` (#440).
-///
-/// A `--push`/`--output` build used to hand its export straight to the primary
-/// BuildKit invocation, which left no local image to stamp — so the image a
-/// consumer pulled or unpacked carried none of the metadata the reference
-/// records and every reader of it (a later `up`, VS Code, Zed, envbuilder)
-/// expects. Building into the local daemon first and publishing afterwards
-/// closes that gap.
-///
+/// Every single-platform build loads its result into the daemon, so pushing from
+/// there costs nothing and keeps the pushed reference identical to the local one.
 /// The one shape it cannot cover is a multi-platform build: BuildKit refuses to
-/// `--load` a manifest list, so there is nothing local to stamp and the export
-/// stays on the primary build.
+/// `--load` a manifest list, so there is nothing local to push and the push stays
+/// on the build invocation.
+///
+/// `--output` is never deferred: it rides the build itself, which is what lets an
+/// exporter only a non-docker driver can serve work at all (#595).
 fn defers_publish(args: &BuildArgs) -> bool {
-    (args.push || args.output.is_some())
+    args.push
         && !args
             .platform
             .as_deref()
             .is_some_and(|platform| platform.contains(','))
 }
 
-/// Whether this build hands its push/export straight to the primary BuildKit
-/// invocation, leaving no local image behind (see [`defers_publish`]).
-fn exports_directly(args: &BuildArgs) -> bool {
-    (args.push || args.output.is_some()) && !defers_publish(args)
-}
-
 /// Whether a buildx `--output` spec loads the result into the local daemon
 /// (`type=docker` with no destination) rather than writing it somewhere else.
 ///
 /// Used to avoid naming the `docker` exporter twice in one invocation when the
-/// deferred export pass wants to load as well as export (#440).
+/// build wants to load as well as export (#440).
 fn exports_to_daemon(spec: &str) -> bool {
     let mut kind = None;
     let mut has_destination = false;
@@ -2403,6 +2269,7 @@ async fn execute_docker_build(
     config_hash: &str,
     workspace_folder: &Path,
     labels: &[(String, String)],
+    overlay: &BuildOverlay,
 ) -> Result<BuildResult> {
     {
         use deacon_core::docker::{CliDocker, Docker};
@@ -2417,10 +2284,40 @@ async fn execute_docker_build(
 
         // Prepare build context
         let context_path = build_config.context_folder.join(&build_config.context);
-        let dockerfile_path = build_config.dockerfile_path.clone();
+        // The overlay's merged document replaces the configuration's Dockerfile
+        // when Feature layers were spliced into it.
+        let dockerfile_path = overlay
+            .dockerfile_path
+            .clone()
+            .unwrap_or_else(|| build_config.dockerfile_path.clone());
 
-        // Prepare docker build arguments
-        let mut build_args = vec!["build".to_string()];
+        // WHICH BUILDER runs this. `docker build` always runs on the "default"
+        // instance — the daemon's own builder — so a builder the user selected with
+        // `docker buildx use` is silently ignored and every capability only another
+        // driver can serve (OCI export, local cache export, multi-platform output)
+        // is out of reach (#595). `docker buildx build` honours the selection, and
+        // is the reference CLI's own invocation.
+        //
+        // The gate is `buildkit_disabled`, NOT `should_use_buildkit`: the latter is
+        // false when nothing ASKED for BuildKit, and that case still runs BuildKit
+        // on any modern Docker (the daemon's own default). Deciding the invocation
+        // form on it would put the ordinary `deacon build` back on the legacy
+        // builder — which is exactly the defect, just reached by a different route.
+        // Only an explicit off-switch (`--buildkit never`, `DOCKER_BUILDKIT=0`)
+        // sends this to `docker build`, the sole route to the legacy builder.
+        let use_buildx = uses_buildx(args.buildkit.as_ref());
+
+        // Narrower question, unchanged: whether to hand the child an explicit
+        // `DOCKER_BUILDKIT`, and whether the BuildKit-only INPUT flags
+        // (`--secret`, `--ssh`) are allowed.
+        let use_buildkit = should_use_buildkit(args.buildkit.as_ref());
+        debug!(use_buildx, use_buildkit, "Resolved the build invocation");
+
+        let mut build_args = if use_buildx {
+            vec!["buildx".to_string(), "build".to_string()]
+        } else {
+            vec!["build".to_string()]
+        };
 
         // Defer adding context until after all flags (Docker expects PATH last)
 
@@ -2448,8 +2345,9 @@ async fn execute_docker_build(
             build_args.push(platform.clone());
         }
 
-        // Add target
-        if let Some(target) = &build_config.target {
+        // Add target. The Feature stage supersedes the configuration's own
+        // `build.target`, which the Feature layers were stacked on top of.
+        if let Some(target) = overlay.target.as_ref().or(build_config.target.as_ref()) {
             build_args.push("--target".to_string());
             build_args.push(target.clone());
         }
@@ -2594,9 +2492,19 @@ async fn execute_docker_build(
             build_args.push(ssh.clone());
         }
 
-        // Determine if BuildKit should be used
-        let use_buildkit = should_use_buildkit(args.buildkit.as_ref());
-        debug!("Using BuildKit: {}", use_buildkit);
+        // The Feature RUN-mounts' named build contexts. A buildx-only flag, so the
+        // legacy builder cannot install Features at all — say so rather than let it
+        // fail on an `unknown flag`.
+        if !overlay.extra_args.is_empty() {
+            if !use_buildx {
+                return Err(DockerError::CLIError(
+                    "Installing Features requires BuildKit, which the current settings disable"
+                        .to_string(),
+                )
+                .into());
+            }
+            build_args.extend(overlay.extra_args.iter().cloned());
+        }
 
         // Secrets/SSH require BuildKit; provide a clear error early.
         if !use_buildkit
@@ -2640,11 +2548,14 @@ async fn execute_docker_build(
         build_args.push("--label".to_string());
         build_args.push(label);
 
-        // `devcontainer.metadata` is NOT written here (#436). Its entries include
-        // one per installed Feature and the entries the base image already carries,
-        // neither of which is knowable before this build produces an image — so it
-        // is stamped by `stamp_devcontainer_metadata_label` once the final image
-        // (base, or feature-extended) exists.
+        // #436: `devcontainer.metadata`. The caller computed it from the base
+        // image's own entries plus one per Feature plus the config pick, so it is
+        // written by the build that produces the image rather than by a second
+        // build that would have to `FROM` a daemon-local tag (#595).
+        if let Some(metadata) = &overlay.metadata_label {
+            build_args.push("--label".to_string());
+            build_args.push(format!("devcontainer.metadata={}", metadata));
+        }
 
         // Add user-specified labels
         for (key, value) in labels {
@@ -2652,13 +2563,16 @@ async fn execute_docker_build(
             build_args.push(format!("{}={}", key, value));
         }
 
-        // #440: a `--push`/`--output` build whose publish step is deferred keeps
-        // its export off this invocation so the image lands in the local daemon
-        // and can be stamped with `devcontainer.metadata` first; the publish then
-        // happens in `execute_build`. Only the shapes `defers_publish` rules out
-        // (multi-platform) still hand the export straight to BuildKit here.
-        let defer_publish = defers_publish(args);
-        let produces_local_image = defer_publish || (!args.push && args.output.is_none());
+        // A multi-platform result cannot be loaded into the local daemon, so it is
+        // the one shape that leaves nothing local behind. Everything else does,
+        // which is what lets `--image-name` and the deterministic tag resolve and
+        // what lets a `--push` be issued from the daemon after the fact (#440).
+        let multi_platform = args
+            .platform
+            .as_deref()
+            .is_some_and(|platform| platform.contains(','));
+        let produces_local_image = !multi_platform;
+        let defer_publish = args.push && produces_local_image;
 
         // #470: name this build's image with a tag no concurrent build can take,
         // so every post-build pass has a handle that survives a sibling
@@ -2674,33 +2588,41 @@ async fn execute_docker_build(
             None
         };
 
-        // Add --push flag if requested
+        // Add --push flag if requested. A single-platform push is deferred to
+        // `execute_build`, which pushes the loaded image from the daemon (#440).
         if args.push && !defer_publish {
             build_args.push("--push".to_string());
         }
 
-        // Add --output flag if requested
+        // `--output` rides THIS invocation — the only one there is. It used to be
+        // deferred to a second build so the image could be stamped first, and that
+        // second build could only run on the docker driver, which is why every
+        // exporter the docker driver cannot serve was unreachable (#595).
         if let Some(output) = &args.output {
-            if !defer_publish {
+            build_args.push("--output".to_string());
+            build_args.push(output.clone());
+            // Also load, so the local tags (`--image-name` and the deterministic
+            // one) name the image this build produced. `--load` alone is dropped as
+            // a duplicate of an explicit `type=docker` spec, so name the exporter
+            // directly — and only when the user's own spec is not already it.
+            if produces_local_image && !exports_to_daemon(output) {
                 build_args.push("--output".to_string());
-                build_args.push(output.clone());
+                build_args.push("type=docker".to_string());
             }
-        }
-
-        // When using BuildKit and this invocation is the one that produces the
-        // local image, add --load to ensure the image is loaded into the local
-        // Docker daemon (BuildKit doesn't do this by default)
-        if use_buildkit && produces_local_image {
+        } else if use_buildx && produces_local_image {
+            // With no exporter named, `--load` is what puts the result in the local
+            // Docker daemon: buildx does not do this by default, and the legacy
+            // builder (which always does) has no such flag.
             build_args.push("--load".to_string());
         }
 
         // Retrieve the image ID via `--iidfile` instead of `docker build -q`
-        // stdout scraping (only when building locally — a direct push/export may
-        // not produce a local image, and the `local`/`tar` exporters reject the
-        // flag outright). Dropping `-q` lets BuildKit progress stream
-        // to stderr for the build-output UI while the digest still arrives
-        // reliably. The temp file must outlive the build invocation below.
-        let iidfile = if produces_local_image {
+        // stdout scraping. Dropping `-q` lets BuildKit progress stream to stderr
+        // for the build-output UI while the digest still arrives reliably. Skipped
+        // whenever an exporter is named — the `local` and `tar` exporters reject
+        // the flag outright — and whenever no local image is produced at all. The
+        // temp file must outlive the build invocation below.
+        let iidfile = if produces_local_image && args.output.is_none() {
             let f =
                 tempfile::NamedTempFile::new().context("Failed to create image ID temp file")?;
             build_args.push("--iidfile".to_string());
@@ -2722,18 +2644,18 @@ async fn execute_docker_build(
 
         debug!("Docker build command: docker {}", build_args.join(" "));
 
-        // Execute the base Dockerfile build through the streaming executor so its
-        // output honors the resolved mode (Compact/Inherit/Plain). No features are
-        // installed in this pass — feature layering renders separately — so there
-        // are no feature ids to register. `run_build_once` runs a single attempt
-        // (no retry) on our pre-configured command (env vars + working dir).
+        // Execute the build through the streaming executor so its output honors the
+        // resolved mode (Compact/Inherit/Plain). The Feature-install steps are part
+        // of THIS invocation, so their ids are registered with the renderer here.
+        // `run_build_once` runs a single attempt (no retry) on our pre-configured
+        // command (env vars + working dir).
         cmd.args(&build_args) // Pass all args including "build" subcommand
             .current_dir(workspace_folder);
         // Pause the spinner so the build's streaming renderer owns stderr.
         let _pause = crate::commands::shared::progress::SpinnerPause::new(&args.progress_tracker);
         let renderer = crate::ui::build_render::BuildRenderer::for_mode(
             args.build_output_mode,
-            Vec::<&str>::new(),
+            overlay.feature_ids.iter().map(String::as_str),
         );
         let output = deacon_core::docker_retry::run_build_once(
             cmd,
@@ -2807,8 +2729,8 @@ async fn execute_docker_build(
             build_duration: 0.0, // Will be set by caller
             metadata,
             config_hash: config_hash.to_string(),
-            // Base build; feature-layering (and thus build-time host-CA
-            // injection) is applied by the post-build pass in `execute_build`.
+            // Filled in by the caller, which knows the CA set this build was
+            // handed (the RUN step is part of the Feature stage above).
             injected_ca_subjects: Vec::new(),
         };
 
@@ -3123,27 +3045,29 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn test_defers_publish_covers_push_and_output_but_not_multi_platform() {
-        // #440: a `--push`/`--output` build defers its publish so the image is
-        // local when `devcontainer.metadata` is stamped on it. A multi-platform
-        // build cannot be `--load`ed, so it keeps the direct export.
+    fn test_defers_publish_covers_push_but_never_output() {
+        // #440: a single-platform `--push` is issued from the daemon after the
+        // build, which loaded the image. A multi-platform build cannot be
+        // `--load`ed, so its push rides the build invocation.
         let local = BuildArgs::default();
         assert!(!defers_publish(&local), "a plain build publishes nothing");
-        assert!(!exports_directly(&local));
 
         let push = BuildArgs {
             push: true,
             ..BuildArgs::default()
         };
         assert!(defers_publish(&push));
-        assert!(!exports_directly(&push));
 
+        // `--output` is NEVER deferred: it rides the build itself, which is what
+        // lets an exporter only a non-docker driver can serve work at all (#595).
         let export = BuildArgs {
             output: Some("type=docker,dest=/tmp/out.tar".to_string()),
             ..BuildArgs::default()
         };
-        assert!(defers_publish(&export));
-        assert!(!exports_directly(&export));
+        assert!(
+            !defers_publish(&export),
+            "an export belongs to the build that produces the image"
+        );
 
         let single_platform_push = BuildArgs {
             push: true,
@@ -3161,7 +3085,6 @@ mod tests {
             !defers_publish(&multi_platform_push),
             "BuildKit will not --load a manifest list"
         );
-        assert!(exports_directly(&multi_platform_push));
     }
 
     #[test]
@@ -3517,6 +3440,47 @@ mod tests {
         // Test None with no env var (should default to false)
         temp_env::with_var_unset("DOCKER_BUILDKIT", || {
             assert!(!should_use_buildkit(None));
+        });
+    }
+
+    /// #595: the ORDINARY invocation — no `--buildkit`, no `DOCKER_BUILDKIT` —
+    /// must reach `docker buildx build`, because `docker build` runs on the
+    /// daemon's own "default" instance and ignores the builder the user selected.
+    ///
+    /// This is the trap the fix nearly fell into: `should_use_buildkit` is FALSE
+    /// in exactly that case, so deciding the invocation form on it would have left
+    /// the defect in place for every user who has not set `DOCKER_BUILDKIT=1` —
+    /// invisible on a dev machine that does set it.
+    #[test]
+    fn the_invocation_form_follows_the_off_switch_not_the_request() {
+        temp_env::with_var_unset("DOCKER_BUILDKIT", || {
+            assert!(
+                uses_buildx(None),
+                "an ordinary `deacon build` must run on the selected buildx builder"
+            );
+            assert!(
+                !should_use_buildkit(None),
+                "the narrower question is false here — which is why it cannot decide this"
+            );
+            assert!(uses_buildx(Some(&BuildKitOption::Auto)));
+            assert!(
+                !uses_buildx(Some(&BuildKitOption::Never)),
+                "`--buildkit never` is the one route to the legacy builder"
+            );
+        });
+
+        // An explicit off-switch in the environment reaches the legacy builder too.
+        temp_env::with_var("DOCKER_BUILDKIT", Some("0"), || {
+            assert!(!uses_buildx(None));
+            assert!(!uses_buildx(Some(&BuildKitOption::Auto)));
+        });
+
+        temp_env::with_var("DOCKER_BUILDKIT", Some("1"), || {
+            assert!(uses_buildx(None));
+            assert!(
+                !uses_buildx(Some(&BuildKitOption::Never)),
+                "the flag wins over the environment"
+            );
         });
     }
 

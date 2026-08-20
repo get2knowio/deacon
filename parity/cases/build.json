@@ -283,7 +283,7 @@
             "--workspace-folder",
             "${WORKSPACE}",
             "--image-name",
-            "deacon-conformance-build:us3"
+            "${IMAGE_TAG}"
           ],
           "fixtures": [
             "fx-build-dockerfile-feature"
@@ -302,7 +302,19 @@
           "channel": "chan-stdout",
           "operation": "op-build",
           "assertion": {
-            "matches": "Image ID: deacon-devcontainer-features:[\\s\\S]*Tags:[^\\n]*deacon-conformance-build:us3"
+            "matches": "Tags:[^\\n]*<IMAGE_TAG>"
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "devcontainer.metadata": "[{\"id\":\"./features/marker\"}]"
+              }
+            }
           }
         }
       ],
@@ -313,7 +325,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-build-dockerfile-cli-overlay-single-feature`. A Dockerfile build, a Feature layered on top of it, and a user-supplied `--image-name` — the exact combination in which this project once shipped a tag pointing at the PRE-Feature base. The assertion pins both halves in one ordered match: the reported image is the FEATURE-EXTENDED one (`deacon-devcontainer-features:…`), and the user's tag is among the tags applied to it. The stronger observation — running the tag and reading the Feature's marker — needs a `docker run` the declarative runner does not model, so the ordering constraint stands in for it and this note records the difference."
+      "notes": "Covers the high-risk triple `hrt-build-dockerfile-cli-overlay-single-feature`. A Dockerfile build, a Feature layered on top of it, and a user-supplied `--image-name` — the exact combination in which this project once shipped a tag pointing at the PRE-Feature base.\n\nREWRITTEN with the fix for [#595](https://github.com/get2knowio/deacon/issues/595), because the old assertion pinned the MECHANISM rather than the invariant. It matched `Image ID: deacon-devcontainer-features:…` — the name of the intermediate image deacon built to layer Features onto the base and then re-tagged. That intermediate no longer exists: base and Features are built in ONE BuildKit invocation, so `Image ID:` now reports the digest the build produced, exactly as it does for a Feature-less build. An assertion that a specific internal tag appears is satisfied only by the chained design and would have to be deleted to adopt any other, which is the wrong shape for a case about what the user gets.\n\nWhat it asserts now is the invariant itself, in two halves that fail independently: the user's tag is among the tags applied (`chan-stdout`), and the image that tag names carries the Feature's `devcontainer.metadata` entry (`chan-image`). A tag left pointing at the pre-Feature base carries no such entry, which is the regression this case exists to catch. MEASURED against the fix: `docker run <tag> cat /usr/local/share/conformance/install-order` prints `marker` and `cat /etc/conformance-base` prints `conformance-build-base`, so the tag names an image holding both the base's own layer and the Feature's — the `docker run` the declarative runner still does not model, done by hand once."
     },
     {
       "id": "case-build-dockerfile-feature-multi-order-label",

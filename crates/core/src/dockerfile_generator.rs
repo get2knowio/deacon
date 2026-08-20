@@ -503,44 +503,28 @@ impl DockerfileGenerator {
     /// - `builder`: optional buildx builder selection
     /// - When `build_options.is_default()` returns true, no extra arguments are added
     ///
-    /// `select_default_builder` asks for the docker-driver builder to be named explicitly.
-    /// It is a parameter rather than an unconditional flag because only the Docker CLI
-    /// understands `--builder`: Podman drives builds through its own CLI, where the flag is
-    /// not a no-op but an error. The caller knows the runtime; this module deliberately
-    /// does not.
+    /// No builder is pinned here. [`DockerfileConfig::base_image`] on this path is the
+    /// registry reference the configuration named, so the generated `FROM` resolves under
+    /// any buildx driver and the builder the user selected is the one that runs (#595).
+    /// deacon used to build a daemon-local intermediate tag and `FROM` it, which only a
+    /// docker-driver builder could see — and pinning that driver to rescue the chain took
+    /// OCI export, local cache export and multi-platform output away from every build.
+    ///
+    /// `extra_labels` are `key=value` pairs written onto the produced image — the
+    /// `devcontainer.metadata` a caller computed ahead of the build, when it wants
+    /// one recorded.
     pub fn generate_build_args(
         &self,
         dockerfile_path: &Path,
         image_tag: &str,
         build_options: Option<&BuildOptions>,
-        select_default_builder: bool,
+        extra_labels: &[String],
     ) -> Vec<String> {
         let mut args = vec![
             "buildx".to_string(),
             "build".to_string(),
             "--load".to_string(),
         ];
-
-        // This build's `FROM` names an image that may exist ONLY in the local daemon store —
-        // for the Dockerfile shape it is the `deacon-build:<hash>` tag deacon created moments
-        // ago. A `docker-container` driver builder runs in an isolated BuildKit container
-        // that cannot read that store, so it falls through to the registry and fails with a
-        // bare "pull access denied" naming a repository nobody ever pushed (#391). `--load`
-        // does not help: it governs where the OUTPUT goes, not how INPUTS resolve.
-        //
-        // So pin the invocation to the docker-driver builder, which shares the daemon's
-        // store. That is not a preference being overridden — an isolated builder cannot
-        // execute this build at all. A caller who names a builder explicitly still wins:
-        // `to_docker_args` emits its `--builder` after this one and buildx takes the last
-        // occurrence, so an explicit choice is honored and fails on its own terms.
-        //
-        // Only the ACTIVE builder is implicated, which is why this was invisible locally and
-        // reddened only CI: `docker/setup-buildx-action` creates a container-driver builder
-        // and makes it current, while a stock install leaves the docker driver in place.
-        if select_default_builder && build_options.map(|o| o.builder.is_none()).unwrap_or(true) {
-            args.push("--builder".to_string());
-            args.push("default".to_string());
-        }
 
         // Add cache/builder arguments from BuildOptions if provided and not default
         if let Some(opts) = build_options {
@@ -554,6 +538,11 @@ impl DockerfileGenerator {
         if let Some(ref ca_dir) = self.config.host_ca_build_context {
             args.push("--build-context".to_string());
             args.push(format!("{}={}", HOST_CA_BUILD_CONTEXT, ca_dir));
+        }
+
+        for label in extra_labels {
+            args.push("--label".to_string());
+            args.push(label.clone());
         }
 
         // Add build context and other standard arguments
@@ -956,7 +945,7 @@ mod tests {
             std::path::Path::new("/tmp/Dockerfile"),
             "img:tag",
             None,
-            true,
+            &[],
         );
         assert!(
             args.iter()
@@ -1023,7 +1012,7 @@ mod tests {
             Path::new("/tmp/Dockerfile.extended"),
             "test:latest",
             None,
-            true,
+            &[],
         );
 
         assert!(args.contains(&"buildx".to_string()));
@@ -1064,7 +1053,7 @@ mod tests {
             Path::new("/tmp/Dockerfile.extended"),
             "test:latest",
             Some(&build_options),
-            true,
+            &[],
         );
 
         // Standard args still present
@@ -1100,7 +1089,7 @@ mod tests {
             Path::new("/tmp/Dockerfile.extended"),
             "test:latest",
             Some(&build_options),
-            true,
+            &[],
         );
 
         // Standard args present
@@ -1112,47 +1101,21 @@ mod tests {
         assert!(!args.contains(&"--cache-to".to_string()));
         assert!(!args.contains(&"--no-cache".to_string()));
 
-        // `--builder default` IS added, and is not a cache option: the build's `FROM` may
-        // name a daemon-local tag, which only the docker-driver builder can read (#391).
-        assert_eq!(
-            args.windows(2)
-                .find(|w| w[0] == "--builder")
-                .map(|w| w[1].as_str()),
-            Some("default"),
-            "the docker-driver builder must be selected when no builder was requested: {args:?}"
-        );
-    }
-
-    /// Podman never gets `--builder`: it is a Docker CLI flag, and Podman's build path
-    /// would reject it rather than ignore it. The caller passes `false` there.
-    #[test]
-    fn test_generate_build_args_omits_builder_for_a_runtime_that_lacks_it() {
-        let config = DockerfileConfig {
-            base_image: "ubuntu:22.04".to_string(),
-            target_stage: "dev_containers_target_stage".to_string(),
-            features_source_dir: "/tmp/features".to_string(),
-            ..Default::default()
-        };
-
-        let generator = DockerfileGenerator::new(config);
-        let args = generator.generate_build_args(
-            Path::new("/tmp/Dockerfile.extended"),
-            "test:latest",
-            None,
-            false,
-        );
-
+        // And no builder is named either. deacon used to pin `--builder default`
+        // here because this build's `FROM` could name a daemon-local intermediate
+        // tag; it no longer can, and pinning silently overrode the builder the
+        // user selected, taking OCI export, cache export and multi-platform
+        // output with it (#595).
         assert!(
             !args.contains(&"--builder".to_string()),
-            "no builder may be named when the runtime does not support the flag: {args:?}"
+            "no builder may be pinned when none was requested: {args:?}"
         );
     }
 
-    /// An explicitly requested builder wins over the default selection.
+    /// The only `--builder` that ever appears is one the caller asked for.
     ///
-    /// buildx takes the LAST `--builder`, and `to_docker_args` emits the caller's after the
-    /// one added above — so a caller who names a builder gets it, and fails on its own terms
-    /// if that builder cannot see the base image.
+    /// This also keeps Podman honest: `--builder` is a Docker CLI flag that Podman's build
+    /// path rejects rather than ignores, and nothing here emits one unprompted.
     #[test]
     fn test_generate_build_args_explicit_builder_wins() {
         let config = DockerfileConfig {
@@ -1172,7 +1135,7 @@ mod tests {
             Path::new("/tmp/Dockerfile.extended"),
             "test:latest",
             Some(&build_options),
-            true,
+            &[],
         );
 
         let builders: Vec<&str> = args

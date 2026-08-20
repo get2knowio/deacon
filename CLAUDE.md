@@ -543,16 +543,44 @@ must accept BOTH (see `extract_build_config` in `commands/build/mod.rs` and `up`
 `image_build.rs`).
 
 **Build feature installation (`deacon build`):** all four config shapes install features
-and the user `--image-name` must resolve to the FEATURE-EXTENDED image, not the base:
-- Dockerfile / image-reference: build the base (tagged `deacon-build:<hash>`), then the
-  post-build pass layers features via `apply_features_and_lockfile`. The base must be a
-  real tag — a bare `sha256:` digest makes BuildKit treat `FROM` as a remote repo (404).
+and the user `--image-name` must resolve to the FEATURE-EXTENDED image, not the base.
+
+**Never chain a build through a daemon-local tag** (#595). A `docker-container` driver
+builder runs in an isolated BuildKit container that cannot read the daemon's image store,
+so a second build whose `FROM` names a tag deacon just created can only run on the docker
+driver. deacon used to force that with `--builder default`, which silently overrode the
+builder the user selected and took OCI export, local cache export and multi-platform output
+with it — and was also why a foreign `--platform` could not resolve its own base (#593).
+The shape now, which is the reference CLI's own:
+- Dockerfile / image-reference: ONE BuildKit invocation over ONE document —
+  `base_stage_for_features` names the stage to build on (the config's `build.target`, else
+  the final stage, aliased if unnamed), `prepare_feature_layer` emits the install stage, and
+  `merge_dockerfile_with_feature_stage` splices them. An image-reference config synthesizes
+  `FROM <image>` into a temp context first. Driven by `execute_single_container_build` →
+  `execute_docker_build(..., &BuildOverlay)`.
+- Because there is only one build, anything the BASE half needs must arrive on it:
+  `build.args`, `build.options`, `--target`. A missing `--build-arg` here is invisible in
+  the JSON outcome and shows up only in the image (`integration_up_dockerfile_features`).
+- `devcontainer.metadata` is computed BEFORE the build, from the base image resolved out of
+  the Dockerfile (`dockerfile_utils::resolve_base_image`, the reference's `findBaseImage`)
+  plus one entry per Feature plus the config pick, and written as a `--label` on that same
+  build. There is no stamping pass.
+- The primary build runs `docker buildx build`, never `docker build`: the latter always uses
+  the daemon's own "default" instance and ignores the selected builder, pin or no pin. Only
+  `--buildkit never` keeps `docker build` (it is the only way to reach the legacy builder).
+- `--output` rides the build. Only `--push` is deferred (single-platform builds load
+  locally, so the push happens from the daemon afterwards; a multi-platform build cannot
+  `--load`, so its push stays on the invocation).
 - Compose: `execute_compose_build_with_features` resolves the service shape and reuses
-  `up::compose::resolve_compose_feature_image` (shared with `up`).
-- After layering, re-tag the feature image with the deterministic tag + every
-  `--image-name` (`retag_image`). Otherwise `--image-name` points at the pre-feature base
-  and the installed features are invisible — and canaries that only check the JSON outcome
-  (not image contents) won't catch it, so verify with `docker run <tag> cat <marker>`.
+  `up::compose::resolve_compose_feature_image` (shared with `up`), which builds the service's
+  Dockerfile and the Feature stage as one document too. It still `retag_image`s the produced
+  image with the deterministic tag + every `--image-name`; otherwise `--image-name` points at
+  the pre-feature base and the installed features are invisible — and canaries that only
+  check the JSON outcome (not image contents) won't catch it, so verify with
+  `docker run <tag> cat <marker>`.
+- `up` follows the same rule: a Dockerfile config that declares Features defers its base
+  build (`deferred_dockerfile_build` in `up/mod.rs`) so `container.rs` can build base +
+  Features together.
 
 ## Deferral Tracking
 

@@ -5,7 +5,7 @@
 //! - `handle_container_shutdown` - Shutdown handling for single container
 
 use super::args::UpArgs;
-use super::features_build::build_image_with_features;
+use super::features_build::{build_image_with_features, build_image_with_features_from_dockerfile};
 use super::helpers::{apply_user_mapping, handle_lockfile_post_build};
 use super::lifecycle::{HostTrustArgs, execute_initialize_command, execute_lifecycle_commands};
 use super::merged_config::{
@@ -86,6 +86,12 @@ pub(crate) async fn execute_container_up(
     cache_folder: &Option<PathBuf>,
     build_options: &BuildOptions,
     host_ca_set: Option<&CorporateCaSet>,
+    // The Dockerfile shape's build description, present ONLY when the
+    // configuration is Dockerfile-based AND declares Features — the one case where
+    // the base image has deliberately not been built yet, so the Feature stage can
+    // be spliced into the user's own Dockerfile and both built in a single
+    // BuildKit invocation (#595).
+    dockerfile_build: Option<&crate::commands::up::image_build::BuildConfig>,
 ) -> Result<UpContainerInfo> {
     debug!("Starting traditional development container");
 
@@ -277,24 +283,85 @@ pub(crate) async fn execute_container_up(
         // `config_path` anchors local feature references (#69). Pause the
         // interactive spinner for the build so its streaming renderer owns stderr
         // (otherwise the steady-tick spinner clobbers the build progress).
+        let lockfile_policy = crate::commands::shared::lockfile::LockfilePolicy::from_flags(
+            args.no_lockfile,
+            args.frozen_lockfile,
+        );
         let feature_build = {
             let _pause =
                 crate::commands::shared::progress::SpinnerPause::new(&args.progress_tracker);
-            build_image_with_features(
-                &config,
-                identity,
-                workspace_folder,
-                config_path,
-                Some(build_options),
-                host_ca_set,
-                &runtime.cli_docker(),
-                crate::commands::shared::lockfile::LockfilePolicy::from_flags(
-                    args.no_lockfile,
-                    args.frozen_lockfile,
-                ),
-            )
-            .await
-            .with_context(|| "Failed to build feature-extended image")?
+            match dockerfile_build {
+                // Dockerfile shape: base + Features in ONE build, with the Feature
+                // stage spliced onto the end of the user's own document. deacon used
+                // to build the Dockerfile to a daemon-local tag and then `FROM` it —
+                // which only a docker-driver builder could resolve, so the Feature
+                // build had to pin one and override whatever the user selected
+                // (#391/#595).
+                Some(build_config) => {
+                    let dockerfile_content = tokio::fs::read_to_string(&build_config.dockerfile)
+                        .await
+                        .with_context(|| {
+                            format!("Failed to read Dockerfile '{}'", build_config.dockerfile)
+                        })?;
+                    let (staged_content, base_stage) =
+                        super::features_build::base_stage_for_features(
+                            &dockerfile_content,
+                            build_config.target.as_deref(),
+                        )
+                        .with_context(|| {
+                            format!(
+                                "Failed to locate a base stage in Dockerfile '{}' to install \
+                                 Features on",
+                                build_config.dockerfile
+                            )
+                        })?;
+                    let context_path = build_config
+                        .context_folder
+                        .join(&build_config.context)
+                        .canonicalize()
+                        .context("Failed to resolve build context path")?;
+                    // `build.args` and `build.options` used to ride the separate base
+                    // build; with one invocation they have to arrive with the rest.
+                    let mut extra_build_args: Vec<String> = Vec::new();
+                    for (key, value) in &build_config.build_args {
+                        extra_build_args.push("--build-arg".to_string());
+                        extra_build_args.push(format!("{}={}", key, value));
+                    }
+                    extra_build_args.extend(build_config.options.iter().cloned());
+                    build_image_with_features_from_dockerfile(
+                        &config,
+                        identity,
+                        &staged_content,
+                        &base_stage,
+                        &context_path,
+                        config_path,
+                        build_config.target.as_deref(),
+                        Some(build_options),
+                        host_ca_set,
+                        &runtime.cli_docker(),
+                        lockfile_policy,
+                        // `up` records `devcontainer.metadata` on the CONTAINER it
+                        // creates, not on this image.
+                        None,
+                        &extra_build_args,
+                    )
+                    .await
+                    .with_context(|| "Failed to build feature-extended image")?
+                }
+                None => build_image_with_features(
+                    &config,
+                    identity,
+                    workspace_folder,
+                    config_path,
+                    Some(build_options),
+                    host_ca_set,
+                    &runtime.cli_docker(),
+                    lockfile_policy,
+                    None,
+                )
+                .await
+                .with_context(|| "Failed to build feature-extended image")?,
+            }
         };
 
         // Feature-contributed `containerEnv` merges in BELOW the configuration's own.

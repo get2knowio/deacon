@@ -8,6 +8,15 @@
 //!   stage alias or rewrites the Dockerfile to append a generated alias so the
 //!   feature-install layers added later have a deterministic target to
 //!   `--target` against.
+//! - [`resolve_base_image`] walks the stage graph back from the build's target
+//!   stage to the EXTERNAL image it ultimately derives from — the reference's
+//!   `findBaseImage`. A caller inspects that image for the
+//!   `devcontainer.metadata` it contributes and the `USER` it bakes in, both of
+//!   which have to be known BEFORE the build runs because they are written into
+//!   the build's own inputs.
+//! - [`find_user_statement`] reports the `USER` the target stage ends up running
+//!   as when the Dockerfile itself declares one — the reference's
+//!   `findUserStatement`. `None` means "ask the base image".
 //!
 //! The parser is intentionally line-oriented (not a full Dockerfile AST). It
 //! mirrors the reference TypeScript regex behavior so we stay in lock-step with
@@ -135,6 +144,218 @@ pub fn ensure_dockerfile_has_final_stage_name(
         "Final FROM had no stage alias; appended generated alias"
     );
     Ok((modified, default_last_stage_name.to_string()))
+}
+
+/// Matches a global `ARG` declaration (`ARG NAME` or `ARG NAME=default`).
+static PARSE_ARG_LINE: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new(r#"^\s*ARG\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)(=(?P<default>.*))?\s*$"#)
+        .case_insensitive(true)
+        .build()
+        .expect("parseArgLine regex must compile")
+});
+
+/// Matches a `USER` instruction, capturing the user (and optional `:group`).
+static PARSE_USER_LINE: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new(r#"^\s*USER\s+(?P<user>[^\s#]+)"#)
+        .case_insensitive(true)
+        .build()
+        .expect("parseUserLine regex must compile")
+});
+
+/// One `FROM` instruction, in document order.
+#[derive(Debug, Clone)]
+struct Stage {
+    /// The image token exactly as written (`alpine:3.19`, `$BASE`, `builder`).
+    image: String,
+    /// The `AS <alias>` name, when the stage declares one.
+    alias: Option<String>,
+    /// Byte offset just past this stage's `FROM` line — where its body starts.
+    body_start: usize,
+    /// Byte offset of this stage's `FROM` line — where the previous body ends.
+    from_start: usize,
+}
+
+/// Parse every `FROM` instruction in document order.
+fn parse_stages(dockerfile_content: &str) -> Vec<Stage> {
+    FIND_FROM_LINES
+        .captures_iter(dockerfile_content)
+        .filter_map(|caps| {
+            let full = caps.get(0)?;
+            let line = caps.name("line")?.as_str();
+            let from = PARSE_FROM_LINE.captures(line)?;
+            Some(Stage {
+                image: strip_quotes(from.name("image")?.as_str()).to_string(),
+                alias: from.name("label").map(|m| m.as_str().to_string()),
+                body_start: full.start() + line.len(),
+                from_start: full.start(),
+            })
+        })
+        .collect()
+}
+
+fn strip_quotes(token: &str) -> &str {
+    token.trim_matches('"')
+}
+
+/// Collect the ARG declarations that precede the first `FROM` — the only ones
+/// BuildKit expands inside a `FROM` — folded with the caller's `--build-arg`
+/// overrides, which win.
+fn global_args(
+    dockerfile_content: &str,
+    build_args: &std::collections::HashMap<String, String>,
+    first_from: usize,
+) -> std::collections::HashMap<String, String> {
+    let mut args = std::collections::HashMap::new();
+    for line in dockerfile_content[..first_from].lines() {
+        if let Some(caps) = PARSE_ARG_LINE.captures(line) {
+            let name = caps["name"].to_string();
+            let default = caps
+                .name("default")
+                .map(|m| strip_quotes(m.as_str().trim()).to_string())
+                .unwrap_or_default();
+            args.insert(name, default);
+        }
+    }
+    for (k, v) in build_args {
+        args.insert(k.clone(), v.clone());
+    }
+    args
+}
+
+/// Expand `$NAME` / `${NAME}` occurrences from `args`. Unknown names expand to
+/// the empty string, exactly as BuildKit does.
+fn expand_args(token: &str, args: &std::collections::HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(token.len());
+    let bytes: Vec<char> = token.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != '$' {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        if i < bytes.len() && bytes[i] == '{' {
+            i += 1;
+            let mut name = String::new();
+            while i < bytes.len() && bytes[i] != '}' {
+                name.push(bytes[i]);
+                i += 1;
+            }
+            i += 1; // consume '}'
+            // `${NAME:-default}` / `${NAME:+alt}` are not expanded here; take the
+            // name half and let the lookup decide.
+            let name = name.split([':', '-']).next().unwrap_or("").to_string();
+            out.push_str(args.get(&name).map(String::as_str).unwrap_or(""));
+        } else {
+            let mut name = String::new();
+            while i < bytes.len() && (bytes[i].is_alphanumeric() || bytes[i] == '_') {
+                name.push(bytes[i]);
+                i += 1;
+            }
+            out.push_str(args.get(&name).map(String::as_str).unwrap_or(""));
+        }
+    }
+    out
+}
+
+/// Index of the stage a build targets: `target` by alias when given, otherwise
+/// the last `FROM` in the document.
+fn target_stage_index(stages: &[Stage], target: Option<&str>) -> Option<usize> {
+    match target {
+        Some(t) => stages.iter().rposition(|s| {
+            s.alias
+                .as_deref()
+                .is_some_and(|a| a.eq_ignore_ascii_case(t))
+        }),
+        None => stages.len().checked_sub(1),
+    }
+}
+
+/// Follow one stage's `FROM` to the stage it names, if it names one declared
+/// EARLIER in the same document. `None` means the token is an external image.
+fn parent_stage_index(stages: &[Stage], idx: usize, image: &str) -> Option<usize> {
+    stages[..idx].iter().rposition(|s| {
+        s.alias
+            .as_deref()
+            .is_some_and(|a| a.eq_ignore_ascii_case(image))
+    })
+}
+
+/// Resolve the EXTERNAL image the build's target stage ultimately derives from.
+///
+/// Mirrors the reference CLI's `findBaseImage`: start at `target` (or the final
+/// `FROM` when no target is given), follow `FROM <earlier-stage>` links back
+/// through the document, and report the first image token that names something
+/// outside it. Global `ARG`s — the only ones BuildKit expands in a `FROM` — are
+/// substituted, with the caller's `build_args` overriding their defaults.
+///
+/// Returns `None` when the Dockerfile has no `FROM`, when `target` names no
+/// stage, when the chain is cyclic, or when the resolved token still cannot be
+/// resolved to a concrete name (an unset `ARG`, `scratch`). A caller treats
+/// `None` as "nothing to inherit" rather than as an error: everything this
+/// powers is additive metadata.
+pub fn resolve_base_image(
+    dockerfile_content: &str,
+    build_args: &std::collections::HashMap<String, String>,
+    target: Option<&str>,
+) -> Option<String> {
+    let stages = parse_stages(dockerfile_content);
+    let mut idx = target_stage_index(&stages, target)?;
+    let args = global_args(dockerfile_content, build_args, stages[0].from_start);
+
+    // Bounded by the stage count: each hop moves strictly earlier in the document.
+    for _ in 0..=stages.len() {
+        let image = expand_args(&stages[idx].image, &args);
+        match parent_stage_index(&stages, idx, &image) {
+            Some(prev) => idx = prev,
+            None => {
+                if image.is_empty() || image.eq_ignore_ascii_case("scratch") {
+                    return None;
+                }
+                return Some(image);
+            }
+        }
+    }
+    None
+}
+
+/// Report the user the build's target stage runs as, when the Dockerfile itself
+/// says so.
+///
+/// Mirrors the reference CLI's `findUserStatement`: scan the target stage's body
+/// for its last `USER` instruction and, failing that, follow the stage's `FROM`
+/// back through earlier stages in the same document. `None` means no stage in
+/// the chain declares one, so the answer belongs to the base image and the
+/// caller should inspect it.
+pub fn find_user_statement(
+    dockerfile_content: &str,
+    build_args: &std::collections::HashMap<String, String>,
+    target: Option<&str>,
+) -> Option<String> {
+    let stages = parse_stages(dockerfile_content);
+    let mut idx = target_stage_index(&stages, target)?;
+    let args = global_args(dockerfile_content, build_args, stages[0].from_start);
+
+    for _ in 0..=stages.len() {
+        let body_end = stages
+            .get(idx + 1)
+            .map(|s| s.from_start)
+            .unwrap_or(dockerfile_content.len());
+        let body = &dockerfile_content[stages[idx].body_start..body_end];
+        // Last USER wins: it is the one in effect when the stage ends.
+        let declared = body
+            .lines()
+            .filter_map(|l| PARSE_USER_LINE.captures(l))
+            .map(|c| expand_args(strip_quotes(&c["user"]), &args))
+            .rfind(|u| !u.is_empty());
+        if declared.is_some() {
+            return declared;
+        }
+        let image = expand_args(&stages[idx].image, &args);
+        idx = parent_stage_index(&stages, idx, &image)?;
+    }
+    None
 }
 
 /// Errors returned by the Dockerfile parser.
@@ -318,6 +539,114 @@ mod tests {
         let (modified, stage) = ensure(input);
         assert_eq!(stage, STAGE);
         assert!(modified.contains(&format!("FROM $BASE AS {}\n", STAGE)));
+    }
+
+    fn no_args() -> std::collections::HashMap<String, String> {
+        std::collections::HashMap::new()
+    }
+
+    #[test]
+    fn resolve_base_image_reads_a_single_from() {
+        assert_eq!(
+            resolve_base_image("FROM alpine:3.19\nRUN true\n", &no_args(), None).as_deref(),
+            Some("alpine:3.19")
+        );
+    }
+
+    #[test]
+    fn resolve_base_image_follows_stage_references_to_the_external_image() {
+        let df = "FROM debian:bookworm AS base\nRUN true\nFROM base AS mid\nFROM mid\n";
+        assert_eq!(
+            resolve_base_image(df, &no_args(), None).as_deref(),
+            Some("debian:bookworm")
+        );
+    }
+
+    #[test]
+    fn resolve_base_image_honors_the_requested_target() {
+        let df = "FROM debian:bookworm AS base\nFROM alpine:3.19 AS other\n";
+        assert_eq!(
+            resolve_base_image(df, &no_args(), Some("base")).as_deref(),
+            Some("debian:bookworm")
+        );
+        // With no target the LAST FROM wins.
+        assert_eq!(
+            resolve_base_image(df, &no_args(), None).as_deref(),
+            Some("alpine:3.19")
+        );
+    }
+
+    #[test]
+    fn resolve_base_image_expands_global_args_and_build_arg_overrides() {
+        let df = "ARG BASE=alpine:3.19\nFROM $BASE\n";
+        assert_eq!(
+            resolve_base_image(df, &no_args(), None).as_deref(),
+            Some("alpine:3.19")
+        );
+
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("BASE".to_string(), "debian:bookworm".to_string());
+        assert_eq!(
+            resolve_base_image(df, &overrides, None).as_deref(),
+            Some("debian:bookworm")
+        );
+
+        // `${BRACED}` form, and an unset ARG resolves to nothing rather than to
+        // a literal `$NAME` that would 404 against a registry.
+        assert_eq!(
+            resolve_base_image("ARG B=alpine\nFROM ${B}:3.19\n", &no_args(), None).as_deref(),
+            Some("alpine:3.19")
+        );
+        assert_eq!(resolve_base_image("FROM $UNSET\n", &no_args(), None), None);
+    }
+
+    #[test]
+    fn resolve_base_image_returns_none_for_unresolvable_bases() {
+        assert_eq!(resolve_base_image("RUN true\n", &no_args(), None), None);
+        assert_eq!(
+            resolve_base_image("FROM scratch\n", &no_args(), None),
+            None,
+            "`scratch` is not an inspectable image"
+        );
+        assert_eq!(
+            resolve_base_image("FROM alpine AS a\n", &no_args(), Some("nope")),
+            None,
+            "a target naming no stage resolves to nothing"
+        );
+    }
+
+    #[test]
+    fn find_user_statement_reads_the_last_user_in_the_target_stage() {
+        let df = "FROM alpine\nUSER first\nRUN true\nUSER second\n";
+        assert_eq!(
+            find_user_statement(df, &no_args(), None).as_deref(),
+            Some("second")
+        );
+    }
+
+    #[test]
+    fn find_user_statement_follows_the_stage_chain() {
+        let df = "FROM alpine AS base\nUSER vscode\nFROM base\nRUN true\n";
+        assert_eq!(
+            find_user_statement(df, &no_args(), None).as_deref(),
+            Some("vscode")
+        );
+    }
+
+    #[test]
+    fn find_user_statement_ignores_users_in_unrelated_stages() {
+        // `builder` is not on the final stage's chain, so its USER is not ours.
+        let df = "FROM golang AS builder\nUSER nobody\nFROM alpine\nRUN true\n";
+        assert_eq!(find_user_statement(df, &no_args(), None), None);
+    }
+
+    #[test]
+    fn find_user_statement_expands_args() {
+        let df = "ARG U=vscode\nFROM alpine\nUSER $U\n";
+        assert_eq!(
+            find_user_statement(df, &no_args(), None).as_deref(),
+            Some("vscode")
+        );
     }
 
     #[test]
