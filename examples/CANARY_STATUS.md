@@ -22,6 +22,29 @@ pass, so they don't have to be re-evaluated from scratch every session.
 - `🚫 deferred` — exercises a deacon capability that isn't implemented yet.
 - `❓ unverified` — not evaluated this cycle.
 
+Targeted sweep: **2026-08-20** against `main` @ `f716920`, verifying the #179
+self-cleaning change (every `up`/`build` `exec.sh` now removes its own workspace
+artifacts from an `EXIT` trap). Nine canaries run end to end with the release
+binary — `build/basic-dockerfile`, `build/compose-missing-service`,
+`build/dockerfile-with-features`, `features/local-feature`, `up/basic-image`,
+`up/compose-basic`, `up/dockerfile-build`, `up/host-ca`, `up/up-exec-down` — all
+`✅ pass`, each leaving `git status` clean **and** no `.devcontainer-state/`,
+`.devcontainer/build-cache/`, `.deacon/` or lockfile on disk. What the baseline
+measured, before the change:
+
+- The three directories #179 named no longer appear at all: #280 moved lifecycle
+  markers, the build cache and the transient build context to `~/.deacon/`. The
+  traps are a durable guard against a regression there, not a live cleanup.
+- The one artifact still landing in the workspace is the **feature lockfile**.
+  It is written beside the config and takes the config's leading dot, so a
+  workspace-root `.devcontainer.json` yields a workspace-root
+  `.devcontainer-lock.json` — a spelling #178's `.gitignore` did not match, so a
+  bare `deacon build` on `build/dockerfile-with-features` dirtied `git status`.
+  Both the traps and the `.gitignore` now cover all four spellings.
+- Unrelated pre-existing gap, NOT fixed here: `up/up-exec-down` finishes with a
+  plain `deacon down`, which per `shutdownAction: stopContainer` *stops* rather
+  than removes, so it leaves one exited container behind. Removed by hand.
+
 Targeted sweep: **2026-08-05** against `main` @ `a496609` + the #493 example
 migration. The 13 rows that #488 had turned `⚠️ fixture` are `✅ pass` again. #493
 moved each example's local Feature folders under `.devcontainer/` and re-spelled the
@@ -108,6 +131,8 @@ two were unclassified and have since been decided (both fixture-side):
 Sweep hygiene note: canaries left 9 stray `*devcontainer-lock.json` files and
 (via the missing `nginx.conf`) one root-owned directory in the working tree.
 Removed by hand; `exec.sh` cleanup is incomplete for those examples.
+(The lockfile half of this is resolved as of the 2026-08-20 sweep above — every
+`up`/`build` `exec.sh` now removes its own lockfile from its `EXIT` trap, #179.)
 
 Prior sweep: 2026-05-29 (against `main` including PRs #129/#131/#132/#134/#139/
 #143/#144/#145 and #147/#148/#149/#150/#151), when every row was ✅. A later
@@ -120,13 +145,13 @@ and aren't listed.
 
 | Canary | Status | Verified | Notes |
 |---|---|---|---|
-| build/basic-dockerfile | ✅ pass | 2026-07-20 `de5b045` |  |
+| build/basic-dockerfile | ✅ pass | 2026-08-20 `f716920` | #179 self-clean verified: no `.devcontainer-state/` / `.devcontainer/build-cache/` / `.deacon/` / lockfile residue after the run. |
 | build/buildkit-gated-feature | ✅ pass | 2026-08-05 `a496609` | needs debian base + `build.dockerfile` (#129) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
-| build/compose-missing-service | ✅ pass | 2026-07-20 `de5b045` | asserts error |
+| build/compose-missing-service | ✅ pass | 2026-08-20 `f716920` | asserts error #179 self-clean verified: no `.devcontainer-state/` / `.devcontainer/build-cache/` / `.deacon/` / lockfile residue after the run. |
 | build/compose-service-target | ✅ pass | 2026-07-20 `de5b045` |  |
 | build/compose-unsupported-flags | ✅ pass | 2026-07-20 `de5b045` | asserts errors (`--push`/`--output`) |
 | build/compose-with-features | ✅ pass | 2026-08-05 `a496609` | compose+features build (#139) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
-| build/dockerfile-with-features | ✅ pass | 2026-08-05 `a496609` | feature layering (#129) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
+| build/dockerfile-with-features | ✅ pass | 2026-08-20 `f716920` | feature layering (#129) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). #179 self-clean verified: no `.devcontainer-state/` / `.devcontainer/build-cache/` / `.deacon/` / lockfile residue after the run. |
 | build/duplicate-tags | ✅ pass | 2026-07-22 `3db4306` | tag de-dup (#129); exec.sh updated to assert `imageName` array form (#330) |
 | build/image-reference | ✅ pass | 2026-07-20 `de5b045` |  |
 | build/image-reference-with-features | ✅ pass | 2026-08-05 `a496609` | image-ref+features (#134) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
@@ -162,7 +187,7 @@ and aren't listed.
 | features/dependency-ordering | ✅ pass | 2026-08-05 `a496609` | auto install order via `installsAfter`+`dependsOn` (no override); now uses local-path `dependsOn` form `./feature-lib` (#155, PR #158) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
 | features/feature-contributed-lifecycle | ✅ pass | 2026-08-05 `a496609` | #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
 | features/feature-env-injection | ✅ pass | 2026-08-05 `a496609` | #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
-| features/local-feature | ✅ pass | 2026-08-05 `a496609` | local `./` feature install + option override (new) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
+| features/local-feature | ✅ pass | 2026-08-20 `f716920` | local `./` feature install + option override (new) #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). #179 self-clean verified: no `.devcontainer-state/` / `.devcontainer/build-cache/` / `.deacon/` / lockfile residue after the run. |
 | features/lockfile | ✅ pass | 2026-07-20 `de5b045` | lockfile generate / `--frozen-lockfile` pass + mismatch fail; needs ghcr (new) |
 | features/oci-digest-pin | ✅ pass | 2026-07-20 `8179744` | digest ref round-trip regression of #131, fixed in PR #321 (`reference()` now joins a digest with `@`); re-verified green post-merge. |
 | features/option-sanitization | ✅ pass | 2026-08-05 `a496609` | #493 moved the local Features under `.devcontainer/` and re-spelled the ids config-relative; deacon **and** the reference CLI 0.87.0 both accept the new layout (both exited 1 before). |
@@ -184,15 +209,15 @@ and aren't listed.
 | template-management/optional-paths | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/additional-mounts | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/auto-forward | ✅ pass | 2026-07-20 `de5b045` | `--auto-forward` loopback reach + multi-container collision-free (015) |
-| up/basic-image | ✅ pass | 2026-07-20 `de5b045` |  |
-| up/compose-basic | ✅ pass | 2026-07-20 `de5b045` |  |
+| up/basic-image | ✅ pass | 2026-08-20 `f716920` | #179 self-clean verified: no `.devcontainer-state/` / `.devcontainer/build-cache/` / `.deacon/` / lockfile residue after the run. |
+| up/compose-basic | ✅ pass | 2026-08-20 `f716920` | #179 self-clean verified: no `.devcontainer-state/` / `.devcontainer/build-cache/` / `.deacon/` / lockfile residue after the run. |
 | up/compose-profiles | ⚠️ fixture | 2026-07-20 `de5b045` | `nginx.conf` referenced by docker-compose.yml but never committed → docker makes a dir, bind mount fails. Not a deacon bug. |
 | up/configuration-output | ✅ pass | 2026-07-20 `de5b045` | base switched alpine→debian:bookworm-slim (git feature needs bash) (#151) |
 | up/container-user-vs-remote-user | ✅ pass | 2026-07-20 `de5b045` |  |
-| up/dockerfile-build | ✅ pass | 2026-07-20 `de5b045` |  |
+| up/dockerfile-build | ✅ pass | 2026-08-20 `f716920` | #179 self-clean verified: no `.devcontainer-state/` / `.devcontainer/build-cache/` / `.deacon/` / lockfile residue after the run. |
 | up/dotfiles-integration | ✅ pass | 2026-07-20 `de5b045` | repo URL `codespaces/dotfiles` (404)→`holman/dotfiles` (#151); `~` target-path expansion (#150) |
 | up/gpu-modes | ✅ pass | 2026-07-20 `de5b045` | GPU `all` failure expected on non-GPU hosts (tolerated) |
-| up/host-ca | ✅ pass | 2026-07-20 `de5b045` | `--inject-host-ca` explicit bundle; debian-slim → env-var-only fallback (no `ca-certificates`), canonical bundle + CA env vars present (016) |
+| up/host-ca | ✅ pass | 2026-08-20 `f716920` | `--inject-host-ca` explicit bundle; debian-slim → env-var-only fallback (no `ca-certificates`), canonical bundle + CA env vars present (016) #179 self-clean verified: no `.devcontainer-state/` / `.devcontainer/build-cache/` / `.deacon/` / lockfile residue after the run. |
 | up/id-labels-reconnect | ✅ pass | 2026-07-20 `de5b045` | full-ID on reconnect (#143) |
 | up/image-metadata-merge | ✅ pass | 2026-07-22 `3db4306` | scenario 4 (warm read-config) regressed by #339, fixed in PR #342 (container-first metadata resolution) |
 | up/initialize-command | ✅ pass | 2026-07-20 `de5b045` |  |
@@ -204,7 +229,7 @@ and aren't listed.
 | up/remove-existing | ✅ pass | 2026-07-20 `de5b045` | full-ID reuse (#143) |
 | up/security-options | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/skip-lifecycle | ✅ pass | 2026-07-20 `de5b045` |  |
-| up/up-exec-down | ✅ pass | 2026-07-22 `3db4306` | compound-flow up→exec→run-user-commands→down by --workspace-folder (#187 configHash fix); exec.sh drops `--mount-workspace-git-root false` so all four subcommands anchor consistently (run-user-commands/down lack the flag) |
+| up/up-exec-down | ✅ pass | 2026-08-20 `f716920` | compound-flow up→exec→run-user-commands→down by --workspace-folder (#187 configHash fix); exec.sh drops `--mount-workspace-git-root false` so all four subcommands anchor consistently (run-user-commands/down lack the flag) #179 self-clean verified: no `.devcontainer-state/` / `.devcontainer/build-cache/` / `.deacon/` / lockfile residue after the run. |
 | up/update-remote-user-uid | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/user-env-probe-modes | ✅ pass | 2026-07-20 `de5b045` |  |
 | up/wait-for | ✅ pass | 2026-07-20 `de5b045` |  |
