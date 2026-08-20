@@ -3498,6 +3498,211 @@
         "tempdir": true
       },
       "notes": "The GATING half of [#572](https://github.com/get2knowio/deacon/issues/572). Its differential twin `case-up-upstream-compose-with-name-env-var` is the record of the divergence and runs only in the nightly `parity` profile, which gates nothing; this case needs no oracle, so it runs on `parity_docker` — a required PR check and part of the release verify job — which is where a regression in compose name interpolation should actually be caught.\n\nIt also pins what the differential deliberately cannot. The differential declares `chan-exit-code` alone, because while the defect stood deacon created no container and every Compose tolerance would have been stale; with no oracle there is nothing to tolerate, so this case names the interpolated project name outright. `custom-name-with-env-var` is only reachable by evaluating `${CUSTOM_NAME}` against the sibling `.env` — the raw `${CUSTOM_NAME}` is not a legal Compose project name and the derived `deacon_*` default looks nothing like it — so the assertion cannot be satisfied by accident.\n\nMEASURED at oracle 0.87.0 and re-measured against the fix: both CLIs report `custom-name-with-env-var`. Same fixture as the differential twin; see its UPSTREAM.md."
+    },
+    {
+      "id": "case-up-upstream-skip-post-attach",
+      "behaviors": [
+        "bhv-up-skip-post-attach-defers-only-attach"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-attach"
+          ],
+          "fixtures": [
+            "fx-up-skip-post-create-phases"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-phases.txt": "onCreate\nupdateContent\npostCreate\npostStart\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`up --skip-post-attach` defers EXACTLY ONE phase. It is the narrow sibling of `--skip-post-create` (#476), and the pair is worth holding apart precisely because the wide one was a defect: deacon read `--skip-post-create` off its NAME and ran the two base phases anyway, so the family's other member deserved a measurement rather than an inference. The reference's help is unambiguous and one line long — \"Do not run postAttachCommand.\"\n\nMEASURED at oracle 0.87.0 on `fx-up-skip-post-create-phases`, the same five-phase fixture #476 uses, where every hook appends its own name to one file. BOTH CLIs exit 0 and BOTH leave `onCreate\\nupdateContent\\npostCreate\\npostStart\\n` — four lines, `postAttach` absent. deacon needed no fix; this case is the record that the narrow flag is narrow.\n\nThe assertion is carried IN ADDITION to the comparison for the FR-043 reason: a differential alone would stay green if both CLIs started skipping `postStart` too, and the record meant to say which side is right would then say nothing. It is an exact-content match (`jsonSubset` on the one key is exact for that key), so a fifth line fails it and so does a missing fourth — the flag over-reaching and the flag under-reaching are distinguishable failures rather than one blurred one.\n\nThis is the assertable half of upstream's `'should not run postAttachCommand when --skip-post-attach is given'`. The half NOT expressible here is its restart arm — clear the markers, `docker stop`, `up` again — because the operation vocabulary has no container stop/start primitive (`CONSUMER_SUBCOMMANDS` is a closed set of consumer subcommands) and adding one is machinery growth. Recorded on #480 rather than worked around.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 6."
+    },
+    {
+      "id": "case-up-skip-non-blocking-commands-wait-for-default",
+      "behaviors": [
+        "bhv-up-skip-non-blocking-commands-honors-wait-for"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-non-blocking-commands"
+          ],
+          "fixtures": [
+            "fx-up-skip-post-create-phases"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-phases.txt": "onCreate\nupdateContent\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The third and last member of the lifecycle-gate flag family, and the one with NO upstream test behind it at all — `grep -rn 'skip-non-blocking\\|waitFor' src/test/` at v0.87.0 returns nothing, so neither CLI's own suite exercises it. It is included here because the family's other two members were mined this batch and this one was found, while reading them, to be described DIFFERENTLY by the two CLIs.\n\nThe two help texts do not say the same thing. The reference: \"Stop running user commands after running the command configured with waitFor or the updateContentCommand by default.\" deacon: \"Skip non-blocking commands (postStart & postAttach phases).\" Those coincide only when `waitFor` is `postCreateCommand`; under the SPEC DEFAULT (`waitFor` defaults to `updateContentCommand`) deacon's wording predicts `postCreate` still runs and the reference's predicts it does not. That is a divergence a reader would file — so it was measured before it was filed.\n\nMEASURED at oracle 0.87.0 on `fx-up-skip-post-create-phases`: BOTH CLIs exit 0 and BOTH leave exactly `onCreate\\nupdateContent\\n`. deacon implements `waitFor`; only its `--help` string is written as though it did not. NOT A DEFECT, and deliberately not filed as one — but the reason this case exists rather than a note: the behaviour is correct and undocumented-by-its-own-help, which is exactly the configuration in which a later \"fix\" to match the help text would be a silent regression. The assertion is what would catch it.\n\nThe discriminating arm is its sibling `case-up-skip-non-blocking-commands-wait-for-on-create`, which moves `waitFor` off its default so the two readings predict different files. This case alone cannot separate them: `onCreate\\nupdateContent\\n` is consistent with an implementation that hardcodes the default rather than reading the field."
+    },
+    {
+      "id": "case-up-skip-non-blocking-commands-wait-for-on-create",
+      "behaviors": [
+        "bhv-up-skip-non-blocking-commands-honors-wait-for"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-non-blocking-commands"
+          ],
+          "fixtures": [
+            "fx-up-wait-for-on-create-phases"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-phases.txt": "onCreate\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "THE DISCRIMINATOR for `bhv-up-skip-non-blocking-commands-honors-wait-for`, and the reason that behavior has two cases instead of one. Its sibling runs the same flag under the SPEC DEFAULT `waitFor` (`updateContentCommand`), where \"stop after waitFor\" and \"hardcode: stop after updateContent\" predict the SAME file and the case therefore cannot tell them apart. This fixture is identical except that it authors `\"waitFor\": \"onCreateCommand\"`, which moves the stopping point one phase earlier and makes the two readings disagree: reading the field yields `onCreate\\n`, hardcoding the default yields `onCreate\\nupdateContent\\n`.\n\nMEASURED at oracle 0.87.0: BOTH CLIs exit 0 and BOTH leave exactly `onCreate\\n`. deacon reads `waitFor` rather than hardcoding its default.\n\nAn assertion that cannot fail is worse than no assertion, so this one was written to be able to: the file it names is one line, and BOTH plausible wrong implementations (hardcoding the default, or ignoring the flag entirely and running all five phases) produce a longer one. `jsonSubset` on the single key is an exact-content match, so a second line fails rather than being absorbed the way `contains` would absorb it.\n\nFixture `fx-up-wait-for-on-create-phases` is authored here rather than vendored: no upstream config exercises `waitFor` (the reference's own suite never sets it), which is why this is the one case in the batch with no upstream provenance line."
+    },
+    {
+      "id": "case-up-initialize-command-object-executes",
+      "behaviors": [
+        "bhv-up-initialize-command-object-executes"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--trust-workspace"
+          ],
+          "fixtures": [
+            "fx-upstream-initialize-command-object"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-up",
+          "assertion": {
+            "exists": "initializeCommand.1.testMarker"
+          }
+        },
+        {
+          "channel": "chan-filesystem",
+          "operation": "op-up",
+          "assertion": {
+            "exists": "initializeCommand.2.testMarker"
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "initializeCommand.1.testMarker",
+        "initializeCommand.2.testMarker"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The EXECUTION half of the object-form `initializeCommand`. Its parse half has been covered since batch 1 by `case-readconfig-upstream-initialize-command-object`, whose own notes say the quiet part out loud — \"the operation is a configuration read, so nothing is executed on either side and the case measures the parse alone.\" This case is upstream's actual assertion for that fixture (`'should create testMarker files'`), which the batch-1 pass vendored the config for and did not land: both members of the parallel object must RUN, on the HOST, with `${localWorkspaceFolder}` substituted into each — three claims a parse cannot make.\n\nMEASURED at oracle 0.87.0: the reference logs `Running 'touch-test1' from initializeCommand...` and `Running 'touch-test2'...` interleaved and leaves both markers; deacon, given `--trust-workspace`, exits 0 and leaves both markers. Both sides agree.\n\nSPEC-EXPECTATION RATHER THAN LIVE-DIFFERENTIAL, AND THE REASON IS THE POINT. deacon gates every host-side lifecycle hook behind the workspace-trust check (`crates/core/src/trust.rs`), a deacon-specific extension the reference has no equivalent for; measured on this fixture WITHOUT the flag, deacon exits 1 with `WorkspaceUntrusted` while the reference exits 0 and runs the hooks. The runner sends ONE argv to both sides by construction, so there is no invocation that trusts deacon and is still legal for the reference — `--trust-workspace` is not a reference flag. A differential here could therefore only record that the trust gate exists, which `bhv-trust-host-hook-gate` already records. Asserting deacon's own side is the only thing left that says anything about `initializeCommand`, and it is also the more useful claim: it is the first case in the suite that executes a host hook at all, so it pins the TRUSTED path — the one a developer actually takes — which nothing previously exercised end to end.\n\nBeing spec-expectation, it needs no oracle and runs on `parity_docker`, which gates pull requests and the release.\n\nFixture vendored in batch 1 from `src/test/configs/image-with-parallel-initialize-command`; see its UPSTREAM.md. Mined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 6."
     }
   ]
 }
