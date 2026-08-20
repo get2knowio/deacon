@@ -1011,6 +1011,49 @@
         "tempdir": true
       },
       "notes": "`exec` streams host stdin into the container BYTE FOR BYTE. The payload is all 256 byte values, so it contains NUL and is not valid UTF-8 anywhere near its middle — the shapes a lossy `String::from_utf8_lossy` on the way in would silently rewrite, and the shapes a line-oriented copy would reframe.\n\nMined from `src/test/cli.exec.base.ts` at v0.87.0 ('stream binary data'), which builds the same 256-byte buffer and asserts `res.stdout.equals(stdin)` through `exec … cat`.\n\nTHE ASSERTION IS A CHECKSUM COMPUTED IN THE CONTAINER, NOT THE BYTES THEMSELVES, and the difference is worth stating because it bounds what this case proves. `chan-stdout` is a normalized TEXT channel; 256 arbitrary bytes cannot survive it, so upstream's `cat` round-trip is not directly expressible. `cksum` moves the evidence to a channel that can carry it: `1313719201 256` is the CRC and the length, so a corrupted byte changes the checksum and a dropped or added one changes both. What that covers is the INBOUND half — host stdin to the container. The outbound half (container stdout back to the caller, byte-exact) stays unasserted here, because asserting it needs a byte-level channel the model does not have. Measured by hand at oracle 0.87.0 in both directions and both CLIs round-trip the full 256 bytes identically (`sha256` of input and output equal), so the unasserted half is known-good today rather than unexamined — it is simply not GUARDED.\n\nThe checksum was measured, not derived: `cksum` on the host and busybox `cksum` inside `alpine:3.19` both answer `1313719201 256` for this payload.\n\nThis case is why [#586](https://github.com/get2knowio/deacon/issues/586) existed. `Operation.stdinFile` is new: the field it replaced (`stdin`, an inline JSON string) was declared in the schema and DROPPED by the executor, so this case could not have been written, and any case that had tried would have passed with the child reading `/dev/null`. A file rather than a string because a JSON string cannot carry these bytes at all."
+    },
+    {
+      "id": "case-exec-upstream-no-config-in-cwd-rejected",
+      "behaviors": [
+        "bhv-exec-no-config-in-cwd-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--",
+            "sh",
+            "-c",
+            "echo unreachable"
+          ],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-exec",
+          "assertion": {
+            "matches": "Dev container config \\(.*\\) not found\\."
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The NEGATIVE arm of the cwd default, and the loose end batch 4 named as the cheapest remaining item on either queue: an EXISTING current directory with no devcontainer config, no `--workspace-folder` and no `--container-id` must exit 1 rather than attach to something arbitrary. Omitting the flag is the entire test, exactly as in its positive twin `case-exec-default-workspace-folder` — the runner anchors each operation's cwd to the case workspace, so a fixture that is empty by construction (`fx-errors-missing-config` holds only a `.gitkeep`) is a cwd with nothing in it.\n\nDistinct from BOTH existing `exec` negatives, which is why it is not redundant. `case-exec-missing-workspace-rejected` names a path that does not exist and fails during workspace RESOLUTION, before any config is looked for; `case-exec-malformed-config-rejected` has a config that exists and will not parse. This one resolves the workspace fine, finds no document, and has no container to fall back on — a third path, and the one a developer meets by `cd`-ing into the wrong directory.\n\nMEASURED at oracle 0.87.0 in an empty directory: both CLIs exit 1 and both print the SAME sentence — `Dev container config (<abs>/.devcontainer/devcontainer.json) not found.` — deacon on stderr as its `Error:` line, the reference on stderr behind its timestamp prefix. The regex is upstream's own assertion (`/Dev container config \\(.*\\) not found./`) and is separator-agnostic on purpose, because this case runs on Windows where the path inside the parentheses uses backslashes.\n\nHERMETIC — no `resourceGroup`, so it runs on every profile including `dev-fast` and on all three operating systems, joining `case-exec-missing-workspace-rejected` as the second `exec` case that gates every pull request. The lane is a claim, not a convenience: config resolution fails before any daemon contact, verified by re-running with `DOCKER_HOST` pointed at a nonexistent socket and getting the identical diagnostic. A regression that reached for the daemon before reading the workspace would fail here rather than pass.\n\nIt pins DEACON's answer rather than comparing, on `case-exec-missing-workspace-rejected`'s precedent — a differential would need the nightly lane, which gates nothing, to assert a sentence the two CLIs already word identically.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 6."
     }
   ]
 }

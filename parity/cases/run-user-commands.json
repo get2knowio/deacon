@@ -813,6 +813,68 @@
         "tempdir": true
       },
       "notes": "FR-040 unsupported class: the configuration is valid and the request is well-formed, but there is no container to run the commands in. Running hooks against nothing has to fail; reporting success would be indistinguishable from having run them."
+    },
+    {
+      "id": "case-run-user-commands-upstream-skip-post-attach",
+      "behaviors": [
+        "bhv-run-user-commands-skip-post-attach"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-up-skip-post-create-phases"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-attach"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up"
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-ruc",
+          "assertion": {
+            "jsonSubset": {
+              "lifecycle-phases.txt": "onCreate\nupdateContent\npostCreate\npostStart\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "lifecycle-phases.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`--skip-post-attach` is a `run-user-commands` flag as well as an `up` flag, and until this case NOTHING in the suite passed it to either — it appeared only in the prose of three `notes` fields, each reciting it as the opt-out that keeps `run-user-commands` usable as an explicit re-run. A flag argued from in three rationales and exercised by no scenario is exactly the shape this suite exists to close.\n\nThe shape mirrors upstream's own, which drives the flag through `run-user-commands` at the end of `'should not run postAttachCommand when --skip-post-attach is given'` after an `up --skip-post-create`. Deferring first is what makes the observation clean: `up --skip-post-create` leaves the marker file ABSENT (that is #476's case), so every line the file ends up holding was written by the `run-user-commands` pass under test and the count is not diluted by hooks `up` already ran.\n\nMEASURED at oracle 0.87.0 on `fx-up-skip-post-create-phases`: both CLIs exit 0 from both operations, both leave no file after the deferred `up`, and both leave exactly `onCreate\\nupdateContent\\npostCreate\\npostStart\\n` after the flagged `run-user-commands` — four lines, `postAttach` absent.\n\nThe assertion is carried in addition to the comparison (FR-043): a differential alone would stay green if both CLIs started skipping `postStart` as well, and this is a surface where over-reach is the plausible defect — `--skip-post-create`'s twin on `up` (#476) was wrong in precisely that direction, in the other CLI's favour. Deliberately NOT asserted here: what a PLAIN `run-user-commands` re-runs, which is the separately characterized `wvr-ruc-completed-hooks-not-rerun` and is untouched by this case's deferred-then-flagged path.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 6."
     }
   ]
 }
