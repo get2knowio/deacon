@@ -1,7 +1,7 @@
 {
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "devcontainerissues",
-	"workspaceFolder": "/workspaces/cli",		
+	"workspaceFolder": "/workspaces",
 	"containerEnv": {
 		"SOME_PATH": "/tmp/path/doc-ver/loc",
 		"Test_Message": "H\"\n\ne\"'''llo M:;a/t?h&^iKa%#@!``ni,sk_a-",
