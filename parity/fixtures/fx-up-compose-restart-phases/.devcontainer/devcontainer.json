@@ -1,0 +1,12 @@
+{
+	"name": "ConformanceUpComposeRestartPhases",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"shutdownAction": "stopCompose",
+	"onCreateCommand": "echo onCreate >> /workspace/lifecycle-phases.txt",
+	"updateContentCommand": "echo updateContent >> /workspace/lifecycle-phases.txt",
+	"postCreateCommand": "echo postCreate >> /workspace/lifecycle-phases.txt",
+	"postStartCommand": "echo postStart >> /workspace/lifecycle-phases.txt",
+	"postAttachCommand": "echo postAttach >> /workspace/lifecycle-phases.txt"
+}

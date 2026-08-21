@@ -1,0 +1,16 @@
+# Compose project for the restart-timing case (#480).
+#
+# Every hook APPENDS its own phase name to one bind-mounted file, so the file is the
+# record of which phases ran and in what order across BOTH `up` invocations — which is
+# what the restart claim needs and what the existing compose lifecycle fixture cannot
+# give: that one's `postStartCommand` writes with `>` to a separate file, so a second
+# run overwrites rather than accumulates and the re-run is invisible.
+#
+# A stock `alpine:3.19`: nothing here depends on image metadata, so it needs no
+# locally-built `:local` fixture image beyond the ordinary prepull.
+services:
+  app:
+    image: alpine:3.19
+    volumes:
+      - ..:/workspace
+    command: sleep infinity

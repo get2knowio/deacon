@@ -263,6 +263,18 @@ pub(crate) async fn execute_ops(
         // byte-exact input does: as a fixture file this op already materialized (#586).
         let stdin_file = op.stdin_file.as_ref().map(|rel| workspace.join(rel));
 
+        // The one container-lifecycle primitive (#480): stop this side's running containers
+        // so THIS operation runs against a stopped container rather than a fresh one. It
+        // happens after argv substitution and before the spawn, which is what makes the
+        // restart and the operation that performs it one declared step.
+        if op.stop_container_before {
+            let ws_for_stop = workspace.clone();
+            let case_id = case.id.clone();
+            tokio::task::spawn_blocking(move || stop_running_containers(&case_id, &ws_for_stop))
+                .await
+                .map_err(blocking_join_err)??;
+        }
+
         let raw_case = format!("{}__{}", case.id, op.id);
         let inv = run_and_capture(
             side,
@@ -587,6 +599,67 @@ pub fn running_containers_for_workspace_with(
 ) -> Result<Vec<String>, HarnessError> {
     // `ps` without `-a` lists running containers only.
     workspace_container_ids(docker, workspace, false)
+}
+
+/// Stop every RUNNING container carrying `workspace`'s `devcontainer.local_folder` label,
+/// for `Operation::stop_container_before` (#480).
+///
+/// STOP, not remove: the claim this exists for is that a completed `postCreateCommand` does
+/// not re-run when the container comes back up, and a removed container is recreated, which
+/// re-runs it by definition. `docker stop` leaves the container and its filesystem intact so
+/// the next `up` reattaches to the same id.
+///
+/// Scoped by the SIDE'S OWN workspace label, so the deacon and oracle passes — which run in
+/// sequence over two distinct temp workspaces — cannot stop each other's containers.
+///
+/// Stopping nothing is a FAULT, not a no-op (the D-2 rule the workspace probes already
+/// follow): a case declaring this flag is asserting a restart, so a probe that matched no
+/// running container means the restart never happened and every downstream assertion would
+/// be measuring a first create while looking like it measured a restart.
+///
+/// BLOCKING; async callers offload it via `spawn_blocking`.
+fn stop_running_containers(case: &str, workspace: &Path) -> Result<Vec<String>, HarnessError> {
+    stop_running_containers_with(DOCKER_BIN, case, workspace)
+}
+
+/// [`stop_running_containers`] with an injectable container-CLI program — the same seam
+/// [`containers_for_workspace_with`] exposes for the hermetic fault tests.
+pub fn stop_running_containers_with(
+    docker: &str,
+    case: &str,
+    workspace: &Path,
+) -> Result<Vec<String>, HarnessError> {
+    let ids = running_containers_for_workspace_with(docker, workspace)?;
+    if ids.is_empty() {
+        return Err(HarnessError::ObservationFault {
+            case: case.to_string(),
+            cause: format!(
+                "`stopContainerBefore` found no RUNNING container labelled \
+                 devcontainer.local_folder={}; the operation would have measured a first \
+                 create rather than a restart",
+                workspace.display()
+            ),
+        });
+    }
+    let mut args: Vec<&str> = vec!["stop"];
+    args.extend(ids.iter().map(String::as_str));
+    let shown = args.join(" ");
+    let output = std::process::Command::new(docker)
+        .args(&args)
+        .output()
+        .map_err(|e| HarnessError::DockerUnavailable {
+            cause: format!("could not run `docker {shown}`: {e}"),
+        })?;
+    if !output.status.success() {
+        return Err(HarnessError::DockerUnavailable {
+            cause: format!(
+                "`docker {shown}` exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        });
+    }
+    Ok(ids)
 }
 
 /// [`containers_for_workspace`] with an injectable container-CLI program — the seam the
