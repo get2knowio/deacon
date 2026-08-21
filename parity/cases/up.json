@@ -3888,6 +3888,396 @@
         "tempdir": true
       },
       "notes": "The two gates COMPOSED, which is upstream's own second arm of 'should not run postAttachCommand when --skip-post-attach is given' and the arm `case-up-upstream-skip-post-attach` could not express before the stop/start primitive existed. A flag and a restart are each covered alone; what this adds is that they hold TOGETHER — the restart still suppresses `postCreate`, and the flag still suppresses `postAttach`, on the run where both apply.\n\nThat is worth its own case because the two are implemented in different places and the obvious defect is one silently disabling the other: a restart path that re-derived which phases to run, rather than reusing the gated list, would run `postAttach` on the second `up` while the first correctly skipped it — and every single-`up` case in the suite would stay green.\n\nMEASURED at oracle 0.87.0: both CLIs exit 0 from both operations, both reattach to the same container, and both leave\n\n    onCreate\\nupdateContent\\npostCreate\\npostStart\\npostStart\\n\n\nFive lines. `postStart` twice — once per `up`, the restart phase doing its job; `postCreate` once — the restart gate holding; `postAttach` NEVER — the flag holding across both. All three claims are carried by one exact-content match, and each of the three failure modes lengthens or shortens the file differently.\n\nENABLED BY THE ONE CONTAINER-LIFECYCLE PRIMITIVE IN THE OPERATION VOCABULARY. `stopContainerBefore` stops this side's running containers immediately before the operation spawns, so the `up` it sits on runs against a STOPPED container rather than a fresh one. Nothing else in the model can express that: `down` REMOVES, so the next `up` recreates and `postCreate` re-runs by definition, which is the negation of the claim. The primitive is scoped to the side's own workspace label, and the two sides of a differential run in sequence over two distinct temp workspaces, so neither can stop the other's container. Stopping nothing is a fail-loud `ObservationFault`, not a no-op — an operation that silently ran against a fresh container would measure a first create while reporting as a restart, which is the vacuous-assertion failure mode `docs/PARITY.md` warns about, one layer below the assertion.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480)."
+    },
+    {
+      "id": "case-up-upstream-include-configuration",
+      "behaviors": [
+        "bhv-up-include-configuration-emits-configuration"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-configuration",
+            "--include-merged-configuration"
+          ],
+          "fixtures": [
+            "fx-upstream-runargs-env-subst"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "configuration": {
+                "image": "debian:bookworm-slim",
+                "remoteEnv": {
+                  "TEST": "ENV",
+                  "TEST_ESCAPING": "{\n  \"fo$o\": \"ba'r\"\n}"
+                }
+              },
+              "mergedConfiguration": {
+                "image": "debian:bookworm-slim",
+                "remoteEnv": {
+                  "TEST": "ENV",
+                  "TEST_ESCAPING": "{\n  \"fo$o\": \"ba'r\"\n}"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The FIRST case in the suite to pass `--include-configuration` or `--include-merged-configuration` to `up`. Both flags existed on deacon's `up` and on the reference's, 123 other cases in the suite invoked `up` without either, and the only cases exercising them at all drove `read-configuration` or `set-up` — which resolve a document WITHOUT a container and therefore cannot reach the half this surface exists for.\n\nThe fixture is upstream's `configs/image`, already vendored since batch 1 and until now only ever PARSED. That is the batch-6 pattern repeating a third time: a config vendored from an `up` test, read by a `read-configuration` case, and never once run.\n\nMEASURED at oracle 0.87.0. Both CLIs exit 0, both echo the authored `image` and both resolve `${localEnv:PATH}` into `remoteEnv.LOCAL_PATH`. `LOCAL_PATH` is deliberately NOT asserted — its value is the host's `PATH`, so pinning it would be a statement about the machine.\n\nWHAT THIS CASE DELIBERATELY DOES NOT ASSERT, and why that omission is the point: the same fixture's `remoteEnv.TEST_RE` is `${containerEnv:TEST_CE}`, and `TEST_CE` is set on the container by `runArgs: [\"-e\", \"TEST_CE=TEST_VALUE3\"]`. Upstream's own assertion is that BOTH `configuration.remoteEnv.TEST_RE` and `mergedConfiguration.remoteEnv.TEST_RE` read `TEST_VALUE3`. The reference does that; deacon emits the literal `${containerEnv:TEST_CE}` in both, and `${containerEnv:PATH}` in `CONTAINER_PATH` — it serializes the configuration as substituted BEFORE the container existed. That is [#608](https://github.com/get2knowio/deacon/issues/608). The defect is OUTPUT-ONLY: measured on the same container, `deacon exec` injects `TEST_RE=TEST_VALUE3` and `CONTAINER_PATH=/usr/local/sbin:…` correctly, so what is wrong is the document `up` prints, not the environment it builds.\n\nIt has no scenario of its own on purpose, following the [#594](https://github.com/get2knowio/deacon/issues/594) precedent: a `spec-expectation` case asserting the fixed value would be RED in `parity_docker`, a blocking PR lane, and a `live-differential` cannot express it — the two CLIs' `up` result documents disagree structurally by construction (a raw `containerId`, the reference's `configFilePath` `{$mid,fsPath,path,scheme}` object, deacon's `__meta` / `imageMetadata` / `containerMetadata` blocks), so the comparison would report that disagreement forever and say nothing about substitution. The two `TEST_RE` assertions land with the fix, in this case.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should execute successfully with valid config'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+    },
+    {
+      "id": "case-up-upstream-containerenv-merge-image",
+      "behaviors": [
+        "bhv-up-container-env-value-fidelity-image"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "needsRegistry": true,
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-containerenv-escaping"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "envMap": {
+                "JAVA_HOME": "/usr/lib/jvm/msopenjdk-current",
+                "SDKMAN_DIR": "/usr/local/sdkman",
+                "VAR_WITH_SPACES": "value with spaces",
+                "VAR_WITH_LOTS_OF_SPACES": "    value with lots of spaces.   ",
+                "VAR_WITH_QUOTES_WE_WANT_TO_KEEP": "value with \"quotes\" we want to keep",
+                "VAR_WITH_DOLLAR_SIGN": "value with $dollar sign",
+                "VAR_WITH_BACK_SLASH": "value with \\back slash",
+                "ENV_WITH_COMMAND": "bash -c 'echo -n \"Hello, World!\"'"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The EXECUTION half of a fixture the suite has only ever parsed. `fx-upstream-containerenv-escaping` was vendored in batch 1 and read by `case-readconfig-upstream-containerenv-escaping`, which proves the values survive a configuration READ. Upstream's claim is about the running container: it `docker exec`s the container and asserts `$JAVA_HOME`, `$VAR_WITH_SPACES` and an `eval $ENV_WITH_COMMAND` that must print `Hello, World!`.\n\nTWO claims, and the fixture is built so that neither can pass by accident.\n\nFirst, PRECEDENCE. `ghcr.io/devcontainers/features/java:1` contributes its own `JAVA_HOME` through Feature metadata, and the configuration sets a different one. The configuration must win. `SDKMAN_DIR` is asserted alongside it precisely because it is the Feature's OWN contribution and is NOT overridden — so an implementation that dropped Feature `containerEnv` wholesale, and thereby 'passed' `JAVA_HOME`, fails here instead.\n\nSecond, FIDELITY. Leading and trailing spaces, embedded double quotes, a bare `$`, a backslash, and a value that is itself a shell command all have to reach `Config.Env` byte-for-byte. Every one of them is a value some quoting or escaping layer would mangle — and one of them DOES get mangled on the Compose path, which is the sibling case `case-up-upstream-containerenv-compose-backslash`. Asserting the identical backslash value on BOTH paths is what localizes that defect to Compose instead of leaving it a general claim about `containerEnv`.\n\nMEASURED at oracle 0.87.0: both CLIs produce exactly these values. `PATH` is not asserted — the Feature prepends four sdkman directories to it and the normalizer segments it, so it is compared elsewhere and pinned nowhere.\n\n`needsRegistry` is declared because the Feature is resolved from `ghcr.io`; the case still lands in `parity_docker`, since a Docker-backed case that also reaches a registry stays there (every job with a daemon has network).\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should follow the correct merge logic for containerEnv'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+    },
+    {
+      "id": "case-up-upstream-containerenv-merge-compose",
+      "behaviors": [
+        "bhv-up-container-env-value-fidelity-compose"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-containerenv-dollar-escape"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-container-state",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "envMap": {
+                "SOME_PATH": "/tmp/path/doc-ver/loc",
+                "ROSCONSOLE_FORMAT": "[$${severity}] [$${walltime:%Y-%m-%d %H:%M:%S}] [$${node}]: $${message}",
+                "VAR_WITH_SPACES": "value with spaces",
+                "VAR_WITH_QUOTES_WE_WANT_TO_KEEP": "value with \"quotes\" we want to keep",
+                "VAR_WITH_DOLLAR_SIGN": "value with $dollar sign",
+                "ENV_WITH_COMMAND": "bash -c 'echo -n \"Hello, World!\"'",
+                "FOO": "b\"\\n\\ta\"r"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The Compose arm of the same question, and NOT a duplicate of its image sibling: on this path a `containerEnv` value is not passed as a `docker create -e` argument but written into a generated Compose override, so it crosses a YAML writer and Compose's own `${…}` interpolation before it reaches the container. Two of these names (`Test_Message`, `ROSCONSOLE_FORMAT`) are ALSO set by the service's own `environment:` block, and a third (`FOO`) is set ONLY there — so the case pins precedence in both directions: the configuration overrides the service, and what the service alone declares still arrives.\n\n`ROSCONSOLE_FORMAT` is the headline. Its authored value contains `$${severity}`, and `$$` is Compose's own escape for a literal `$`. A writer that emits the value verbatim into the override yields `${severity}` in the container; one that escapes correctly yields `$${severity}`, which is what upstream asserts and what both CLIs produce.\n\nMEASURED at oracle 0.87.0: byte-identical on every name asserted here.\n\nTWO of the fixture's names are deliberately absent from the assertion, and their absence is not an oversight. `VAR_WITH_BACK_SLASH` diverges — deacon delivers a BACKSPACE (0x08) where the reference delivers a literal backslash — and is carried by `case-up-upstream-containerenv-compose-backslash`, red on purpose in the nightly lane so this gating case can stay green. `Test_Message` also diverges, in a direction no one has ruled on: its authored value contains real newlines, deacon delivers them as real newlines and the reference converts them to the two-character sequence `\\n`. deacon is arguably the more faithful side there, the spec says nothing about it, and `docs/PARITY.md` reserves that call for the maintainer — so it is referred up rather than asserted, tolerated or filed.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should follow the correct merge logic for containerEnv using docker compose'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+    },
+    {
+      "id": "case-up-upstream-containerenv-compose-backslash",
+      "behaviors": [
+        "bhv-up-container-env-backslash-fidelity-compose"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-containerenv-dollar-escape"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "printenv",
+            "VAR_WITH_BACK_SLASH"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "value with \\back slash"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED ON PURPOSE. It asserts the FIXED behaviour, so it turns green on the fix and not on an assertion edit — the `case-build-upstream-buildkit-never-platform-refused` precedent.\n\nMEASURED at oracle 0.87.0 on `fx-upstream-containerenv-dollar-escape`, byte for byte through `od -c`. The configuration authors `\"VAR_WITH_BACK_SLASH\": \"value with \\\\back slash\"`, i.e. the eleven characters `value with ` followed by a literal `\\`, then `back slash`. The reference delivers exactly that. deacon delivers `value with ` followed by **0x08**, then `ack slash` — the backslash and the `b` have been collapsed into a BACKSPACE control character.\n\nThe cause is `escape_yaml_value` in `crates/core/src/compose.rs`. It has two branches: a value that 'needs quoting' is escaped (backslashes doubled) and wrapped in `\"…\"`; a value that does not is wrapped in `\"…\"` **without escaping anything**. `value with \\back slash` contains no newline, colon, hash, quote or leading/trailing space, so it takes the second branch and lands in a DOUBLE-QUOTED YAML scalar with its backslash intact, where `\\b` is YAML's escape for backspace. The branch that skips escaping is the one that emits quotes, which is why the bug is invisible on every value that happens to trip the first branch.\n\nCOMPOSE-ONLY, and that is measured rather than assumed: the identical value on the identical `containerEnv` key reaches the container correctly on the image path, asserted by `case-up-upstream-containerenv-merge-image`. The image path passes the value as a `docker create -e` argument and never crosses a YAML writer.\n\nOBSERVED THROUGH `exec` STDOUT RATHER THAN `chan-container-state`, deliberately. The difference is one environment value, and a whole-channel container-state differential on a Compose fixture drags in the keep-alive `cmd`/`entrypoint` split, deacon's identity labels and Compose's `config_files`/`config-hash` pair — eight tolerances for a case whose entire subject is a single string. `printenv` on both sides prints that string and nothing else, so the case needs NO tolerance at all and its verdict is unambiguous.\n\nBoth a comparison and an assertion are declared: the comparison is what makes this a record of a divergence, and the `contains` pins deacon's own side so the case cannot go green by the reference regressing to match.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should follow the correct merge logic for containerEnv using docker compose'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+    },
+    {
+      "id": "case-up-upstream-subfolder-config-executes",
+      "behaviors": [
+        "bhv-up-config-flag-selects-subfolder-config"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/.devcontainer/subfolder/devcontainer.json"
+          ],
+          "fixtures": [
+            "fx-upstream-subfolder-config"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/.devcontainer/subfolder/devcontainer.json",
+            "--",
+            "sh",
+            "-c",
+            "test ! -f /postCreateCommand.txt && ls /subfolderConfigPostCreateCommand.txt && env | grep SUBFOLDER_CONFIG_IMAGE_ENV"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "SUBFOLDER_CONFIG_IMAGE_ENV=true"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The third fixture batch 1 vendored from an `up` test and only ever PARSED. `case-readconfig-upstream-subfolder-config` proves `--config` selects which document is READ; upstream's `up` test proves it selects which Dockerfile is BUILT and which lifecycle hooks RUN, and nothing asserted that.\n\nThe fixture is built so the two configurations are distinguishable in three independent ways, and the case checks all three in one exit code:\n\n- the root `.devcontainer.json`'s `postCreateCommand` writes `/postCreateCommand.txt` — it must be ABSENT;\n- the subfolder config's writes `/subfolderConfigPostCreateCommand.txt` — it must be PRESENT;\n- the subfolder's Dockerfile, and only it, sets `ENV SUBFOLDER_CONFIG_IMAGE_ENV=true` — so the value proves the image came from the subfolder rather than from the root `build.args` Dockerfile.\n\nThe absence check is what makes this more than a smoke test. A CLI that resolved `--config` for the BUILD and then fell back to discovery for the lifecycle would leave both markers, and an assertion naming only the subfolder one would pass.\n\n`exec` carries the same `--config`, and that is load-bearing rather than tidy: the two documents produce different container identities, so `exec` without it resolves the ROOT configuration and finds no container at all.\n\nMEASURED at oracle 0.87.0: both CLIs exit 0 from both operations and print the same two lines. It is `spec-expectation` rather than `live-differential` because the comparison was already run by hand and agreed, and pinning it here puts the claim in `parity_docker` — a blocking PR lane — instead of the nightly, which gates nothing.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should run with config in subfolder'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+    },
+    {
+      "id": "case-up-upstream-missing-workspace-rejected",
+      "behaviors": [
+        "bhv-up-missing-workspace-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}/path-that-does-not-exist"
+          ],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-up",
+          "assertion": {
+            "contains": "Failed to resolve workspace path"
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`up` against a `--workspace-folder` that does not exist must exit 1 and say so, and must still print the `{\"outcome\": \"error\"}` result document rather than dying with a bare exit code. Upstream asserts exactly those three things (`error.error.code === 1`, `JSON.parse(error.stdout).outcome === 'error'`, and a message matching `/Dev container config \\(.*\\) not found./`).\n\nHERMETIC — no `resourceGroup` — so it runs on every profile including `dev-fast` and on all three operating systems, joining the two `exec` negatives as the first `up` case that gates every pull request. The lane is a CLAIM, not a convenience: workspace resolution happens before any daemon contact, verified by re-running with `docker` off `PATH` and `DOCKER_HOST` pointed at a nonexistent socket and getting the identical output. A regression that reached for the daemon before reading the workspace would fail here rather than pass.\n\nIt pins DEACON's answer rather than comparing it, on the exact precedent of its `exec` twin `case-exec-missing-workspace-rejected`. MEASURED at oracle 0.87.0: both CLIs exit 1 and both print an `outcome: error` document on stdout, but they word the diagnostic differently — deacon `Failed to resolve workspace path '<path>': path does not exist or cannot be accessed`, the reference `Dev container config (<path>/.devcontainer/devcontainer.json) not found.` deacon names the directory it could not resolve; the reference names a file it never looked for, because it never checks the directory. deacon's is the more accurate of the two, so the wording difference is not a divergence to fix, and a `live-differential` here would need a tolerance to say only that the two disagree about phrasing — worth less than what this asserts.\n\nThe `outcome: error` half IS compared in effect, because both CLIs emit it and the assertion is written against the shared shape rather than either wording.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should fail with \"not found\" error when config is not found'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+    },
+    {
+      "id": "case-up-upstream-cwd-default-workspace",
+      "behaviors": [
+        "bhv-up-default-workspace-folder"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [],
+          "fixtures": [
+            "fx-upstream-runargs-env-subst"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED ON PURPOSE. With no `--workspace-folder`, `up` must resolve its configuration from the CURRENT DIRECTORY — the shape a developer types, `cd` into the project and run `deacon up`. Upstream gives this its own `describe` block ('Command up with default workspace') with a positive and a negative arm.\n\nMEASURED at oracle 0.87.0 in a directory holding `fx-upstream-runargs-env-subst`: the reference exits 0 and reports a `containerId`. deacon exits 1 with `Missing required argument: One of --container-id, --id-label or --workspace-folder is required.` — it never looks at the cwd. That is [#610](https://github.com/get2knowio/deacon/issues/610).\n\nThe defect is an INTERNAL inconsistency as much as a parity one. deacon's `exec` already defaults to the cwd — `case-exec-default-workspace-folder` and `case-exec-upstream-no-config-in-cwd-rejected` both depend on it — and so does `build`, pinned by `case-build-upstream-cwd-default-workspace`. `up` and `read-configuration` are the two that demand the flag.\n\nIt costs nothing to express: the runner already anchors each operation's cwd to the case's isolated workspace, so OMITTING the flag is the whole test. That is also the case's one fragility, recorded here because it is invisible in an empty `argv` — if the runner ever stops anchoring cwd to the workspace, this case starts failing for a reason that has nothing to do with `up`. Its `exec` and `build` siblings carry the same note.\n\n`live-differential`, so the RED lands in the nightly lane, which gates nothing, rather than in `parity_docker`, which blocks pull requests. `chan-exit-code` is the only channel declared: an `up` result document cannot be compared across the two CLIs (a raw `containerId`, differing `configuration` shapes), and while the defect stands there is no container to inspect either. The `equals: 0` assertion pins deacon's own side so the case turns green on the fix and not on the reference changing. A `spec-expectation` sibling asserting `outcome: success` and a `containerId` belongs with that fix, exactly as #593's siblings did.\n\nUPSTREAM'S NEGATIVE ARM IS NOT LANDED, and the omission is deliberate. 'should fail gracefully when no config in current directory' has both CLIs exit 1 today, so a differential on the exit code would be GREEN — for the wrong reason, since deacon fails on a missing FLAG and the reference on a missing CONFIG. An assertion that cannot fail for the reason it was written is the thing `docs/PARITY.md` warns about. It lands with the fix, as the `up` twin of `case-exec-upstream-no-config-in-cwd-rejected`, asserting the same `Dev container config \\(.*\\) not found\\.` regex.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should create and start container using current directory config'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
     }
   ]
 }
