@@ -426,13 +426,24 @@ fn test_gpu_modes_output_separation() {
             );
         }
 
-        // Any GPU-related warnings or logs should be on stderr only
-        if stdout.contains("GPU") {
-            // This should not happen - warnings/logs belong on stderr
-            panic!(
-                "GPU-related output found on stdout for mode '{}'. stdout: {}",
-                mode, stdout
-            );
-        }
+        // Any GPU-related warning or LOG line belongs on stderr. This looks for
+        // deacon's own GPU log wording rather than the bare substring "GPU",
+        // mirroring `test_gpu_all_info_to_stderr`: stdout legitimately carries the
+        // result document, and on a GPU-less host `--gpu-mode all` fails with a
+        // daemon message that quotes the word ("failed to discover GPU vendor from
+        // CDI"). Reporting that inside `{"outcome": "error", …}` on stdout IS the
+        // output contract, not a violation of it. Until #610 this loop never got
+        // past `up`'s argument validation — it passes no `--workspace-folder` and
+        // relies on the cwd — so the substring check had never actually run against
+        // a real `up`.
+        assert!(
+            !stdout.contains("GPU mode")
+                && !stdout.contains("GPU runtime")
+                && !stdout.contains("GPU detection")
+                && !stdout.contains("--gpus"),
+            "GPU-related log output found on stdout for mode '{}'. stdout: {}",
+            mode,
+            stdout
+        );
     }
 }

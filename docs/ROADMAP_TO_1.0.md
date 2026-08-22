@@ -92,7 +92,7 @@ Both are already specced; treat as primary 1.0 work.
 | B.1 | **Lockfile graduation**: `--no-lockfile`, `--frozen-lockfile`, and *default-on* lockfile writes on `up`/`build` (`.devcontainer-lock.json`) | **High** — CI primitive | v0.87.0, [PR #1212](https://github.com/devcontainers/cli/pull/1212) |
 | B.2 | **`devcontainer.metadata` label is always a JSON array**, even for single-entry metadata. Writer-side contract change. | **High** — image interop with VS Code/Zed/envbuilder | v0.86.0, [PR #1199](https://github.com/devcontainers/cli/pull/1199) |
 | B.3 | `--mount-git-worktree-common-dir` for worktrees with `--relative-paths` | Medium | v0.81.0, [PR #1127](https://github.com/devcontainers/cli/pull/1127) |
-| B.4 | Default `--workspace-folder` to CWD when omitted | Medium — UX | v0.82.0, [PR #1104](https://github.com/devcontainers/cli/pull/1104) |
+| B.4 | ~~Default `--workspace-folder` to CWD when omitted~~ — **done** for `up` (issue #610); `exec`, `build`, `down` and `run-user-commands` already did. `read-configuration` still requires one of `--workspace-folder`/`--config`/`--container-id`/`--id-label` — a separate decision | Medium — UX | v0.82.0, [PR #1104](https://github.com/devcontainers/cli/pull/1104) |
 | B.5 | Windows drive-letter lowercase normalization for id-labels (parity with VS Code) | Low — Windows-only | v0.86.0 |
 | B.6 | Skip injecting `# syntax=docker/dockerfile:1.4` when Docker Engine ≥ 23.0.0; hidden `--omit-syntax-directive` flag | Low | v0.80.3, [PR #1118](https://github.com/devcontainers/cli/pull/1118) |
 | B.7 | `BUILDKIT_INLINE_CACHE=1` on Feature build path for cache reuse | Low — perf | v0.83.0, [PR #1135](https://github.com/devcontainers/cli/pull/1135) |
@@ -213,7 +213,7 @@ implementation (`@devcontainers/cli`).
 
 ### Tier 2 — Strongly recommended
 
-15. CLI parity §B.3–B.5: `--mount-git-worktree-common-dir`, default `--workspace-folder = CWD`, Windows drive-letter normalization.
+15. CLI parity §B.3–B.5: `--mount-git-worktree-common-dir`, ~~default `--workspace-folder = CWD`~~ (**done** for `up`, issue #610), Windows drive-letter normalization.
 16. `--container-session-data-folder` flag (parity with reference probe-cache plumbing).
 17. `--omit-paths` on `templates apply`.
 18. `--stop-for-personalization` on `run-user-commands`.

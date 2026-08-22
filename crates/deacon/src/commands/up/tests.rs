@@ -24,6 +24,94 @@ fn test_up_args_creation() {
     assert!(args.config_path.is_none());
 }
 
+/// #610: with no `--workspace-folder`, `up` resolves the workspace from the
+/// process's current directory instead of rejecting the invocation.
+#[test]
+fn test_workspace_folder_defaults_to_current_directory() {
+    use super::resolve_workspace_folder;
+
+    let cwd = std::env::current_dir().expect("cwd is readable");
+    let resolved = resolve_workspace_folder(None).expect("cwd must resolve as the default");
+
+    assert_eq!(
+        resolved,
+        cwd.canonicalize().expect("cwd canonicalizes"),
+        "an omitted --workspace-folder must resolve to the canonicalized current directory"
+    );
+}
+
+/// The equivalence the fix rests on: every downstream consumer of `up`'s workspace
+/// folder (argument validation, identity hashing, the trust gate, the git-root mount
+/// walk, compose project naming) reads the SAME value whether the path was defaulted
+/// from the cwd or typed as `--workspace-folder $(pwd)`. Materializing the default at
+/// `up`'s entry rather than inside `load_config` is what buys that.
+#[test]
+fn test_defaulted_workspace_folder_matches_explicit_cwd() {
+    use super::resolve_workspace_folder;
+
+    let cwd = std::env::current_dir().expect("cwd is readable");
+
+    let defaulted = resolve_workspace_folder(None).expect("cwd must resolve as the default");
+    let explicit = resolve_workspace_folder(Some(cwd)).expect("explicit cwd must resolve");
+
+    assert_eq!(
+        defaulted, explicit,
+        "a defaulted cwd must be indistinguishable from an explicit --workspace-folder $(pwd)"
+    );
+
+    // The identity every reconnecting subcommand hashes must agree too, since that is
+    // what `up` ↔ `exec` / `down` / `run-user-commands` reconnection is keyed on.
+    let config = DevContainerConfig::default();
+    assert_eq!(
+        deacon_core::container::ContainerIdentity::new(&defaulted, &config).workspace_hash,
+        deacon_core::container::ContainerIdentity::new(&explicit, &config).workspace_hash,
+        "container identity must not depend on whether the workspace folder was defaulted"
+    );
+}
+
+/// An explicit `--workspace-folder` still resolves to that path, not the cwd — the
+/// default must not shadow a flag the developer typed.
+#[test]
+fn test_explicit_workspace_folder_wins_over_the_default() {
+    use super::resolve_workspace_folder;
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let resolved =
+        resolve_workspace_folder(Some(temp.path().to_path_buf())).expect("temp dir resolves");
+
+    assert_eq!(
+        resolved,
+        temp.path().canonicalize().expect("temp dir canonicalizes"),
+        "an explicit --workspace-folder must be honored verbatim"
+    );
+    assert_ne!(
+        resolved,
+        std::env::current_dir()
+            .expect("cwd is readable")
+            .canonicalize()
+            .expect("cwd canonicalizes"),
+        "an explicit --workspace-folder must not fall back to the cwd"
+    );
+}
+
+/// A `--workspace-folder` that does not exist is still a hard error (the default
+/// applies only when the flag is ABSENT, never as a fallback for a bad path).
+#[test]
+fn test_missing_explicit_workspace_folder_is_still_rejected() {
+    use super::resolve_workspace_folder;
+
+    let err = resolve_workspace_folder(Some(PathBuf::from(
+        "/nonexistent/path/that/does/not/exist/xyz123",
+    )))
+    .expect_err("a nonexistent --workspace-folder must not fall back to the cwd");
+
+    assert!(
+        err.to_string().contains("Failed to resolve workspace path"),
+        "expected the path-resolution diagnostic, got: {}",
+        err
+    );
+}
+
 #[test]
 fn test_error_mapping_config_not_found() {
     use deacon_core::errors::{ConfigError, DeaconError};

@@ -930,6 +930,11 @@ pub struct Cli {
     pub quiet: u8,
 
     /// Workspace folder path.
+    ///
+    /// Defaults to the current directory for `up`, `build`, `exec`, `down` and
+    /// `run-user-commands` (#610). `read-configuration` still requires one of
+    /// `--workspace-folder` / `--config` / `--container-id` / `--id-label`.
+    ///
     /// Also settable via the `DEACON_WORKSPACE_FOLDER` environment variable.
     #[arg(
         long,
