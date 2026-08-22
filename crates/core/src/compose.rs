@@ -62,9 +62,10 @@ pub struct ComposeProject {
 /// container startup. Supports workspace mounts with consistency options.
 #[derive(Debug, Clone)]
 pub struct ComposeMount {
-    /// Mount type (bind or volume)
+    /// Mount type (bind, volume or tmpfs)
     pub mount_type: String,
-    /// Source path or volume name
+    /// Source path or volume name. Empty when the mount has no source: a tmpfs,
+    /// or a `volume` ANONYMOUS volume (#617).
     pub source: String,
     /// Target path in container
     pub target: String,
@@ -1535,6 +1536,21 @@ impl ComposeProject {
                     continue;
                 }
 
+                // A `type=volume` mount with no source is an ANONYMOUS volume
+                // (#617). The compose SHORT form cannot express it — `- /target`
+                // reads as a target-only entry, and adding any option turns the
+                // first field back into a source (`- /target:ro` means
+                // source=/target, target=ro) — so emit the long form, which says
+                // exactly this and nothing else.
+                if mount.mount_type == "volume" && mount.source.is_empty() {
+                    yaml.push_str("      - type: volume\n");
+                    yaml.push_str(&format!("        target: {}\n", mount.target));
+                    if mount.read_only {
+                        yaml.push_str("        read_only: true\n");
+                    }
+                    continue;
+                }
+
                 let mut mount_str = format!("{}:{}", mount.source, mount.target);
                 // Build options suffix: ro and/or consistency
                 // Docker Compose short-form: source:target:options
@@ -1593,9 +1609,16 @@ impl ComposeProject {
         // new volume, this is what makes the reference valid. This is a
         // top-level (not per-service) YAML key, so it must sit outside the
         // `services:` block built above.
+        //
+        // An ANONYMOUS volume (`type=volume` with no source, #617) has no name to
+        // declare — Compose creates it per-container — so it is skipped here; a
+        // blank key would produce an invalid `volumes:` mapping.
         let mut new_volume_names: Vec<&str> = Vec::new();
         for mount in &self.additional_mounts {
-            if mount.mount_type == "volume" && !new_volume_names.contains(&mount.source.as_str()) {
+            if mount.mount_type == "volume"
+                && !mount.source.is_empty()
+                && !new_volume_names.contains(&mount.source.as_str())
+            {
                 new_volume_names.push(&mount.source);
             }
         }
@@ -3328,6 +3351,71 @@ mod tests {
         assert!(declaration.contains("  feat-probe-vol: {}"));
         // The bind mount's source must NOT be declared as a named volume.
         assert!(!declaration.contains("/host/ws"));
+    }
+
+    /// #617: a `type=volume` mount with NO source is an anonymous volume. The
+    /// compose short form cannot express it — `- /target` reads as target-only
+    /// and `- /target:ro` re-reads the first field as a source — so the override
+    /// must emit the LONG form, and must not declare a nameless top-level volume.
+    #[test]
+    fn test_generate_injection_override_with_anonymous_volume() {
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: vec![
+                ComposeMount {
+                    mount_type: "volume".to_string(),
+                    source: String::new(),
+                    target: "/home/anon".to_string(),
+                    read_only: false,
+                    consistency: None,
+                },
+                ComposeMount {
+                    mount_type: "volume".to_string(),
+                    source: "named-vol".to_string(),
+                    target: "/home/named".to_string(),
+                    read_only: false,
+                    consistency: None,
+                },
+            ],
+            profiles: Vec::new(),
+            additional_env: IndexMap::new(),
+            external_volumes: Vec::new(),
+            override_command: Some(false),
+            service_image_override: None,
+            deacon_labels: IndexMap::new(),
+        };
+
+        let override_yaml = project.generate_injection_override().unwrap();
+
+        // Long form for the anonymous volume…
+        assert!(
+            override_yaml.contains("      - type: volume\n        target: /home/anon\n"),
+            "expected long-form anonymous volume, got:\n{override_yaml}"
+        );
+        // …never the malformed short form with an empty source.
+        assert!(
+            !override_yaml.contains("- :/home/anon"),
+            "empty source must not reach the short form:\n{override_yaml}"
+        );
+        // The NAMED sibling still uses the short form and is still declared.
+        assert!(override_yaml.contains("named-vol:/home/named"));
+
+        let top_level_volumes_idx = override_yaml
+            .find("\nvolumes:\n")
+            .expect("expected a top-level `volumes:` key for the named volume");
+        let declaration = &override_yaml[top_level_volumes_idx..];
+        assert!(declaration.contains("  named-vol: {}"));
+        // An anonymous volume has no name to declare; a blank key would be
+        // an invalid mapping.
+        assert!(
+            !declaration.contains("  : {}"),
+            "anonymous volume must not be declared:\n{declaration}"
+        );
     }
 
     #[test]

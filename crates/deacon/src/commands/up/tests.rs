@@ -326,6 +326,41 @@ fn test_normalized_mount_parse_tmpfs_without_source() {
     assert!(!mount.read_only);
 }
 
+/// #617: `deacon up --mount type=volume,target=/x` requests an ANONYMOUS Docker
+/// volume — the same shape the object form in `devcontainer.json` uses — and must
+/// be accepted here too, so the CLI flag and the config field agree.
+#[test]
+fn test_normalized_mount_parse_anonymous_volume() {
+    let mount = NormalizedMount::parse("type=volume,target=/home/anon").unwrap();
+    assert!(matches!(mount.mount_type, MountType::Volume));
+    assert_eq!(mount.source, "");
+    assert_eq!(mount.target, "/home/anon");
+    assert!(!mount.read_only);
+}
+
+/// The re-emitted spec string is what reaches `merge_mounts` and then
+/// `docker create --mount`, so it must omit `source` entirely rather than emit
+/// an empty value Docker rejects.
+#[test]
+fn test_normalized_mount_to_spec_string_anonymous_volume_omits_source() {
+    let mount = NormalizedMount::parse("type=volume,target=/home/anon").unwrap();
+    assert_eq!(mount.to_spec_string(), "type=volume,target=/home/anon");
+
+    let read_only = NormalizedMount::parse("type=volume,target=/home/anon,readonly").unwrap();
+    assert_eq!(
+        read_only.to_spec_string(),
+        "type=volume,target=/home/anon,readonly"
+    );
+}
+
+/// The allowance is targeted: an explicitly EMPTY `source=` is a typo on either
+/// type and stays a hard error.
+#[test]
+fn test_normalized_mount_parse_empty_source_rejected() {
+    assert!(NormalizedMount::parse("type=volume,source=,target=/data").is_err());
+    assert!(NormalizedMount::parse("type=bind,source=,target=/data").is_err());
+}
+
 #[test]
 fn test_normalized_mount_to_spec_string_tmpfs_omits_source() {
     let mount = NormalizedMount {

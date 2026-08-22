@@ -22,7 +22,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizedMount {
     pub mount_type: MountType,
-    /// Source path/volume for bind/volume mounts. Empty for tmpfs mounts.
+    /// Source path/volume for bind and named-volume mounts. Empty when the mount
+    /// has no source: a tmpfs, or a `type=volume` ANONYMOUS volume (#617).
     pub source: String,
     pub target: String,
     /// Whether the volume is externally managed (not created by deacon). Per
@@ -52,7 +53,9 @@ impl NormalizedMount {
     /// Expected format:
     /// `type=(bind|volume|tmpfs),target=<path>[,source=<path>][,external=(true|false)][,readonly|readonly=(true|false)|ro][,consistency=(cached|consistent|delegated)]`
     ///
-    /// `source` is required for `bind` and `volume`, optional for `tmpfs`.
+    /// `source` is required for `bind`. It is OPTIONAL for `volume` — omitting it
+    /// requests an anonymous Docker volume, which is what Docker's own `--mount`
+    /// flag means by an absent source (#617) — and is never used by `tmpfs`.
     ///
     /// Per #119, `readonly` (bare or `=true/false`) and `ro` (bare) are
     /// Docker-aligned aliases for the read-only flag — distinct from
@@ -141,8 +144,24 @@ impl NormalizedMount {
             }
         };
 
+        // Source rules mirror `deacon_core::mount::Mount::validate`, which follows
+        // Docker's `--mount` flag verbatim: `bind` requires a source, `volume` does
+        // NOT (omitting it is how Docker asks for an ANONYMOUS volume — #617), and
+        // `tmpfs` never has one. An explicitly EMPTY `source=` is a typo rather than
+        // a request and stays an error on both `bind` and `volume`.
+        if matches!(mount_type, MountType::Bind | MountType::Volume) && source == Some("") {
+            return Err(
+                DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+                    message: format!(
+                        "Invalid mount format: '{}'. source must not be empty (omit it entirely for an anonymous volume)",
+                        mount_str
+                    ),
+                })
+                .into(),
+            );
+        }
         let source = match mount_type {
-            MountType::Bind | MountType::Volume => source.ok_or_else(|| {
+            MountType::Bind => source.ok_or_else(|| {
                 DeaconError::Config(deacon_core::errors::ConfigError::Validation {
                     message: format!(
                         "Invalid mount format: '{}'. Missing required field: source",
@@ -150,7 +169,8 @@ impl NormalizedMount {
                     ),
                 })
             })?,
-            MountType::Tmpfs => source.unwrap_or(""),
+            // Empty means "no source": an anonymous volume, or a tmpfs.
+            MountType::Volume | MountType::Tmpfs => source.unwrap_or(""),
         };
 
         let target = target.ok_or_else(|| {
@@ -236,7 +256,11 @@ impl NormalizedMount {
             format!("target={}", self.target),
         ];
 
-        if matches!(self.mount_type, MountType::Bind | MountType::Volume) {
+        // An empty `source` means the mount has none: a tmpfs, or a `type=volume`
+        // ANONYMOUS volume (#617). Emitting `source=` for either would hand Docker
+        // an empty value it rejects, so the key is omitted entirely.
+        if matches!(self.mount_type, MountType::Bind | MountType::Volume) && !self.source.is_empty()
+        {
             parts.insert(1, format!("source={}", self.source));
         }
 
