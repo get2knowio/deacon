@@ -32,6 +32,40 @@ fn is_docker_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Volume cleanup guard — an ANONYMOUS volume (#617) survives `docker rm -f`,
+/// which does not take `-v`, so its id has to be reclaimed explicitly.
+///
+/// Declare this guard BEFORE the [`ContainerGuard`] in a test: drop runs in
+/// reverse declaration order, so the container is removed first and the volume
+/// is no longer in use by the time this one fires.
+struct VolumeGuard {
+    volume_names: std::cell::RefCell<Vec<String>>,
+}
+
+impl VolumeGuard {
+    fn new() -> Self {
+        Self {
+            volume_names: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    fn register(&self, name: String) {
+        if !name.is_empty() {
+            self.volume_names.borrow_mut().push(name);
+        }
+    }
+}
+
+impl Drop for VolumeGuard {
+    fn drop(&mut self) {
+        for name in self.volume_names.borrow().iter() {
+            let _ = StdCommand::new("docker")
+                .args(["volume", "rm", "-f", name])
+                .output();
+        }
+    }
+}
+
 /// Container cleanup guard - ensures containers are removed after tests
 struct ContainerGuard {
     container_ids: std::cell::RefCell<Vec<String>>,
@@ -781,4 +815,89 @@ fn test_feature_with_empty_mounts_array() {
         .expect("deacon up should succeed even with empty mounts array");
 
     println!("✓ Feature with empty mounts array doesn't cause errors");
+}
+
+/// #617: a `mounts` entry requesting an ANONYMOUS volume — `type: volume` with a
+/// `target` and no `source`, which is how Docker's own `--mount` flag asks for one
+/// and what the spec defers to verbatim — must create the volume and mount it.
+///
+/// Asserts against `docker inspect`, not against the `up` outcome: deacon used to
+/// reject the config outright, and an outcome-only check would also pass for a
+/// build that silently dropped the mount.
+///
+/// The config is the reference CLI's own fixture shape
+/// (`src/test/configs/image-with-mounts`), exercised here in BOTH the object form
+/// and the equivalent `--mount` string form so the two ingresses agree.
+#[test]
+fn test_config_anonymous_volume_mount_applied_to_container() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_config_anonymous_volume_mount_applied_to_container: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+
+    let devcontainer_config = json!({
+        "name": "Anonymous Volume Mount Test",
+        "image": "alpine:3.19",
+        "workspaceFolder": "/workspace",
+        "mounts": [
+            { "type": "volume", "target": "/home/anon_object" }
+        ]
+    });
+
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        serde_json::to_string_pretty(&devcontainer_config).unwrap(),
+    )
+    .unwrap();
+
+    // Declared first so it drops LAST, after the container is gone.
+    let volume_guard = VolumeGuard::new();
+    let guard = ContainerGuard::new();
+    let container_id = run_deacon_up(
+        &temp_dir,
+        &guard,
+        &[
+            "--skip-post-create",
+            "--mount",
+            "type=volume,target=/home/anon_cli",
+        ],
+    )
+    .expect("deacon up should accept an anonymous volume mount");
+
+    for target in ["/home/anon_object", "/home/anon_cli"] {
+        let mount_details = get_mount_details(&container_id, target)
+            .unwrap_or_else(|| panic!("Anonymous volume should be mounted at {target}"));
+
+        assert_eq!(
+            mount_details["Type"].as_str(),
+            Some("volume"),
+            "Mount at {target} should be a volume: {mount_details}"
+        );
+
+        // Docker names an anonymous volume with a freshly generated id rather
+        // than leaving it undefined — the claim upstream's own test
+        // ("docker volume should not be named undefined if the src argument is
+        // omitted in mount command") reaches for.
+        let name = mount_details["Name"]
+            .as_str()
+            .unwrap_or_else(|| panic!("Anonymous volume at {target} should have a Name"));
+        assert!(
+            !name.is_empty() && name != "undefined",
+            "Anonymous volume at {target} got a bogus name: {name}"
+        );
+        volume_guard.register(name.to_string());
+
+        assert_eq!(
+            mount_details["RW"].as_bool(),
+            Some(true),
+            "Anonymous volume at {target} should be writable"
+        );
+    }
+
+    println!("✓ Anonymous volume mounts (object form and --mount) create and mount a volume");
 }

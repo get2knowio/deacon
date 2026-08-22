@@ -5,9 +5,10 @@
 //! formats and types:
 //!
 //! ## Mount Types
-//! - `bind`: Bind mount from host filesystem
-//! - `volume`: Named Docker volume
-//! - `tmpfs`: Temporary filesystem in memory
+//! - `bind`: Bind mount from host filesystem (always requires a `source`)
+//! - `volume`: Docker volume — named when a `source` is given, ANONYMOUS when it is
+//!   omitted, exactly as Docker's own `--mount` flag defines it (#617)
+//! - `tmpfs`: Temporary filesystem in memory (never has a `source`)
 //!
 //! ## Mount Formats
 //! 1. Docker mount syntax: `type=bind,source=.,target=/workspaces/app,consistency=cached`
@@ -189,7 +190,9 @@ impl Mount {
     pub fn to_docker_args(&self) -> Vec<String> {
         let mut mount_str = format!("type={}", self.mount_type);
 
-        // Add source for bind and volume mounts
+        // Add source for bind and named-volume mounts. An absent source on a
+        // `type=volume` mount is left absent on purpose — that is Docker's own
+        // spelling for an anonymous volume (#617).
         if let Some(ref source) = self.source {
             let source_path = if self.mount_type == MountType::Bind {
                 // For bind mounts, resolve relative paths to absolute before platform conversion
@@ -255,16 +258,49 @@ impl Mount {
     ///
     /// Checks for common configuration issues and logs warnings for unsupported fields.
     pub fn validate(&self) -> Result<()> {
-        // Validate source is present for bind and volume mounts
+        // Source rules follow Docker's `--mount` flag, which the spec defers to
+        // verbatim ("Each value is a string that accepts the same values as the
+        // Docker CLI `--mount` flag" —
+        // `parity/spec/113500f4/devcontainerjson-reference.md:27`):
+        //
+        // - `bind` genuinely requires a source: there is no host path to bind
+        //   without one.
+        // - `volume` does NOT. Omitting `source` is precisely how Docker's own
+        //   `--mount` asks for an ANONYMOUS volume, and the reference CLI passes
+        //   that shape straight through (#617). Rejecting it was deacon's bug.
+        // - `tmpfs` never has one.
+        //
+        // An explicitly EMPTY `source=` is a different thing from an absent one:
+        // it is a typo, not a request, and stays a hard error for every type
+        // that can carry a source.
         match self.mount_type {
-            MountType::Bind | MountType::Volume => {
-                if self.source.is_none() {
+            MountType::Bind => match self.source.as_deref() {
+                None | Some("") => {
                     return Err(ConfigError::Validation {
                         message: format!("{} mount requires a source", self.mount_type),
                     }
                     .into());
                 }
-            }
+                Some(_) => {}
+            },
+            MountType::Volume => match self.source.as_deref() {
+                Some("") => {
+                    return Err(ConfigError::Validation {
+                        message: format!(
+                            "{} mount source must not be empty (omit `source` entirely for an anonymous volume)",
+                            self.mount_type
+                        ),
+                    }
+                    .into());
+                }
+                None => {
+                    debug!(
+                        target = %self.target,
+                        "volume mount without a source: requesting an anonymous Docker volume"
+                    );
+                }
+                Some(_) => {}
+            },
             MountType::Tmpfs => {
                 if self.source.is_some() {
                     warn!("tmpfs mount should not have a source, ignoring");
@@ -561,7 +597,8 @@ pub fn merge_mounts(
 fn normalize_mount_to_string(mount: &Mount) -> String {
     let mut parts = vec![format!("type={}", mount.mount_type)];
 
-    // Add source for bind and volume mounts
+    // Add source for bind and named-volume mounts. An anonymous volume
+    // (`type=volume` with no source) keeps its source absent (#617).
     if let Some(ref source) = mount.source {
         parts.push(format!("source={}", source));
     }
@@ -788,11 +825,21 @@ impl MountParser {
             .into());
         }
 
-        let source = if parts[0].is_empty() {
-            None
-        } else {
-            Some(parts[0].to_string())
-        };
+        // An empty first component (`:/container/path`) is not a Docker short-form
+        // spelling of anything — the anonymous-volume shape is the object/`--mount`
+        // form `type=volume,target=…` (#617), never a leading colon. Reject it here
+        // so it does not fall through to `MountType::Volume` with no source and get
+        // silently accepted as an anonymous volume.
+        if parts[0].is_empty() {
+            return Err(ConfigError::Validation {
+                message: format!(
+                    "Volume mount specification '{}' has an empty source; use 'type=volume,target=...' for an anonymous volume",
+                    mount_spec
+                ),
+            }
+            .into());
+        }
+        let source = Some(parts[0].to_string());
 
         let target = parts[1].to_string();
 
@@ -817,17 +864,13 @@ impl MountParser {
             }
         }
 
-        // Determine mount type based on source
-        let mount_type = if source.is_none() {
-            MountType::Volume
-        } else if let Some(ref src) = source {
-            if src.starts_with('/') || src.starts_with('.') || src.contains('\\') {
-                MountType::Bind
-            } else {
-                MountType::Volume
-            }
-        } else {
+        // Determine mount type based on source. The empty-source case was rejected
+        // above, so `source` is always `Some(non-empty)` here.
+        let src = parts[0];
+        let mount_type = if src.starts_with('/') || src.starts_with('.') || src.contains('\\') {
             MountType::Bind
+        } else {
+            MountType::Volume
         };
 
         let mount = Mount {
@@ -1230,6 +1273,109 @@ mod tests {
         };
 
         assert!(mount.validate().is_err());
+    }
+
+    /// #617: `type=volume` with no `source` is Docker's own spelling for an
+    /// ANONYMOUS volume, and the spec defers `mounts` to the `--mount` flag
+    /// verbatim. It must parse, validate, and reach Docker with its source
+    /// still absent — deacon used to reject it.
+    #[test]
+    fn test_anonymous_volume_docker_syntax_accepted() {
+        let mount = MountParser::parse_mount("type=volume,target=/home/anon")
+            .expect("anonymous volume must parse");
+
+        assert_eq!(mount.mount_type, MountType::Volume);
+        assert_eq!(mount.source, None);
+        assert_eq!(mount.target, "/home/anon");
+
+        // The source must stay ABSENT on the wire; `source=` with an empty value
+        // is rejected by Docker.
+        assert_eq!(
+            mount.to_docker_args(),
+            vec![
+                "--mount".to_string(),
+                "type=volume,target=/home/anon".to_string()
+            ]
+        );
+    }
+
+    /// The same shape in the object form the reference's own fixture uses
+    /// (`src/test/configs/image-with-mounts`).
+    #[test]
+    fn test_anonymous_volume_object_form_accepted() {
+        let mounts = MountParser::parse_mounts_from_json(&[serde_json::json!({
+            "target": "/home/test_devcontainer_config",
+            "type": "volume"
+        })]);
+
+        assert_eq!(mounts.len(), 1, "object-form anonymous volume must parse");
+        assert_eq!(mounts[0].mount_type, MountType::Volume);
+        assert_eq!(mounts[0].source, None);
+        assert_eq!(mounts[0].target, "/home/test_devcontainer_config");
+    }
+
+    /// An anonymous volume may still carry the options Docker allows on one.
+    #[test]
+    fn test_anonymous_volume_readonly_round_trips() {
+        let mount = MountParser::parse_mount("type=volume,target=/home/anon,ro")
+            .expect("anonymous volume with ro must parse");
+
+        assert_eq!(mount.mode, MountMode::ReadOnly);
+        assert_eq!(
+            mount.to_docker_args(),
+            vec![
+                "--mount".to_string(),
+                "type=volume,target=/home/anon,ro".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_anonymous_volume_validates() {
+        let mount = Mount {
+            mount_type: MountType::Volume,
+            source: None,
+            target: "/home/anon".to_string(),
+            mode: MountMode::ReadWrite,
+            consistency: None,
+            options: HashMap::new(),
+        };
+
+        assert!(mount.validate().is_ok());
+    }
+
+    /// The allowance is targeted: `bind` still genuinely requires a source, so
+    /// dropping it stays a hard error rather than becoming an anonymous volume.
+    #[test]
+    fn test_mount_validation_bind_without_source_still_rejected() {
+        assert!(MountParser::parse_mount("type=bind,target=/container/path").is_err());
+    }
+
+    /// An explicitly EMPTY `source=` is a typo, not a request for an anonymous
+    /// volume — Docker rejects an empty source value on either type.
+    #[test]
+    fn test_mount_validation_empty_source_rejected() {
+        for spec in [
+            "type=volume,source=,target=/container/path",
+            "type=bind,source=,target=/container/path",
+        ] {
+            assert!(
+                MountParser::parse_mount(spec).is_err(),
+                "empty source must be rejected: {spec}"
+            );
+        }
+    }
+
+    /// The short `source:target` form has no anonymous spelling, so a leading
+    /// colon stays an error instead of silently becoming an anonymous volume.
+    #[test]
+    fn test_short_form_empty_source_rejected() {
+        let err = MountParser::parse_mount(":/container/path")
+            .expect_err("leading-colon short form must be rejected");
+        assert!(
+            err.to_string().contains("empty source"),
+            "expected an empty-source diagnostic, got: {err}"
+        );
     }
 
     #[test]
@@ -2085,6 +2231,72 @@ mod merge_mounts_tests {
         assert!(result.mounts[0].contains("type=volume"));
         assert!(result.mounts[0].contains("source=myvolume"));
         assert!(result.mounts[0].contains("target=/data"));
+    }
+
+    /// #617: the exact config `up` receives from
+    /// `fx-upstream-mount-object-anonymous-volume`. `merge_mounts` is the single
+    /// path every mount takes to `docker create --mount`, so the normalized
+    /// string it emits must carry NO `source` key at all.
+    #[test]
+    fn test_merge_mounts_object_format_anonymous_volume() {
+        let config_mounts = vec![serde_json::json!({
+            "target": "/home/test_devcontainer_config",
+            "type": "volume"
+        })];
+        let features = vec![];
+
+        let result = merge_mounts(&config_mounts, &features, None)
+            .expect("anonymous volume mount must merge");
+        assert_eq!(
+            result.mounts,
+            vec!["type=volume,target=/home/test_devcontainer_config".to_string()]
+        );
+    }
+
+    /// The string form of the same shape, which `deacon up --mount` produces.
+    #[test]
+    fn test_merge_mounts_string_form_anonymous_volume() {
+        let config_mounts = vec![serde_json::Value::String(
+            "type=volume,target=/home/anon".to_string(),
+        )];
+        let features = vec![];
+
+        let result =
+            merge_mounts(&config_mounts, &features, None).expect("anonymous volume must merge");
+        assert_eq!(
+            result.mounts,
+            vec!["type=volume,target=/home/anon".to_string()]
+        );
+    }
+
+    /// A feature may request one too — the merge path is shared.
+    #[test]
+    fn test_merge_mounts_feature_anonymous_volume() {
+        let config_mounts: Vec<serde_json::Value> = vec![];
+        let features = vec![create_feature_with_mounts(
+            "anon",
+            vec!["type=volume,target=/scratch".to_string()],
+        )];
+
+        let result = merge_mounts(&config_mounts, &features, None)
+            .expect("feature anonymous volume must merge");
+        assert_eq!(
+            result.mounts,
+            vec!["type=volume,target=/scratch".to_string()]
+        );
+    }
+
+    /// Targeted allowance: an object-form mount with an EMPTY `source` is still
+    /// an error, and so is an object-form `bind` with no source at all.
+    #[test]
+    fn test_merge_mounts_object_format_invalid_sources_still_rejected() {
+        for mount in [
+            serde_json::json!({ "type": "volume", "source": "", "target": "/data" }),
+            serde_json::json!({ "type": "bind", "target": "/data" }),
+        ] {
+            let result = merge_mounts(std::slice::from_ref(&mount), &[], None);
+            assert!(result.is_err(), "must be rejected: {mount}");
+        }
     }
 
     #[test]
