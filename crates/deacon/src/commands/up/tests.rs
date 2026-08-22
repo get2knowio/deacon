@@ -665,3 +665,118 @@ fn test_up_result_builder_methods_for_new_fields() {
         panic!("Expected Success variant");
     }
 }
+
+/// #608: the document `up` REPORTS must resolve `${containerEnv:*}` against the
+/// container it just created. `up` used to serialize the pass-1 configuration —
+/// substituted BEFORE the container existed, so every `${containerEnv:*}` in it
+/// is still a template by construction, in both `configuration` and
+/// `mergedConfiguration` (which is derived from the same document).
+#[test]
+fn container_substitution_resolves_container_env_in_reported_config() {
+    use super::helpers::container_substituted_config;
+    use std::collections::HashMap;
+
+    let config: DevContainerConfig = serde_json::from_value(json!({
+        "image": "debian:bookworm-slim",
+        "remoteEnv": {
+            "TEST": "ENV",
+            "CONTAINER_PATH": "${containerEnv:PATH}",
+            "TEST_RE": "${containerEnv:TEST_CE}"
+        }
+    }))
+    .unwrap();
+
+    let container_env = HashMap::from([
+        ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+        ("TEST_CE".to_string(), "TEST_VALUE3".to_string()),
+    ]);
+
+    let resolved = container_substituted_config(
+        &config,
+        &std::env::current_dir().unwrap(),
+        "devcontainer-id",
+        Some(&container_env),
+        "/workspaces/demo",
+    );
+
+    let remote_env = resolved.remote_env();
+    assert_eq!(
+        remote_env.get("TEST_RE").and_then(|v| v.as_deref()),
+        Some("TEST_VALUE3")
+    );
+    assert_eq!(
+        remote_env.get("CONTAINER_PATH").and_then(|v| v.as_deref()),
+        Some("/usr/bin:/bin")
+    );
+    // A value with nothing to substitute is untouched.
+    assert_eq!(
+        remote_env.get("TEST").and_then(|v| v.as_deref()),
+        Some("ENV")
+    );
+}
+
+/// #608 fail-safe: with no container environment in hand the pass is SKIPPED, so
+/// the template survives. Running it against an absent environment would be worse
+/// than not running it — `resolve_variable` answers `Some("")` for a missing key
+/// once `container_env` is `Some`, so every reference would collapse to an empty
+/// string and the caller could not tell "the container has no such variable" from
+/// "deacon could not read the container".
+#[test]
+fn container_substitution_preserves_templates_without_a_container_env() {
+    use super::helpers::container_substituted_config;
+
+    let config: DevContainerConfig = serde_json::from_value(json!({
+        "image": "debian:bookworm-slim",
+        "remoteEnv": { "TEST_RE": "${containerEnv:TEST_CE}" }
+    }))
+    .unwrap();
+
+    let resolved = container_substituted_config(
+        &config,
+        &std::env::current_dir().unwrap(),
+        "devcontainer-id",
+        None,
+        "/workspaces/demo",
+    );
+
+    assert_eq!(
+        resolved
+            .remote_env()
+            .get("TEST_RE")
+            .and_then(|v| v.as_deref()),
+        Some("${containerEnv:TEST_CE}")
+    );
+}
+
+/// #608: the same pass carries the OTHER container-aware token the reference's
+/// `containerSubstitute` resolves. `up` knows the real mount target by the time
+/// it reports, so `${containerWorkspaceFolder}` must name it rather than survive
+/// as a literal.
+#[test]
+fn container_substitution_resolves_container_workspace_folder() {
+    use super::helpers::container_substituted_config;
+    use std::collections::HashMap;
+
+    let config: DevContainerConfig = serde_json::from_value(json!({
+        "image": "debian:bookworm-slim",
+        "remoteEnv": { "PROJECT": "${containerWorkspaceFolder}/src" }
+    }))
+    .unwrap();
+
+    let container_env = HashMap::from([("PATH".to_string(), "/usr/bin".to_string())]);
+    let resolved = container_substituted_config(
+        &config,
+        &std::env::current_dir().unwrap(),
+        "devcontainer-id",
+        Some(&container_env),
+        "/workspaces/demo",
+    );
+
+    assert_eq!(
+        resolved
+            .remote_env()
+            .get("PROJECT")
+            .and_then(|v| v.as_deref()),
+        Some("/workspaces/demo/src")
+    );
+}

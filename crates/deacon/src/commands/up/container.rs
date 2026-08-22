@@ -974,9 +974,31 @@ pub(crate) async fn execute_container_up(
         args.mount_workspace_git_root,
     );
 
+    // The document `up` reports gets the reference CLI's `containerSubstitute`
+    // pass (#608): `config` up to here is the pass-1 configuration, resolved
+    // BEFORE the container existed, so every `${containerEnv:*}` in it is still
+    // a template. `resolve_env_and_user` already probed this container, so the
+    // raw container environment is in hand and no second inspect is needed.
+    // Applied to BOTH blocks, since `mergedConfiguration` is derived from the
+    // same configuration and had the identical gap.
+    let reported_config = if args.include_configuration || args.include_merged_configuration {
+        super::helpers::container_substituted_config(
+            &config,
+            workspace_folder,
+            &deacon_core::container::compute_dev_container_id(&identity.id_hash_labels()),
+            // An empty map means the inspect inside `resolve_env_and_user` failed
+            // (it warns and carries on); pass `None` so the templates survive
+            // rather than every one of them resolving to an empty string.
+            Some(&env_user_resolution.container_env).filter(|env| !env.is_empty()),
+            &remote_workspace_folder,
+        )
+    } else {
+        config.clone()
+    };
+
     // Serialize configuration if requested
     let configuration = if args.include_configuration {
-        Some(serde_json::to_value(&config)?)
+        Some(serde_json::to_value(&reported_config)?)
     } else {
         None
     };
@@ -986,13 +1008,13 @@ pub(crate) async fn execute_container_up(
         let options = inspect_for_merged_configuration(
             docker,
             &container_result.container_id,
-            config.image.as_deref(),
+            reported_config.image.as_deref(),
             None, // Single container, no service context
             resolved_features,
         )
         .await;
         Some(build_merged_configuration_with_options(
-            &config,
+            &reported_config,
             config_path,
             options,
         )?)

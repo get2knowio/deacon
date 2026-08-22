@@ -318,9 +318,28 @@ pub(crate) async fn execute_compose_up(
                     args.mount_workspace_git_root,
                 );
 
+                // Reported document gets the container-aware substitution pass
+                // (#608) — same rule as the single-container path.
+                let reported_config =
+                    if args.include_configuration || args.include_merged_configuration {
+                        super::helpers::container_substituted_config(
+                            config,
+                            workspace_folder,
+                            &deacon_core::container::compute_dev_container_id(
+                                &identity.id_hash_labels(),
+                            ),
+                            super::helpers::container_env_for_substitution(runtime, &container_id)
+                                .await
+                                .as_ref(),
+                            &remote_workspace_folder,
+                        )
+                    } else {
+                        config.clone()
+                    };
+
                 // Serialize configuration if requested
                 let configuration = if args.include_configuration {
-                    Some(serde_json::to_value(config)?)
+                    Some(serde_json::to_value(&reported_config)?)
                 } else {
                     None
                 };
@@ -331,13 +350,13 @@ pub(crate) async fn execute_compose_up(
                     let options = inspect_for_merged_configuration(
                         runtime,
                         &container_id,
-                        config.image.as_deref(),
+                        reported_config.image.as_deref(),
                         Some(project.service.clone()),
                         None, // No resolved features for reconnect
                     )
                     .await;
                     Some(build_merged_configuration_with_options(
-                        config,
+                        &reported_config,
                         config_path,
                         options,
                     )?)
@@ -802,9 +821,25 @@ pub(crate) async fn execute_compose_up(
         args.mount_workspace_git_root,
     );
 
+    // Reported document gets the container-aware substitution pass (#608) —
+    // same rule as the single-container path.
+    let reported_config = if args.include_configuration || args.include_merged_configuration {
+        super::helpers::container_substituted_config(
+            config,
+            workspace_folder,
+            &deacon_core::container::compute_dev_container_id(&identity.id_hash_labels()),
+            super::helpers::container_env_for_substitution(runtime, &container_id)
+                .await
+                .as_ref(),
+            &remote_workspace_folder,
+        )
+    } else {
+        config.clone()
+    };
+
     // Serialize configuration if requested
     let configuration = if args.include_configuration {
-        Some(serde_json::to_value(&config)?)
+        Some(serde_json::to_value(&reported_config)?)
     } else {
         None
     };
@@ -814,13 +849,13 @@ pub(crate) async fn execute_compose_up(
         let options = inspect_for_merged_configuration(
             runtime,
             &container_id,
-            config.image.as_deref(),
+            reported_config.image.as_deref(),
             Some(project.service.clone()),
             None, // Features not yet supported for compose flow
         )
         .await;
         Some(build_merged_configuration_with_options(
-            config,
+            &reported_config,
             config_path,
             options,
         )?)
