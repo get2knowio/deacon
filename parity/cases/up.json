@@ -4373,6 +4373,342 @@
         "tempdir": true
       },
       "notes": "UPSTREAM'S NEGATIVE ARM of the cwd default — 'should fail gracefully when no config in current directory' — held back from batch 7 on purpose and landed with the fix for [#610](https://github.com/get2knowio/deacon/issues/610). An EXISTING current directory with no devcontainer config, no `--workspace-folder` and no `--id-label` must exit 1 for the RIGHT reason. Before the fix both CLIs exited 1 here, so the assertion would have been green while deacon was failing on a missing FLAG and the reference on a missing CONFIG — an assertion that cannot fail for the reason it was written, which is the trap `docs/PARITY.md` names. It is worth landing now precisely because the reason changed.\n\nOmitting the flag is the whole test, exactly as in the positive twin `case-up-upstream-cwd-default-workspace-success`: the runner anchors each operation's cwd to the case workspace, so a fixture that is empty by construction (`fx-errors-missing-config` holds only a `.gitkeep`) is a cwd with nothing in it.\n\nDISTINCT from `case-up-upstream-missing-workspace-rejected`, which names a `--workspace-folder` that does not exist and fails during workspace RESOLUTION before any config is looked for. This one resolves the workspace fine — the cwd is real — and finds no document, the path a developer meets by `cd`-ing into the wrong directory. The two exercise different code and print different sentences.\n\nMEASURED at oracle 0.87.0 in an empty directory: both CLIs exit 1 and both print an `outcome: error` document naming the absolute path of the document they looked for, but they word it differently — deacon `No devcontainer.json found in workspace` / `Configuration file not found: <abs>/.devcontainer/devcontainer.json`, the reference `Dev container config (<abs>/.devcontainer/devcontainer.json) not found.` Both name the problem and both name the file. So this pins DEACON's answer rather than comparing, on the exact precedent of `case-up-upstream-missing-workspace-rejected` and its `exec` twins: a `live-differential` would need a tolerance to record only that the two disagree about phrasing, which is worth less than what this asserts. Note the wording gap is `up`'s own and NOT shared with `exec` — `case-exec-upstream-no-config-in-cwd-rejected` asserts the reference's exact sentence because `exec` happens to word it identically. Aligning `up` would mean changing the `message` field of its `outcome: error` document, a user-facing contract with its own tests, and is a separate decision from #610.\n\nThe `outcome: error` half IS compared in effect, because both CLIs emit it and the assertion is written against the shared shape rather than either wording. The stderr assertion uses `contains` rather than a path regex on purpose: the path inside deacon's second line uses backslashes on Windows, and the sentence being asserted carries the claim without it.\n\nHERMETIC — no `resourceGroup`, so it runs on every profile including `dev-fast` and on all three operating systems, joining `case-up-upstream-missing-workspace-rejected` as the second `up` case that gates every pull request. The lane is a CLAIM, not a convenience: config resolution fails before any daemon contact, verified by re-running with `docker` off `PATH` and `DOCKER_HOST` pointed at a nonexistent socket and getting the identical output. A regression that reached for the daemon before reading the workspace would fail here rather than pass.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+    },
+    {
+      "id": "case-up-upstream-feature-no-version-tag-installs",
+      "behaviors": [
+        "bhv-up-feature-untagged-oci-reference-installed"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "needsRegistry": true,
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-feature-no-version-tag"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "id -un; echo TRE=$TEST_REMOTE_ENV; command -v git"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "remoteUser": "node"
+            }
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "matches": "(?s)^node\nTRE=Value 1\n/usr/local/bin/git"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "THE PROMISED ITEM. #480 batch 7 closed `src/test/cli.up.test.ts` with two claims named and deliberately not taken; this is the first of them — upstream's `'should execute successfully with valid config with a Feature'`, an OCI Feature id carrying NO version at all (`ghcr.io/devcontainers/features/git`) INSTALLED at `up` time rather than merely resolved.\n\n`case-readconfig-upstream-feature-no-version-tag` reads the same fixture and proves the untagged id RESOLVES; before this case nothing in the suite ever brought one up. The distinction is not academic: resolution reads a manifest, installation pulls the layer and runs `install.sh` inside a build, and an implementation that defaulted the omitted version correctly in the reader and not in the installer would have been invisible.\n\nWhat makes the assertion falsifiable rather than a smoke test: an untagged reference that does NOT default to `latest` is a 404 against a tag that does not exist, so the Feature layer never builds and `up` exits 1. That is the exact shape of the failure this case would catch, and it was confirmed by hand — the case is red the moment the default is dropped.\n\nThe `exec` operation carries three claims in one line. `id -un` is `node`, so `remoteUser` from a configuration that also declares an untagged Feature still governs the process the caller gets; `TEST_REMOTE_ENV` reaches it, so `remoteEnv` survives the Feature-extended image; and `command -v git` resolves to `/usr/local/bin/git`, the Feature's own build-from-source location rather than the distribution's `/usr/bin/git`.\n\nFIXTURE ADAPTATION, recorded in the fixture's UPSTREAM.md. Batch 7 named the blocker precisely: batch 1 repinned this config's base to `debian:bookworm-slim`, where the `node` user upstream's `\"remoteUser\": \"node\"` names does not exist, so `up` would have failed for a reason unrelated to the claim. The base is now `mcr.microsoft.com/devcontainers/typescript-node:1-20-bookworm` — already named by the fixture tree, so no new image is pulled, and upstream's OWN pairing restored (its config pins `typescript-node:0-16-bullseye`, which has the user for the same reason). `case-readconfig-upstream-feature-no-version-tag` reads the changed line identically on both sides and stays green.\n\nMEASURED at oracle 0.87.0: both CLIs exit 0, both report `remoteUser: node`, both print the same three lines, and — the observation that decided this case's shape — both write the AUTHORED, untagged id into `devcontainer.metadata` (`{\"id\":\"ghcr.io/devcontainers/features/git\"}`, no `:latest` appended), agreeing with #490's ruling that the declared reference is what gets reported. The label is not asserted here because the base image contributes seven further entries of its own and the two sides format the JSON string differently; the claim it would carry is already pinned by the `read-configuration` sibling.\n\n`needsRegistry` is declared because the Feature is resolved from `ghcr.io`; the case still lands in `parity_docker`, since a Docker-backed case that also reaches a registry stays there.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 8."
+    },
+    {
+      "id": "case-up-upstream-mount-object-anonymous-volume",
+      "behaviors": [
+        "bhv-up-mount-anonymous-volume-created"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-mount-object-anonymous-volume"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "grep -q \" /home/test_devcontainer_config \" /proc/mounts && echo ANON-VOLUME-MOUNTED"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "ANON-VOLUME-MOUNTED"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED ON PURPOSE — [#617](https://github.com/get2knowio/deacon/issues/617). Asserts the FIXED behaviour, so it turns green on the fix rather than on an assertion edit.\n\nThe EXECUTION half of a fixture the suite had only ever parsed. `fx-upstream-mount-object-anonymous-volume` was vendored in batch 1 from the reference's `src/test/configs/image-with-mounts` and read by `case-readconfig-upstream-mount-object-anonymous-volume` (green — both sides echo the object-form mount identically). The upstream test behind it is an `up` test: `src/test/imageMetadata.test.ts`, 'docker volume should not be named undefined if the src argument is omitted in mount command'.\n\nMEASURED at oracle 0.87.0: the reference exits 0 and `docker inspect` shows a second mount, `Type: volume`, `Destination: /home/test_devcontainer_config`, `Name` a fresh 64-hex anonymous volume id. deacon exits 1 before creating anything: `Invalid mount in config: type=volume,target=/home/test_devcontainer_config: … volume mount requires a source`. `crates/core/src/mount.rs` requires a `source` for `MountType::Volume` as well as for `MountType::Bind`; a bind genuinely needs one, a volume does not — omitting it is how Docker's own `--mount` asks for an anonymous volume, and the spec defers to that flag verbatim (`parity/spec/113500f4/devcontainerjson-reference.md:27`).\n\nThe claim is observed through `/proc/mounts` inside the container rather than through `chan-container-state`. The volume's NAME is a fresh random id on each side by construction, so a whole-channel comparison of the mounts array would report a divergence on every run and say nothing about behaviour — the same reasoning that kept #609's case on `exec` stdout. What `/proc/mounts` proves is stronger than the name anyway: a real filesystem is mounted at the target, which is what upstream's 'not named undefined' assertion was reaching for.\n\nMined from the reference CLI's own e2e suite (`src/test/imageMetadata.test.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 8."
+    },
+    {
+      "id": "case-up-upstream-remote-user-uid-collision",
+      "behaviors": [
+        "bhv-up-remote-user-uid-remap-skipped-on-collision"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-devport-userenvprobe"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "id -un; grep -c \"^bar:x:1001:1001:\" /etc/passwd || true"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "matches": "(?s)^bar\n1\n"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED ON PURPOSE — [#618](https://github.com/get2knowio/deacon/issues/618). Asserts the FIXED behaviour, so it turns green on the fix rather than on an assertion edit.\n\nThe EXECUTION half of a fixture the suite had only ever parsed. `fx-upstream-devport-userenvprobe` was vendored in batch 1 from the reference's `src/test/configs/compose-Dockerfile-alpine` and read by `case-readconfig-upstream-legacy-vscode-properties` (green since #486). Nothing had ever built it — and its Dockerfile creates `foo` (uid 1000) and THEN `bar` (uid 1001) for a reason that only shows up when it does.\n\nOn a host whose uid is 1000 — every GitHub-hosted runner, and this dev container — `updateRemoteUserUID` wants to move `remoteUser: bar` from 1001 to 1000. That uid is already taken. The reference REFUSES the remap in exactly this situation; its `scripts/updateUID.Dockerfile` carries the guard verbatim: `elif [ \"$OLD_UID\" != \"$NEW_UID\" -a -n \"$EXISTING_USER\" ]; then echo \"User with UID exists\"`. deacon remaps anyway.\n\nMEASURED at oracle 0.87.0, host uid:gid 1000:1000. Reference `/etc/passwd`: `foo:x:1000:1000` and `bar:x:1001:1001`, `id -un` prints `bar`, the three lifecycle markers are owned by `bar`. deacon: `foo:x:1000:1000` and `bar:x:1000:1000` — two entries sharing uid 1000 — so every name lookup for 1000 returns `foo`. `id -un` prints `foo`, the markers are owned by `foo`, and even an explicit `deacon exec --user bar` lands on `foo`. deacon's own `up` result document still says `\"remoteUser\": \"bar\"`, which is why nothing reading the outcome could see this.\n\nTHE SECOND FIELD IS WHAT MAKES THE ASSERTION MORE THAN A NAME CHECK. `grep -c \"^bar:x:1001:1001:\"` reads the passwd entry itself, so an implementation that made `id -un` print `bar` by some other route — reordering passwd, creating a second `bar` — still fails. `|| true` keeps the shell's exit status 0 on both sides when the count is zero, so `chan-exit-code` stays a claim about the operation rather than an echo of the grep.\n\nNOT compose-specific: reproduced on the single-container path with the same two-user image (#618 carries that measurement). The case uses the vendored Compose fixture because that is the document upstream shipped and the one the mining rule points at.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0, the `compose-Dockerfile-alpine` arm), [#480](https://github.com/get2knowio/deacon/issues/480) batch 8."
+    },
+    {
+      "id": "case-up-upstream-local-feature-inside-devcontainer-installs",
+      "behaviors": [
+        "bhv-up-local-feature-config-dir-relative-install"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-local-feature-inside-devcontainer"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "color; hello"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "matches": "(?s)my favorite color is gold.*Hello there, vscode!!!!"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The EXECUTION half of a fixture the suite had only ever parsed, and the first half of a pair. `fx-upstream-local-feature-inside-devcontainer` was vendored in batch 1 and read by `case-readconfig-upstream-local-feature-inside-devcontainer`, which proves the two local Feature directories RESOLVE from a config at `.devcontainer/devcontainer.json`. Upstream's test runs them: `src/test/container-features/e2e.test.ts`, 'should exec the color command' / 'should exec the helloworld command'.\n\nResolving a local Feature and INSTALLING one are different code. Installation copies the directory into the build context, runs `install.sh` with the authored options in the environment, and layers the result — none of which a `read-configuration` case can reach. The two commands are the proof, and they are the options as well: `color` prints `my favorite color is gold` only if `localFeatureB`'s `favorite` option arrived (its default is `red`), and `hello` prints `Hello there, vscode!!!!` only if BOTH of `localFeatureA`'s options arrived (its defaults are `hey` and `?????`). A Feature that installed with default options passes neither.\n\n`vscode` in the greeting is a third claim riding along: `hello` runs `whoami` at exec time, so the name is the effective remote user of the process the caller gets, not something the Feature baked in.\n\nMEASURED at oracle 0.87.0: both CLIs exit 0 from both operations and print byte-identical output, ANSI colour codes included. `spec-expectation` rather than `live-differential` because the comparison was run by hand and agreed, and pinning it here puts the claim in `parity_docker`, a blocking PR lane, instead of the nightly, which gates nothing.\n\nMined from the reference CLI's own e2e suite (`src/test/container-features/e2e.test.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 8."
+    },
+    {
+      "id": "case-up-upstream-local-feature-root-config-installs",
+      "behaviors": [
+        "bhv-up-local-feature-root-config-relative-install"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-local-feature-outside-devcontainer"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "color; hello"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "matches": "(?s)my favorite color is gold.*Hello there, vscode!!!!"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The other half of the pair, and the half that can only pass for the right reason. The config here is `.devcontainer.json` at the WORKSPACE ROOT and the same two Feature directories are named `./.devcontainer/localFeatureA` and `./.devcontainer/localFeatureB` — paths that are correct only if resolution is anchored at the ACTIVE CONFIG's own directory. An installer that hardcoded `<workspace>/.devcontainer` as the anchor looks for `.devcontainer/.devcontainer/localFeatureA` and fails; one that hardcoded the workspace root fails the sibling case instead. `case-readconfig-upstream-local-feature-config-at-workspace-root` pins the same pairing at READ time; this pins it at INSTALL time, where the directory is actually copied into a build context.\n\nSame two commands, same three claims as the sibling: both Features installed, both authored option values delivered (`gold` over the default `red`, `Hello there` + `!!!!` over the defaults `hey` + `?????`), and `whoami` inside `hello` reporting the effective remote user.\n\nMEASURED at oracle 0.87.0: both CLIs exit 0 from both operations and print byte-identical output.\n\nMined from the reference CLI's own e2e suite (`src/test/container-features/e2e.test.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 8."
     }
   ]
 }
