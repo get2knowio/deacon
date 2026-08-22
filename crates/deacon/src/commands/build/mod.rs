@@ -419,6 +419,18 @@ pub struct BuildMetadata {
     pub inputs: BuildInputs,
     /// When the build was created
     pub created_at: u64,
+    /// The `--image-name`s the invocation that wrote this entry passed (#620).
+    ///
+    /// `--image-name` is an OUTPUT of the build, not an input to its identity, so
+    /// it deliberately does NOT participate in `config_hash`. Recording it here is
+    /// what lets a later cache hit tell the build's own names (the deterministic
+    /// `deacon-build:<hash>` tag, or Compose's derived `<project>-<service>`) apart
+    /// from names that were merely requested THEN — see [`reconcile_cached_tags`].
+    ///
+    /// Absent in entries written before #620; defaults to empty, which degrades to
+    /// treating every recorded tag as build-owned.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requested_image_names: Vec<String>,
 }
 
 /// Build inputs tracked for cache invalidation
@@ -887,7 +899,7 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
     // Re-running keeps correctness; a future refinement can fold the
     // feature digests into the hash for proper caching.
     if !args.force && !args.push && args.output.is_none() && !features_present {
-        if let Some(cached_result) = check_build_cache(
+        if let Some(cached) = check_build_cache(
             &config_hash,
             args.user_data_folder.as_deref(),
             &workspace_hash,
@@ -895,8 +907,14 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
         .await?
         {
             info!("Using cached build result");
+            // #620: the image needs no rebuilding, but the TAGS this invocation
+            // asked for still have to exist and still have to be what the result
+            // document reports. Caching the build is right; caching the tagging is
+            // not — the reference CLI tags a cached image with whatever
+            // `--image-name` the current invocation passed.
+            let reconciled = reconcile_cached_tags(cached, &args.image_names).await?;
             output_result(
-                &cached_result,
+                &reconciled,
                 &args.output_format,
                 &args.redaction_config,
                 &args.secret_registry,
@@ -1066,8 +1084,11 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
     }
 
     // Cache the result
+    // The requested names travel with the entry so a later hit can tell them apart
+    // from the tags this build owns (#620).
     cache_build_result(
         &final_result,
+        &args.image_names,
         args.user_data_folder.as_deref(),
         &workspace_hash,
     )
@@ -1337,12 +1358,19 @@ fn is_non_build_affecting_directory(dirname: &str) -> bool {
     )
 }
 
+/// A cache hit: the recorded build result plus the `--image-name`s the invocation
+/// that recorded it asked for (#620).
+struct CachedBuild {
+    result: BuildResult,
+    requested_image_names: Vec<String>,
+}
+
 /// Check for cached build result
 async fn check_build_cache(
     config_hash: &str,
     user_data_folder: Option<&Path>,
     workspace_hash: &str,
-) -> Result<Option<BuildResult>> {
+) -> Result<Option<CachedBuild>> {
     let cache_file = match get_build_cache_path(user_data_folder, workspace_hash, config_hash) {
         Ok(p) => p,
         Err(e) => {
@@ -1370,7 +1398,10 @@ async fn check_build_cache(
             // Validate that the image still exists
             if is_image_available(&metadata.result.image_id).await? {
                 debug!("Cache hit for config hash {}", config_hash);
-                Ok(Some(metadata.result))
+                Ok(Some(CachedBuild {
+                    result: metadata.result,
+                    requested_image_names: metadata.requested_image_names,
+                }))
             } else {
                 debug!(
                     "Cached image {} no longer available, invalidating cache",
@@ -1388,9 +1419,72 @@ async fn check_build_cache(
     }
 }
 
+/// Apply the `--image-name`s of the CURRENT invocation to a cached image, and
+/// return the result document that invocation should report (#620).
+///
+/// A cache hit skips the build, which is correct — `--image-name` is an OUTPUT of
+/// the build, not an input to its identity, so it never changes `config_hash`.
+/// What is NOT correct is skipping the *tagging*: before this, a second `build`
+/// with a different `--image-name` reported the name the FIRST build was given and
+/// created no tag for the new one, so `docker inspect --type=image <new name>`
+/// failed against an `"outcome": "success"` document that named it. The reference
+/// CLI 0.87.0 tags a cached image with whatever the current invocation asked for.
+///
+/// Reconciliation keeps the tags the cached build OWNS — deacon's deterministic
+/// `deacon-build:<hash>` tag on the single-container path, Compose's derived
+/// `<project>-<service>` — and replaces the names that were merely *requested* by
+/// the earlier run with the ones requested now. Previously requested tags are left
+/// on the daemon rather than removed; the reference leaves them too.
+async fn reconcile_cached_tags(cached: CachedBuild, requested: &[String]) -> Result<BuildResult> {
+    let CachedBuild {
+        mut result,
+        requested_image_names: previously_requested,
+    } = cached;
+
+    // Retag unconditionally rather than only for names the cache does not already
+    // carry: a name repeated across runs must still resolve, and the tag may have
+    // been removed from the daemon since. `is_image_available` has just confirmed
+    // `image_id` resolves.
+    for name in requested {
+        retag_image(&result.image_id, name).await?;
+    }
+
+    result.tags = reconciled_tags(&result.tags, &previously_requested, requested);
+    Ok(result)
+}
+
+/// The tag list a cache hit should report: the tags the cached build OWNS, then
+/// every `--image-name` this invocation passed, in the order it passed them.
+///
+/// Split out from [`reconcile_cached_tags`] so the ordering rules — which decide
+/// what the result document says — are testable without a daemon.
+fn reconciled_tags(
+    cached_tags: &[String],
+    previously_requested: &[String],
+    requested: &[String],
+) -> Vec<String> {
+    let mut tags: Vec<String> = cached_tags
+        .iter()
+        .filter(|t| !previously_requested.contains(t) && !requested.contains(t))
+        .cloned()
+        .collect();
+    tags.extend(requested.iter().cloned());
+
+    // The one shape with no build-owned tag to fall back on: a Compose build whose
+    // first run supplied `--image-name` (which suppresses the derived
+    // `<project>-<service>` name) and whose second run supplied none. Report what
+    // the cache recorded rather than an `imageName`-less document — those tags do
+    // still name this image.
+    if tags.is_empty() {
+        return cached_tags.to_vec();
+    }
+    tags
+}
+
 /// Cache build result
 async fn cache_build_result(
     result: &BuildResult,
+    requested_image_names: &[String],
     user_data_folder: Option<&Path>,
     workspace_hash: &str,
 ) -> Result<()> {
@@ -1419,6 +1513,7 @@ async fn cache_build_result(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
+        requested_image_names: requested_image_names.to_vec(),
     };
 
     let cache_file = cache_dir.join(format!("{}.json", result.config_hash));
@@ -2147,7 +2242,8 @@ async fn drop_run_private_tag(tag: &str) {
 ///
 /// Used after the post-build feature pass to re-point the base build's tags at
 /// the feature-extended image, so `--image-name` resolves to the image that
-/// actually contains the installed features.
+/// actually contains the installed features — and by [`reconcile_cached_tags`],
+/// to apply a changed `--image-name` to an image served from the build cache (#620).
 async fn retag_image(source: &str, target: &str) -> Result<()> {
     let output = tokio::process::Command::new("docker")
         .args(["tag", source, target])
@@ -4030,6 +4126,7 @@ mod tests {
             result: build_result,
             inputs,
             created_at: 1234567890,
+            requested_image_names: vec!["myimage:v1".to_string()],
         };
 
         // Test serialization
@@ -4044,6 +4141,124 @@ mod tests {
             deserialized.inputs.dockerfile_hash,
             metadata.inputs.dockerfile_hash
         );
+        assert_eq!(
+            deserialized.requested_image_names,
+            metadata.requested_image_names
+        );
+    }
+
+    /// A cache entry written before #620 carries no `requested_image_names`; it must
+    /// still deserialize, defaulting to "every recorded tag is build-owned".
+    #[test]
+    fn test_build_metadata_without_requested_image_names_deserializes() {
+        let json = r#"{
+            "config_hash": "hash123",
+            "result": {
+                "image_id": "sha256:abc",
+                "tags": ["deacon-build:abc123456789", "old:v1"],
+                "build_duration": 1.0,
+                "metadata": {},
+                "config_hash": "hash123"
+            },
+            "inputs": {
+                "dockerfile_hash": "dh",
+                "context_files": [],
+                "feature_set_digest": null,
+                "build_config": {
+                    "dockerfile": "Dockerfile",
+                    "dockerfile_path": "Dockerfile",
+                    "context": ".",
+                    "context_folder": ".",
+                    "target": null,
+                    "build_args": {},
+                    "options": []
+                }
+            },
+            "created_at": 1234567890
+        }"#;
+        let parsed: BuildMetadata = serde_json::from_str(json).unwrap();
+        assert!(parsed.requested_image_names.is_empty());
+    }
+
+    // #620: `--image-name` is an OUTPUT of the build, so a cache hit reports the
+    // names THIS invocation asked for, not the ones that first populated the entry.
+    #[test]
+    fn test_reconciled_tags_replaces_a_changed_image_name() {
+        let cached = vec![
+            "deacon-build:abc123456789".to_string(),
+            "old:v1".to_string(),
+        ];
+        let tags = reconciled_tags(&cached, &["old:v1".to_string()], &["new:v1".to_string()]);
+        // `output_result` drops the leading deterministic tag, so the document reads
+        // exactly `["new:v1"]`.
+        assert_eq!(tags, vec!["deacon-build:abc123456789", "new:v1"]);
+    }
+
+    #[test]
+    fn test_reconciled_tags_preserves_requested_order() {
+        let cached = vec![
+            "deacon-build:abc123456789".to_string(),
+            "old:v1".to_string(),
+        ];
+        let tags = reconciled_tags(
+            &cached,
+            &["old:v1".to_string()],
+            &["first:v1".to_string(), "second:v1".to_string()],
+        );
+        assert_eq!(
+            tags,
+            vec!["deacon-build:abc123456789", "first:v1", "second:v1"]
+        );
+    }
+
+    #[test]
+    fn test_reconciled_tags_drops_a_stale_name_when_none_is_requested() {
+        let cached = vec![
+            "deacon-build:abc123456789".to_string(),
+            "old:v1".to_string(),
+        ];
+        let tags = reconciled_tags(&cached, &["old:v1".to_string()], &[]);
+        assert_eq!(tags, vec!["deacon-build:abc123456789"]);
+    }
+
+    #[test]
+    fn test_reconciled_tags_keeps_a_build_owned_name() {
+        // Compose derives `<project>-<service>` when no `--image-name` is given; it
+        // belongs to the build and survives alongside a newly requested name.
+        let cached = vec!["proj-app".to_string()];
+        let tags = reconciled_tags(&cached, &[], &["new:v1".to_string()]);
+        assert_eq!(tags, vec!["proj-app", "new:v1"]);
+    }
+
+    #[test]
+    fn test_reconciled_tags_does_not_duplicate_a_repeated_name() {
+        let cached = vec![
+            "deacon-build:abc123456789".to_string(),
+            "same:v1".to_string(),
+        ];
+        let tags = reconciled_tags(&cached, &["same:v1".to_string()], &["same:v1".to_string()]);
+        assert_eq!(tags, vec!["deacon-build:abc123456789", "same:v1"]);
+    }
+
+    #[test]
+    fn test_reconciled_tags_falls_back_when_nothing_would_be_reported() {
+        // Compose, first run named, second run unnamed: no build-owned tag exists to
+        // report, so the recorded names stand rather than an `imageName`-less document.
+        let cached = vec!["old:v1".to_string()];
+        let tags = reconciled_tags(&cached, &["old:v1".to_string()], &[]);
+        assert_eq!(tags, vec!["old:v1"]);
+    }
+
+    /// A pre-#620 entry has no record of what was requested, so every recorded tag
+    /// counts as build-owned; a newly requested name is still applied and reported.
+    #[test]
+    fn test_reconciled_tags_legacy_entry_appends() {
+        let cached = vec![
+            "deacon-build:abc123456789".to_string(),
+            "old:v1".to_string(),
+        ];
+        let tags = reconciled_tags(&cached, &[], &["new:v1".to_string()]);
+        assert_eq!(tags, vec!["deacon-build:abc123456789", "old:v1", "new:v1"]);
     }
 
     #[test]
