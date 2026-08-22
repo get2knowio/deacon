@@ -320,22 +320,26 @@ pub(crate) async fn execute_compose_up(
 
                 // Reported document gets the container-aware substitution pass
                 // (#608) — same rule as the single-container path.
-                let reported_config =
-                    if args.include_configuration || args.include_merged_configuration {
-                        super::helpers::container_substituted_config(
+                let reported_config = if args.include_configuration
+                    || args.include_merged_configuration
+                {
+                    crate::commands::shared::container_substitution::container_substituted_config(
                             config,
                             workspace_folder,
                             &deacon_core::container::compute_dev_container_id(
                                 &identity.id_hash_labels(),
                             ),
-                            super::helpers::container_env_for_substitution(runtime, &container_id)
-                                .await
-                                .as_ref(),
+                            crate::commands::shared::container_substitution::container_env_for_substitution(
+                                runtime,
+                                &container_id,
+                            )
+                            .await
+                            .as_ref(),
                             &remote_workspace_folder,
                         )
-                    } else {
-                        config.clone()
-                    };
+                } else {
+                    config.clone()
+                };
 
                 // Serialize configuration if requested
                 let configuration = if args.include_configuration {
@@ -824,13 +828,16 @@ pub(crate) async fn execute_compose_up(
     // Reported document gets the container-aware substitution pass (#608) —
     // same rule as the single-container path.
     let reported_config = if args.include_configuration || args.include_merged_configuration {
-        super::helpers::container_substituted_config(
+        crate::commands::shared::container_substitution::container_substituted_config(
             config,
             workspace_folder,
             &deacon_core::container::compute_dev_container_id(&identity.id_hash_labels()),
-            super::helpers::container_env_for_substitution(runtime, &container_id)
-                .await
-                .as_ref(),
+            crate::commands::shared::container_substitution::container_env_for_substitution(
+                runtime,
+                &container_id,
+            )
+            .await
+            .as_ref(),
             &remote_workspace_folder,
         )
     } else {

@@ -761,7 +761,7 @@ fn test_up_result_builder_methods_for_new_fields() {
 /// `mergedConfiguration` (which is derived from the same document).
 #[test]
 fn container_substitution_resolves_container_env_in_reported_config() {
-    use super::helpers::container_substituted_config;
+    use crate::commands::shared::container_substitution::container_substituted_config;
     use std::collections::HashMap;
 
     let config: DevContainerConfig = serde_json::from_value(json!({
@@ -811,7 +811,7 @@ fn container_substitution_resolves_container_env_in_reported_config() {
 /// "deacon could not read the container".
 #[test]
 fn container_substitution_preserves_templates_without_a_container_env() {
-    use super::helpers::container_substituted_config;
+    use crate::commands::shared::container_substitution::container_substituted_config;
 
     let config: DevContainerConfig = serde_json::from_value(json!({
         "image": "debian:bookworm-slim",
@@ -842,7 +842,7 @@ fn container_substitution_preserves_templates_without_a_container_env() {
 /// as a literal.
 #[test]
 fn container_substitution_resolves_container_workspace_folder() {
-    use super::helpers::container_substituted_config;
+    use crate::commands::shared::container_substitution::container_substituted_config;
     use std::collections::HashMap;
 
     let config: DevContainerConfig = serde_json::from_value(json!({

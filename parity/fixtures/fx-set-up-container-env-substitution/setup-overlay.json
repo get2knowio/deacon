@@ -1,0 +1,8 @@
+{
+	"name": "ConformanceSetUpContainerEnvOverlay",
+	"remoteEnv": {
+		"PROBE_CONTAINER_ENV": "${containerEnv:SETUP_PROBE_VAR}",
+		"PROBE_CONTAINER_ENV_MISSING": "${containerEnv:NO_SUCH_VAR_XYZ}"
+	},
+	"postCreateCommand": "printf 'cenv=[%s] missing=[%s]\\n' '${containerEnv:SETUP_PROBE_VAR}' '${containerEnv:NO_SUCH_VAR_XYZ}' > /work/setup-container-env.txt"
+}
