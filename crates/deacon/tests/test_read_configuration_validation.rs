@@ -7,19 +7,77 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
+/// Reference parity (#615): with no selector at all, `read-configuration` resolves
+/// its configuration from the CURRENT DIRECTORY instead of demanding a flag. This
+/// asserts it reads THAT directory's document and not merely that it exits 0: the
+/// `name` and the reported `configFilePath` both have to come from the temp
+/// workspace, which a run that silently walked elsewhere could not produce.
+///
+/// MEASURED at oracle 0.87.0 in the same shape: the reference prints a byte-identical
+/// result document. Before the fix deacon exited 1 with `Missing required argument: …`
+/// without ever looking at the cwd.
 #[test]
-fn test_selector_requirement_no_selectors_no_config() {
-    // When no selector flags AND no --config are provided, fail with the
-    // updated exact message that lists --config as an accepted selector
-    // (spec parity #66).
+fn test_no_selectors_defaults_workspace_to_current_directory() {
+    let temp_dir = TempDir::new().unwrap();
+    // Canonicalize: deacon canonicalizes the defaulted cwd, and on macOS
+    // `/var/folders/...` resolves to `/private/var/folders/...`.
+    let workspace = temp_dir.path().canonicalize().unwrap();
+    let config_dir = workspace.join(".devcontainer");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("devcontainer.json"),
+        r#"{"name": "cwd-default-marker", "image": "ubuntu:22.04"}"#,
+    )
+    .unwrap();
+
     let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.arg("read-configuration");
+    cmd.current_dir(&workspace).arg("read-configuration");
+
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let parsed: serde_json::Value = serde_json::from_slice(&output).expect("stdout must be JSON");
+
+    assert_eq!(
+        parsed["configuration"]["name"], "cwd-default-marker",
+        "the cwd's own configuration must be the one read: {parsed}"
+    );
+    let config_file_path = parsed["configuration"]["configFilePath"]["path"]
+        .as_str()
+        .expect("configFilePath.path must be reported")
+        .replace('\\', "/");
+    let expected = config_dir
+        .join("devcontainer.json")
+        .display()
+        .to_string()
+        .replace('\\', "/");
+    assert_eq!(
+        config_file_path, expected,
+        "the defaulted workspace must resolve to the cwd's document"
+    );
+}
+
+/// The negative arm of the same default: an existing cwd with NO devcontainer
+/// document exits 1 for the right reason — a missing CONFIG, naming the absolute path
+/// it looked for, not a missing FLAG. The absence assertion is the load-bearing half;
+/// exit 1 alone was already true before the fix, for the wrong reason.
+#[test]
+fn test_no_selectors_no_config_in_cwd_names_the_missing_document() {
+    let temp_dir = TempDir::new().unwrap();
+    let workspace = temp_dir.path().canonicalize().unwrap();
+    let expected = workspace
+        .join(".devcontainer")
+        .join("devcontainer.json")
+        .display()
+        .to_string();
+
+    let mut cmd = Command::cargo_bin("deacon").unwrap();
+    cmd.current_dir(&workspace).arg("read-configuration");
 
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "Missing required argument: One of --container-id, --id-label, --workspace-folder, or --config is required.",
-        ));
+        .stderr(predicate::str::contains("Configuration file not found:"))
+        .stderr(predicate::str::contains(expected))
+        // It must no longer refuse on a missing `--workspace-folder` (#615).
+        .stderr(predicate::str::contains("Missing required argument").not());
 }
 
 #[test]

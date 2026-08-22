@@ -4603,6 +4603,119 @@
         "tempdir": true
       },
       "notes": "An explicit `--config` naming a devcontainer.json nested TWO levels down (`.devcontainer/subfolder/devcontainer.json`) while a different, valid config sits at the workspace root. Two things have to be right at once: the named file wins over the discoverable one, and `build.dockerfile` resolves against the NAMED config's directory rather than the workspace root — the subfolder has its own Dockerfile, so resolving against the root would silently build the wrong image. MEASURED at oracle 0.87.0: byte-identical.\n\nMined from the reference CLI's own e2e fixtures (#480, batch 1). Vendored from devcontainers/cli v0.87.0; see the fixture's UPSTREAM.md for the source path and every adaptation."
+    },
+    {
+      "id": "case-readconfig-upstream-cwd-default-workspace",
+      "behaviors": [
+        "bhv-readconfig-default-workspace-folder"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [],
+          "fixtures": [
+            "fx-readconfig-discovery-dotfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "name": "discovery-root-dotfile",
+                "image": "alpine:3.19"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "With no `--workspace-folder`, no `--config` and no container selector, `read-configuration` resolves its configuration from the CURRENT DIRECTORY — the shape a developer types, `cd` into the project and run `deacon read-configuration`.\n\nFIXED by [#615](https://github.com/get2knowio/deacon/issues/615), the LAST subcommand out of step. MEASURED at oracle 0.87.0 in a directory holding this fixture, at the parent commit: the reference exited 0 and printed a result document, while deacon exited 1 with `Missing required argument: One of --container-id, --id-label, --workspace-folder, or --config is required.` and never looked at the cwd. `execute_read_configuration` now materializes the cwd default ONCE, before anything reads the workspace folder, exactly as `execute_up` has since [#610](https://github.com/get2knowio/deacon/issues/610) — both call the same `shared::workspace::resolve_workspace_folder`.\n\nIt costs nothing to express: the runner already anchors each operation's cwd to the case's workspace — for a config-only case that is the committed fixture directory itself, read only, since only Docker-backed and `fs-heavy` cases are materialized into an isolated temp copy (`runner.rs`) — so OMITTING the flag is the whole test. That is also the case's one fragility, recorded here because it is invisible in an empty `argv`: if the runner ever stops anchoring cwd to the workspace, this case starts failing for a reason that has nothing to do with `read-configuration`. Its `up`, `exec` and `build` siblings carry the same note.\n\nIt asserts the `name` and `image` the FIXTURE authors, not merely `exit 0`. That is what makes it a claim about WHICH document was read: a run that resolved some other workspace, or that fell through to an empty container-only base config, exits 0 too but cannot produce these two values. `chan-exit-code` pins the other half.\n\nHERMETIC (no `resourceGroup`), like every other `read-configuration` case: config resolution touches no daemon and no registry, so this runs in every profile including `dev-fast` and on all three operating systems — a regression that reinstated the flag requirement blocks the pull request that introduced it. Its `live-differential` twin `case-readconfig-upstream-cwd-default-workspace-differential` carries the same claim as a comparison in the nightly lane, which gates nothing.\n\nReuses `fx-readconfig-discovery-dotfile` deliberately rather than vendoring a new fixture: a root `.devcontainer.json` holding a name and an image is the smallest document that can prove which workspace was resolved, and the fixture is already compared between the two CLIs by `case-readconfig-discovery-root-dotfile`."
+    },
+    {
+      "id": "case-readconfig-upstream-cwd-default-workspace-differential",
+      "behaviors": [
+        "bhv-readconfig-default-workspace-folder"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [],
+          "fixtures": [
+            "fx-readconfig-discovery-dotfile"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The comparison half of the cwd default — the `live-differential` twin of `case-readconfig-upstream-cwd-default-workspace`, on the shape `case-up-upstream-cwd-default-workspace` and its `spec-expectation` sibling established for [#610](https://github.com/get2knowio/deacon/issues/610). The hermetic twin pins DEACON's answer and gates every pull request; this one asserts that the two CLIs still agree, in the nightly lane, which gates nothing.\n\nWorth landing where the `up` and `exec` negatives were not: MEASURED at oracle 0.87.0 at the fix, both CLIs print a BYTE-IDENTICAL result document for this fixture — the same `configuration`, the same `configFilePath`, the same `workspace` block — so the comparison is over a surface where a real difference would show, not over an exit code the two happen to share for different reasons. Before the fix it would have diverged on both channels, which is the reason it is landing WITH the fix rather than ahead of it.\n\nIt costs nothing to express: the runner already anchors each operation's cwd to the case's workspace — for a config-only case that is the committed fixture directory itself, read only, since only Docker-backed and `fs-heavy` cases are materialized into an isolated temp copy (`runner.rs`) — so OMITTING the flag is the whole test. That is also the case's one fragility, recorded here because it is invisible in an empty `argv`: if the runner ever stops anchoring cwd to the workspace, this case starts failing for a reason that has nothing to do with `read-configuration`. Its `up`, `exec` and `build` siblings carry the same note.\n\nMEASURED IN THE HARNESS, not only by hand: the recorded `deacon.stdout` and `oracle.stdout` for this case are byte-identical, git-root workspace mount included — the fixture lives inside this repository, so both CLIs report the same `workspaceMount` source, and a case that ran outside a repository would exercise the same agreement on a different pair of paths.\n\n[#615](https://github.com/get2knowio/deacon/issues/615)."
+    },
+    {
+      "id": "case-readconfig-upstream-no-config-in-cwd-rejected",
+      "behaviors": [
+        "bhv-readconfig-no-config-in-cwd-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "Configuration file not found"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The NEGATIVE arm of the cwd default: an EXISTING current directory with no devcontainer document, no `--workspace-folder`, no `--config` and no container selector exits 1 naming the absolute path it looked for. Upstream covers the same pair for `up` and `exec`; this is `read-configuration`'s.\n\nNOT VACUOUS, which is the whole reason it lands with the fix for [#615](https://github.com/get2knowio/deacon/issues/615) rather than ahead of it. Before the fix deacon also exited 1 here — but on a missing FLAG, printing `Missing required argument: …`, so an exit-code assertion would have been green for the wrong reason, the trap `docs/PARITY.md` names. The `chan-stderr` assertion is what distinguishes the two reasons, and it could not have passed at the parent commit.\n\nIt pins DEACON's answer rather than comparing, and the measurement is why: at oracle 0.87.0 in an empty directory the reference exits 1 and prints NOTHING on either stream beyond its version banner. deacon names the document it could not find (`Configuration file not found: <abs>/.devcontainer/devcontainer.json`), which is the more useful of the two answers and not a divergence to fix; a differential could only compare the exit code, which is `case-errors-decl-missing-config`'s job with the flag passed explicitly.\n\nDISTINCT from `bhv-readconfig-missing-config`, which passes `--workspace-folder` and fails on the same missing document: this one has to RESOLVE the workspace first, from the cwd, and the path a developer meets is `cd`-ing into the wrong directory.\n\nIt costs nothing to express: the runner already anchors each operation's cwd to the case's workspace — for a config-only case that is the committed fixture directory itself, read only, since only Docker-backed and `fs-heavy` cases are materialized into an isolated temp copy (`runner.rs`) — so OMITTING the flag is the whole test. That is also the case's one fragility, recorded here because it is invisible in an empty `argv`: if the runner ever stops anchoring cwd to the workspace, this case starts failing for a reason that has nothing to do with `read-configuration`. Its `up`, `exec` and `build` siblings carry the same note.\n\nHERMETIC, and `fx-errors-missing-config` (a directory holding only a `.gitkeep`) is a cwd with nothing in it by construction."
     }
   ]
 }

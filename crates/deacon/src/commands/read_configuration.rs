@@ -9,6 +9,7 @@
 use crate::commands::shared::build_resolution::{
     resolve_devcontainer_build_config, resolve_dockerfile_base_image,
 };
+use crate::commands::shared::workspace::resolve_workspace_folder;
 use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
 use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
@@ -1583,20 +1584,40 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         args.secrets_files.len()
     );
 
-    // Selector validation:
-    // At least one of --container-id, --id-label, --workspace-folder, or
-    // --config is required. Spec parity (#66): the upstream reference CLI
-    // accepts `--config <path>` on its own — `read-configuration` can parse
-    // a config file without any workspace context. We mirror that here.
+    // Selector resolution.
+    //
+    // Spec parity (#66): the upstream reference CLI accepts `--config <path>` on its
+    // own — `read-configuration` can parse a config file without any workspace
+    // context. We mirror that here.
+    //
+    // Reference parity (#615): when NO selector at all is given, the workspace is the
+    // process's CURRENT DIRECTORY, exactly as `up` (#610), `exec`, `build`, `down`
+    // and `run-user-commands` already resolve it. deacon used to reject the
+    // invocation here with `Missing required argument: …` without ever looking at the
+    // cwd, which made `read-configuration` the last subcommand out of step with both
+    // the reference and the rest of deacon.
+    //
+    // Materializing the default HERE rather than leaving it to the `unwrap_or(".")`
+    // below is the load-bearing part: `workspace_folder` is a *borrow* of `args`, and
+    // the path it names also anchors `resolve_workspace_configuration`, the
+    // `ContainerIdentity` used for `${devcontainerId}`, local feature-path resolution
+    // and every `SubstitutionContext` this command builds. A canonical absolute
+    // default makes those report the same values a `--workspace-folder $(pwd)` run
+    // reports, instead of a bare `.` leaking into `configFilePath` and into the
+    // "Configuration file not found: ./.devcontainer/devcontainer.json" diagnostic.
+    //
+    // Container selectors are deliberately NOT defaulted over: `--container-id` /
+    // `--id-label` with no workspace is container-only mode, where an empty base
+    // config is the documented behavior (spec line 104) and inventing a workspace
+    // would silently start reading the cwd's configuration instead.
     let has_container_id = args.container_id.is_some();
     let has_id_label = !args.id_label.is_empty();
-    let has_workspace_folder = args.workspace_folder.is_some();
     let has_config = args.config_path.is_some();
-    if !has_container_id && !has_id_label && !has_workspace_folder && !has_config {
-        anyhow::bail!(
-            "Missing required argument: One of --container-id, --id-label, --workspace-folder, or --config is required."
-        );
+    let mut args = args;
+    if args.workspace_folder.is_none() && !has_container_id && !has_id_label && !has_config {
+        args.workspace_folder = Some(resolve_workspace_folder(None)?);
     }
+    let args = args;
 
     // Validate id_label format (must match <name>=<value> pattern)
     if !args.id_label.is_empty() {

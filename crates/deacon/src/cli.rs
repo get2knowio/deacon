@@ -931,9 +931,10 @@ pub struct Cli {
 
     /// Workspace folder path.
     ///
-    /// Defaults to the current directory for `up`, `build`, `exec`, `down` and
-    /// `run-user-commands` (#610). `read-configuration` still requires one of
-    /// `--workspace-folder` / `--config` / `--container-id` / `--id-label`.
+    /// Defaults to the current directory when omitted (#610, #615). On
+    /// `read-configuration` the default applies only when no other selector is
+    /// given: `--config` alone anchors the workspace at the config file's directory,
+    /// and `--container-id` / `--id-label` alone read the container's own metadata.
     ///
     /// Also settable via the `DEACON_WORKSPACE_FOLDER` environment variable.
     #[arg(
