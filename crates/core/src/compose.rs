@@ -612,6 +612,15 @@ impl ComposeCommand {
     }
 }
 
+/// The image name Compose gives a built service when the service authors no
+/// `image:` of its own.
+///
+/// Compose v2 joins the project and service names with a hyphen (v1 used an
+/// underscore); deacon requires v2, so the hyphen form is the only one produced.
+pub fn default_service_image_name(project_name: &str, service: &str) -> String {
+    format!("{}-{}", project_name, service)
+}
+
 /// Shape of a compose service relevant to the features-install pipeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServiceShape {
@@ -1295,6 +1304,31 @@ impl ComposeManager {
             project.name, service
         );
         Ok(output)
+    }
+
+    /// Resolve the image reference `docker compose build` tags a service's build
+    /// result with.
+    ///
+    /// Compose names the built image after the service's own `image:` when one is
+    /// authored, and otherwise after its `<project>-<service>` default. Callers
+    /// that need to hang additional tags off the produced image (`deacon build
+    /// --image-name`, #619) must resolve that reference rather than assume the
+    /// default, which is why the `image:` case is read back out of
+    /// `docker compose config` instead of guessed.
+    #[instrument(skip(self))]
+    pub async fn resolve_service_image_name(
+        &self,
+        project: &ComposeProject,
+        service: &str,
+    ) -> Result<String> {
+        let shape = self
+            .get_command(project)
+            .extract_service_shape(service)
+            .await?;
+        Ok(match shape {
+            ServiceShape::Image(image) => image,
+            _ => default_service_image_name(&project.name, service),
+        })
     }
 
     /// Validate that a service exists in a Docker Compose project configuration.
@@ -4250,6 +4284,18 @@ mod tests {
         assert_eq!(
             parse_service_shape_from_config(cfg, "dev").unwrap(),
             ServiceShape::Image("node:20-alpine".to_string())
+        );
+    }
+
+    /// #619: the fallback `deacon build --image-name` tags off when a compose
+    /// service authors no `image:` of its own must be Compose v2's default
+    /// `<project>-<service>` (hyphen, not v1's underscore) — a wrong separator
+    /// names an image the daemon does not have and `docker tag` fails.
+    #[test]
+    fn default_service_image_name_uses_compose_v2_separator() {
+        assert_eq!(
+            default_service_image_name("deacon_ws_abc123_def456", "app"),
+            "deacon_ws_abc123_def456-app"
         );
     }
 
