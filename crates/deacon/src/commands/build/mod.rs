@@ -1717,12 +1717,25 @@ async fn execute_compose_build(
 
     info!("Docker Compose service built successfully: {}", service);
 
-    // Generate image names - compose services typically use project-service naming
-    let mut image_names = args.image_names.clone();
-    if image_names.is_empty() {
-        // Use default naming: project_service
-        image_names.push(format!("{}-{}", project.name, service));
+    // Resolve the reference Compose actually tagged the build result with — the
+    // service's own `image:` when authored, else Compose's `<project>-<service>`
+    // default — and hang every `--image-name` off it (#619).
+    //
+    // Nothing else creates those tags on this path: the Compose-WITH-Features
+    // sibling gets them from `retag_image` after the Feature build, and a
+    // Features-free config never reaches that build. Before this, `--image-name`
+    // was reported but never created, and the leading entry of `tags` was one of
+    // the user's names, which `output_result` then stripped as if it were the
+    // deterministic tag. `tags[0]` is now the produced image, matching the
+    // deterministic-tag-first shape every other build path uses.
+    let built_image = compose_manager
+        .resolve_service_image_name(&project, service)
+        .await?;
+    for image_name in &args.image_names {
+        retag_image(&built_image, image_name).await?;
     }
+    let mut all_tags = vec![built_image.clone()];
+    all_tags.extend(args.image_names.clone());
 
     // Create metadata with labels
     let mut metadata = HashMap::new();
@@ -1731,8 +1744,8 @@ async fn execute_compose_build(
     }
 
     Ok(BuildResult {
-        image_id: format!("{}-{}", project.name, service),
-        tags: image_names,
+        image_id: built_image,
+        tags: all_tags,
         // Compose owns its own image naming (workspace-namespaced, so never
         // shared with a concurrent build); no run-private tag is minted (#470).
         private_ref: None,

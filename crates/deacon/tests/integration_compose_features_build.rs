@@ -1,5 +1,6 @@
-//! End-to-end Docker integration tests for installing devcontainer features into
-//! compose services.
+//! End-to-end Docker integration tests for the compose build paths: installing
+//! devcontainer features into compose services, and (the Features-free sibling)
+//! `deacon build --image-name` tagging on a compose config.
 //!
 //! Bead 14a (commit `f4997b9`) shipped `image:`-shape support. Bead 14b adds
 //! `build:`-shape support via the Dockerfile stage-name parser. These tests
@@ -385,11 +386,17 @@ fn build_compose_with_features_tags_final_image() {
         "#!/usr/bin/env bash\nset -e\necho installed > /compose-feature-marker.txt\n",
     )
     .expect("write install.sh");
+    // `dockerComposeFile` resolves against the CONFIG dir (`.devcontainer/`), not
+    // the workspace folder, so a compose file at the workspace root is reached
+    // with `../`. Spelling it `docker-compose.yml` here pointed at a path that
+    // does not exist, and `deacon build` failed with a message containing
+    // "Docker" — which the tolerant early-return below then read as "no daemon",
+    // so this test passed without ever building anything.
     fs::write(
         dc_dir.join("devcontainer.json"),
         r#"{
   "name": "build-compose-features",
-  "dockerComposeFile": "docker-compose.yml",
+  "dockerComposeFile": "../docker-compose.yml",
   "service": "app",
   "remoteUser": "root",
   "features": { "./features/marker": {} }
@@ -413,16 +420,15 @@ fn build_compose_with_features_tags_final_image() {
         .output()
         .expect("spawn deacon build");
 
-    if !out.status.success() {
-        // Docker unavailable / not permitted is the only acceptable failure.
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(
-            stderr.contains("Docker") || stderr.contains("permission denied"),
-            "deacon build (compose+features) failed unexpectedly: {}",
-            stderr
-        );
-        return;
-    }
+    // Docker availability is already gated at the top of the test, so a failure
+    // here is a real one. Matching a "Docker" substring instead swallowed a
+    // config-resolution error for as long as this test existed.
+    assert!(
+        out.status.success(),
+        "deacon build (compose+features) failed:\nSTDOUT:\n{}\nSTDERR:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let run = StdCommand::new("docker")
         .args([
@@ -443,6 +449,162 @@ fn build_compose_with_features_tags_final_image() {
         "--image-name should resolve to the feature-extended compose image; \
          stdout={:?} stderr={:?}",
         String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// #619: `deacon build` on a compose config with **no** Features must create a
+/// tag for EVERY `--image-name` and report all of them, in order.
+///
+/// The Features-free compose path never reaches `resolve_compose_feature_image`,
+/// so nothing used to retag the image `docker compose build` produced: the result
+/// document named tags that did not exist, and — because the first entry of
+/// `tags` was a user name where every other path puts the deterministic tag —
+/// `output_result` stripped one of them on the way out.
+///
+/// The assertion is artifact-level on purpose (CLAUDE.md's canary rule): a JSON
+/// `outcome` is exactly what stayed green while no tag was created. Both names
+/// must resolve, resolve to the SAME image, and that image must carry the base
+/// layer's marker.
+#[test]
+fn build_compose_without_features_tags_every_image_name() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping build_compose_without_features_tags_every_image_name: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().expect("tempdir");
+    let workspace = temp_dir.path();
+
+    // build-shape compose service, no features anywhere in the config. alpine is
+    // fine here precisely because no feature `install.sh` needs bash.
+    fs::write(
+        workspace.join("Dockerfile"),
+        "FROM alpine:3.19\nRUN echo compose-base > /base-marker.txt\nCMD [\"sleep\", \"infinity\"]\n",
+    )
+    .expect("write Dockerfile");
+    fs::write(
+        workspace.join("docker-compose.yml"),
+        "services:\n  app:\n    build:\n      context: .\n      dockerfile: Dockerfile\n    command: [\"sleep\", \"infinity\"]\n",
+    )
+    .expect("write compose");
+
+    let dc_dir = workspace.join(".devcontainer");
+    fs::create_dir_all(&dc_dir).expect("create .devcontainer");
+    // `dockerComposeFile` is config-dir-relative, so the workspace-root compose
+    // file is reached with `../` (see the sibling test above).
+    fs::write(
+        dc_dir.join("devcontainer.json"),
+        r#"{
+  "name": "build-compose-no-features",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app"
+}"#,
+    )
+    .expect("write devcontainer.json");
+
+    // Unique tags so the test never collides with a sibling on the shared daemon.
+    let first = "deacon-test/compose-multitag-first:v1";
+    let second = "deacon-test/compose-multitag-second:v1";
+    let _ = StdCommand::new("docker")
+        .args(["rmi", "-f", first, second])
+        .output();
+
+    let out = support::deacon_command()
+        .current_dir(workspace)
+        .args([
+            "build",
+            "--workspace-folder",
+            workspace.to_str().unwrap(),
+            "--image-name",
+            first,
+            "--image-name",
+            second,
+            "--output-format",
+            "json",
+        ])
+        .env("DEACON_LOG", "warn")
+        .output()
+        .expect("spawn deacon build");
+
+    // Docker availability is gated above, so any failure here is a real one.
+    assert!(
+        out.status.success(),
+        "deacon build (compose, no features) failed:\nSTDOUT:\n{}\nSTDERR:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Collect everything to assert BEFORE tearing down, so cleanup always runs.
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let result: serde_json::Value =
+        serde_json::from_str(&stdout).expect("build should emit a single JSON document on stdout");
+
+    let ids: Vec<String> = [first, second]
+        .iter()
+        .map(|tag| {
+            let inspect = StdCommand::new("docker")
+                .args(["image", "inspect", "--format", "{{.Id}}", tag])
+                .output()
+                .expect("docker image inspect");
+            if inspect.status.success() {
+                String::from_utf8_lossy(&inspect.stdout).trim().to_string()
+            } else {
+                String::new()
+            }
+        })
+        .collect();
+
+    // The marker proves the tag points at the service's own build, not at some
+    // unrelated image that happened to answer to the name.
+    let run = StdCommand::new("docker")
+        .args(["run", "--rm", first, "cat", "/base-marker.txt"])
+        .output()
+        .expect("docker run");
+    let marker = String::from_utf8_lossy(&run.stdout).to_string();
+
+    // `RepoTags` names the compose-produced image too, so the project image is
+    // reclaimed alongside the two tags rather than left on the daemon.
+    let repo_tags = StdCommand::new("docker")
+        .args(["image", "inspect", "--format", "{{json .RepoTags}}", first])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| serde_json::from_slice::<Vec<String>>(&o.stdout).ok())
+        .unwrap_or_else(|| vec![first.to_string(), second.to_string()]);
+    let mut rmi = vec!["rmi".to_string(), "-f".to_string()];
+    rmi.extend(repo_tags);
+    let _ = StdCommand::new("docker").args(&rmi).output();
+
+    assert_eq!(
+        result["imageName"],
+        serde_json::json!([first, second]),
+        "every --image-name must be reported, in order; got {}",
+        stdout
+    );
+    assert!(
+        !ids[0].is_empty(),
+        "'{}' must exist on the daemon after the build; result was {}",
+        first,
+        stdout
+    );
+    assert!(
+        !ids[1].is_empty(),
+        "'{}' must exist on the daemon after the build; result was {}",
+        second,
+        stdout
+    );
+    assert_eq!(
+        ids[0], ids[1],
+        "both --image-name tags must point at the same built service image"
+    );
+    assert!(
+        marker.contains("compose-base"),
+        "the tagged image must be the compose service's own build; \
+         `cat /base-marker.txt` gave stdout={:?} stderr={:?}",
+        marker,
         String::from_utf8_lossy(&run.stderr)
     );
 }
