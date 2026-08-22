@@ -1,5 +1,5 @@
 {
-	"image": "debian:bookworm-slim",
+	"image": "mcr.microsoft.com/devcontainers/typescript-node:1-20-bookworm",
 	"features": {
 		"ghcr.io/devcontainers/features/git": {}
 	},
