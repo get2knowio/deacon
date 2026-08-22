@@ -2,8 +2,56 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::docker::Mount;
+
+/// Resolve a subcommand's effective HOST workspace folder, defaulting to the
+/// current directory when `--workspace-folder` is absent.
+///
+/// Reference parity ([#610], [#615]): with no `--workspace-folder`, the workspace is
+/// the process's CURRENT DIRECTORY — the shape a developer types, `cd` into the
+/// project and run `deacon <subcommand>`. That is what the reference CLI does, and
+/// what `exec`, `build`, `down` and `run-user-commands` already did before either
+/// issue (the first three inherit it from `shared::config_loader::load_config`,
+/// which falls back to `current_dir()`). `up` (#610) and then `read-configuration`
+/// (#615) were the two that demanded the flag and rejected the invocation with
+/// `Missing required argument: …` before ever looking at the cwd.
+///
+/// Callers materialize the default at their OWN entry point rather than leaving it
+/// to `load_config`, and that placement is the load-bearing part. A subcommand that
+/// reads `args.workspace_folder` anywhere other than the loader — `up` does on five
+/// further paths (argument validation, container identity hashing, the
+/// workspace-trust gate, the `--mount-workspace-git-root` mount-source walk and
+/// compose project naming); `read-configuration` does for
+/// `resolve_workspace_configuration`, `ContainerIdentity`, feature-path anchoring and
+/// every `SubstitutionContext` it builds — would otherwise see `None` on exactly the
+/// paths that never consult the loader. Materializing once, up front, is what makes a
+/// defaulted cwd indistinguishable from an explicit `--workspace-folder $(pwd)` on
+/// every one of them, canonicalization included.
+///
+/// Passing `Some(path)` canonicalizes it exactly as `up` always has; passing `None`
+/// canonicalizes the current directory. `read-configuration` calls it only with
+/// `None`: its explicit `--workspace-folder` stays verbatim, because canonicalizing
+/// it would change what `configFilePath` and `${localWorkspaceFolder}` report for an
+/// explicitly-passed symlinked path — a separate, user-visible contract that #615
+/// does not touch.
+///
+/// [#610]: https://github.com/get2knowio/deacon/issues/610
+/// [#615]: https://github.com/get2knowio/deacon/issues/615
+pub(crate) fn resolve_workspace_folder(explicit: Option<PathBuf>) -> Result<PathBuf> {
+    let ws = match explicit {
+        Some(ws) => ws,
+        None => std::env::current_dir()
+            .context("Failed to resolve the current directory as the default workspace folder")?,
+    };
+    ws.canonicalize().with_context(|| {
+        format!(
+            "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
+            ws.display()
+        )
+    })
+}
 
 /// Recover the container workspace folder from a RUNNING container's actual
 /// workspace bind-mount, instead of re-deriving it host-side from the
