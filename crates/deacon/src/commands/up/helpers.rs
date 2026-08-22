@@ -5,11 +5,15 @@
 //! - `discover_id_labels_from_config` - Discover id-labels from configuration
 //! - `apply_user_mapping` - Apply user mapping configuration
 //! - `handle_lockfile_post_build` - Write/compare lockfile after a feature build
+//! - `container_substituted_config` - Reported-document `containerSubstitute` pass (#608)
 
 use anyhow::Result;
 use deacon_core::config::DevContainerConfig;
+use deacon_core::docker::Docker;
 use deacon_core::errors::DeaconError;
 use deacon_core::lockfile::Lockfile;
+use deacon_core::variable::SubstitutionContext;
+use std::collections::HashMap;
 use std::path::Path;
 use tracing::{debug, instrument, warn};
 
@@ -35,6 +39,90 @@ pub(crate) fn default_remote_workspace_folder(
         config_workspace_folder,
         mount_workspace_git_root,
     )
+}
+
+/// Re-run variable substitution against the container `up` just created, so the
+/// document `up` REPORTS resolves the container-aware tokens.
+///
+/// This is the reference CLI's third substitution pass (`containerSubstitute`,
+/// `variableSubstitution.ts`). deacon already ran it for everything that USES the
+/// configuration at runtime — `resolve_env_and_user` resolves `${containerEnv:*}`
+/// in `remoteEnv` before injecting it, which is why `deacon exec` on the same
+/// container has the right values — but the `--include-configuration` /
+/// `--include-merged-configuration` blocks were serialized from the pass-1
+/// configuration, which by construction predates the container and therefore
+/// cannot have resolved a single `${containerEnv:*}`. Issue #608.
+///
+/// `container_env` is the RAW container environment (`inspect`'s `Config.Env`),
+/// the canonical source for `${containerEnv:VAR}` — not the userEnvProbe result
+/// and not the merged effective env.
+///
+/// Fail-safe: when the container environment could not be read, the caller passes
+/// `None` and this returns the configuration untouched, so the template survives
+/// instead of collapsing to an empty string (`resolve_variable` returns
+/// `Some("")` for a missing key once `container_env` is `Some`).
+pub(crate) fn container_substituted_config(
+    config: &DevContainerConfig,
+    workspace_folder: &Path,
+    devcontainer_id: &str,
+    container_env: Option<&HashMap<String, String>>,
+    container_workspace_folder: &str,
+) -> DevContainerConfig {
+    let Some(container_env) = container_env else {
+        debug!(
+            "No container environment available; reporting configuration as substituted pre-container"
+        );
+        return config.clone();
+    };
+
+    let mut context = match SubstitutionContext::new(workspace_folder) {
+        Ok(context) => context,
+        Err(error) => {
+            warn!(
+                "Could not build a container substitution context for the reported configuration: {}",
+                error
+            );
+            return config.clone();
+        }
+    };
+    context.devcontainer_id = devcontainer_id.to_string();
+    context.container_env = Some(container_env.clone());
+    context.container_workspace_folder = Some(container_workspace_folder.to_string());
+
+    let (substituted, report) = config.apply_variable_substitution(&context);
+    debug!(
+        "Container substitution pass over the reported configuration made {} replacements",
+        report.replacements.len()
+    );
+    substituted
+}
+
+/// Read the raw container environment for [`container_substituted_config`].
+///
+/// Best-effort by design: an inspect failure yields `None`, which leaves the
+/// reported configuration exactly as it was rather than resolving every
+/// `${containerEnv:*}` to an empty string.
+pub(crate) async fn container_env_for_substitution<D: Docker>(
+    runtime: &D,
+    container_id: &str,
+) -> Option<HashMap<String, String>> {
+    match runtime.inspect_container(container_id).await {
+        Ok(Some(info)) => Some(info.env),
+        Ok(None) => {
+            warn!(
+                "Container '{}' not found while resolving the reported configuration",
+                container_id
+            );
+            None
+        }
+        Err(error) => {
+            warn!(
+                "Container inspect failed while resolving the reported configuration: {}",
+                error
+            );
+            None
+        }
+    }
 }
 
 /// Check if any features are disallowed and return an error if found.

@@ -3892,7 +3892,8 @@
     {
       "id": "case-up-upstream-include-configuration",
       "behaviors": [
-        "bhv-up-include-configuration-emits-configuration"
+        "bhv-up-include-configuration-emits-configuration",
+        "bhv-up-include-configuration-resolves-container-env"
       ],
       "context": [],
       "oracleType": "spec-expectation",
@@ -3930,14 +3931,16 @@
                 "image": "debian:bookworm-slim",
                 "remoteEnv": {
                   "TEST": "ENV",
-                  "TEST_ESCAPING": "{\n  \"fo$o\": \"ba'r\"\n}"
+                  "TEST_ESCAPING": "{\n  \"fo$o\": \"ba'r\"\n}",
+                  "TEST_RE": "TEST_VALUE3"
                 }
               },
               "mergedConfiguration": {
                 "image": "debian:bookworm-slim",
                 "remoteEnv": {
                   "TEST": "ENV",
-                  "TEST_ESCAPING": "{\n  \"fo$o\": \"ba'r\"\n}"
+                  "TEST_ESCAPING": "{\n  \"fo$o\": \"ba'r\"\n}",
+                  "TEST_RE": "TEST_VALUE3"
                 }
               }
             }
@@ -3951,7 +3954,7 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "The FIRST case in the suite to pass `--include-configuration` or `--include-merged-configuration` to `up`. Both flags existed on deacon's `up` and on the reference's, 123 other cases in the suite invoked `up` without either, and the only cases exercising them at all drove `read-configuration` or `set-up` — which resolve a document WITHOUT a container and therefore cannot reach the half this surface exists for.\n\nThe fixture is upstream's `configs/image`, already vendored since batch 1 and until now only ever PARSED. That is the batch-6 pattern repeating a third time: a config vendored from an `up` test, read by a `read-configuration` case, and never once run.\n\nMEASURED at oracle 0.87.0. Both CLIs exit 0, both echo the authored `image` and both resolve `${localEnv:PATH}` into `remoteEnv.LOCAL_PATH`. `LOCAL_PATH` is deliberately NOT asserted — its value is the host's `PATH`, so pinning it would be a statement about the machine.\n\nWHAT THIS CASE DELIBERATELY DOES NOT ASSERT, and why that omission is the point: the same fixture's `remoteEnv.TEST_RE` is `${containerEnv:TEST_CE}`, and `TEST_CE` is set on the container by `runArgs: [\"-e\", \"TEST_CE=TEST_VALUE3\"]`. Upstream's own assertion is that BOTH `configuration.remoteEnv.TEST_RE` and `mergedConfiguration.remoteEnv.TEST_RE` read `TEST_VALUE3`. The reference does that; deacon emits the literal `${containerEnv:TEST_CE}` in both, and `${containerEnv:PATH}` in `CONTAINER_PATH` — it serializes the configuration as substituted BEFORE the container existed. That is [#608](https://github.com/get2knowio/deacon/issues/608). The defect is OUTPUT-ONLY: measured on the same container, `deacon exec` injects `TEST_RE=TEST_VALUE3` and `CONTAINER_PATH=/usr/local/sbin:…` correctly, so what is wrong is the document `up` prints, not the environment it builds.\n\nIt has no scenario of its own on purpose, following the [#594](https://github.com/get2knowio/deacon/issues/594) precedent: a `spec-expectation` case asserting the fixed value would be RED in `parity_docker`, a blocking PR lane, and a `live-differential` cannot express it — the two CLIs' `up` result documents disagree structurally by construction (a raw `containerId`, the reference's `configFilePath` `{$mid,fsPath,path,scheme}` object, deacon's `__meta` / `imageMetadata` / `containerMetadata` blocks), so the comparison would report that disagreement forever and say nothing about substitution. The two `TEST_RE` assertions land with the fix, in this case.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should execute successfully with valid config'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+      "notes": "The FIRST case in the suite to pass `--include-configuration` or `--include-merged-configuration` to `up`. Both flags existed on deacon's `up` and on the reference's, 123 other cases in the suite invoked `up` without either, and the only cases exercising them at all drove `read-configuration` or `set-up` — which resolve a document WITHOUT a container and therefore cannot reach the half this surface exists for.\n\nThe fixture is upstream's `configs/image`, already vendored since batch 1 and until now only ever PARSED. That is the batch-6 pattern repeating a third time: a config vendored from an `up` test, read by a `read-configuration` case, and never once run.\n\nMEASURED at oracle 0.87.0. Both CLIs exit 0, both echo the authored `image` and both resolve `${localEnv:PATH}` into `remoteEnv.LOCAL_PATH`. `LOCAL_PATH` is deliberately NOT asserted — its value is the host's `PATH`, so pinning it would be a statement about the machine.\n\nTHE HALF THIS CASE WAS OPENED WITHOUT, LANDED WITH THE FIX FOR [#608](https://github.com/get2knowio/deacon/issues/608): the fixture's `remoteEnv.TEST_RE` is `${containerEnv:TEST_CE}`, and `TEST_CE` is set on the container by `runArgs: [\"-e\", \"TEST_CE=TEST_VALUE3\"]`. Upstream's own assertion is that BOTH `configuration.remoteEnv.TEST_RE` and `mergedConfiguration.remoteEnv.TEST_RE` read `TEST_VALUE3`, and both are asserted here now. At the parent commit deacon emitted the literal `${containerEnv:TEST_CE}` in both blocks (and `${containerEnv:PATH}` in `CONTAINER_PATH`) because it serialized the configuration as substituted BEFORE the container existed. The defect was OUTPUT-ONLY: measured on the same container, `deacon exec` injected `TEST_RE=TEST_VALUE3` correctly, so what was wrong was the document `up` printed, not the environment it built. The fix runs the reference's `containerSubstitute` pass over the reported document — reusing `apply_variable_substitution` with the raw container env `resolve_env_and_user` already probed — and both blocks now match oracle 0.87.0 key-for-key on `remoteEnv`.\n\nThe case carried these two assertions NOWHERE while the defect was open, on the [#594](https://github.com/get2knowio/deacon/issues/594) precedent: a `spec-expectation` case asserting the fixed value would have been RED in `parity_docker`, a blocking PR lane, and a `live-differential` cannot express it — the two CLIs' `up` result documents disagree structurally by construction (a raw `containerId`, the reference's `configFilePath` `{$mid,fsPath,path,scheme}` object, deacon's `__meta` / `imageMetadata` / `containerMetadata` blocks), so the comparison would report that disagreement forever and say nothing about substitution.\n\n`CONTAINER_PATH` (`${containerEnv:PATH}`) is resolved by the same pass and measured identical on both CLIs, but stays unasserted for the same reason `LOCAL_PATH` does: its value is the BASE IMAGE's `PATH`, a statement about `debian:bookworm-slim` rather than about deacon. `TEST_RE` is the assertion that carries the claim, because the configuration itself determines its value.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should execute successfully with valid config'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
     },
     {
       "id": "case-up-upstream-containerenv-merge-image",
