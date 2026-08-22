@@ -1488,7 +1488,11 @@ impl ComposeProject {
         if let Some(ref image) = self.service_image_override {
             // Quote the image tag so reserved characters (':' is the separator
             // for tags) don't confuse the YAML parser.
-            yaml.push_str(&format!("    image: \"{}\"\n", image.replace('"', "\\\"")));
+            // Same rule as every other scalar here: a hand-rolled `"…"` that
+            // escapes only `"` leaves a backslash to be reinterpreted by the YAML
+            // parser (#609). Route it through the one escaper. NOT
+            // `escape_compose_value` — an image reference is not `$`-doubled.
+            yaml.push_str(&format!("    image: {}\n", escape_yaml_value(image)));
         }
 
         if override_cmd {
@@ -1693,41 +1697,50 @@ fn escape_compose_value(value: &str) -> String {
     escape_yaml_value(&value.replace('$', "$$"))
 }
 
-/// Escape a value for YAML output.
+/// Escape a value into a double-quoted YAML scalar.
 ///
-/// YAML requires special handling for values containing:
-/// - Newlines (must be quoted and escaped)
-/// - Colons (especially at start)
-/// - Quotes (must be escaped)
-/// - Leading/trailing whitespace (must be quoted)
-/// - Hash characters (could be interpreted as comments)
+/// Every value is emitted double-quoted, so every value is escaped. Those two
+/// halves must travel together: a double-quoted YAML scalar PROCESSES escape
+/// sequences, so quoting a value without escaping it is the one combination that
+/// is wrong, and it is what #609 reported. `value with \back slash` tripped no
+/// clause of the old `needs_quoting` predicate — no newline, colon, hash, quote
+/// or edge space — so it took the branch that quoted but did not escape, and the
+/// YAML parser read its `\b` back as U+0008 BACKSPACE. A lone trailing backslash
+/// was worse still: it escaped the closing quote and produced a document Compose
+/// could not parse at all.
+///
+/// Escaping unconditionally is a no-op for any value that needs no escaping, so
+/// this narrows strictly to the mis-escaped cases and changes nothing else. In
+/// particular a value carrying REAL newlines is unaffected — it always tripped
+/// the old predicate and was always emitted as `\n`, which the parser turns back
+/// into a real newline (deliberately out of scope here; see #480 batch 7).
+///
+/// Handled:
+/// - `\` and `"` — doubled / escaped, or the parser reinterprets them.
+/// - Newline, carriage return, tab — the named escapes.
+/// - Every other C0 control and DEL — as `\xNN`. YAML forbids these raw inside a
+///   double-quoted scalar, so passing them through produces an invalid document.
+///
+/// Everything else, non-ASCII included, is passed through verbatim: the override
+/// file is written as UTF-8.
 fn escape_yaml_value(value: &str) -> String {
-    // Check if value needs quoting
-    let needs_quoting = value.contains('\n')
-        || value.contains(':')
-        || value.contains('#')
-        || value.contains('"')
-        || value.contains('\'')
-        || value.starts_with(' ')
-        || value.ends_with(' ')
-        || value.starts_with('!')
-        || value.starts_with('&')
-        || value.starts_with('*')
-        || value.is_empty();
-
-    if needs_quoting {
-        // Use double quotes and escape special characters
-        let escaped = value
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t");
-        format!("\"{}\"", escaped)
-    } else {
-        // Simple values can be unquoted or double-quoted for consistency
-        format!("\"{}\"", value)
+    let mut escaped = String::with_capacity(value.len() + 2);
+    escaped.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
+                escaped.push_str(&format!("\\x{:02x}", c as u32));
+            }
+            c => escaped.push(c),
+        }
     }
+    escaped.push('"');
+    escaped
 }
 
 /// Parse .env file and extract COMPOSE_PROJECT_NAME if present.
@@ -3638,29 +3651,200 @@ mod tests {
         assert_eq!(escape_compose_value("$$"), "\"$$$$\"");
     }
 
+    /// Decode a double-quoted YAML scalar the way a YAML parser does.
+    ///
+    /// This is the independent inverse of [`escape_yaml_value`], written against
+    /// the YAML 1.2 escape table (§7.3.1) rather than against the encoder, so a
+    /// round-trip assertion is a real property check and not a restatement of the
+    /// encoder's own rules. It exists so the round trip can be proven without
+    /// adding a YAML dependency to `deacon-core`.
+    ///
+    /// It deliberately understands the escapes the ENCODER never emits — `\b`,
+    /// `\0`, `\e`, `\u….` — because those are exactly what a mis-escaped value is
+    /// silently reinterpreted as. `"value with \back slash"` decodes to a value
+    /// carrying U+0008, which is the corruption #609 reported.
+    fn decode_double_quoted_yaml_scalar(scalar: &str) -> String {
+        let inner = scalar
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .unwrap_or_else(|| panic!("not a double-quoted scalar: {scalar}"));
+
+        let mut out = String::new();
+        let mut chars = inner.chars();
+        while let Some(ch) = chars.next() {
+            if ch != '\\' {
+                out.push(ch);
+                continue;
+            }
+            let esc = chars.next().expect("dangling escape");
+            match esc {
+                '0' => out.push('\0'),
+                'a' => out.push('\u{7}'),
+                'b' => out.push('\u{8}'),
+                't' => out.push('\t'),
+                'n' => out.push('\n'),
+                'v' => out.push('\u{b}'),
+                'f' => out.push('\u{c}'),
+                'r' => out.push('\r'),
+                'e' => out.push('\u{1b}'),
+                '"' => out.push('"'),
+                '/' => out.push('/'),
+                '\\' => out.push('\\'),
+                ' ' => out.push(' '),
+                'x' | 'u' | 'U' => {
+                    let width = match esc {
+                        'x' => 2,
+                        'u' => 4,
+                        _ => 8,
+                    };
+                    let hex: String = (0..width)
+                        .map(|_| chars.next().expect("truncated hex escape"))
+                        .collect();
+                    let code = u32::from_str_radix(&hex, 16).expect("bad hex escape");
+                    out.push(char::from_u32(code).expect("bad scalar value"));
+                }
+                other => panic!("unrecognized YAML escape: \\{other}"),
+            }
+        }
+        out
+    }
+
+    /// Values a quoting layer is liable to mangle. Reused by the exact-output and
+    /// round-trip tests so neither can drift away from the other.
+    const RISKY_YAML_SCALARS: &[&str] = &[
+        // #609: the reported corruption. No newline, colon, hash, quote or edge
+        // space, so it used to take the branch that quoted WITHOUT escaping, and
+        // `\b` was read back as a backspace.
+        r"value with \back slash",
+        r"\",
+        r"\\",
+        // The two-character sequence backslash-n, NOT a newline.
+        r"\n",
+        r"C:\Users\dev",
+        r"trailing\\",
+        "say \"hi\"",
+        // Compose interpolation escape: `$$` is data by the time it gets here.
+        "[$${severity}] [$${node}]",
+        "$",
+        "plain",
+        "",
+        " leading",
+        "trailing ",
+        "key:value",
+        "has # hash",
+        "line1\nline2",
+        "tab\there",
+        "carriage\rreturn",
+        "unicode: café 日本語 🦀",
+        "bell\u{7}and\u{1b}escape",
+        "nul\u{0}byte",
+        "del\u{7f}",
+    ];
+
     #[test]
-    fn test_escape_yaml_value() {
-        // Simple value
+    fn test_escape_yaml_value_exact_encoding() {
+        // Every value is emitted as a double-quoted scalar, and a double-quoted
+        // scalar processes escapes — so every value is escaped. Both halves of
+        // that sentence must hold together; quoting without escaping (the #609
+        // bug) is the one combination that is wrong.
         assert_eq!(escape_yaml_value("hello"), "\"hello\"");
-
-        // Value with newline
+        assert_eq!(escape_yaml_value(""), "\"\"");
+        assert_eq!(escape_yaml_value("key:value"), "\"key:value\"");
+        assert_eq!(escape_yaml_value(" leading"), "\" leading\"");
         assert_eq!(escape_yaml_value("line1\nline2"), "\"line1\\nline2\"");
-
-        // Value with quotes
         assert_eq!(escape_yaml_value("say \"hi\""), "\"say \\\"hi\\\"\"");
 
-        // Value with colon
-        assert_eq!(escape_yaml_value("key:value"), "\"key:value\"");
+        // #609: a lone backslash is doubled, whatever else the value contains.
+        assert_eq!(
+            escape_yaml_value(r"value with \back slash"),
+            r#""value with \\back slash""#
+        );
+        assert_eq!(escape_yaml_value(r"path\to\file"), r#""path\\to\\file""#);
+        assert_eq!(escape_yaml_value(r"\"), r#""\\""#);
 
-        // Value with backslash - backslash doesn't need special escaping in YAML
-        // when double-quoted, unless combined with other special chars
-        assert_eq!(escape_yaml_value(r"path\to\file"), r#""path\to\file""#);
+        // A control character has no raw spelling inside a double-quoted scalar.
+        assert_eq!(escape_yaml_value("nul\u{0}byte"), r#""nul\x00byte""#);
+        assert_eq!(escape_yaml_value("\u{1b}"), r#""\x1b""#);
+        assert_eq!(escape_yaml_value("\u{7f}"), r#""\x7f""#);
 
-        // Empty value
-        assert_eq!(escape_yaml_value(""), "\"\"");
+        // Non-ASCII is passed through as-is: the override file is UTF-8.
+        assert_eq!(escape_yaml_value("café 🦀"), "\"café 🦀\"");
+    }
 
-        // Value with leading space
-        assert_eq!(escape_yaml_value(" leading"), "\" leading\"");
+    #[test]
+    fn test_escape_yaml_value_round_trips() {
+        for value in RISKY_YAML_SCALARS {
+            let encoded = escape_yaml_value(value);
+            let decoded = decode_double_quoted_yaml_scalar(&encoded);
+            assert_eq!(
+                decoded, *value,
+                "value did not survive the YAML round trip: {value:?} -> {encoded} -> {decoded:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_escape_compose_value_round_trips_through_yaml_then_interpolation() {
+        // The full compose pipeline is two layers: the YAML parser reads the
+        // scalar, then Compose's interpolation collapses `$$` to `$`. A value is
+        // only correct if it survives BOTH.
+        for value in RISKY_YAML_SCALARS {
+            let encoded = escape_compose_value(value);
+            let after_yaml = decode_double_quoted_yaml_scalar(&encoded);
+            let after_interpolation = after_yaml.replace("$$", "$");
+            assert_eq!(
+                after_interpolation, *value,
+                "value did not survive YAML + interpolation: {value:?} -> {encoded}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_compose_override_delivers_backslash_env_verbatim() {
+        // The #609 reproduction at the level that actually ships: the generated
+        // override text. Reading the emitted scalar back must yield the authored
+        // value, not a backspace.
+        let authored = r"value with \back slash";
+        let mut additional_env: IndexMap<String, String> = IndexMap::new();
+        additional_env.insert("VAR_WITH_BACK_SLASH".to_string(), authored.to_string());
+
+        let project = ComposeProject {
+            name: "test".to_string(),
+            base_path: PathBuf::from("/test"),
+            compose_files: vec![PathBuf::from("docker-compose.yml")],
+            service: "myservice".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env,
+            external_volumes: Vec::new(),
+            override_command: Some(false),
+            service_image_override: None,
+            deacon_labels: IndexMap::new(),
+        };
+
+        let yaml = project.generate_injection_override().unwrap();
+        let line = yaml
+            .lines()
+            .find(|l| l.trim_start().starts_with("VAR_WITH_BACK_SLASH:"))
+            .expect("env line present");
+        let scalar = line
+            .split_once(':')
+            .expect("key: value")
+            .1
+            .trim()
+            .to_string();
+
+        let delivered = decode_double_quoted_yaml_scalar(&scalar).replace("$$", "$");
+        assert_eq!(
+            delivered, authored,
+            "the override must carry the backslash verbatim; got {delivered:?} from {scalar}"
+        );
+        assert!(
+            !delivered.contains('\u{8}'),
+            "a backspace means the backslash was reinterpreted (#609): {delivered:?}"
+        );
     }
 
     // Tests for parse_external_volumes_from_config
