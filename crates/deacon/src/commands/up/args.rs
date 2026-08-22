@@ -634,6 +634,13 @@ pub(crate) fn build_options_from_args(args: &UpArgs) -> BuildOptions {
 /// - remote_env format validation
 /// - terminal dimensions pairing
 /// - expect_existing_container constraints
+///
+/// Since #610 the first two rules are satisfied by construction on the CLI path:
+/// `execute_up` resolves `workspace_folder` (defaulting to the current directory)
+/// before calling this, so it is always `Some`. They are kept as defense in depth
+/// for the library entry points, which can construct `UpArgs` directly, and because
+/// `ContainerSelector` is where these messages are shared with `exec`,
+/// `read-configuration` and `run-user-commands`.
 pub(crate) fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpInput> {
     // Parse selection inputs through ContainerSelector to keep validation and error messages shared
     let selector_workspace = args.workspace_folder.as_ref().cloned();

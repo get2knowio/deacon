@@ -57,6 +57,7 @@ use deacon_core::host_ca::{CorporateCaSet, HOST_CA_BUNDLE_PATH, discover_corpora
 use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::state::StateManager;
+use std::path::PathBuf;
 use tracing::{debug, info, instrument, warn};
 
 // Internal imports from submodules
@@ -72,9 +73,52 @@ use merged_config::merge_image_metadata_into_config;
 /// for lifecycle exec commands during `deacon up` when JSON logging is active.
 pub(crate) const ENV_FORCE_TTY_IF_JSON: &str = "DEACON_FORCE_TTY_IF_JSON";
 
+/// Resolve `up`'s effective workspace folder, defaulting to the current directory.
+///
+/// Reference parity (#610): with no `--workspace-folder`, the workspace is the
+/// process's CURRENT DIRECTORY — the shape a developer types, `cd` into the project
+/// and run `deacon up`. That is what the reference CLI does, and what deacon's own
+/// `exec`, `build`, `down` and `run-user-commands` already do (the first three
+/// inherit it from `shared::config_loader::load_config`, which falls back to
+/// `current_dir()`). `up` alone demanded the flag and rejected the invocation with
+/// `Missing required argument: …` before it ever looked at the cwd.
+///
+/// Defaulting HERE — once, at `up`'s entry, ahead of `normalize_and_validate_args`
+/// — rather than inside `load_config` is deliberate. `up` consumes the workspace
+/// folder on five further paths: argument validation, container identity hashing
+/// (`ContainerIdentity::new`), the workspace-trust gate, the
+/// `--mount-workspace-git-root` mount-source walk, and compose project naming. All
+/// of them read `args.workspace_folder`, not the loader's result, so materializing
+/// the default up front is what makes a defaulted cwd indistinguishable from an
+/// explicit `--workspace-folder $(pwd)` on every one of them — including the
+/// canonicalization here, which the trust gate's allowlist lookup is keyed on.
+///
+/// Spec parity (#67): `--mount-workspace-git-root` controls only the *mount source*
+/// for the default workspace bind mount. Discovery of
+/// `.devcontainer/devcontainer.json` and `${localWorkspaceFolder}` substitution stay
+/// anchored at this path so that running deacon against a sub-project inside a
+/// larger git repository does not silently load the enclosing repo's devcontainer
+/// configuration. The git-root walk happens later, only when constructing the
+/// workspace mount source in `execute_container_up`.
+pub(crate) fn resolve_workspace_folder(explicit: Option<PathBuf>) -> Result<PathBuf> {
+    let ws = match explicit {
+        Some(ws) => ws,
+        None => std::env::current_dir()
+            .context("Failed to resolve the current directory as the default workspace folder")?,
+    };
+    ws.canonicalize().with_context(|| {
+        format!(
+            "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
+            ws.display()
+        )
+    })
+}
+
 /// Starts development containers for the current workspace according to the resolved devcontainer configuration.
 ///
 /// This is the top-level entry point for the `up` command. It:
+/// - Resolves the workspace folder, defaulting to the current directory when
+///   `--workspace-folder` is absent (see [`resolve_workspace_folder`]).
 /// - Loads or discovers the devcontainer configuration (from `args.config_path` or `args.workspace_folder`).
 /// - Validates host requirements (unless skipped via flags).
 /// - Optionally merges CLI-provided feature modifications into the effective configuration.
@@ -106,26 +150,8 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
     debug!("Starting up command execution");
     debug!("Up args: {:?}", args);
 
-    // Normalize the workspace folder.
-    //
-    // Spec parity (#67): `--mount-workspace-git-root` controls only the
-    // *mount source* for the default workspace bind mount. Discovery of
-    // `.devcontainer/devcontainer.json` and `${localWorkspaceFolder}`
-    // substitution stay anchored at the user-provided `--workspace-folder`
-    // so that running deacon against a sub-project inside a larger git
-    // repository does not silently load the enclosing repo's devcontainer
-    // configuration. The git-root walk happens later, only when
-    // constructing the workspace mount source in `execute_container_up`.
     let mut args = args;
-    if let Some(ws) = args.workspace_folder.clone() {
-        let resolved = ws.canonicalize().with_context(|| {
-            format!(
-                "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
-                ws.display()
-            )
-        })?;
-        args.workspace_folder = Some(resolved);
-    }
+    args.workspace_folder = Some(resolve_workspace_folder(args.workspace_folder.clone())?);
 
     // Step 1: Validate and normalize inputs (fail-fast before any runtime operations)
     let _normalized = normalize_and_validate_args(&args)?;

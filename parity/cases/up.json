@@ -4280,7 +4280,99 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "RED ON PURPOSE. With no `--workspace-folder`, `up` must resolve its configuration from the CURRENT DIRECTORY — the shape a developer types, `cd` into the project and run `deacon up`. Upstream gives this its own `describe` block ('Command up with default workspace') with a positive and a negative arm.\n\nMEASURED at oracle 0.87.0 in a directory holding `fx-upstream-runargs-env-subst`: the reference exits 0 and reports a `containerId`. deacon exits 1 with `Missing required argument: One of --container-id, --id-label or --workspace-folder is required.` — it never looks at the cwd. That is [#610](https://github.com/get2knowio/deacon/issues/610).\n\nThe defect is an INTERNAL inconsistency as much as a parity one. deacon's `exec` already defaults to the cwd — `case-exec-default-workspace-folder` and `case-exec-upstream-no-config-in-cwd-rejected` both depend on it — and so does `build`, pinned by `case-build-upstream-cwd-default-workspace`. `up` and `read-configuration` are the two that demand the flag.\n\nIt costs nothing to express: the runner already anchors each operation's cwd to the case's isolated workspace, so OMITTING the flag is the whole test. That is also the case's one fragility, recorded here because it is invisible in an empty `argv` — if the runner ever stops anchoring cwd to the workspace, this case starts failing for a reason that has nothing to do with `up`. Its `exec` and `build` siblings carry the same note.\n\n`live-differential`, so the RED lands in the nightly lane, which gates nothing, rather than in `parity_docker`, which blocks pull requests. `chan-exit-code` is the only channel declared: an `up` result document cannot be compared across the two CLIs (a raw `containerId`, differing `configuration` shapes), and while the defect stands there is no container to inspect either. The `equals: 0` assertion pins deacon's own side so the case turns green on the fix and not on the reference changing. A `spec-expectation` sibling asserting `outcome: success` and a `containerId` belongs with that fix, exactly as #593's siblings did.\n\nUPSTREAM'S NEGATIVE ARM IS NOT LANDED, and the omission is deliberate. 'should fail gracefully when no config in current directory' has both CLIs exit 1 today, so a differential on the exit code would be GREEN — for the wrong reason, since deacon fails on a missing FLAG and the reference on a missing CONFIG. An assertion that cannot fail for the reason it was written is the thing `docs/PARITY.md` warns about. It lands with the fix, as the `up` twin of `case-exec-upstream-no-config-in-cwd-rejected`, asserting the same `Dev container config \\(.*\\) not found\\.` regex.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should create and start container using current directory config'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+      "notes": "With no `--workspace-folder`, `up` resolves its configuration from the CURRENT DIRECTORY — the shape a developer types, `cd` into the project and run `deacon up`. Upstream gives this its own `describe` block ('Command up with default workspace') with a positive and a negative arm.\n\nWAS RED ON PURPOSE; GREEN SINCE THE FIX FOR [#610](https://github.com/get2knowio/deacon/issues/610). MEASURED at oracle 0.87.0 in a directory holding `fx-upstream-runargs-env-subst`, at the commit that landed this case: the reference exited 0 and reported a `containerId`, while deacon exited 1 with `Missing required argument: One of --container-id, --id-label or --workspace-folder is required.` and never looked at the cwd. `execute_up` now materializes the cwd default ONCE, before anything reads the workspace folder, so a defaulted cwd is indistinguishable from an explicit `--workspace-folder $(pwd)` on every path that consumes it — argument validation, container identity hashing, the workspace-trust gate, the `--mount-workspace-git-root` mount-source walk and compose project naming all read `args.workspace_folder` rather than the loader's result, which is why the default lives there and not inside `load_config`.\n\nThe defect was an INTERNAL inconsistency as much as a parity one. deacon's `exec` already defaulted to the cwd — `case-exec-default-workspace-folder` and `case-exec-upstream-no-config-in-cwd-rejected` both depend on it — and so did `build`, pinned by `case-build-upstream-cwd-default-workspace`. `up` and `read-configuration` were the two that demanded the flag; `read-configuration` still does, which is a separate decision the issue names and this fix deliberately does not take.\n\nIt costs nothing to express: the runner already anchors each operation's cwd to the case's isolated workspace, so OMITTING the flag is the whole test. That is also the case's one fragility, recorded here because it is invisible in an empty `argv` — if the runner ever stops anchoring cwd to the workspace, this case starts failing for a reason that has nothing to do with `up`. Its `exec` and `build` siblings carry the same note.\n\n`live-differential`, so the RED landed in the nightly lane, which gates nothing, rather than in `parity_docker`, which blocks pull requests. `chan-exit-code` is the only channel declared: an `up` result document cannot be compared across the two CLIs (a raw `containerId`, differing `configuration` shapes). The `equals: 0` assertion pins deacon's own side, so the case turned green on the fix and not on the reference changing. The `spec-expectation` sibling the red case called for — `case-up-upstream-cwd-default-workspace-success` — landed with the fix and carries the same claim into `parity_docker`, where it gates every pull request.\n\nUPSTREAM'S NEGATIVE ARM also landed with the fix, as `case-up-upstream-no-config-in-cwd-rejected`. Holding it back was deliberate: before the fix both CLIs exited 1 in a config-less directory, so a differential on the exit code would have been GREEN for the WRONG reason — deacon failing on a missing FLAG, the reference on a missing CONFIG — which is the vacuous assertion `docs/PARITY.md` warns about.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should create and start container using current directory config'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+    },
+    {
+      "id": "case-up-upstream-cwd-default-workspace-success",
+      "behaviors": [
+        "bhv-up-default-workspace-folder"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [],
+          "fixtures": [
+            "fx-upstream-runargs-env-subst"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The gating half of the cwd default, and the `spec-expectation` sibling that `case-up-upstream-cwd-default-workspace` named as belonging with the fix for [#610](https://github.com/get2knowio/deacon/issues/610) — the same shape #593's fix added alongside its differential. The differential twin runs only in the nightly lane, which gates nothing; this one runs in `parity_docker`, so a regression that reinstated the `--workspace-folder` requirement blocks the pull request that introduced it instead of surfacing the next morning.\n\nOMITTING the flag is the whole test, exactly as in the twin: the runner anchors each operation's cwd to the case's isolated workspace, so an empty `argv` over a fixture holding a `.devcontainer.json` IS a cwd with a config in it. The same fragility travels with it — invisible in an empty `argv`, so recorded here: if the runner ever stops anchoring cwd to the workspace, this case fails for a reason that has nothing to do with `up`.\n\nIt asserts `outcome: success` and NOT the `containerId`, which is what `chan-structured-output` can honestly carry. A container id is a fresh 64-hex string on every run and the normalizer deliberately does not tokenize it: `devcontainer_id_token` rewrites 12-char hex runs only inside the enumerated `DEVCONTAINER_ID_FIELDS`, precisely so two genuinely different digests cannot collapse to one token and mask a divergence. `jsonSubset` compares values, has no presence predicate, and no case in the suite asserts a `containerId`. `outcome: success` is not a weaker claim than it looks: `up` reports it only after the container is created and started, so a run that resolved the cwd but provisioned nothing cannot reach it. `chan-exit-code` pins the other half.\n\n`docker-shared` rather than hermetic, and the difference from its negative twin is the point: this arm has a config to act on, so it provisions. `case-up-upstream-no-config-in-cwd-rejected` resolves the same cwd, finds no document and never contacts the daemon, which is why that one is hermetic and gates all three operating systems while this one waits for a daemon.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should create and start container using current directory config'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
+    },
+    {
+      "id": "case-up-upstream-no-config-in-cwd-rejected",
+      "behaviors": [
+        "bhv-up-no-config-in-cwd-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-up",
+          "assertion": {
+            "contains": "No devcontainer.json found in workspace"
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "UPSTREAM'S NEGATIVE ARM of the cwd default — 'should fail gracefully when no config in current directory' — held back from batch 7 on purpose and landed with the fix for [#610](https://github.com/get2knowio/deacon/issues/610). An EXISTING current directory with no devcontainer config, no `--workspace-folder` and no `--id-label` must exit 1 for the RIGHT reason. Before the fix both CLIs exited 1 here, so the assertion would have been green while deacon was failing on a missing FLAG and the reference on a missing CONFIG — an assertion that cannot fail for the reason it was written, which is the trap `docs/PARITY.md` names. It is worth landing now precisely because the reason changed.\n\nOmitting the flag is the whole test, exactly as in the positive twin `case-up-upstream-cwd-default-workspace-success`: the runner anchors each operation's cwd to the case workspace, so a fixture that is empty by construction (`fx-errors-missing-config` holds only a `.gitkeep`) is a cwd with nothing in it.\n\nDISTINCT from `case-up-upstream-missing-workspace-rejected`, which names a `--workspace-folder` that does not exist and fails during workspace RESOLUTION before any config is looked for. This one resolves the workspace fine — the cwd is real — and finds no document, the path a developer meets by `cd`-ing into the wrong directory. The two exercise different code and print different sentences.\n\nMEASURED at oracle 0.87.0 in an empty directory: both CLIs exit 1 and both print an `outcome: error` document naming the absolute path of the document they looked for, but they word it differently — deacon `No devcontainer.json found in workspace` / `Configuration file not found: <abs>/.devcontainer/devcontainer.json`, the reference `Dev container config (<abs>/.devcontainer/devcontainer.json) not found.` Both name the problem and both name the file. So this pins DEACON's answer rather than comparing, on the exact precedent of `case-up-upstream-missing-workspace-rejected` and its `exec` twins: a `live-differential` would need a tolerance to record only that the two disagree about phrasing, which is worth less than what this asserts. Note the wording gap is `up`'s own and NOT shared with `exec` — `case-exec-upstream-no-config-in-cwd-rejected` asserts the reference's exact sentence because `exec` happens to word it identically. Aligning `up` would mean changing the `message` field of its `outcome: error` document, a user-facing contract with its own tests, and is a separate decision from #610.\n\nThe `outcome: error` half IS compared in effect, because both CLIs emit it and the assertion is written against the shared shape rather than either wording. The stderr assertion uses `contains` rather than a path regex on purpose: the path inside deacon's second line uses backslashes on Windows, and the sentence being asserted carries the claim without it.\n\nHERMETIC — no `resourceGroup`, so it runs on every profile including `dev-fast` and on all three operating systems, joining `case-up-upstream-missing-workspace-rejected` as the second `up` case that gates every pull request. The lane is a CLAIM, not a convenience: config resolution fails before any daemon contact, verified by re-running with `docker` off `PATH` and `DOCKER_HOST` pointed at a nonexistent socket and getting the identical output. A regression that reached for the daemon before reading the workspace would fail here rather than pass.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
     }
   ]
 }
