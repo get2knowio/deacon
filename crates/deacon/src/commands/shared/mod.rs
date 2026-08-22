@@ -28,6 +28,7 @@ pub(crate) fn resolve_runtime(
 pub(crate) mod build_resolution;
 pub mod config_loader;
 pub mod container_metadata;
+pub(crate) mod container_substitution;
 pub mod env_user;
 pub mod feature_resolver;
 pub mod host_ca;

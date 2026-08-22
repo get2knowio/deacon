@@ -2006,3 +2006,162 @@ fn test_set_up_reports_customizations_as_per_tool_arrays() {
         serde_json::to_string_pretty(merged).unwrap()
     );
 }
+
+/// #616 (`set-up` surface): the blocks `set-up` REPORTS resolve `${containerEnv:*}`
+/// against the adopted container, and the commands it EXECS do not.
+///
+/// The two halves are asserted from ONE authored string, because that is the only shape
+/// that can tell the fix from an over-fix: the reference reports the resolved form and
+/// runs the literal one, so a pass folded into the executed configuration would look like
+/// a pass on the JSON and be wrong in the container. Measured at oracle 0.87.0 on this
+/// exact shape — its reported `postCreateCommand` reads `'from-container-env' ''` while
+/// the file its hook wrote reads `cenv=[${containerEnv:SETUP_PROBE_VAR}]`.
+///
+/// A raw `docker run -e` container is the evidence shape rather than a `deacon up`: the
+/// variable's canonical source is the container's `Config.Env` (what `inspect` returns and
+/// what the fix reads), and setting it directly is what proves the value comes from the
+/// CONTAINER rather than from the `containerEnv` the `--config` document could have
+/// authored. The `--config` here authors none.
+///
+/// `PROBE_CONTAINER_ENV_MISSING` is the assertion that separates "the pass ran" from "the
+/// pass ran and agreed": a key the container does not define resolves to the EMPTY STRING
+/// on both sides, so a fail-safe that skipped the pass would leave the token literal here.
+#[test]
+fn test_set_up_container_substitutes_the_reported_configuration() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping test_set_up_container_substitutes_the_reported_configuration: Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let guard = ContainerGuard::new();
+
+    let unique = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    );
+
+    let name = format!("deacon-test-setup-616-{}", unique);
+    let out = StdCommand::new("docker")
+        .args([
+            "run",
+            "-d",
+            "--name",
+            &name,
+            "-e",
+            "SETUP_PROBE_VAR=from-container-env",
+            "alpine:3.19",
+            "sleep",
+            "infinity",
+        ])
+        .output()
+        .expect("docker run should execute");
+    assert!(
+        out.status.success(),
+        "docker run failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let container_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    guard.register(container_id.clone());
+
+    // Single quotes keep the tokens literal for `sh`, so whatever reaches the container
+    // is what deacon put in the command string — the point of the execution assertion.
+    let hook = "printf 'cenv=[%s] missing=[%s]\\n' '${containerEnv:SETUP_PROBE_VAR}' \
+                '${containerEnv:NO_SUCH_VAR_XYZ}' > /tmp/setup-container-env.txt";
+    let config_path = temp_dir.path().join("set-up-config.json");
+    fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&json!({
+            "remoteEnv": {
+                "PROBE_CONTAINER_ENV": "${containerEnv:SETUP_PROBE_VAR}",
+                "PROBE_CONTAINER_ENV_MISSING": "${containerEnv:NO_SUCH_VAR_XYZ}",
+            },
+            "postCreateCommand": hook,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("deacon")
+        .expect("deacon binary")
+        .env("DEACON_LOG", "warn")
+        .args([
+            "set-up",
+            "--container-id",
+            &container_id,
+            "--config",
+            config_path.to_str().unwrap(),
+            "--include-configuration",
+            "--include-merged-configuration",
+        ])
+        .assert();
+    let output = assert.get_output();
+    assert!(
+        output.status.success(),
+        "deacon set-up failed:\nSTDOUT:\n{}\nSTDERR:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let document: Value = serde_json::from_slice(&output.stdout)
+        .expect("set-up must emit a single JSON document on stdout");
+
+    let resolved_hook = "printf 'cenv=[%s] missing=[%s]\\n' 'from-container-env' '' \
+                         > /tmp/setup-container-env.txt";
+    for block in ["configuration", "mergedConfiguration"] {
+        let value = document
+            .get(block)
+            .unwrap_or_else(|| panic!("--include-* must produce the `{block}` block"));
+        assert_eq!(
+            value.pointer("/remoteEnv/PROBE_CONTAINER_ENV"),
+            Some(&json!("from-container-env")),
+            "`{block}` must resolve `${{containerEnv:*}}` against the adopted container \
+             (#616). Got: {}",
+            serde_json::to_string_pretty(value).unwrap()
+        );
+        assert_eq!(
+            value.pointer("/remoteEnv/PROBE_CONTAINER_ENV_MISSING"),
+            Some(&json!("")),
+            "a key the container does not define resolves to the empty string, as the \
+             reference does. Got: {}",
+            serde_json::to_string_pretty(value).unwrap()
+        );
+    }
+    assert_eq!(
+        document.pointer("/configuration/postCreateCommand"),
+        Some(&json!(resolved_hook)),
+        "the reported hook is the RESOLVED form. Got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(
+        document.pointer("/mergedConfiguration/postCreateCommands"),
+        Some(&json!([resolved_hook])),
+        "and so is the collected array. Got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    // The other half: what set-up RAN kept the tokens literal, which no assertion on the
+    // JSON above can see.
+    let artifact = StdCommand::new("docker")
+        .args(["exec", &container_id, "cat", "/tmp/setup-container-env.txt"])
+        .output()
+        .expect("docker exec should execute");
+    assert!(
+        artifact.status.success(),
+        "the postCreate hook must have written the artifact: {}",
+        String::from_utf8_lossy(&artifact.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&artifact.stdout),
+        "cenv=[${containerEnv:SETUP_PROBE_VAR}] missing=[${containerEnv:NO_SUCH_VAR_XYZ}]\n",
+        "the EXECUTED command keeps the tokens literal — the reference hands them to the \
+         container shell unresolved, so folding the container pass into what set-up runs \
+         would be a divergence, not an improvement (#616)"
+    );
+}

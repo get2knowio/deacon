@@ -404,6 +404,96 @@
         "tempdir": true
       },
       "notes": "Closes #513, the other half — and the half that makes the rule falsifiable. The overlay authors NO `workspaceFolder`, so both tokens must stay LITERAL: the reference hands them to the container shell, which expands the unset names to empty, and the artifact is `cwf=[] base=[]`. deacon wrote `cwf=[/] base=[]` — an invented `/` coming from `merged_config.workspace_folder.unwrap_or(\"/\")`, a DEFAULT for the exec cwd leaking into the command text. The fix separates the two uses (`substitution_workspace_folder: Option<String>` alongside the cwd `String`), so the cwd still falls back to `/` — `docker exec -w` needs a path — while the substitution value is simply absent. The base fixture DOES author `workspaceFolder: /work`, and that is the sharp part of this case rather than fixture noise: `op-up` stamps it into the container's `devcontainer.metadata`, so a value IS reachable through the merge, and the expectation is still literal. That pins the source as the `--config` document alone, not the merged configuration — measured against oracle 0.87.0 on a hand-built container whose metadata label authored `workspaceFolder` with an overlay that did not: the reference left both tokens literal, and its `FG` helper feeds `containerWorkspaceFolder` from the config document's raw `workspaceFolder` (undefined when the document omits it). It also means a naive fix reading the MERGED config passes the sibling case and fails this one. `--container-data-folder`, the bind-mounted `/work` artifact path and the omitted `chan-stdout` are all here for the reasons the sibling's notes give. Image pinned to alpine:3.19."
+    },
+    {
+      "id": "case-set-up-container-env-substitution",
+      "behaviors": [
+        "bhv-setup-container-env-substituted-in-reported-blocks"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-set-up-container-env-substitution"
+          ]
+        },
+        {
+          "id": "op-set-up",
+          "subcommand": "set-up",
+          "argv": [
+            "--container-id",
+            "${CONTAINER_ID}",
+            "--config",
+            "${WORKSPACE}/setup-overlay.json",
+            "--container-data-folder",
+            "/tmp/conformance-set-up-container-env",
+            "--include-configuration",
+            "--include-merged-configuration"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-set-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-set-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "configuration": {
+                "remoteEnv": {
+                  "PROBE_CONTAINER_ENV": "from-container-env",
+                  "PROBE_CONTAINER_ENV_MISSING": ""
+                },
+                "postCreateCommand": "printf 'cenv=[%s] missing=[%s]\\n' 'from-container-env' '' > /work/setup-container-env.txt"
+              },
+              "mergedConfiguration": {
+                "remoteEnv": {
+                  "PROBE_CONTAINER_ENV": "from-container-env",
+                  "PROBE_CONTAINER_ENV_MISSING": ""
+                },
+                "postCreateCommands": [
+                  "printf 'cenv=[%s] missing=[%s]\\n' 'from-container-env' '' > /work/setup-container-env.txt"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-set-up",
+          "assertion": {
+            "jsonSubset": {
+              "setup-container-env.txt": "cenv=[${containerEnv:SETUP_PROBE_VAR}] missing=[${containerEnv:NO_SUCH_VAR_XYZ}]\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "setup-container-env.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes #616, the `set-up` half of #608 — the same defect on the same output surface, left behind when #613 fixed `up`, and left behind ON PURPOSE with a `## Deferred (post-PR-6c)` note in `set_up.rs` naming exactly this pass. The claim is that the REPORTED blocks resolve `${containerEnv:*}` against the adopted container while what `set-up` EXECS does not — two halves that disagree in the reference itself, which is why the case declares two channels and why a fix that folded the pass into the executed configuration would go red rather than greener. Measured against oracle 0.87.0 on this fixture: the base config authors `containerEnv: {SETUP_PROBE_VAR: \"from-container-env\"}`, `op-up` applies it at create time so it lands in the container's `Config.Env` (the canonical source for the variable, which is why the fix reads `ContainerInfo::env` from the inspect `set-up` already does rather than probing a shell), and the overlay `--config` reads it back through `remoteEnv`. The reference reports `PROBE_CONTAINER_ENV: \"from-container-env\"` in BOTH `configuration` and `mergedConfiguration`; deacon reported the raw `${containerEnv:SETUP_PROBE_VAR}` in both, because its single substitution pass ran before the function knew anything about the container's environment. `PROBE_CONTAINER_ENV_MISSING` is not decoration: a key the container does not define resolves to the EMPTY STRING on both sides, which is the assertion that separates \"the pass ran\" from \"the pass ran and agreed\" — a fail-safe that skipped the pass would leave the token literal there and be caught, and so would one that errored. `postCreateCommand` is asserted in the reported blocks for the sharpest reason in the case: the reference REPORTS it resolved (`'from-container-env' ''`) and RUNS it literal, so the two surfaces are pinned to DIFFERENT values from one authored string, and no fix can satisfy both by accident. `chan-file-content` carries the execution half — the hook writes the two tokens into the bind-mounted `/work` the base fixture pins (host-visible, and immune to whatever cwd the two CLIs choose), and both sides write `cenv=[${containerEnv:SETUP_PROBE_VAR}] missing=[${containerEnv:NO_SUCH_VAR_XYZ}]` byte-for-byte, before AND after the fix. `--container-data-folder` is the trap #510 documented and every set-up case since has paid: `op-up` leaves the reference's lifecycle markers in the default folder and a marked phase does not re-run, so without a fresh folder the hook is silently skipped and the execution channel proves nothing. The overlay deliberately authors no `workspaceFolder` and no `${containerWorkspaceFolder}`: that variable is settled separately (#513, two sibling cases) and both sides leave it literal here, so including it would couple this case to a neighbour instead of pinning the one variable it is about. `chan-stdout` is deliberately NOT declared, for the same key-ordering reason as every sibling — the two sides emit the same document with different key order, and the structured channel exists to see past that. The two sides agree on every key after normalization, with `portsAttributes` elided on both by the standing `bhv-readconfig-merged-computed-empties-omitted` characterization, so the case declares no tolerance. Image pinned to alpine:3.19."
     }
   ]
 }

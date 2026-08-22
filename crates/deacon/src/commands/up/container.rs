@@ -982,7 +982,7 @@ pub(crate) async fn execute_container_up(
     // Applied to BOTH blocks, since `mergedConfiguration` is derived from the
     // same configuration and had the identical gap.
     let reported_config = if args.include_configuration || args.include_merged_configuration {
-        super::helpers::container_substituted_config(
+        crate::commands::shared::container_substitution::container_substituted_config(
             &config,
             workspace_folder,
             &deacon_core::container::compute_dev_container_id(&identity.id_hash_labels()),

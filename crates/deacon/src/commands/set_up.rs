@@ -24,13 +24,10 @@
 //! - **Dotfiles installer** (`--dotfiles-repository` / `--dotfiles-install-command`
 //!   / `--dotfiles-target-path`) via `ContainerLifecycle`'s built-in clone +
 //!   auto-detect installer + target-path marker (PR-6b)
+//! - A container-aware substitution pass over the REPORTED blocks
+//!   (`${containerEnv:VAR}` against the adopted container's `Config.Env`) — the
+//!   reference's `containerSubstitute`, shared with `up` (#616)
 //! - JSON output on stdout: `{outcome, configuration?, mergedConfiguration?}`
-//!
-//! ## Deferred (post-PR-6c)
-//!
-//! - A second substitution pass against the live container environment
-//!   (`${containerEnv:VAR}`) — current pass uses only the configured
-//!   `container_env`, not the live `docker exec` env probe
 
 use crate::commands::shared::resolve_runtime;
 use anyhow::{Context, Result};
@@ -354,19 +351,64 @@ pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Re
         info!("--skip-post-create set; skipping /etc patches, all lifecycle hooks, and dotfiles");
     }
 
-    // Phase 8: Emit JSON result on stdout (spec §10).
+    // Phase 8: Container substitution over the REPORTED blocks only — the reference's
+    // third pass (`containerSubstitute`), the same one `up` got in #608/#613 and
+    // `set-up` was left without (#616). Pass 5 ran before this function knew anything
+    // about the container's environment, so every `${containerEnv:*}` in it is still a
+    // template; measured at oracle 0.87.0, the reference resolves them in BOTH blocks
+    // (and answers a key the container does not define with the empty string).
+    //
+    // The container environment is already in hand: Phase 2 inspected the container and
+    // `ContainerInfo::env` IS `Config.Env`, the canonical source for `${containerEnv:*}`
+    // — so there is no second inspect, and no probe. Fail-safe per #613: an empty map
+    // means the inspect gave us nothing, and passing `None` leaves the templates intact
+    // rather than collapsing every one of them to an empty string.
+    //
+    // REPORTED ONLY, deliberately. What set-up EXECS keeps the pass-5 configuration,
+    // because the reference leaves `${containerEnv:*}` literal in the lifecycle commands
+    // it runs — measured on the same container: its `postCreateCommand` wrote
+    // `cenv=[${containerEnv:SETUP_PROBE_VAR}]`, and so does deacon's. That agreement is
+    // pinned by the `chan-file-content` channel of `case-set-up-container-env-substitution`,
+    // so folding this pass into `substituted_merged` would go red.
+    //
+    // The context is the one pass 5 built, not a fresh workspace-anchored one: `set-up`
+    // takes no `--workspace-folder`, so `without_workspace` keeps `${localWorkspaceFolder}`,
+    // `${localWorkspaceFolderBasename}` and `${devcontainerId}` literal (#510) and
+    // `${containerWorkspaceFolder}` comes from the `--config` document's own
+    // `workspaceFolder` (#513). This pass adds the container environment and nothing else.
+    let reported_env = Some(&container.env).filter(|env| !env.is_empty());
+    let reported_config = if args.include_configuration || args.include_merged_configuration {
+        crate::commands::shared::container_substitution::container_substituted_with_context(
+            &substituted_config,
+            &substitution_context,
+            reported_env,
+        )
+    } else {
+        substituted_config.clone()
+    };
+    let reported_merged = if args.include_merged_configuration {
+        crate::commands::shared::container_substitution::container_substituted_with_context(
+            &substituted_merged,
+            &substitution_context,
+            reported_env,
+        )
+    } else {
+        substituted_merged.clone()
+    };
+
+    // Phase 9: Emit JSON result on stdout (spec §10).
     let result = SetUpResult::Success {
         outcome: "success",
         configuration: args
             .include_configuration
-            .then(|| configuration_document(&substituted_config, args.config_path.as_deref()))
+            .then(|| configuration_document(&reported_config, args.config_path.as_deref()))
             .transpose()?,
         merged_configuration: args
             .include_merged_configuration
             .then(|| {
                 merged_configuration_document(
-                    &substituted_merged,
-                    &substituted_config,
+                    &reported_merged,
+                    &reported_config,
                     args.config_path.as_deref(),
                 )
             })
@@ -1715,6 +1757,98 @@ mod tests {
             unauthored.post_create_command.as_ref().unwrap(),
             &serde_json::json!(probe),
             "and in the command, where an invented `/` used to appear instead"
+        );
+    }
+
+    /// #616: the container pass resolves `${containerEnv:*}` in the blocks set-up
+    /// REPORTS and leaves the commands it EXECS alone — two surfaces that must end up
+    /// with DIFFERENT values from one authored string, which is exactly what the
+    /// reference does (measured at oracle 0.87.0: its reported `postCreateCommand` reads
+    /// `'from-container-env' ''` while the artifact its hook wrote reads
+    /// `cenv=[${containerEnv:SETUP_PROBE_VAR}]`).
+    ///
+    /// The two #510/#513 characterizations are asserted in the same test rather than
+    /// trusted: the container pass reuses the context pass 1 built, so a future version
+    /// that rebuilt it with the workspace-anchored constructor would resolve
+    /// `${localWorkspaceFolder}` / `${devcontainerId}` here and this is what catches it.
+    #[test]
+    fn set_up_container_pass_resolves_container_env_only_in_the_reported_blocks() {
+        use crate::commands::shared::container_substitution::container_substituted_with_context;
+
+        let probe = "cenv=${containerEnv:SETUP_PROBE_VAR} \
+                     missing=${containerEnv:NO_SUCH_VAR} \
+                     ws=${localWorkspaceFolder} id=${devcontainerId}";
+        let config = DevContainerConfig {
+            remote_env: Some(
+                [("PROBE".to_string(), Some(probe.to_string()))]
+                    .into_iter()
+                    .collect(),
+            ),
+            post_create_command: Some(serde_json::json!(probe)),
+            ..Default::default()
+        };
+
+        // Exactly what `execute_set_up` builds.
+        let anchor = std::env::current_dir().expect("cwd is readable");
+        let context =
+            SubstitutionContext::without_workspace(&anchor).expect("context builds from the cwd");
+        let executed = config.apply_variable_substitution(&context).0;
+
+        let container_env = HashMap::from([(
+            "SETUP_PROBE_VAR".to_string(),
+            "from-container-env".to_string(),
+        )]);
+        let reported =
+            container_substituted_with_context(&executed, &context, Some(&container_env));
+
+        assert_eq!(
+            reported.remote_env.as_ref().unwrap()["PROBE"].as_deref(),
+            Some(
+                "cenv=from-container-env missing= \
+                 ws=${localWorkspaceFolder} id=${devcontainerId}"
+            ),
+            "the reported block resolves the container variables — a key the container \
+             does not define becomes the empty string, as the reference does — while the \
+             workspace variables stay literal (#510)"
+        );
+        assert_eq!(
+            executed.post_create_command.as_ref().unwrap(),
+            &serde_json::json!(probe),
+            "and what set-up EXECS is untouched: the reference hands the raw token to the \
+             container shell, so folding the pass into the executed config would diverge"
+        );
+    }
+
+    /// #616 fail-safe, the same rule #613 set for `up`: with no container environment in
+    /// hand the pass is SKIPPED so the template survives. Running it against an absent
+    /// environment would be worse than not running it — `resolve_variable` answers
+    /// `Some("")` for a missing key once `container_env` is `Some`, so every reference
+    /// would collapse to an empty string and the caller could not tell "the container has
+    /// no such variable" from "deacon could not read the container".
+    #[test]
+    fn set_up_container_pass_preserves_templates_without_a_container_env() {
+        use crate::commands::shared::container_substitution::container_substituted_with_context;
+
+        let config = DevContainerConfig {
+            remote_env: Some(
+                [(
+                    "PROBE".to_string(),
+                    Some("${containerEnv:SETUP_PROBE_VAR}".to_string()),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            ..Default::default()
+        };
+        let anchor = std::env::current_dir().expect("cwd is readable");
+        let context =
+            SubstitutionContext::without_workspace(&anchor).expect("context builds from the cwd");
+
+        let reported = container_substituted_with_context(&config, &context, None);
+        assert_eq!(
+            reported.remote_env.as_ref().unwrap()["PROBE"].as_deref(),
+            Some("${containerEnv:SETUP_PROBE_VAR}"),
+            "an unreadable container environment leaves the template intact"
         );
     }
 

@@ -1,0 +1,10 @@
+{
+	"name": "ConformanceSetUpContainerEnvBase",
+	"image": "alpine:3.19",
+	"remoteUser": "root",
+	"workspaceFolder": "/work",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/work,type=bind",
+	"containerEnv": {
+		"SETUP_PROBE_VAR": "from-container-env"
+	}
+}
