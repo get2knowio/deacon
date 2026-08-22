@@ -1,0 +1,10 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PARITY_BUILD_ARG: reached-the-build
+      labels:
+        parity.authored.label: authored-in-compose
+    command: sleep infinity

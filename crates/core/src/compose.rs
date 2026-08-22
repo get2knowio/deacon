@@ -8,6 +8,7 @@ use crate::errors::{ConfigError, DockerError, Result};
 use crate::security::SecurityOptions;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, warn};
 
@@ -671,6 +672,38 @@ pub struct SynthesizedServiceBuild<'a> {
     pub dockerfile: &'a str,
 }
 
+/// The Feature-install document deacon builds INSTEAD of the service's own
+/// Dockerfile when the configuration declares Features.
+///
+/// It is the author's Dockerfile with a Feature-install stage appended, written
+/// outside the workspace and named by absolute path — so Compose keeps resolving
+/// the service's own `context`, `args`, `labels` and everything else the author
+/// wrote, and only the document being built changes. That is the reference CLI's
+/// own shape (its `Dockerfile-with-features` arrives the same way), and it is why
+/// its `build.args` were never at risk of being dropped ([#629]).
+///
+/// [#629]: https://github.com/get2knowio/deacon/issues/629
+#[derive(Debug, Clone)]
+pub struct FeatureBuildLayer<'a> {
+    /// Absolute path to the merged base + Feature Dockerfile. Outside the build
+    /// context on purpose; BuildKit reads it from the client either way.
+    pub dockerfile: &'a Path,
+    /// The stage the Feature layer ends at. Named explicitly because the author
+    /// may have declared a `build.target` of their own, which would otherwise stop
+    /// the build before the Features are installed.
+    pub target: &'a str,
+    /// `name=path` build contexts the install stage's `RUN --mount`s resolve
+    /// against, as `(name, path)` pairs.
+    pub additional_contexts: &'a [(String, String)],
+    /// Cache sources/destination for this build. They ride the document because
+    /// `docker compose build` has no `--cache-from` / `--cache-to` flag.
+    pub cache_from: &'a [String],
+    /// See [`Self::cache_from`].
+    pub cache_to: Option<&'a str>,
+    /// Target platform, for the same reason.
+    pub platform: Option<&'a str>,
+}
+
 /// What `deacon build` layers over a Compose project so the produced image carries
 /// what the reference's does.
 #[derive(Debug, Clone)]
@@ -683,6 +716,8 @@ pub struct ComposeBuildOverlay<'a> {
     pub metadata_label: Option<&'a str>,
     /// Set only for an `image:`-shaped service; see [`SynthesizedServiceBuild`].
     pub synthesized_build: Option<SynthesizedServiceBuild<'a>>,
+    /// Set when the configuration declares Features; see [`FeatureBuildLayer`].
+    pub feature_layer: Option<FeatureBuildLayer<'a>>,
 }
 
 impl ComposeBuildOverlay<'_> {
@@ -691,7 +726,10 @@ impl ComposeBuildOverlay<'_> {
     /// pipe an empty override.
     #[must_use = "the rendered override should be passed to compose build"]
     pub fn to_yaml(&self) -> Option<String> {
-        if self.metadata_label.is_none() && self.synthesized_build.is_none() {
+        if self.metadata_label.is_none()
+            && self.synthesized_build.is_none()
+            && self.feature_layer.is_none()
+        {
             return None;
         }
 
@@ -717,6 +755,39 @@ impl ComposeBuildOverlay<'_> {
                 "      dockerfile: {}\n",
                 escape_compose_value(synth.dockerfile)
             ));
+        }
+        if let Some(layer) = &self.feature_layer {
+            yaml.push_str(&format!(
+                "      dockerfile: {}\n",
+                escape_compose_value(&layer.dockerfile.display().to_string())
+            ));
+            yaml.push_str(&format!(
+                "      target: {}\n",
+                escape_compose_value(layer.target)
+            ));
+            if !layer.additional_contexts.is_empty() {
+                yaml.push_str("      additional_contexts:\n");
+                for (name, path) in layer.additional_contexts {
+                    yaml.push_str(&format!(
+                        "        - {}\n",
+                        escape_compose_value(&format!("{}={}", name, path))
+                    ));
+                }
+            }
+            if !layer.cache_from.is_empty() {
+                yaml.push_str("      cache_from:\n");
+                for source in layer.cache_from {
+                    yaml.push_str(&format!("        - {}\n", escape_compose_value(source)));
+                }
+            }
+            if let Some(cache_to) = layer.cache_to {
+                yaml.push_str("      cache_to:\n");
+                yaml.push_str(&format!("        - {}\n", escape_compose_value(cache_to)));
+            }
+            if let Some(platform) = layer.platform {
+                yaml.push_str("      platforms:\n");
+                yaml.push_str(&format!("        - {}\n", escape_compose_value(platform)));
+            }
         }
         if let Some(label) = self.metadata_label {
             yaml.push_str("      labels:\n");
@@ -932,6 +1003,12 @@ pub struct ServiceBuildSection {
     pub context: Option<String>,
     pub dockerfile: Option<String>,
     pub target: Option<String>,
+    /// The service's `build.args`. Compose applies them itself, so nothing has to
+    /// forward them — they are read so that a `FROM $ARG` or `USER $ARG` in the
+    /// Dockerfile resolves against the values the build will really use. An entry
+    /// with no value declares a passthrough from the environment and carries
+    /// nothing to substitute, so it is not recorded.
+    pub args: BTreeMap<String, String>,
 }
 
 /// A service's build-relevant declarations, WITHOUT the `image:`-wins collapse
@@ -1007,6 +1084,15 @@ fn parse_service_build_plan(
                 .and_then(|v| v.as_str())
                 .map(String::from),
             target: obj.get("target").and_then(|v| v.as_str()).map(String::from),
+            args: obj
+                .get("args")
+                .and_then(|v| v.as_object())
+                .map(|args| {
+                    args.iter()
+                        .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default(),
         }),
         _ => None,
     };
@@ -1455,7 +1541,7 @@ impl ComposeManager {
         service: &str,
         sink: Option<&dyn crate::docker_retry::BuildLineSink>,
     ) -> Result<String> {
-        self.build_service_with_override(project, service, None, sink)
+        self.build_service_with_override(project, service, None, &[], sink)
             .await
     }
 
@@ -1470,13 +1556,19 @@ impl ComposeManager {
     /// Overriding rather than replacing is deliberate, and is the reference CLI's
     /// own shape: Compose still resolves the service, so its `build.context`,
     /// `build.args` and everything else the author wrote keep applying, and only
-    /// the keys the overlay names are added.
+    /// the keys the overlay names are added. That is also what puts the
+    /// Feature-installing build on this path (#629) — enumerating the author's
+    /// keys is what dropped them.
+    ///
+    /// `extra_args` are flags for `docker compose build` itself (`--no-cache`,
+    /// `--builder`), for the settings that have no place in the document.
     #[instrument(skip(self, sink, override_yaml))]
     pub async fn build_service_with_override(
         &self,
         project: &ComposeProject,
         service: &str,
         override_yaml: Option<&str>,
+        extra_args: &[String],
         sink: Option<&dyn crate::docker_retry::BuildLineSink>,
     ) -> Result<String> {
         let command = self.get_command(project);
@@ -1488,8 +1580,11 @@ impl ComposeManager {
             override_yaml.is_some()
         );
 
+        let mut args: Vec<&str> = vec!["build"];
+        args.extend(extra_args.iter().map(String::as_str));
+        args.push(service);
         let output = command
-            .execute_streamed_with_stdin(&["build", service], sink, override_yaml)
+            .execute_streamed_with_stdin(&args, sink, override_yaml)
             .await?;
 
         debug!(
@@ -4519,6 +4614,7 @@ mod tests {
                 context: Some("..".to_string()),
                 dockerfile: Some("Dockerfile.dev".to_string()),
                 target: Some("runtime".to_string()),
+                args: BTreeMap::new(),
             })
         );
         // And Compose tags such a build with the authored name, not its default.
@@ -4538,6 +4634,7 @@ mod tests {
                 context: Some(".".to_string()),
                 dockerfile: None,
                 target: None,
+                args: BTreeMap::new(),
             })
         );
         assert_eq!(plan.built_image_name("proj", "dev"), "proj-dev");
@@ -4567,6 +4664,7 @@ mod tests {
                 context_dir: &dir,
                 dockerfile: "Dockerfile",
             }),
+            feature_layer: None,
         };
         // Rendered whole rather than probed for substrings: indentation is what
         // makes `image:` a sibling of `build:` and `labels:` a child of it, and a
@@ -4597,6 +4695,7 @@ mod tests {
             service: "app",
             metadata_label: Some(r#"[{"remoteUser":"root"}]"#),
             synthesized_build: None,
+            feature_layer: None,
         };
         // Pinned WHOLE for the same reason: what this test is about is the keys
         // that are ABSENT, and no `contains` assertion can check for those.
@@ -4612,6 +4711,109 @@ mod tests {
         );
     }
 
+    /// #629: with Features, the overlay names the document to build, the stage to
+    /// stop at and the contexts the install mounts resolve against — and STILL
+    /// nothing else. No `context`, no `args`, no `image`: the service's own keys
+    /// have to keep applying, which is the whole reason this build goes through
+    /// Compose instead of a direct `docker buildx build`.
+    #[test]
+    fn build_overlay_names_the_feature_document_and_nothing_the_author_wrote() {
+        let dockerfile = PathBuf::from("/tmp/deacon-features-abc/Dockerfile.extended");
+        let contexts = vec![(
+            "dev_containers_feature_content_source".to_string(),
+            "/tmp/deacon-features-abc/src".to_string(),
+        )];
+        let overlay = ComposeBuildOverlay {
+            service: "app",
+            metadata_label: Some(r#"[{"id":"./feat"}]"#),
+            synthesized_build: None,
+            feature_layer: Some(FeatureBuildLayer {
+                dockerfile: &dockerfile,
+                target: "dev_containers_target_stage",
+                additional_contexts: &contexts,
+                cache_from: &[],
+                cache_to: None,
+                platform: None,
+            }),
+        };
+        // Pinned WHOLE: the keys that are ABSENT are what this test is about, and
+        // the indentation is what makes `target` a child of `build:` rather than
+        // a sibling of it.
+        assert_eq!(
+            overlay.to_yaml().expect("overlay says something"),
+            concat!(
+                "services:\n",
+                "  app:\n",
+                "    build:\n",
+                "      dockerfile: \"/tmp/deacon-features-abc/Dockerfile.extended\"\n",
+                "      target: \"dev_containers_target_stage\"\n",
+                "      additional_contexts:\n",
+                "        - \"dev_containers_feature_content_source=/tmp/deacon-features-abc/src\"\n",
+                "      labels:\n",
+                "        devcontainer.metadata: \"[{\\\"id\\\":\\\"./feat\\\"}]\"\n",
+            )
+        );
+    }
+
+    /// The cache and platform settings ride the document because `docker compose
+    /// build` has no flag for them — dropping them would silently disable
+    /// `--cache-from` / `--cache-to` / `--platform` on this path alone.
+    #[test]
+    fn build_overlay_carries_cache_and_platform_settings() {
+        let dockerfile = PathBuf::from("/tmp/df");
+        let overlay = ComposeBuildOverlay {
+            service: "app",
+            metadata_label: None,
+            synthesized_build: None,
+            feature_layer: Some(FeatureBuildLayer {
+                dockerfile: &dockerfile,
+                target: "stage",
+                additional_contexts: &[],
+                cache_from: &["type=registry,ref=example/cache".to_string()],
+                cache_to: Some("type=inline"),
+                platform: Some("linux/arm64"),
+            }),
+        };
+        assert_eq!(
+            overlay.to_yaml().expect("overlay says something"),
+            concat!(
+                "services:\n",
+                "  app:\n",
+                "    build:\n",
+                "      dockerfile: \"/tmp/df\"\n",
+                "      target: \"stage\"\n",
+                "      cache_from:\n",
+                "        - \"type=registry,ref=example/cache\"\n",
+                "      cache_to:\n",
+                "        - \"type=inline\"\n",
+                "      platforms:\n",
+                "        - \"linux/arm64\"\n",
+            )
+        );
+    }
+
+    /// A service's `build.args` are read (never forwarded — Compose applies them
+    /// itself) so that a `FROM $ARG` resolves against what the build will really
+    /// use. An arg with no value is a passthrough from the environment and carries
+    /// nothing to substitute.
+    #[test]
+    fn build_plan_reads_the_services_build_args() {
+        let cfg = r#"{ "services": { "dev": { "build": {
+            "context": ".", "args": { "MARKER": "from-compose", "FROM_ENV": null }
+        } } } }"#;
+        let plan = parse_service_build_plan(cfg, "dev").unwrap().unwrap();
+        let build = plan.build.expect("build section");
+        assert_eq!(
+            build.args.get("MARKER").map(String::as_str),
+            Some("from-compose")
+        );
+        assert!(
+            !build.args.contains_key("FROM_ENV"),
+            "a valueless arg carries nothing to substitute; got {:?}",
+            build.args
+        );
+    }
+
     /// An overlay with nothing to say renders nothing, so the caller runs the
     /// plain build instead of piping an empty document at Compose.
     #[test]
@@ -4620,6 +4822,7 @@ mod tests {
             service: "app",
             metadata_label: None,
             synthesized_build: None,
+            feature_layer: None,
         };
         assert!(overlay.to_yaml().is_none());
     }
@@ -4634,6 +4837,7 @@ mod tests {
             service: "app",
             metadata_label: Some(r#"[{"mounts":["source=${localWorkspaceFolder}/sib"]}]"#),
             synthesized_build: None,
+            feature_layer: None,
         };
         let yaml = overlay.to_yaml().expect("overlay says something");
         assert!(
