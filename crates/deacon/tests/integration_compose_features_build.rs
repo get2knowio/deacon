@@ -608,3 +608,147 @@ fn build_compose_without_features_tags_every_image_name() {
         String::from_utf8_lossy(&run.stderr)
     );
 }
+
+/// #628: `deacon build` on a compose config with **no** Features must produce an
+/// image carrying `devcontainer.metadata`, exactly as the reference CLI's does —
+/// and must not lose anything the compose author declared in getting there.
+///
+/// The two halves belong in ONE test because they are the same decision. A label
+/// cannot be added by retagging, and stamping one afterwards would mean a second
+/// build `FROM` a daemon-local tag, which #595 forbids; so the label has to be an
+/// INPUT to the build. The way that stays safe is to OVERRIDE the compose build
+/// rather than replace it — Compose still resolves the service, so `build.args`
+/// keep applying. Replacing it would satisfy the label assertion alone while
+/// silently dropping every build arg, which is measurably what deacon's
+/// compose-WITH-Features path does today (filed separately).
+///
+/// Artifact-level on purpose: the JSON `outcome` was `success` throughout the
+/// window in which no label existed at all.
+#[test]
+fn build_compose_without_features_labels_the_image_and_keeps_build_args() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping build_compose_without_features_labels_the_image_and_keeps_build_args: \
+             Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().expect("tempdir");
+    let workspace = temp_dir.path();
+
+    // A `build:`-shape service whose Dockerfile can only produce the right marker
+    // if the compose file's own `build.args` reach it.
+    fs::write(
+        workspace.join("Dockerfile"),
+        "FROM alpine:3.19\nARG MARKER=arg-was-dropped\nRUN echo \"$MARKER\" > /arg-marker.txt\n\
+         CMD [\"sleep\", \"infinity\"]\n",
+    )
+    .expect("write Dockerfile");
+    fs::write(
+        workspace.join("docker-compose.yml"),
+        concat!(
+            "services:\n",
+            "  app:\n",
+            "    build:\n",
+            "      context: .\n",
+            "      dockerfile: Dockerfile\n",
+            "      args:\n",
+            "        MARKER: arg-reached-the-build\n",
+            "    command: [\"sleep\", \"infinity\"]\n",
+        ),
+    )
+    .expect("write compose");
+
+    let dc_dir = workspace.join(".devcontainer");
+    fs::create_dir_all(&dc_dir).expect("create .devcontainer");
+    // `dockerComposeFile` is config-dir-relative, so the workspace-root compose
+    // file is reached with `../` (see the siblings above). `remoteUser` and
+    // `shutdownAction` are the entries the label must record.
+    fs::write(
+        dc_dir.join("devcontainer.json"),
+        r#"{
+  "name": "build-compose-metadata-label",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "root"
+}"#,
+    )
+    .expect("write devcontainer.json");
+
+    let tag = "deacon-test/compose-metadata-label:v1";
+    let _ = StdCommand::new("docker").args(["rmi", "-f", tag]).output();
+
+    let out = support::deacon_command()
+        .current_dir(workspace)
+        .args([
+            "build",
+            "--workspace-folder",
+            workspace.to_str().unwrap(),
+            "--image-name",
+            tag,
+            "--output-format",
+            "json",
+        ])
+        .env("DEACON_LOG", "warn")
+        .output()
+        .expect("spawn deacon build");
+
+    // Docker availability is gated above, so any failure here is a real one.
+    assert!(
+        out.status.success(),
+        "deacon build (compose, no features) failed:\nSTDOUT:\n{}\nSTDERR:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Collect everything to assert BEFORE tearing down, so cleanup always runs.
+    let label = StdCommand::new("docker")
+        .args([
+            "image",
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"devcontainer.metadata\"}}",
+            tag,
+        ])
+        .output()
+        .expect("docker image inspect");
+    let label = String::from_utf8_lossy(&label.stdout).trim().to_string();
+
+    let run = StdCommand::new("docker")
+        .args(["run", "--rm", tag, "cat", "/arg-marker.txt"])
+        .output()
+        .expect("docker run");
+    let marker = String::from_utf8_lossy(&run.stdout).to_string();
+
+    // `RepoTags` names the compose-produced image too, so the project image is
+    // reclaimed alongside the tag rather than left on the daemon.
+    let repo_tags = StdCommand::new("docker")
+        .args(["image", "inspect", "--format", "{{json .RepoTags}}", tag])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| serde_json::from_slice::<Vec<String>>(&o.stdout).ok())
+        .unwrap_or_else(|| vec![tag.to_string()]);
+    let mut rmi = vec!["rmi".to_string(), "-f".to_string()];
+    rmi.extend(repo_tags);
+    let _ = StdCommand::new("docker").args(&rmi).output();
+
+    // Pinned WHOLE and by value, not by presence: the entries are ordered and a
+    // presence check would pass on a label recording the wrong configuration.
+    // Measured against the reference CLI at oracle 0.87.0 on this shape, which
+    // writes the same document (modulo the cosmetic spaces it pads arrays with).
+    assert_eq!(
+        label, r#"[{"remoteUser":"root","shutdownAction":"stopCompose"}]"#,
+        "the compose-produced image must carry devcontainer.metadata; \
+         got {label:?}"
+    );
+    assert!(
+        marker.contains("arg-reached-the-build"),
+        "the compose service's own build.args must still reach the build; \
+         `cat /arg-marker.txt` gave stdout={:?} stderr={:?}",
+        marker,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}

@@ -218,7 +218,7 @@
           "channel": "chan-stdout",
           "operation": "op-build",
           "assertion": {
-            "matches": "\"imageName\"\\s*:\\s*\\[\\s*\"alpine:3\\.19\"\\s*\\]"
+            "matches": "\"imageName\"\\s*:\\s*\\[\\s*\"deacon-build:[0-9a-f]{12}\"\\s*\\]"
           }
         }
       ],
@@ -229,7 +229,74 @@
         "volumes": true,
         "tempdir": true
       },
-      "notes": "Covers the high-risk triple `hrt-build-compose-no-features-structured`. Building a Compose configuration has to resolve the SERVICE's shape rather than the top-level one, and `outcome` alone would not show it — a build of the wrong thing succeeds too. Spec-expectation rather than differential because the structured rendering is reached by a flag the two CLIs spell differently, and the runner sends one argv to both sides. RE-PINNED with the #619 fix (2026-08-22), and deliberately not by moving the fixture. This fixture's service is `image:`-shaped (`image: alpine:3.19`, no `build:`), so Compose builds NOTHING for it, and the name this case used to pin — Compose's `<project>-app` default — named an image that never existed on the daemon (measured: after a no-`--image-name` build, no `*-app` image is present). The regex matched a fiction, which is the same class of defect #619 is about. `execute_compose_build` now reports the reference CLI's own fallback order, `overrideImageName || service.image || <project>-<service>`; with `image:` authored that resolves to `alpine:3.19`, which exists and which `--image-name` can actually be tagged from (measured: two names, both created, both at alpine:3.19's id — where the old `<project>-app` source would have failed `docker tag` with 'No such image'). The pin is STRONGER than the one it replaces, not weaker: nothing but a read of THIS SERVICE's entry in the resolved `docker compose config` can produce `alpine:3.19` — the devcontainer.json declares no `image` of its own — where `-app` only showed the service NAME had been used. The whole one-element array is pinned so an extra leaked tag would fail too. What deacon still does NOT do, and what this case therefore does not assert: the reference reaches `overrideImageName` on this shape, because it ALWAYS runs its extended Compose build (measured at 0.87.0 on this fixture: it reports and creates `vsc-<workspace>-<hash>`, a distinct image from `alpine:3.19`) — that extended build is also where its `devcontainer.metadata` label comes from, and it is the deferred gap the #619 ledger row names."
+      "notes": "Covers the high-risk triple `hrt-build-compose-no-features-structured`. Building a Compose configuration has to resolve the SERVICE's shape rather than the top-level one, and `outcome` alone would not show it — a build of the wrong thing succeeds too. Spec-expectation rather than differential because the structured rendering is reached by a flag the two CLIs spell differently, and the runner sends one argv to both sides. RE-PINNED with the #619 fix (2026-08-22), and deliberately not by moving the fixture. This fixture's service is `image:`-shaped (`image: alpine:3.19`, no `build:`), so Compose builds NOTHING for it, and the name this case used to pin — Compose's `<project>-app` default — named an image that never existed on the daemon (measured: after a no-`--image-name` build, no `*-app` image is present). The regex matched a fiction, which is the same class of defect #619 is about. `execute_compose_build` now reports the reference CLI's own fallback order, `overrideImageName || service.image || <project>-<service>`; with `image:` authored that resolves to `alpine:3.19`, which exists and which `--image-name` can actually be tagged from (measured: two names, both created, both at alpine:3.19's id — where the old `<project>-app` source would have failed `docker tag` with 'No such image'). The pin is STRONGER than the one it replaces, not weaker: nothing but a read of THIS SERVICE's entry in the resolved `docker compose config` can produce `alpine:3.19` — the devcontainer.json declares no `image` of its own — where `-app` only showed the service NAME had been used. The whole one-element array is pinned so an extra leaked tag would fail too. What deacon still does NOT do, and what this case therefore does not assert: the reference reaches `overrideImageName` on this shape, because it ALWAYS runs its extended Compose build (measured at 0.87.0 on this fixture: it reports and creates `vsc-<workspace>-<hash>`, a distinct image from `alpine:3.19`) — that extended build is also where its `devcontainer.metadata` label comes from, and it is the deferred gap the #619 ledger row names. RE-PINNED AGAIN with the #628 fix (2026-08-22), which closed exactly that deferred gap, and the move is the point rather than a cost: deacon now reaches the FIRST term of the same chain. An `image:`-only service builds nothing, so deacon synthesizes the build the label has to ride — a one-`FROM` Dockerfile over the service's own image — and names its result, which is what `overrideImageName` is. The reported name is therefore no longer the pulled base but deacon's own `deacon-build:<hash>`, the same deterministic tag its Compose-WITH-Features sibling and every non-Compose shape report; the reference reports its equivalent `vsc-<workspace>-<hash>`. Both halves of the name are pinned — the literal prefix and a 12-hex-digit hash — so a build that reported the base image, an `--image-name` echo, or an untagged id would all fail. What this case asserts is unchanged in KIND (a `build` over a Compose configuration resolves the SERVICE and reports what it actually produced); what changed is that there is now a produced image to name. The label that build carries is asserted by `case-build-compose-metadata-label-no-features` over this same fixture, deliberately apart: this case is about the reported name, that one about the artifact."
+    },
+    {
+      "id": "case-build-compose-metadata-label-no-features",
+      "behaviors": [
+        "bhv-build-image-metadata-label"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-compose"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "devcontainer.metadata": "[{\"remoteUser\":\"root\",\"shutdownAction\":\"stopCompose\"}]"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Fixes #628, and the Features-free counterpart of `case-build-compose-metadata-label` above: that one covers a Compose config that DECLARES Features, which is what forced a Feature-extended build for the label to ride. With no Features there was no such build, and deacon's Compose image carried no `devcontainer.metadata` at all — where the reference's does, because it ALWAYS runs its extended Compose build. Measured at oracle 0.87.0 on this fixture: the reference reports and creates `vsc-<workspace>-<hash>` carrying `[ {\"remoteUser\":\"root\",\"shutdownAction\":\"stopCompose\"} ]`; deacon reported `alpine:3.19` — the PULLED BASE — carrying no such label. Exit 0 and `outcome: success` on both sides throughout, which is why the image channel is the whole observation. Same fixture as `case-build-compose-service-shape` on purpose: one case pins the name the build reports, this one pins what the artifact carries, and neither can stand in for the other — the defect was invisible in the reported name until the fix changed it, and a name alone never showed the label. The label is pinned WHOLE and by value, matching the sibling's reasoning: the entries are ordered (the base image's own, then each Feature, then the config pick), a presence check would pass on a label recording the wrong configuration, and `alpine:3.19` contributes none of its own so the config pick is the entire document. The reference pads its arrays with cosmetic spaces (`[ {…} ]`) that deacon does not; the DOCUMENT is identical, and no channel compares the two renderings, both CLIs being asserted against the spec expectation rather than against each other here. `source: image` because a `build` leaves no container. `--image-name` is passed so the assertion has a stable handle on the produced image, which is otherwise named by a hash."
     },
     {
       "id": "case-build-dockerfile-feature-differential",

@@ -981,6 +981,7 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
         } else {
             execute_compose_build(
                 &config,
+                &load_result.raw_config,
                 &args,
                 &workspace_folder,
                 &config_path,
@@ -1647,17 +1648,37 @@ fn should_use_buildkit(buildkit_option: Option<&BuildKitOption>) -> bool {
     }
 }
 
-/// Execute Compose build
-#[instrument(skip(config, args, workspace_folder, labels))]
+/// Execute a Compose build for a configuration that declares no Features.
+///
+/// Compose drives the build, and deacon layers ONE inline override over the
+/// project's own files (#628) — the reference CLI's own shape. Two things ride
+/// that override, both of which have to be inputs to the build rather than
+/// operations on its output:
+///
+/// - `build.labels: {devcontainer.metadata: …}`, because a label cannot be added
+///   by retagging and a second build `FROM` a daemon-local tag is what #595
+///   forbids;
+/// - for a service that declares only an `image:` — which Compose builds nothing
+///   for — a synthesized one-`FROM` build plus the `image:` naming its result, so
+///   there IS a build for the label to ride.
+///
+/// Overriding rather than replacing is the whole point: `build.context`,
+/// `build.args`, `build.target` and everything else the author wrote keep applying,
+/// because Compose still resolves the service.
+// `config` is the substituted configuration the build reads; `raw_config` is the
+// same document as authored, which is what travels with the image (#373).
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip(config, raw_config, args, workspace_folder, labels))]
 async fn execute_compose_build(
     config: &DevContainerConfig,
+    raw_config: &DevContainerConfig,
     args: &BuildArgs,
     workspace_folder: &Path,
     config_path: &Path,
     labels: &[(String, String)],
     config_hash: &str,
 ) -> Result<BuildResult> {
-    use deacon_core::compose::ComposeManager;
+    use deacon_core::compose::{ComposeBuildOverlay, ComposeManager, SynthesizedServiceBuild};
     use std::time::Instant;
 
     let service = config
@@ -1695,6 +1716,67 @@ async fn execute_compose_build(
         ));
     }
 
+    // Read the service's `image:` / `build:` declarations UNCOLLAPSED: whether
+    // Compose builds anything decides both what has to be synthesized and what the
+    // produced image is called, and `ServiceShape` folds a service declaring both
+    // into its image side.
+    let plan = compose_manager
+        .get_command(&project)
+        .extract_service_build_plan(service)
+        .await?
+        .ok_or_else(|| {
+            anyhow!(
+                "Service '{}' not found in resolved Docker Compose configuration",
+                service
+            )
+        })?;
+
+    // `devcontainer.metadata` for the produced image, computed BEFORE the build
+    // from the base image the service resolves to — knowable in advance, which is
+    // what lets it ride this invocation instead of a second one (#595). No
+    // Features are declared on this path, so the entries are the base image's own
+    // plus the config pick.
+    let docker = deacon_core::docker::CliDocker::new();
+    let base_image = resolve_compose_base_image(&plan, &project, config_path).await;
+    let metadata_label = compose_metadata_label(&docker, base_image.as_deref(), raw_config).await;
+
+    // A service with no `build:` builds nothing, so there is nothing for the label
+    // to ride and nothing but the pulled base to report. Supply both halves, as
+    // the reference does.
+    let short_hash = &config_hash[..12.min(config_hash.len())];
+    // Outside the workspace, like the single-container path's own temp context:
+    // the workspace may be read-only, and it is not deacon's to write into.
+    let synth_dir = TempDirGuard::new(
+        std::env::temp_dir().join(format!("deacon-compose-build-{}", short_hash)),
+    );
+    let deterministic_tag = format!("deacon-build:{}", short_hash);
+    let synthesized = match (&plan.build, &plan.image) {
+        (None, Some(image)) => {
+            tokio::fs::create_dir_all(&synth_dir.path).await?;
+            tokio::fs::write(
+                synth_dir.path.join("Dockerfile"),
+                format!("FROM {}\n", image).as_bytes(),
+            )
+            .await?;
+            Some(SynthesizedServiceBuild {
+                image_name: &deterministic_tag,
+                context_dir: &synth_dir.path,
+                dockerfile: "Dockerfile",
+            })
+        }
+        _ => None,
+    };
+
+    let overlay = ComposeBuildOverlay {
+        service,
+        metadata_label: metadata_label.as_deref(),
+        synthesized_build: synthesized,
+    };
+    let override_yaml = overlay.to_yaml();
+    if let Some(yaml) = &override_yaml {
+        debug!("Compose build override:\n{}", yaml);
+    }
+
     // Build the service, rendering its BuildKit output per the resolved mode.
     // This is the base compose-service build (no feature-install steps — feature
     // layering renders separately), so there are no feature ids to register.
@@ -1707,7 +1789,9 @@ async fn execute_compose_build(
     let sink = renderer
         .as_ref()
         .map(|r| r as &dyn deacon_core::docker_retry::BuildLineSink);
-    let build_result = compose_manager.build_service(&project, service, sink).await;
+    let build_result = compose_manager
+        .build_service_with_override(&project, service, override_yaml.as_deref(), sink)
+        .await;
     if let Some(r) = &renderer {
         r.finish(build_result.is_ok());
     }
@@ -1717,20 +1801,21 @@ async fn execute_compose_build(
 
     info!("Docker Compose service built successfully: {}", service);
 
-    // Resolve the reference Compose actually tagged the build result with — the
-    // service's own `image:` when authored, else Compose's `<project>-<service>`
-    // default — and hang every `--image-name` off it (#619).
-    //
-    // Nothing else creates those tags on this path: the Compose-WITH-Features
-    // sibling gets them from `retag_image` after the Feature build, and a
-    // Features-free config never reaches that build. Before this, `--image-name`
-    // was reported but never created, and the leading entry of `tags` was one of
-    // the user's names, which `output_result` then stripped as if it were the
-    // deterministic tag. `tags[0]` is now the produced image, matching the
+    // The reference Compose actually tagged the build result with, and every
+    // `--image-name` hung off it (#619). Nothing else creates those tags on this
+    // path: the Compose-WITH-Features sibling gets them from `retag_image` after
+    // the Feature build. `tags[0]` is the produced image, matching the
     // deterministic-tag-first shape every other build path uses.
-    let built_image = compose_manager
-        .resolve_service_image_name(&project, service)
-        .await?;
+    //
+    // Which reference that is follows the overlay: the name deacon just told
+    // Compose to build as when it synthesized the build, and otherwise the
+    // reference the service itself resolves to — `overrideImageName ||
+    // service.image || <project>-<service>`, the reference CLI's own order.
+    let built_image = if overlay.synthesized_build.is_some() {
+        deterministic_tag.clone()
+    } else {
+        plan.built_image_name(&project.name, service)
+    };
     for image_name in &args.image_names {
         retag_image(&built_image, image_name).await?;
     }
@@ -1741,6 +1826,9 @@ async fn execute_compose_build(
     let mut metadata = HashMap::new();
     for (key, value) in labels {
         metadata.insert(key.clone(), value.clone());
+    }
+    if let Some(label) = &metadata_label {
+        metadata.insert("devcontainer.metadata".to_string(), label.clone());
     }
 
     Ok(BuildResult {
@@ -1756,6 +1844,96 @@ async fn execute_compose_build(
         injected_ca_subjects: Vec::new(),
         config_hash: config_hash.to_string(),
     })
+}
+
+/// The image a Compose service's build ultimately descends from, so the
+/// `devcontainer.metadata` deacon writes can inherit the entries that base
+/// already carries.
+///
+/// `image:`-only services resolve to that image. A `build:` service resolves
+/// through its Dockerfile the same way the single-container path does
+/// (`resolve_base_image`, the reference's `findBaseImage`). Returns `None` when
+/// the Dockerfile cannot be read or names no resolvable base — the label is then
+/// built from the configuration alone, which is strictly better than failing a
+/// build over a diagnostic detail.
+async fn resolve_compose_base_image(
+    plan: &deacon_core::compose::ServiceBuildPlan,
+    project: &deacon_core::compose::ComposeProject,
+    config_path: &Path,
+) -> Option<String> {
+    let Some(build) = &plan.build else {
+        return plan.image.clone();
+    };
+
+    // Compose resolves `build.context` and `build.dockerfile` relative to the
+    // compose file's directory, NOT the workspace — the same rule
+    // `resolve_compose_feature_image`'s `build:` arm follows.
+    let compose_dir = project
+        .compose_files
+        .first()
+        .and_then(|p| p.parent())
+        .map(Path::to_path_buf)
+        .or_else(|| config_path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| project.base_path.clone());
+    let context = build.context.as_deref().unwrap_or(".");
+    let context_path = if Path::new(context).is_absolute() {
+        PathBuf::from(context)
+    } else {
+        compose_dir.join(context)
+    };
+    let dockerfile = build.dockerfile.as_deref().unwrap_or("Dockerfile");
+    let dockerfile_path = if Path::new(dockerfile).is_absolute() {
+        PathBuf::from(dockerfile)
+    } else {
+        context_path.join(dockerfile)
+    };
+
+    match tokio::fs::read_to_string(&dockerfile_path).await {
+        Ok(content) => deacon_core::dockerfile_utils::resolve_base_image(
+            &content,
+            &HashMap::new(),
+            build.target.as_deref(),
+        ),
+        Err(e) => {
+            debug!(
+                "Could not read '{}' to resolve the Compose service's base image ({}); \
+                 devcontainer.metadata will carry the configuration's entries only",
+                dockerfile_path.display(),
+                e
+            );
+            None
+        }
+    }
+}
+
+/// Serialize the `devcontainer.metadata` a Features-free Compose build should
+/// write, or `None` when there is nothing to record — the reference writes no
+/// label at all in that case.
+async fn compose_metadata_label(
+    docker: &deacon_core::docker::CliDocker,
+    base_image: Option<&str>,
+    raw_config: &DevContainerConfig,
+) -> Option<String> {
+    let entries = crate::commands::up::merged_config::container_metadata_entries(
+        docker,
+        base_image,
+        raw_config,
+        // No Features on this path, by construction: the caller routes a config
+        // that declares any to `execute_compose_build_with_features`.
+        &[],
+    )
+    .await;
+    if entries.is_empty() {
+        debug!("No devcontainer.metadata entries to record for the Compose build");
+        return None;
+    }
+    match serde_json::to_string(&serde_json::Value::Array(entries)) {
+        Ok(json) => Some(json),
+        Err(e) => {
+            warn!(error = %e, "Failed to serialize devcontainer.metadata; leaving the label unset");
+            None
+        }
+    }
 }
 
 /// Execute a Compose build that also installs declared features.

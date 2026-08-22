@@ -152,12 +152,33 @@ impl ComposeCommand {
     /// Returns a `tokio::process::Command` for async-safe process spawning.
     /// For test inspection (e.g., `get_args()`), use `.as_std().get_args()`.
     pub fn build_command(&self, args: &[&str]) -> tokio::process::Command {
+        self.build_command_maybe_stdin(args, false)
+    }
+
+    /// The one place a `docker compose` argv is assembled.
+    ///
+    /// `with_stdin` inserts `-f -` after the project's own compose files so an
+    /// inline override read from stdin layers LAST (compose merges files in the
+    /// order they are given). Both the buffered [`Self::execute_with_stdin`] and
+    /// the streaming [`Self::execute_streamed_with_stdin`] route through here so
+    /// the two cannot drift — they did, before: the stdin variant carried its own
+    /// transcribed copy of every flag.
+    fn build_command_maybe_stdin(
+        &self,
+        args: &[&str],
+        with_stdin: bool,
+    ) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(&self.docker_path);
         command.arg("compose");
 
         // Add compose files
         for file in &self.compose_files {
             command.arg("-f").arg(file);
+        }
+
+        // Inline override from stdin, layered after the project's own files.
+        if with_stdin {
+            command.arg("-f").arg("-");
         }
 
         // Add environment files
@@ -209,46 +230,7 @@ impl ComposeCommand {
         use std::process::Stdio;
         use tokio::io::AsyncWriteExt;
 
-        let mut command = self.build_command(args);
-
-        // Add stdin file source if we have input
-        if stdin_input.is_some() {
-            // Insert -f - before the subcommand args to read from stdin
-            // Note: We need to rebuild command to insert at the right position
-            let mut new_command = tokio::process::Command::new(&self.docker_path);
-            new_command.arg("compose");
-
-            // Add compose files
-            for file in &self.compose_files {
-                new_command.arg("-f").arg(file);
-            }
-
-            // Add stdin as additional compose file
-            new_command.arg("-f").arg("-");
-
-            // Add environment files
-            for file in &self.env_files {
-                new_command.arg("--env-file").arg(file);
-            }
-
-            // Add project name if specified
-            if let Some(ref project_name) = self.project_name {
-                new_command.arg("-p").arg(project_name);
-            }
-
-            // Add profiles if specified
-            for profile in &self.profiles {
-                new_command.arg("--profile").arg(profile);
-            }
-
-            // Add arguments
-            new_command.args(args);
-
-            // Set working directory
-            new_command.current_dir(&self.base_path);
-
-            command = new_command;
-        }
+        let mut command = self.build_command_maybe_stdin(args, stdin_input.is_some());
 
         debug!(
             "Executing docker compose command: {} compose {} {} {}",
@@ -320,19 +302,52 @@ impl ComposeCommand {
         args: &[&str],
         sink: Option<&dyn crate::docker_retry::BuildLineSink>,
     ) -> Result<String> {
+        self.execute_streamed_with_stdin(args, sink, None).await
+    }
+
+    /// [`Self::execute_streamed`] plus the inline compose override
+    /// [`Self::execute_with_stdin`] accepts.
+    ///
+    /// `deacon build` needs both halves at once: the override carries the
+    /// `devcontainer.metadata` label the produced image must be built with, and
+    /// the sink renders BuildKit's progress like every other build path. Writing
+    /// stdin before draining the child's pipes is safe because the override is a
+    /// few hundred bytes — far inside a pipe buffer — and stdin is dropped to
+    /// signal EOF immediately after, which is what lets compose start reading its
+    /// files at all.
+    #[instrument(skip(self, sink, stdin_input))]
+    pub async fn execute_streamed_with_stdin(
+        &self,
+        args: &[&str],
+        sink: Option<&dyn crate::docker_retry::BuildLineSink>,
+        stdin_input: Option<&str>,
+    ) -> Result<String> {
         use std::process::Stdio;
+        use tokio::io::AsyncWriteExt;
 
         if let Some(sink) = sink {
             sink.reset();
         }
 
-        let mut command = self.build_command(args);
+        let mut command = self.build_command_maybe_stdin(args, stdin_input.is_some());
+        if stdin_input.is_some() {
+            command.stdin(Stdio::piped());
+        }
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
 
-        let child = command.spawn().map_err(|e| {
+        let mut child = command.spawn().map_err(|e| {
             DockerError::CLIError(format!("Failed to execute docker compose command: {}", e))
         })?;
+
+        if let Some(input) = stdin_input {
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(input.as_bytes()).await.map_err(|e| {
+                    DockerError::CLIError(format!("Failed to write stdin to docker compose: {}", e))
+                })?;
+                // Dropped here: compose blocks until stdin reaches EOF.
+            }
+        }
 
         let output = crate::docker_retry::stream_captured_child(child, sink)
             .await
@@ -610,6 +625,19 @@ impl ComposeCommand {
         let output = self.execute(&["config", "--format", "json"]).await?;
         parse_service_shape_from_config(&output, service_name)
     }
+
+    /// Read a service's `image:` / `build:` declarations without the `image:`-wins
+    /// collapse [`Self::extract_service_shape`] applies — see [`ServiceBuildPlan`]
+    /// for why `deacon build` needs the uncollapsed view. `Ok(None)` when the
+    /// service is not in the resolved document.
+    #[instrument(skip(self))]
+    pub async fn extract_service_build_plan(
+        &self,
+        service_name: &str,
+    ) -> Result<Option<ServiceBuildPlan>> {
+        let output = self.execute(&["config", "--format", "json"]).await?;
+        parse_service_build_plan(&output, service_name)
+    }
 }
 
 /// The image name Compose gives a built service when the service authors no
@@ -619,6 +647,90 @@ impl ComposeCommand {
 /// underscore); deacon requires v2, so the hyphen form is the only one produced.
 pub fn default_service_image_name(project_name: &str, service: &str) -> String {
     format!("{}-{}", project_name, service)
+}
+
+/// A synthesized `build:` section for a service that declares only an `image:`.
+///
+/// Compose builds nothing for such a service, so there is no build for a label to
+/// ride and no image but the pulled base to report. The reference CLI answers this
+/// by supplying BOTH halves — a one-`FROM` Dockerfile over the service's own image,
+/// and an `image:` naming the result — and that is what this carries.
+///
+/// The `image:` override is not optional cosmetics: without it Compose would tag
+/// the build result with the service's authored `image:`, CLOBBERING the pulled
+/// base (`alpine:3.19` would come to mean this workspace's derived image on the
+/// host). That is why the reference sets `overrideImageName` on exactly this shape.
+#[derive(Debug, Clone)]
+pub struct SynthesizedServiceBuild<'a> {
+    /// Name to build and tag as, replacing the service's authored `image:`.
+    pub image_name: &'a str,
+    /// Directory holding the synthesized Dockerfile — and nothing else, so the
+    /// build context stays empty.
+    pub context_dir: &'a Path,
+    /// Its filename within `context_dir`.
+    pub dockerfile: &'a str,
+}
+
+/// What `deacon build` layers over a Compose project so the produced image carries
+/// what the reference's does.
+#[derive(Debug, Clone)]
+pub struct ComposeBuildOverlay<'a> {
+    /// The service being built.
+    pub service: &'a str,
+    /// `devcontainer.metadata` to build the image WITH, when there is anything to
+    /// record. Compose applies `build.labels` to the produced image, so the label
+    /// is an input to the build rather than a second pass over its output (#628).
+    pub metadata_label: Option<&'a str>,
+    /// Set only for an `image:`-shaped service; see [`SynthesizedServiceBuild`].
+    pub synthesized_build: Option<SynthesizedServiceBuild<'a>>,
+}
+
+impl ComposeBuildOverlay<'_> {
+    /// Render the overlay as a compose document, or `None` when it would say
+    /// nothing — in which case the caller should run the plain build rather than
+    /// pipe an empty override.
+    #[must_use = "the rendered override should be passed to compose build"]
+    pub fn to_yaml(&self) -> Option<String> {
+        if self.metadata_label.is_none() && self.synthesized_build.is_none() {
+            return None;
+        }
+
+        let mut yaml = String::from("services:\n");
+        yaml.push_str(&format!("  {}:\n", self.service));
+
+        if let Some(synth) = &self.synthesized_build {
+            // Not `escape_compose_value`: an image reference carries no `$` that
+            // Compose should pass through, matching `generate_injection_override`.
+            yaml.push_str(&format!(
+                "    image: {}\n",
+                escape_yaml_value(synth.image_name)
+            ));
+        }
+
+        yaml.push_str("    build:\n");
+        if let Some(synth) = &self.synthesized_build {
+            yaml.push_str(&format!(
+                "      context: {}\n",
+                escape_compose_value(&synth.context_dir.display().to_string())
+            ));
+            yaml.push_str(&format!(
+                "      dockerfile: {}\n",
+                escape_compose_value(synth.dockerfile)
+            ));
+        }
+        if let Some(label) = self.metadata_label {
+            yaml.push_str("      labels:\n");
+            // `$`-doubled like every other value Compose interpolates: the label
+            // records the configuration AS AUTHORED, so a `${localWorkspaceFolder}`
+            // inside it must reach Docker intact rather than expand to "" (#437).
+            yaml.push_str(&format!(
+                "        devcontainer.metadata: {}\n",
+                escape_compose_value(label)
+            ));
+        }
+
+        Some(yaml)
+    }
 }
 
 /// Shape of a compose service relevant to the features-install pipeline.
@@ -800,8 +912,67 @@ fn parse_service_profiles_from_config(
 /// - Neither → `ServiceShape::Neither`.
 /// - Service key missing → `ServiceShape::NotFound`.
 fn parse_service_shape_from_config(json_output: &str, service_name: &str) -> Result<ServiceShape> {
-    if json_output.trim().is_empty() {
+    let Some(plan) = parse_service_build_plan(json_output, service_name)? else {
         return Ok(ServiceShape::NotFound);
+    };
+    Ok(match (plan.image, plan.build) {
+        (Some(image), _) => ServiceShape::Image(image),
+        (None, Some(build)) => ServiceShape::Build {
+            context: build.context,
+            dockerfile: build.dockerfile,
+            target: build.target,
+        },
+        (None, None) => ServiceShape::Neither,
+    })
+}
+
+/// A service's `build:` section as the resolved compose config spells it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ServiceBuildSection {
+    pub context: Option<String>,
+    pub dockerfile: Option<String>,
+    pub target: Option<String>,
+}
+
+/// A service's build-relevant declarations, WITHOUT the `image:`-wins collapse
+/// [`ServiceShape`] applies.
+///
+/// That collapse is right for the feature-install pipeline, which extends the
+/// image side either way, and wrong for deciding whether Compose BUILDS anything:
+/// a service declaring both `image:` and `build:` is built by Compose and tagged
+/// with the authored `image:`, so treating it as image-only would replace a real
+/// build with a synthesized one-`FROM` stand-in. Both views come from one parse so
+/// they cannot disagree about the document.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ServiceBuildPlan {
+    /// The service's authored `image:`, if any.
+    pub image: Option<String>,
+    /// Its `build:` section, if any.
+    pub build: Option<ServiceBuildSection>,
+}
+
+impl ServiceBuildPlan {
+    /// The image reference `docker compose build` tags this service's result with:
+    /// its authored `image:` when it has one, else Compose's `<project>-<service>`
+    /// default.
+    pub fn built_image_name(&self, project_name: &str, service: &str) -> String {
+        self.image
+            .clone()
+            .unwrap_or_else(|| default_service_image_name(project_name, service))
+    }
+}
+
+/// Parse one service's `image:` / `build:` declarations out of the resolved
+/// compose config JSON. `Ok(None)` when the service is not in the document.
+///
+/// `build:` may be a shorthand string (the build context) per the compose schema,
+/// in which case it is captured as `context` with the other fields unset.
+fn parse_service_build_plan(
+    json_output: &str,
+    service_name: &str,
+) -> Result<Option<ServiceBuildPlan>> {
+    if json_output.trim().is_empty() {
+        return Ok(None);
     }
 
     let config: serde_json::Value = serde_json::from_str(json_output).map_err(|e| {
@@ -813,40 +984,34 @@ fn parse_service_shape_from_config(json_output: &str, service_name: &str) -> Res
         .and_then(|s| s.as_object())
         .and_then(|s| s.get(service_name))
     else {
-        return Ok(ServiceShape::NotFound);
+        return Ok(None);
     };
 
-    if let Some(image) = service.get("image").and_then(|v| v.as_str()) {
-        return Ok(ServiceShape::Image(image.to_string()));
-    }
+    let image = service
+        .get("image")
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
-    if let Some(build) = service.get("build") {
-        match build {
-            serde_json::Value::String(context) => {
-                return Ok(ServiceShape::Build {
-                    context: Some(context.clone()),
-                    dockerfile: None,
-                    target: None,
-                });
-            }
-            serde_json::Value::Object(obj) => {
-                return Ok(ServiceShape::Build {
-                    context: obj
-                        .get("context")
-                        .and_then(|v| v.as_str())
-                        .map(String::from),
-                    dockerfile: obj
-                        .get("dockerfile")
-                        .and_then(|v| v.as_str())
-                        .map(String::from),
-                    target: obj.get("target").and_then(|v| v.as_str()).map(String::from),
-                });
-            }
-            _ => {}
-        }
-    }
+    let build = match service.get("build") {
+        Some(serde_json::Value::String(context)) => Some(ServiceBuildSection {
+            context: Some(context.clone()),
+            ..Default::default()
+        }),
+        Some(serde_json::Value::Object(obj)) => Some(ServiceBuildSection {
+            context: obj
+                .get("context")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            dockerfile: obj
+                .get("dockerfile")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            target: obj.get("target").and_then(|v| v.as_str()).map(String::from),
+        }),
+        _ => None,
+    };
 
-    Ok(ServiceShape::Neither)
+    Ok(Some(ServiceBuildPlan { image, build }))
 }
 
 /// Docker Compose manager
@@ -1290,14 +1455,42 @@ impl ComposeManager {
         service: &str,
         sink: Option<&dyn crate::docker_retry::BuildLineSink>,
     ) -> Result<String> {
+        self.build_service_with_override(project, service, None, sink)
+            .await
+    }
+
+    /// [`Self::build_service`] with an inline compose override layered over the
+    /// project's own files.
+    ///
+    /// This is how `deacon build` gets a `devcontainer.metadata` label onto the
+    /// image a Compose build produces (#628). The label has to be an INPUT to the
+    /// build: a label cannot be added by retagging, and adding one afterwards
+    /// would mean a second build `FROM` a daemon-local tag, which #595 forbids.
+    ///
+    /// Overriding rather than replacing is deliberate, and is the reference CLI's
+    /// own shape: Compose still resolves the service, so its `build.context`,
+    /// `build.args` and everything else the author wrote keep applying, and only
+    /// the keys the overlay names are added.
+    #[instrument(skip(self, sink, override_yaml))]
+    pub async fn build_service_with_override(
+        &self,
+        project: &ComposeProject,
+        service: &str,
+        override_yaml: Option<&str>,
+        sink: Option<&dyn crate::docker_retry::BuildLineSink>,
+    ) -> Result<String> {
         let command = self.get_command(project);
 
         debug!(
-            "Building compose project {} service {}",
-            project.name, service
+            "Building compose project {} service {} (override: {})",
+            project.name,
+            service,
+            override_yaml.is_some()
         );
 
-        let output = command.execute_streamed(&["build", service], sink).await?;
+        let output = command
+            .execute_streamed_with_stdin(&["build", service], sink, override_yaml)
+            .await?;
 
         debug!(
             "Compose project {} service {} built successfully",
@@ -4296,6 +4489,160 @@ mod tests {
         assert_eq!(
             default_service_image_name("deacon_ws_abc123_def456", "app"),
             "deacon_ws_abc123_def456-app"
+        );
+    }
+
+    /// #628: the uncollapsed view must keep BOTH declarations when a service has
+    /// both, where `ServiceShape` reports only the image side. This is the whole
+    /// reason the second view exists: a service declaring both is BUILT by
+    /// Compose, so reading it as image-only would replace a real build with a
+    /// synthesized one-`FROM` stand-in and silently drop the author's Dockerfile.
+    #[test]
+    fn build_plan_keeps_both_declarations_where_shape_collapses_them() {
+        let cfg = r#"{ "services": { "dev": {
+            "image": "myorg/dev:v1",
+            "build": { "context": "..", "dockerfile": "Dockerfile.dev", "target": "runtime" }
+        } } }"#;
+
+        // The collapsed view: image wins, the build section is invisible.
+        assert_eq!(
+            parse_service_shape_from_config(cfg, "dev").unwrap(),
+            ServiceShape::Image("myorg/dev:v1".to_string())
+        );
+
+        // The uncollapsed view: both survive.
+        let plan = parse_service_build_plan(cfg, "dev").unwrap().unwrap();
+        assert_eq!(plan.image.as_deref(), Some("myorg/dev:v1"));
+        assert_eq!(
+            plan.build,
+            Some(ServiceBuildSection {
+                context: Some("..".to_string()),
+                dockerfile: Some("Dockerfile.dev".to_string()),
+                target: Some("runtime".to_string()),
+            })
+        );
+        // And Compose tags such a build with the authored name, not its default.
+        assert_eq!(plan.built_image_name("proj", "dev"), "myorg/dev:v1");
+    }
+
+    /// A `build:`-only service falls back to Compose's `<project>-<service>`.
+    #[test]
+    fn build_plan_falls_back_to_the_compose_default_name() {
+        let cfg = r#"{ "services": { "dev": { "build": "." } } }"#;
+        let plan = parse_service_build_plan(cfg, "dev").unwrap().unwrap();
+        assert_eq!(plan.image, None);
+        // `build:` shorthand is the context.
+        assert_eq!(
+            plan.build,
+            Some(ServiceBuildSection {
+                context: Some(".".to_string()),
+                dockerfile: None,
+                target: None,
+            })
+        );
+        assert_eq!(plan.built_image_name("proj", "dev"), "proj-dev");
+    }
+
+    /// A missing service and empty output are both "not in the document", not
+    /// errors — matching every other parser over `docker compose config`.
+    #[test]
+    fn build_plan_absent_service_is_none() {
+        let cfg = r#"{ "services": { "db": { "image": "postgres" } } }"#;
+        assert!(parse_service_build_plan(cfg, "dev").unwrap().is_none());
+        assert!(parse_service_build_plan("", "dev").unwrap().is_none());
+        assert!(parse_service_build_plan("  \n ", "dev").unwrap().is_none());
+    }
+
+    /// #628: an `image:`-only service builds nothing, so the overlay has to supply
+    /// a build AND the name to tag it with — otherwise Compose would tag the
+    /// result with the service's authored `image:`, clobbering the pulled base.
+    #[test]
+    fn build_overlay_synthesizes_a_build_for_an_image_only_service() {
+        let dir = PathBuf::from("/tmp/deacon-compose-build-abc");
+        let overlay = ComposeBuildOverlay {
+            service: "app",
+            metadata_label: Some(r#"[{"remoteUser":"root"}]"#),
+            synthesized_build: Some(SynthesizedServiceBuild {
+                image_name: "deacon-build:abc123def456",
+                context_dir: &dir,
+                dockerfile: "Dockerfile",
+            }),
+        };
+        // Rendered whole rather than probed for substrings: indentation is what
+        // makes `image:` a sibling of `build:` and `labels:` a child of it, and a
+        // `contains` assertion cannot see that.
+        assert_eq!(
+            overlay.to_yaml().expect("overlay says something"),
+            concat!(
+                "services:\n",
+                "  app:\n",
+                "    image: \"deacon-build:abc123def456\"\n",
+                "    build:\n",
+                "      context: \"/tmp/deacon-compose-build-abc\"\n",
+                "      dockerfile: \"Dockerfile\"\n",
+                "      labels:\n",
+                "        devcontainer.metadata: \"[{\\\"remoteUser\\\":\\\"root\\\"}]\"\n",
+            )
+        );
+    }
+
+    /// A `build:` service already builds, so the overlay adds the label and
+    /// NOTHING else: naming `context`/`dockerfile`/`image` here would override the
+    /// author's own, which is exactly what must not happen — `build.args`,
+    /// `build.target` and the rest keep applying because Compose still resolves
+    /// the service.
+    #[test]
+    fn build_overlay_adds_only_the_label_to_a_service_that_builds() {
+        let overlay = ComposeBuildOverlay {
+            service: "app",
+            metadata_label: Some(r#"[{"remoteUser":"root"}]"#),
+            synthesized_build: None,
+        };
+        // Pinned WHOLE for the same reason: what this test is about is the keys
+        // that are ABSENT, and no `contains` assertion can check for those.
+        assert_eq!(
+            overlay.to_yaml().expect("overlay says something"),
+            concat!(
+                "services:\n",
+                "  app:\n",
+                "    build:\n",
+                "      labels:\n",
+                "        devcontainer.metadata: \"[{\\\"remoteUser\\\":\\\"root\\\"}]\"\n",
+            )
+        );
+    }
+
+    /// An overlay with nothing to say renders nothing, so the caller runs the
+    /// plain build instead of piping an empty document at Compose.
+    #[test]
+    fn build_overlay_with_nothing_to_say_renders_nothing() {
+        let overlay = ComposeBuildOverlay {
+            service: "app",
+            metadata_label: None,
+            synthesized_build: None,
+        };
+        assert!(overlay.to_yaml().is_none());
+    }
+
+    /// #437, on this path: the label records the configuration AS AUTHORED, so a
+    /// `${localWorkspaceFolder}` inside it must survive Compose's interpolation.
+    /// Un-doubled, Compose expands the unset variable to "" and the label reaching
+    /// the image is a different document than the one deacon computed.
+    #[test]
+    fn build_overlay_doubles_dollars_in_the_label() {
+        let overlay = ComposeBuildOverlay {
+            service: "app",
+            metadata_label: Some(r#"[{"mounts":["source=${localWorkspaceFolder}/sib"]}]"#),
+            synthesized_build: None,
+        };
+        let yaml = overlay.to_yaml().expect("overlay says something");
+        assert!(
+            yaml.contains("$${localWorkspaceFolder}"),
+            "the `$` must be doubled for Compose; got: {yaml}"
+        );
+        assert!(
+            !yaml.contains("=${localWorkspaceFolder}"),
+            "no un-doubled `$` may survive; got: {yaml}"
         );
     }
 
