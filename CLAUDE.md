@@ -578,6 +578,16 @@ The shape now, which is the reference CLI's own:
   the pre-feature base and the installed features are invisible — and canaries that only
   check the JSON outcome (not image contents) won't catch it, so verify with
   `docker run <tag> cat <marker>`.
+- **Never build a Compose service outside Compose** (#628, #629). A `build:` service's own
+  `build:` keys — `args`, `labels`, `target`, and whatever is added next — apply only if
+  Compose renders the service, so both the Features-free and the Features-declaring build run
+  `docker compose build` and layer ONE inline override (`ComposeBuildOverlay::to_yaml`, piped
+  through `-f -`) naming ONLY what deacon adds: the merged Dockerfile, `target`,
+  `additional_contexts`, and the `devcontainer.metadata` label. This is the reference CLI's
+  own shape. Forwarding the keys instead is what dropped `build.args` for a year with
+  `outcome: success` on both sides — enumerate nothing, override narrowly. Settings Compose
+  has no document key for (`--no-cache`, `--builder`) ride the invocation; ones it has no
+  flag for (`cache_from`, `cache_to`, `platforms`) ride the document.
 - `up` follows the same rule: a Dockerfile config that declares Features defers its base
   build (`deferred_dockerfile_build` in `up/mod.rs`) so `container.rs` can build base +
   Features together.

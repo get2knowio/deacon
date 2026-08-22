@@ -299,6 +299,76 @@
       "notes": "Fixes #628, and the Features-free counterpart of `case-build-compose-metadata-label` above: that one covers a Compose config that DECLARES Features, which is what forced a Feature-extended build for the label to ride. With no Features there was no such build, and deacon's Compose image carried no `devcontainer.metadata` at all — where the reference's does, because it ALWAYS runs its extended Compose build. Measured at oracle 0.87.0 on this fixture: the reference reports and creates `vsc-<workspace>-<hash>` carrying `[ {\"remoteUser\":\"root\",\"shutdownAction\":\"stopCompose\"} ]`; deacon reported `alpine:3.19` — the PULLED BASE — carrying no such label. Exit 0 and `outcome: success` on both sides throughout, which is why the image channel is the whole observation. Same fixture as `case-build-compose-service-shape` on purpose: one case pins the name the build reports, this one pins what the artifact carries, and neither can stand in for the other — the defect was invisible in the reported name until the fix changed it, and a name alone never showed the label. The label is pinned WHOLE and by value, matching the sibling's reasoning: the entries are ordered (the base image's own, then each Feature, then the config pick), a presence check would pass on a label recording the wrong configuration, and `alpine:3.19` contributes none of its own so the config pick is the entire document. The reference pads its arrays with cosmetic spaces (`[ {…} ]`) that deacon does not; the DOCUMENT is identical, and no channel compares the two renderings, both CLIs being asserted against the spec expectation rather than against each other here. `source: image` because a `build` leaves no container. `--image-name` is passed so the assertion has a stable handle on the produced image, which is otherwise named by a hash."
     },
     {
+      "id": "case-build-compose-feature-build-shape-keeps-build-keys",
+      "behaviors": [
+        "bhv-build-features-extended-image",
+        "bhv-build-image-metadata-label"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-compose-feature-build-shape"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "parity.build.arg": "reached-the-build",
+                "parity.authored.label": "authored-in-compose",
+                "devcontainer.metadata": "[{\"id\":\"./features/marker\"},{\"remoteUser\":\"root\"}]"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Fixes #629, and the `build:`-shaped counterpart of `case-build-compose-feature-metadata-label` above — that one's service declares an `image:`, so it has no `build:` keys to lose. This one's declares `build.args` and `build.labels`, and deacon lost BOTH: the Feature-extended image was built OUTSIDE Compose, by a direct `docker buildx build` that carried only what deacon had thought to forward, and `build.args` were explicitly not forwarded (the code said Compose would apply them, which is true only of a build Compose actually runs). MEASURED at oracle 0.87.0 on the same shape: an `ARG` the service declared reached the reference's image and not deacon's, while both exited 0 with `outcome: success` — which is why every assertion here is artifact-level, and why the defect survived a year of green result documents.\n\nThe three labels are one assertion in three parts, each failing independently. `parity.build.arg` is `LABEL parity.build.arg=$PARITY_BUILD_ARG` in the fixture's own Dockerfile, so it reads `reached-the-build` only if the service's `build.args` reached the build and `dropped-before-the-build` otherwise — a build arg made observable on a channel that captures image config, since the file a `RUN` writes is not one. `parity.authored.label` is the author's own `build.labels` entry, dropped by the same mechanism and restored by the same fix. `devcontainer.metadata` pins that the Feature-extended build still happens at all and still records what it installed, so a fix that preserved the author's keys by not installing Features would fail here rather than pass quietly.\n\nThe fix is a MECHANISM change, which is why the case asserts the artifact rather than the mechanism: Compose drives the build and deacon layers an inline override naming only the merged Dockerfile, the stage to stop at, and the Feature contexts — the reference CLI's own shape (its `Dockerfile-with-features` arrives the same way). Everything the author wrote keeps applying by construction, so the next `build:` key nobody enumerated is safe too. `source: image` because a `build` leaves no container. Image pinned to alpine:3.19."
+    },
+    {
       "id": "case-build-dockerfile-feature-differential",
       "behaviors": [
         "bhv-build-features-extended-image"

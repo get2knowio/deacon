@@ -164,9 +164,11 @@ pub(crate) struct PreparedFeatureLayer {
     /// `FROM <base stage> AS dev_containers_target_stage` plus one RUN-mount per
     /// Feature. Appended verbatim after the base Dockerfile's own content.
     pub install_stage: String,
-    /// `--build-context name=path` arguments the install stage's mounts resolve
-    /// against. Already formatted as buildx expects them.
-    pub build_contexts: Vec<String>,
+    /// The named build contexts the install stage's mounts resolve against, as
+    /// `(name, path)` pairs. Kept unformatted because the two executors spell them
+    /// differently: `--build-context name=path` for buildx, an
+    /// `additional_contexts:` entry for a Compose-driven build (#629).
+    pub build_contexts: Vec<(String, String)>,
     /// Feature-contributed `containerEnv`, in install order.
     pub combined_env: HashMap<String, String>,
     /// The Features that will be installed, in installation order — one
@@ -174,6 +176,16 @@ pub(crate) struct PreparedFeatureLayer {
     pub resolved_features: Vec<ResolvedFeature>,
     /// Lockfile assembled from the resolved + downloaded Features.
     pub lockfile: Lockfile,
+}
+
+impl PreparedFeatureLayer {
+    /// [`Self::build_contexts`] spelled the way `docker buildx build` takes them.
+    pub fn buildx_context_args(&self) -> Vec<String> {
+        self.build_contexts
+            .iter()
+            .flat_map(|(name, path)| ["--build-context".to_string(), format!("{}={}", name, path)])
+            .collect()
+    }
 }
 
 /// Resolve, download and stage the configuration's Features, then emit the
@@ -214,13 +226,14 @@ pub(crate) async fn prepare_feature_layer(
 
     let mut build_contexts = Vec::new();
     if let Some(ref ca_dir) = host_ca_dir {
-        build_contexts.push("--build-context".to_string());
-        build_contexts.push(format!("{}={}", HOST_CA_BUILD_CONTEXT, ca_dir.display()));
+        build_contexts.push((
+            HOST_CA_BUILD_CONTEXT.to_string(),
+            ca_dir.display().to_string(),
+        ));
     }
-    build_contexts.push("--build-context".to_string());
-    build_contexts.push(format!(
-        "dev_containers_feature_content_source={}",
-        staged.features_source_dir.display()
+    build_contexts.push((
+        "dev_containers_feature_content_source".to_string(),
+        staged.features_source_dir.display().to_string(),
     ));
 
     Ok(PreparedFeatureLayer {
@@ -403,32 +416,174 @@ pub(crate) async fn build_image_with_features(
     })
 }
 
+/// The document, the Feature layer and the label a Dockerfile-based Feature build
+/// needs, resolved WITHOUT running anything.
+///
+/// Two executors consume it: `up`'s single-container path, which runs one
+/// `docker buildx build`, and the Compose `build:` path, which hands the same
+/// document to `docker compose build` so the service's own `build:` keys keep
+/// applying (#629). Sharing the preparation is what keeps those two from drifting
+/// on what a Feature layer is.
+pub(crate) struct DockerfileFeatureBuild {
+    /// The resolved Features and the stage that installs them.
+    pub prepared: PreparedFeatureLayer,
+    /// Where the merged base + Feature document was written. Outside the build
+    /// context on purpose — deacon does not write into the user's workspace.
+    pub dockerfile_path: PathBuf,
+    /// `devcontainer.metadata` for the produced image, when the caller asked for
+    /// one. Computed from the base image BEFORE the build so the build itself can
+    /// write it, rather than a second build `FROM` a daemon-local tag (#595).
+    pub metadata_label: Option<String>,
+}
+
+/// Resolve the Features, emit the merged Dockerfile, and compute the metadata
+/// label for a build whose base is a user-authored Dockerfile.
+///
+/// `base_dockerfile_content` must already have its base stage named
+/// (`base_stage_for_features` / `ensure_dockerfile_has_final_stage_name`), and
+/// `declared_build_args` are the `ARG` values the build will really pass, so a
+/// `FROM $ARG` or `USER $ARG` resolves against them rather than against a guess.
+#[allow(clippy::too_many_arguments)]
+#[instrument(
+    skip(config, identity, base_dockerfile_content, declared_build_args),
+    fields(base_stage = %base_dockerfile_final_stage, target = ?target)
+)]
+pub(crate) async fn prepare_dockerfile_feature_build(
+    config: &DevContainerConfig,
+    identity: &ContainerIdentity,
+    base_dockerfile_content: &str,
+    base_dockerfile_final_stage: &str,
+    config_path: &Path,
+    target: Option<&str>,
+    declared_build_args: &HashMap<String, String>,
+    host_ca_set: Option<&CorporateCaSet>,
+    cli: &deacon_core::docker::CliRuntime,
+    lockfile_policy: LockfilePolicy,
+    metadata_raw_config: Option<&DevContainerConfig>,
+) -> Result<DockerfileFeatureBuild> {
+    info!(
+        "Preparing feature layer on top of user-authored Dockerfile (stage={})",
+        base_dockerfile_final_stage
+    );
+
+    let features_obj = config
+        .features()
+        .as_object()
+        .ok_or_else(|| DeaconError::Runtime("Features must be an object".to_string()))?;
+    if features_obj.is_empty() {
+        return Err(DeaconError::Runtime(
+            "prepare_dockerfile_feature_build called with no features".to_string(),
+        )
+        .into());
+    }
+
+    // `_REMOTE_USER` / `_CONTAINER_USER` for this shape. The "base" is a *stage
+    // name* inside the user's Dockerfile, so there is no image to inspect until
+    // that stage has been built — but the Dockerfile itself may say who it runs
+    // as, and the reference reads exactly that (`findUserStatement`) before
+    // falling back to the base image (#89).
+    let dockerfile_user = deacon_core::dockerfile_utils::find_user_statement(
+        base_dockerfile_content,
+        declared_build_args,
+        target,
+    );
+    let feature_install_env = FeatureInstallEnv::resolve(
+        config.remote_user.as_deref(),
+        config.container_user.as_deref(),
+        dockerfile_user.as_deref(),
+    );
+
+    let prepared = prepare_feature_layer(
+        config,
+        identity,
+        config_path,
+        base_dockerfile_final_stage,
+        feature_install_env,
+        host_ca_set,
+        lockfile_policy,
+    )
+    .await?;
+
+    // Final Dockerfile: user prologue + feature install stage. The user's
+    // Dockerfile may carry a `# syntax=` directive at the very top; that's already
+    // preserved because we copy the full content first.
+    let combined = merge_dockerfile_with_feature_stage(base_dockerfile_content, &prepared);
+
+    // Write the merged Dockerfile to a temp dir (NOT into the user's context dir,
+    // so we never pollute the workspace). Both executors read it by path, which
+    // BuildKit resolves independently of where the context directory lives.
+    let temp_dir =
+        crate::commands::shared::feature_resolver::feature_staging_root(&identity.workspace_hash);
+    tokio::fs::create_dir_all(&temp_dir).await?;
+    let dockerfile_path = temp_dir.join("Dockerfile.extended");
+    tokio::fs::write(&dockerfile_path, combined.as_bytes()).await?;
+    debug!(
+        "Wrote merged Dockerfile ({} bytes) at {}",
+        combined.len(),
+        dockerfile_path.display()
+    );
+
+    // The entries the base contributes come from the EXTERNAL image this
+    // Dockerfile derives from, resolved from the document itself — the
+    // reference's `findBaseImage`.
+    let base_image_ref = deacon_core::dockerfile_utils::resolve_base_image(
+        base_dockerfile_content,
+        declared_build_args,
+        target,
+    );
+    if let Some(image) = &base_image_ref {
+        if let Err(e) = cli.ensure_image_available(image).await {
+            debug!(
+                image = %image,
+                error = %e,
+                "Could not make the base image available for metadata inspection; \
+                 proceeding with no inherited devcontainer.metadata entries"
+            );
+        }
+    }
+    let metadata_label = compute_metadata_label(
+        cli,
+        base_image_ref.as_deref(),
+        metadata_raw_config,
+        &prepared.resolved_features,
+    )
+    .await;
+
+    Ok(DockerfileFeatureBuild {
+        prepared,
+        dockerfile_path,
+        metadata_label,
+    })
+}
+
 /// Build an extended Docker image with features installed when the base
 /// description is a user-authored Dockerfile under `base_context_dir`.
 ///
-/// Used by the compose `build:` shape: bead 14b's Dockerfile-stage-name parser
-/// rewrites the user's final `FROM` to carry a deterministic alias, then we
-/// concatenate our feature-install stage that targets that alias. The merged
-/// Dockerfile is written to a temp directory and built with the user's
-/// original context directory so the existing `COPY`/`ADD` directives keep
-/// resolving the right files.
+/// Used by `up`'s single-container Dockerfile path: the stage-name parser rewrites
+/// the user's final `FROM` to carry a deterministic alias, then we concatenate our
+/// feature-install stage that targets that alias. The merged Dockerfile is written
+/// to a temp directory and built with the user's original context directory so the
+/// existing `COPY`/`ADD` directives keep resolving the right files.
+///
+/// The Compose `build:` shape does NOT come through here: it shares the
+/// preparation ([`prepare_dockerfile_feature_build`]) but lets Compose drive the
+/// build, so the service's own `build:` keys keep applying (#629).
 ///
 /// # Arguments
 ///
 /// * `config` - DevContainer configuration containing features to install
 /// * `identity` - Container identity for deterministic naming
 /// * `base_dockerfile_content` - The user's Dockerfile contents, already
-///   processed by `ensure_dockerfile_has_final_stage_name` so the final stage
-///   has the alias `base_dockerfile_final_stage`
-/// * `base_dockerfile_final_stage` - The name of that final stage; our
-///   feature-install stage will `FROM <stage>`
-/// * `base_context_dir` - The compose `build.context` directory, resolved to
-///   an absolute path. This is passed as the BuildKit context so the user's
+///   processed by `base_stage_for_features` so the stage the Features install on
+///   carries the name `base_dockerfile_final_stage`
+/// * `base_dockerfile_final_stage` - The name of that stage; our feature-install
+///   stage will `FROM <stage>`
+/// * `base_context_dir` - The configuration's build context, resolved to an
+///   absolute path. This is passed as the BuildKit context so the user's
 ///   relative `COPY`/`ADD` paths keep working
-/// * `target` - Optional `build.target` from compose; ignored today because
-///   our feature stage always builds on top of the user's *final* stage
-///   (which `ensure_dockerfile_has_final_stage_name` selected). Recorded in
-///   the tracing span for diagnostics.
+/// * `target` - The configuration's `build.target`, when it declares one. The
+///   caller has already resolved it into `base_dockerfile_final_stage`; it is
+///   passed again so a `FROM $ARG` / `USER $ARG` is read against the right stage.
 /// * `build_options` - Optional build options for cache-from/cache-to/buildx settings
 /// * `extra_build_args` - argv the base half of this build needs and the Feature
 ///   half does not: the configuration's `build.args` as `--build-arg K=V` pairs
@@ -458,88 +613,28 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     metadata_raw_config: Option<&DevContainerConfig>,
     extra_build_args: &[String],
 ) -> Result<FeatureBuildOutput> {
-    // Optional `build.target` is honored as the upstream stage we extend. The
-    // reference CLI rewrites the FROM matching `target`; we accomplish the
-    // same outcome by trusting the caller to pre-process via
-    // `ensure_dockerfile_has_final_stage_name`, which already picks the final
-    // stage. We log `target` so any compose configs that rely on intermediate
-    // stages can be diagnosed without silently picking the wrong layer.
-    if let Some(t) = target {
-        if t != base_dockerfile_final_stage {
-            debug!(
-                requested_target = %t,
-                used_stage = %base_dockerfile_final_stage,
-                "compose build.target differs from Dockerfile final stage; \
-                 features will be installed on top of the final stage"
-            );
-        }
-    }
-
-    info!(
-        "Building extended image with features on top of user-authored Dockerfile (stage={})",
-        base_dockerfile_final_stage
-    );
-
-    let features_obj = config
-        .features()
-        .as_object()
-        .ok_or_else(|| DeaconError::Runtime("Features must be an object".to_string()))?;
-    if features_obj.is_empty() {
-        return Err(DeaconError::Runtime(
-            "build_image_with_features_from_dockerfile called with no features".to_string(),
-        )
-        .into());
-    }
-
-    // The `--build-arg` values this build carries, as a map, so a `FROM $ARG` or
-    // `USER $ARG` in the Dockerfile resolves to what the build will actually use.
-    let declared_build_args = build_arg_map(extra_build_args);
-
-    // `_REMOTE_USER` / `_CONTAINER_USER` for this shape. The "base" is a *stage
-    // name* inside the user's Dockerfile, so there is no image to inspect until
-    // that stage has been built — but the Dockerfile itself may say who it runs
-    // as, and the reference reads exactly that (`findUserStatement`) before
-    // falling back to the base image (#89).
-    let dockerfile_user = deacon_core::dockerfile_utils::find_user_statement(
-        base_dockerfile_content,
-        &declared_build_args,
-        target,
-    );
-    let feature_install_env = FeatureInstallEnv::resolve(
-        config.remote_user.as_deref(),
-        config.container_user.as_deref(),
-        dockerfile_user.as_deref(),
-    );
-
-    let prepared = prepare_feature_layer(
+    let build = prepare_dockerfile_feature_build(
         config,
         identity,
-        config_path,
+        base_dockerfile_content,
         base_dockerfile_final_stage,
-        feature_install_env,
+        config_path,
+        target,
+        // The `--build-arg` values this build carries, as a map, so a `FROM $ARG`
+        // or `USER $ARG` in the Dockerfile resolves to what the build will
+        // actually use.
+        &build_arg_map(extra_build_args),
         host_ca_set,
+        cli,
         lockfile_policy,
+        metadata_raw_config,
     )
     .await?;
-
-    // Compose final Dockerfile: user prologue + feature install stage.
-    // The user's Dockerfile may carry a `# syntax=` directive at the very top;
-    // that's already preserved because we copy the full content first.
-    let combined = merge_dockerfile_with_feature_stage(base_dockerfile_content, &prepared);
-
-    // Write merged Dockerfile to a temp dir (NOT into the user's context dir, so
-    // we never pollute the workspace). buildx reads it via `-f` regardless of
-    // where the context directory lives.
-    let temp_dir =
-        crate::commands::shared::feature_resolver::feature_staging_root(&identity.workspace_hash);
-    tokio::fs::create_dir_all(&temp_dir).await?;
-    let dockerfile_path = temp_dir.join("Dockerfile.extended");
-    tokio::fs::write(&dockerfile_path, combined.as_bytes()).await?;
-    debug!(
-        "Wrote merged Dockerfile ({} bytes) at {}",
-        combined.len(),
-        dockerfile_path.display()
-    );
+    let DockerfileFeatureBuild {
+        prepared,
+        dockerfile_path,
+        metadata_label,
+    } = build;
 
     let extended_image_tag = format!("deacon-devcontainer-features:{}", identity.workspace_hash);
 
@@ -574,38 +669,14 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     // because there is no separate base build any more (#595).
     build_args.extend(extra_build_args.iter().cloned());
 
-    // `devcontainer.metadata`, when the caller wants one recorded. The entries the
-    // base contributes come from the EXTERNAL image this Dockerfile derives from,
-    // resolved from the document itself — the reference's `findBaseImage` — so the
-    // label can be written by this build rather than by a second one (#595).
-    let base_image_ref = deacon_core::dockerfile_utils::resolve_base_image(
-        base_dockerfile_content,
-        &declared_build_args,
-        target,
-    );
-    if let Some(image) = &base_image_ref {
-        if let Err(e) = cli.ensure_image_available(image).await {
-            debug!(
-                image = %image,
-                error = %e,
-                "Could not make the base image available for metadata inspection; \
-                 proceeding with no inherited devcontainer.metadata entries"
-            );
-        }
-    }
-    let metadata_label = compute_metadata_label(
-        cli,
-        base_image_ref.as_deref(),
-        metadata_raw_config,
-        &prepared.resolved_features,
-    )
-    .await;
+    // `devcontainer.metadata`, when the caller wants one recorded — computed
+    // BEFORE the build, so this invocation can write it (#595).
     if let Some(metadata) = &metadata_label {
         build_args.push("--label".to_string());
         build_args.push(format!("devcontainer.metadata={}", metadata));
     }
 
-    build_args.extend(prepared.build_contexts.iter().cloned());
+    build_args.extend(prepared.buildx_context_args());
     build_args.extend(vec![
         "--target".to_string(),
         FEATURE_TARGET_STAGE.to_string(),
@@ -1367,7 +1438,7 @@ fn build_lockfile_from_features(
     Lockfile { features: entries }
 }
 
-async fn ensure_buildkit_or_error() -> Result<()> {
+pub(crate) async fn ensure_buildkit_or_error() -> Result<()> {
     use deacon_core::build::buildkit::is_buildkit_available;
     if !is_buildkit_available().await? {
         return Err(DeaconError::Runtime(

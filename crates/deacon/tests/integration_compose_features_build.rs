@@ -752,3 +752,185 @@ fn build_compose_without_features_labels_the_image_and_keeps_build_args() {
         String::from_utf8_lossy(&run.stderr)
     );
 }
+
+/// #629: the same guarantee, on the path that declares Features — where deacon
+/// used to build the Feature-extended image OUTSIDE Compose and so saw only what
+/// it had thought to forward. `build.args` were not forwarded, so an `ARG` the
+/// service declared reached the reference's image and not deacon's.
+///
+/// Every assertion here is a `build:` key the author wrote and deacon does not
+/// name in its override — the arg, the label, and the `target` that decides WHICH
+/// stage the Features install on. They pass together because Compose still
+/// resolves the service, not because each was enumerated; the previous shape
+/// dropped all three at once.
+///
+/// Artifact-level for the same reason as its Features-free sibling: both CLIs
+/// exited 0 with `outcome: success` throughout the window in which the arg was
+/// being dropped, so nothing in the result document could have caught it.
+/// MEASURED against the reference CLI at oracle 0.87.0 on this exact shape: the
+/// image it produces carries the same four values.
+#[test]
+fn build_compose_with_features_keeps_the_services_own_build_keys() {
+    if !is_docker_available() {
+        eprintln!(
+            "Skipping build_compose_with_features_keeps_the_services_own_build_keys: \
+             Docker not available"
+        );
+        return;
+    }
+
+    let temp_dir = TempDir::new().expect("tempdir");
+    let workspace = temp_dir.path();
+
+    // Multi-stage on a bash-capable base (a Feature's `install.sh` needs bash).
+    // The `last` stage exists to be NOT built: `build.target` names `middle`, and
+    // the Features must install on top of that.
+    fs::write(
+        workspace.join("Dockerfile"),
+        concat!(
+            "FROM debian:bookworm-slim AS base\n",
+            "ARG MARKER=arg-was-dropped\n",
+            "RUN echo \"$MARKER\" > /arg-marker.txt\n",
+            "\n",
+            "FROM base AS middle\n",
+            "RUN echo middle > /stage.txt\n",
+            "\n",
+            "FROM middle AS last\n",
+            "RUN echo last > /stage.txt\n",
+        ),
+    )
+    .expect("write Dockerfile");
+    fs::write(
+        workspace.join("docker-compose.yml"),
+        concat!(
+            "services:\n",
+            "  app:\n",
+            "    build:\n",
+            "      context: .\n",
+            "      dockerfile: Dockerfile\n",
+            "      target: middle\n",
+            "      args:\n",
+            "        MARKER: arg-reached-the-build\n",
+            "      labels:\n",
+            "        author.own.label: authored\n",
+            "    command: [\"sleep\", \"infinity\"]\n",
+        ),
+    )
+    .expect("write compose");
+
+    let dc_dir = workspace.join(".devcontainer");
+    fs::create_dir_all(&dc_dir).expect("create .devcontainer");
+    let feat = dc_dir.join("features/marker");
+    fs::create_dir_all(&feat).expect("create feature dir");
+    fs::write(
+        feat.join("devcontainer-feature.json"),
+        r#"{ "id": "marker", "version": "1.0.0", "name": "Marker" }"#,
+    )
+    .expect("write feature json");
+    fs::write(
+        feat.join("install.sh"),
+        "#!/usr/bin/env bash\nset -e\necho installed > /compose-feature-marker.txt\n",
+    )
+    .expect("write install.sh");
+    // `dockerComposeFile` is config-dir-relative; the workspace-root compose file
+    // is reached with `../`, as in every sibling here.
+    fs::write(
+        dc_dir.join("devcontainer.json"),
+        r#"{
+  "name": "build-compose-features-build-keys",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "remoteUser": "root",
+  "features": { "./features/marker": {} }
+}"#,
+    )
+    .expect("write devcontainer.json");
+
+    let tag = "deacon-test/compose-features-build-keys:v1";
+    let _ = StdCommand::new("docker").args(["rmi", "-f", tag]).output();
+
+    let out = support::deacon_command()
+        .current_dir(workspace)
+        .args([
+            "build",
+            "--workspace-folder",
+            workspace.to_str().unwrap(),
+            "--image-name",
+            tag,
+            "--output-format",
+            "json",
+        ])
+        .env("DEACON_LOG", "warn")
+        .output()
+        .expect("spawn deacon build");
+
+    assert!(
+        out.status.success(),
+        "deacon build (compose + features) failed:\nSTDOUT:\n{}\nSTDERR:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Collect everything to assert BEFORE tearing down, so cleanup always runs.
+    let run = StdCommand::new("docker")
+        .args([
+            "run",
+            "--rm",
+            tag,
+            "cat",
+            "/arg-marker.txt",
+            "/stage.txt",
+            "/compose-feature-marker.txt",
+        ])
+        .output()
+        .expect("docker run");
+    let produced = String::from_utf8_lossy(&run.stdout).to_string();
+
+    let author_label = StdCommand::new("docker")
+        .args([
+            "image",
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"author.own.label\"}}",
+            tag,
+        ])
+        .output()
+        .expect("docker image inspect");
+    let author_label = String::from_utf8_lossy(&author_label.stdout)
+        .trim()
+        .to_string();
+
+    // The Compose-produced image is named by `RepoTags` too, so reclaim it
+    // alongside the user's tag rather than leaving it on the daemon.
+    let repo_tags = StdCommand::new("docker")
+        .args(["image", "inspect", "--format", "{{json .RepoTags}}", tag])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| serde_json::from_slice::<Vec<String>>(&o.stdout).ok())
+        .unwrap_or_else(|| vec![tag.to_string()]);
+    let mut rmi = vec!["rmi".to_string(), "-f".to_string()];
+    rmi.extend(repo_tags);
+    let _ = StdCommand::new("docker").args(&rmi).output();
+
+    assert!(
+        produced.contains("arg-reached-the-build"),
+        "the service's own build.args must reach a Feature-installing build; \
+         got {produced:?} stderr={:?}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        produced.contains("middle") && !produced.contains("last"),
+        "the Features must install on top of the service's own build.target; \
+         got {produced:?}"
+    );
+    assert!(
+        produced.contains("installed"),
+        "the Feature must still be installed; got {produced:?} stderr={:?}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        author_label, "authored",
+        "the service's own build.labels must survive deacon's override"
+    );
+}

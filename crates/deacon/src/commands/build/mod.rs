@@ -1771,6 +1771,8 @@ async fn execute_compose_build(
         service,
         metadata_label: metadata_label.as_deref(),
         synthesized_build: synthesized,
+        // Features route to `execute_compose_build_with_features` instead.
+        feature_layer: None,
     };
     let override_yaml = overlay.to_yaml();
     if let Some(yaml) = &override_yaml {
@@ -1790,7 +1792,7 @@ async fn execute_compose_build(
         .as_ref()
         .map(|r| r as &dyn deacon_core::docker_retry::BuildLineSink);
     let build_result = compose_manager
-        .build_service_with_override(&project, service, override_yaml.as_deref(), sink)
+        .build_service_with_override(&project, service, override_yaml.as_deref(), &[], sink)
         .await;
     if let Some(r) = &renderer {
         r.finish(build_result.is_ok());
@@ -2309,8 +2311,8 @@ async fn execute_single_container_build(
             .iter()
             .map(|f| f.id.clone())
             .collect();
+        overlay.extra_args = prepared.buildx_context_args();
         resolved_features = prepared.resolved_features;
-        overlay.extra_args = prepared.build_contexts;
         overlay.dockerfile_path = Some(merged_path);
         overlay.target = Some(FEATURE_TARGET_STAGE.to_string());
     }
