@@ -142,10 +142,107 @@ pub struct UserMappingResult {
     pub user_created: bool,
     /// Whether UID/GID was updated
     pub uid_updated: bool,
+    /// Whether the UID remap was WANTED but refused because the target UID is
+    /// already owned by another user in the container (see [`decide_uid_remap`]).
+    pub uid_update_skipped_uid_taken: bool,
     /// Whether home directory was created
     pub home_created: bool,
     /// Whether workspace ownership was adjusted
     pub workspace_ownership_adjusted: bool,
+}
+
+/// What `updateRemoteUserUID` should do for one remote user.
+///
+/// This is the decision half of the remap, extracted so it can be exercised
+/// without a container. It mirrors the reference CLI's
+/// `scripts/updateUID.Dockerfile` branch-for-branch — see [`decide_uid_remap`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UidRemapDecision {
+    /// Nothing to do — the user already carries the target ids (or the only
+    /// change the guards would have allowed is a no-op).
+    NoChange,
+    /// Another user already owns the target UID; the remote user is left alone
+    /// so it keeps being the identity the configuration named.
+    SkippedUidTaken {
+        /// Name of the user that already owns the target UID.
+        existing_user: String,
+    },
+    /// Perform the remap with these ids.
+    Remap {
+        /// UID to move the remote user to.
+        uid: u32,
+        /// GID to move the remote user to. Equal to the remote user's CURRENT
+        /// gid when another group already owns the target gid.
+        gid: u32,
+    },
+}
+
+/// Decide whether `updateRemoteUserUID` may remap a user, mirroring the
+/// reference CLI's `scripts/updateUID.Dockerfile`:
+///
+/// ```sh
+/// if [ -z "$OLD_UID" ]; then …
+/// elif [ "$OLD_UID" = "$NEW_UID" -a "$OLD_GID" = "$NEW_GID" ]; then …
+/// elif [ "$OLD_UID" != "$NEW_UID" -a -n "$EXISTING_USER" ]; then
+///     echo "User with UID exists ($EXISTING_USER=$NEW_UID)."
+/// else
+///     if [ "$OLD_GID" != "$NEW_GID" -a -n "$EXISTING_GROUP" ]; then
+///         echo "Group with GID exists ($EXISTING_GROUP=$NEW_GID)."
+///         NEW_GID="$OLD_GID"
+///     fi
+///     …
+/// fi
+/// ```
+///
+/// `existing_user` is the name of whatever `/etc/passwd` entry already holds
+/// `target_uid` (`EXISTING_USER`), and `existing_group` the `/etc/group` entry
+/// holding `target_gid` (`EXISTING_GROUP`); both are `None` when the id is free.
+/// Neither can name the remote user itself in the branch that consults it: the
+/// UID guard only fires when `current_uid != target_uid`, and the GID fallback
+/// only when `current_gid != target_gid`.
+///
+/// Without the UID guard the container ends up with two `/etc/passwd` entries
+/// sharing one uid, and every name lookup for it resolves to the OTHER user —
+/// see [issue #618](https://github.com/get2knowio/deacon/issues/618).
+pub fn decide_uid_remap(
+    current_uid: u32,
+    current_gid: u32,
+    target_uid: u32,
+    target_gid: u32,
+    existing_user: Option<&str>,
+    existing_group: Option<&str>,
+) -> UidRemapDecision {
+    // `OLD_UID = NEW_UID -a OLD_GID = NEW_GID` — "UIDs and GIDs are the same".
+    if current_uid == target_uid && current_gid == target_gid {
+        return UidRemapDecision::NoChange;
+    }
+
+    // `OLD_UID != NEW_UID -a -n "$EXISTING_USER"` — "User with UID exists".
+    if current_uid != target_uid {
+        if let Some(existing_user) = existing_user {
+            return UidRemapDecision::SkippedUidTaken {
+                existing_user: existing_user.to_string(),
+            };
+        }
+    }
+
+    // `OLD_GID != NEW_GID -a -n "$EXISTING_GROUP"` — "Group with GID exists",
+    // which keeps OLD_GID and remaps the uid only.
+    let gid = if current_gid != target_gid && existing_group.is_some() {
+        current_gid
+    } else {
+        target_gid
+    };
+
+    if current_uid == target_uid && current_gid == gid {
+        // The GID fallback ate the only change there was to make.
+        return UidRemapDecision::NoChange;
+    }
+
+    UidRemapDecision::Remap {
+        uid: target_uid,
+        gid,
+    }
 }
 
 /// Error types specific to user mapping operations
@@ -187,6 +284,17 @@ pub trait UserMapper {
 
     /// Check if a user exists in the container
     async fn user_exists(&self, container_id: &str, username: &str) -> Result<bool>;
+
+    /// Name of the `/etc/passwd` entry that currently owns `uid`, if any.
+    ///
+    /// This is the reference CLI's `EXISTING_USER` lookup; it is what stops
+    /// `updateRemoteUserUID` from stamping a second user onto an occupied uid.
+    async fn find_user_by_uid(&self, container_id: &str, uid: u32) -> Result<Option<String>>;
+
+    /// Name of the `/etc/group` entry that currently owns `gid`, if any.
+    ///
+    /// The reference CLI's `EXISTING_GROUP` lookup.
+    async fn find_group_by_gid(&self, container_id: &str, gid: u32) -> Result<Option<String>>;
 
     /// Create a new user in the container
     async fn create_user(
@@ -269,6 +377,7 @@ impl<T: UserMapper> UserMappingService<T> {
                 user_info: current_user,
                 user_created: false,
                 uid_updated: false,
+                uid_update_skipped_uid_taken: false,
                 home_created: false,
                 workspace_ownership_adjusted: false,
             });
@@ -293,6 +402,7 @@ impl<T: UserMapper> UserMappingService<T> {
             ),
             user_created: false,
             uid_updated: false,
+            uid_update_skipped_uid_taken: false,
             home_created: false,
             workspace_ownership_adjusted: false,
         };
@@ -311,18 +421,73 @@ impl<T: UserMapper> UserMappingService<T> {
                     let target_gid = config.host_gid.unwrap_or(target_uid);
 
                     if user_info.uid != target_uid || user_info.gid != target_gid {
-                        debug!(
-                            "Updating user {} UID from {} to {} and GID from {} to {}",
-                            remote_user, user_info.uid, target_uid, user_info.gid, target_gid
-                        );
+                        // The reference CLI refuses to move a user onto ids
+                        // another entry already owns; ask the container who
+                        // holds them before deciding (#618). Each lookup is
+                        // only consulted by the branch that can be reached
+                        // when the corresponding id actually differs, so we
+                        // only pay for it then.
+                        let existing_user = if user_info.uid != target_uid {
+                            self.user_mapper
+                                .find_user_by_uid(container_id, target_uid)
+                                .await?
+                        } else {
+                            None
+                        };
+                        let existing_group = if user_info.gid != target_gid {
+                            self.user_mapper
+                                .find_group_by_gid(container_id, target_gid)
+                                .await?
+                        } else {
+                            None
+                        };
 
-                        self.user_mapper
-                            .update_user_uid(container_id, remote_user, target_uid, target_gid)
-                            .await?;
+                        match decide_uid_remap(
+                            user_info.uid,
+                            user_info.gid,
+                            target_uid,
+                            target_gid,
+                            existing_user.as_deref(),
+                            existing_group.as_deref(),
+                        ) {
+                            UidRemapDecision::NoChange => {}
+                            UidRemapDecision::SkippedUidTaken { existing_user } => {
+                                // Mirrors the reference's
+                                // `echo "User with UID exists ($EXISTING_USER=$NEW_UID)."`.
+                                // Remapping anyway would give two /etc/passwd
+                                // entries one uid, and every name lookup for
+                                // it would resolve to `existing_user`.
+                                warn!(
+                                    "Skipping updateRemoteUserUID for '{}': UID {} is already owned by '{}'; keeping {}:{}",
+                                    remote_user,
+                                    target_uid,
+                                    existing_user,
+                                    user_info.uid,
+                                    user_info.gid
+                                );
+                                result.uid_update_skipped_uid_taken = true;
+                            }
+                            UidRemapDecision::Remap { uid, gid } => {
+                                if gid != target_gid {
+                                    debug!(
+                                        "GID {} is already owned by another group; keeping GID {} for user {}",
+                                        target_gid, gid, remote_user
+                                    );
+                                }
+                                debug!(
+                                    "Updating user {} UID from {} to {} and GID from {} to {}",
+                                    remote_user, user_info.uid, uid, user_info.gid, gid
+                                );
 
-                        result.user_info.uid = target_uid;
-                        result.user_info.gid = target_gid;
-                        result.uid_updated = true;
+                                self.user_mapper
+                                    .update_user_uid(container_id, remote_user, uid, gid)
+                                    .await?;
+
+                                result.user_info.uid = uid;
+                                result.user_info.gid = gid;
+                                result.uid_updated = true;
+                            }
+                        }
                     }
                 }
             }
@@ -376,11 +541,26 @@ impl<T: UserMapper> UserMappingService<T> {
         // to root — corrupting the developer's workspace (e.g. `remoteUser:
         // root` fixtures flipping the repo to root:root). Only adjust ownership
         // for a real, non-root target user.
+        //
+        // Skip for the same reason when the UID remap was REFUSED because the
+        // host uid is taken (#618): the remote user then keeps an image-assigned
+        // uid that has nothing to do with the host's, so chowning the bind mount
+        // to it would take the developer's own workspace away from them. The
+        // reference CLI does not chown the workspace at all — its `updateUID`
+        // script only chowns `$HOME`, and only inside the branch that actually
+        // remaps — so skipping here is also the closer behaviour.
         if let Some(ref workspace_path) = config.workspace_path {
             if result.user_info.uid == 0 {
                 debug!(
                     "Skipping workspace ownership adjustment for {}: target user is root (uid 0)",
                     workspace_path
+                );
+            } else if result.uid_update_skipped_uid_taken {
+                debug!(
+                    "Skipping workspace ownership adjustment for {}: the UID remap was refused, \
+                     so {} keeps its image-assigned uid {} and chowning a host bind mount to it \
+                     would strip the host user's access",
+                    workspace_path, result.user_info.username, result.user_info.uid
                 );
             } else {
                 debug!(
@@ -563,6 +743,46 @@ impl<T: Docker> DockerUserMapper<T> {
         self.docker.exec(container_id, command, config).await
     }
 
+    /// Name of the first `database` record (a `/etc/passwd` or `/etc/group`
+    /// path) whose third colon-separated field is `id`, or `None`.
+    ///
+    /// Reads the file directly rather than going through `getent`, because that
+    /// is what the reference CLI's `updateUID.Dockerfile` does — its
+    /// `EXISTING_USER` / `EXISTING_GROUP` are `sed` matches over `/etc/passwd`
+    /// and `/etc/group`. NSS sources beyond the files are deliberately not
+    /// consulted: the remap rewrites those two files, so they are the only
+    /// place a collision can be created or observed.
+    ///
+    /// `awk` over `sed` for the same reason `update_user_uid` uses it: these are
+    /// fixed-position colon-separated records, `awk` is in BusyBox, and there
+    /// is no regex escaping to get wrong.
+    async fn find_id_owner(
+        &self,
+        container_id: &str,
+        database: &str,
+        id: u32,
+    ) -> Result<Option<String>> {
+        let script = format!(
+            "awk -F: -v id={} '$3==id {{ print $1; exit }}' {}",
+            id, database
+        );
+        let cmd = vec!["sh".to_string(), "-c".to_string(), script];
+        let result = self.exec_silent(container_id, &cmd, Some("root")).await?;
+        if !result.success {
+            return Err(UserMappingError::CommandExecutionFailed {
+                command: format!("lookup of id {} in {}", id, database),
+                error: result.stderr.trim().to_string(),
+            }
+            .into());
+        }
+        let name = result.stdout.trim();
+        if name.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(name.to_string()))
+        }
+    }
+
     /// Parse `id -u -n` / `id` output into a `UserInfo`.
     fn parse_user_info_from_passwd(line: &str, username: &str) -> Result<UserInfo> {
         // Expected format from getent passwd: username:x:uid:gid:gecos:home:shell
@@ -663,6 +883,14 @@ impl<T: Docker + Send + Sync> UserMapper for DockerUserMapper<T> {
         let cmd = vec!["id".to_string(), "-u".to_string(), username.to_string()];
         let result = self.exec_silent(container_id, &cmd, Some("root")).await?;
         Ok(result.success)
+    }
+
+    async fn find_user_by_uid(&self, container_id: &str, uid: u32) -> Result<Option<String>> {
+        self.find_id_owner(container_id, "/etc/passwd", uid).await
+    }
+
+    async fn find_group_by_gid(&self, container_id: &str, gid: u32) -> Result<Option<String>> {
+        self.find_id_owner(container_id, "/etc/group", gid).await
     }
 
     async fn create_user(
@@ -1017,6 +1245,8 @@ mod tests {
     // Mock implementation for testing
     struct MockUserMapper {
         users: HashMap<String, UserInfo>,
+        /// Extra `/etc/group` entries not implied by `users`, keyed by gid.
+        groups: HashMap<u32, String>,
         current_user: UserInfo,
     }
 
@@ -1024,6 +1254,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 users: HashMap::new(),
+                groups: HashMap::new(),
                 current_user: UserInfo::new(
                     "root".to_string(),
                     0,
@@ -1036,6 +1267,11 @@ mod tests {
 
         fn with_user(mut self, user: UserInfo) -> Self {
             self.users.insert(user.username.clone(), user);
+            self
+        }
+
+        fn with_group(mut self, gid: u32, name: &str) -> Self {
+            self.groups.insert(gid, name.to_string());
             self
         }
     }
@@ -1055,6 +1291,24 @@ mod tests {
 
         async fn user_exists(&self, _container_id: &str, username: &str) -> Result<bool> {
             Ok(self.users.contains_key(username))
+        }
+
+        async fn find_user_by_uid(&self, _container_id: &str, uid: u32) -> Result<Option<String>> {
+            Ok(self
+                .users
+                .values()
+                .find(|u| u.uid == uid)
+                .map(|u| u.username.clone()))
+        }
+
+        async fn find_group_by_gid(&self, _container_id: &str, gid: u32) -> Result<Option<String>> {
+            // A user's primary group counts as a /etc/group entry too.
+            Ok(self.groups.get(&gid).cloned().or_else(|| {
+                self.users
+                    .values()
+                    .find(|u| u.gid == gid)
+                    .map(|u| u.username.clone())
+            }))
         }
 
         async fn create_user(
@@ -1390,5 +1644,173 @@ mod tests {
     fn test_needs_uid_mapping_false_without_host_uid() {
         let config = UserMappingConfig::new(Some("user".to_string()), None, true);
         assert!(!config.needs_uid_mapping());
+    }
+
+    // ---- #618: the reference's updateUID.Dockerfile guards -----------------
+
+    /// Both ids already match: the reference's "UIDs and GIDs are the same"
+    /// branch.
+    #[test]
+    fn decide_uid_remap_is_a_no_op_when_both_ids_match() {
+        assert_eq!(
+            decide_uid_remap(1000, 1000, 1000, 1000, Some("foo"), Some("foo")),
+            UidRemapDecision::NoChange
+        );
+    }
+
+    /// The UID half of #618: another `/etc/passwd` entry already owns the
+    /// target uid, so the remap is refused OUTRIGHT — the gid is not touched
+    /// either, which is what keeps the remote user a coherent identity.
+    #[test]
+    fn decide_uid_remap_refuses_when_another_user_owns_the_uid() {
+        assert_eq!(
+            decide_uid_remap(1002, 1002, 1000, 1000, Some("foo"), Some("foo")),
+            UidRemapDecision::SkippedUidTaken {
+                existing_user: "foo".to_string()
+            }
+        );
+    }
+
+    /// The GID half, which no parity case reaches: the uid is free but another
+    /// group owns the target gid, so the reference keeps `OLD_GID` and remaps
+    /// the uid only.
+    #[test]
+    fn decide_uid_remap_keeps_the_old_gid_when_another_group_owns_it() {
+        assert_eq!(
+            decide_uid_remap(1002, 1002, 1000, 1000, None, Some("staff")),
+            UidRemapDecision::Remap {
+                uid: 1000,
+                gid: 1002
+            }
+        );
+    }
+
+    /// The GID fallback can eat the only change there was to make: the uid
+    /// already matches and the gid cannot move, so nothing is left to do.
+    #[test]
+    fn decide_uid_remap_is_a_no_op_when_the_gid_fallback_undoes_the_only_change() {
+        assert_eq!(
+            decide_uid_remap(1000, 1002, 1000, 1000, None, Some("staff")),
+            UidRemapDecision::NoChange
+        );
+    }
+
+    /// Both ids free: the ordinary remap the guards must not get in the way of.
+    #[test]
+    fn decide_uid_remap_remaps_when_both_ids_are_free() {
+        assert_eq!(
+            decide_uid_remap(1002, 1002, 1000, 1000, None, None),
+            UidRemapDecision::Remap {
+                uid: 1000,
+                gid: 1000
+            }
+        );
+    }
+
+    /// The `EXISTING_USER` lookup is only consulted when the uid actually
+    /// moves — a user whose uid already matches but whose gid does not must
+    /// still be able to have its gid remapped, even though it is itself the
+    /// entry that owns the target uid.
+    #[test]
+    fn decide_uid_remap_moves_the_gid_when_only_the_gid_differs() {
+        assert_eq!(
+            decide_uid_remap(1000, 1002, 1000, 1000, Some("bar"), None),
+            UidRemapDecision::Remap {
+                uid: 1000,
+                gid: 1000
+            }
+        );
+    }
+
+    /// End-to-end through the service: #618's shape — `bar` at 1002 with the
+    /// host at 1000, which `foo` already owns. `bar` keeps 1002:1002.
+    #[tokio::test]
+    async fn test_uid_update_skipped_when_target_uid_is_taken() {
+        let mapper = MockUserMapper::new()
+            .with_user(UserInfo::new(
+                "foo".to_string(),
+                1000,
+                1000,
+                "/home/foo".to_string(),
+                "/bin/sh".to_string(),
+            ))
+            .with_user(UserInfo::new(
+                "bar".to_string(),
+                1002,
+                1002,
+                "/home/bar".to_string(),
+                "/bin/sh".to_string(),
+            ));
+        let service = UserMappingService::new(mapper);
+
+        let config =
+            UserMappingConfig::new(Some("bar".to_string()), None, true).with_host_user(1000, 1000);
+
+        let result = service.apply_user_mapping("c1", &config).await.unwrap();
+
+        assert!(!result.uid_updated);
+        assert!(result.uid_update_skipped_uid_taken);
+        assert_eq!(result.user_info.username, "bar");
+        assert_eq!(result.user_info.uid, 1002);
+        assert_eq!(result.user_info.gid, 1002);
+    }
+
+    /// A refused remap must NOT take the developer's workspace with it: `bar`
+    /// keeps an image-assigned uid, so chowning the host bind mount to it would
+    /// strip the host user's access. The reference chowns only `$HOME`, and
+    /// only when it actually remaps.
+    #[tokio::test]
+    async fn test_workspace_ownership_skipped_when_uid_remap_is_refused() {
+        let mapper = MockUserMapper::new()
+            .with_user(UserInfo::new(
+                "foo".to_string(),
+                1000,
+                1000,
+                "/home/foo".to_string(),
+                "/bin/sh".to_string(),
+            ))
+            .with_user(UserInfo::new(
+                "bar".to_string(),
+                1002,
+                1002,
+                "/home/bar".to_string(),
+                "/bin/sh".to_string(),
+            ));
+        let service = UserMappingService::new(mapper);
+
+        let config = UserMappingConfig::new(Some("bar".to_string()), None, true)
+            .with_host_user(1000, 1000)
+            .with_workspace_path("/workspaces/project".to_string());
+
+        let result = service.apply_user_mapping("c1", &config).await.unwrap();
+
+        assert!(result.uid_update_skipped_uid_taken);
+        assert!(!result.workspace_ownership_adjusted);
+    }
+
+    /// End-to-end through the service: the uid is free, the gid is not, so the
+    /// uid moves and the gid stays.
+    #[tokio::test]
+    async fn test_uid_update_keeps_old_gid_when_target_gid_is_taken() {
+        let mapper = MockUserMapper::new()
+            .with_user(UserInfo::new(
+                "bar".to_string(),
+                1002,
+                1002,
+                "/home/bar".to_string(),
+                "/bin/sh".to_string(),
+            ))
+            .with_group(1000, "staff");
+        let service = UserMappingService::new(mapper);
+
+        let config =
+            UserMappingConfig::new(Some("bar".to_string()), None, true).with_host_user(1000, 1000);
+
+        let result = service.apply_user_mapping("c1", &config).await.unwrap();
+
+        assert!(result.uid_updated);
+        assert!(!result.uid_update_skipped_uid_taken);
+        assert_eq!(result.user_info.uid, 1000);
+        assert_eq!(result.user_info.gid, 1002);
     }
 }
