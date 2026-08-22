@@ -502,6 +502,210 @@ RUN echo "Building with cache test"
     }
 }
 
+/// #620: a cache hit must still apply the `--image-name` THIS invocation passed.
+///
+/// `--image-name` is an OUTPUT of the build, not an input to its identity, so a
+/// second build over an unchanged workspace legitimately skips the build — but it
+/// used to skip the *tagging* too, reporting the FIRST invocation's name and
+/// creating no tag for the new one. `docker inspect --type=image <new name>` then
+/// failed against an `"outcome": "success"` document that named it. The reference
+/// CLI 0.87.0 tags a cached image with whatever the current invocation asked for
+/// (measured: both names exist, each build reports its own).
+///
+/// Asserts at the artifact level per the canary rule — the tag must resolve to the
+/// image that carries the Dockerfile's marker file, not merely appear in the JSON.
+#[test]
+fn test_build_cache_hit_applies_a_changed_image_name() {
+    if !docker_available() {
+        eprintln!("Skipping: Docker is not available");
+        return;
+    }
+
+    let nonce = std::process::id();
+    let first_name = format!("deacon-t620-first-{}:v1", nonce);
+    let second_name = format!("deacon-t620-second-{}:v1", nonce);
+    let third_name = format!("deacon-t620-third-{}:v1", nonce);
+    let _cleanup = ImageTags(vec![
+        first_name.clone(),
+        second_name.clone(),
+        third_name.clone(),
+    ]);
+
+    let temp_dir = TempDir::new().unwrap();
+    let user_data = TempDir::new().unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    // The marker is what makes the tag assertion an artifact assertion: a tag left
+    // pointing anywhere else cannot produce it.
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        format!("FROM alpine:3.19\nRUN echo cachehit-{} > /marker\n", nonce),
+    )
+    .unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        r#"{
+    "name": "Cache Hit Image Name",
+    "build": { "dockerfile": "Dockerfile" }
+}
+"#,
+    )
+    .unwrap();
+
+    let build = |name: &str| {
+        Command::cargo_bin("deacon")
+            .unwrap()
+            .current_dir(&temp_dir)
+            .arg("--log-level")
+            .arg("info")
+            .arg("--user-data-folder")
+            .arg(user_data.path())
+            .arg("build")
+            .arg("--image-name")
+            .arg(name)
+            .arg("--output-format")
+            .arg("json")
+            .assert()
+    };
+
+    // First build: cold, populates the cache.
+    let first = build(&first_name);
+    let first_output = first.get_output();
+    assert!(
+        first_output.status.success(),
+        "First build should succeed: {}",
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+    let first_json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&first_output.stdout)).unwrap();
+    assert_eq!(first_json["imageName"], serde_json::json!([first_name]));
+
+    // Second build: unchanged inputs, so the build is served from the cache — but a
+    // DIFFERENT `--image-name`.
+    let second = build(&second_name);
+    let second_output = second.get_output();
+    assert!(
+        second_output.status.success(),
+        "Second build should succeed: {}",
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+    let second_stderr = String::from_utf8_lossy(&second_output.stderr);
+    assert!(
+        second_stderr.contains("Using cached build result"),
+        "Second build should have hit the build cache; stderr: {}",
+        second_stderr
+    );
+
+    // The document reports the name THIS run asked for, and only that one.
+    let second_json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&second_output.stdout)).unwrap();
+    assert_eq!(
+        second_json["imageName"],
+        serde_json::json!([second_name]),
+        "A cache hit must report the --image-name of the current invocation"
+    );
+
+    // The tag genuinely exists, and it names the image the build produced.
+    assert!(
+        image_exists(&second_name),
+        "The newly requested tag {} must exist after a cache hit",
+        second_name
+    );
+    assert_eq!(
+        image_id(&second_name),
+        image_id(&first_name),
+        "Both names must point at the one built image"
+    );
+    assert_eq!(
+        run_and_capture(&second_name, &["cat", "/marker"]).trim(),
+        format!("cachehit-{}", nonce),
+        "The new tag must resolve to the image this build produced"
+    );
+
+    // A third cache hit with no `--image-name` reports deacon's own deterministic
+    // tag rather than a name a previous run happened to request.
+    let third = Command::cargo_bin("deacon")
+        .unwrap()
+        .current_dir(&temp_dir)
+        .arg("--user-data-folder")
+        .arg(user_data.path())
+        .arg("build")
+        .arg("--output-format")
+        .arg("json")
+        .assert();
+    let third_output = third.get_output();
+    assert!(third_output.status.success());
+    let third_json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&third_output.stdout)).unwrap();
+    let reported = third_json["imageName"].as_array().unwrap();
+    assert_eq!(reported.len(), 1, "expected one name, got {:?}", reported);
+    assert!(
+        reported[0].as_str().unwrap().starts_with("deacon-build:"),
+        "An unnamed cache hit must not report an earlier run's --image-name, got {:?}",
+        reported[0]
+    );
+}
+
+/// Removes the tags it names on drop so a failed assertion still leaves the daemon
+/// clean; `docker image rm` on an absent tag is a no-op here.
+struct ImageTags(Vec<String>);
+
+impl Drop for ImageTags {
+    fn drop(&mut self) {
+        for tag in &self.0 {
+            let _ = std::process::Command::new("docker")
+                .args(["image", "rm", "-f", tag])
+                .output();
+        }
+    }
+}
+
+fn docker_available() -> bool {
+    std::process::Command::new("docker")
+        .args(["info"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn image_exists(tag: &str) -> bool {
+    std::process::Command::new("docker")
+        .args(["inspect", "--type=image", tag])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn image_id(tag: &str) -> String {
+    let output = std::process::Command::new("docker")
+        .args(["inspect", "--type=image", "--format={{.Id}}", tag])
+        .output()
+        .expect("docker inspect should run");
+    assert!(
+        output.status.success(),
+        "docker inspect {} failed: {}",
+        tag,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn run_and_capture(tag: &str, cmd: &[&str]) -> String {
+    let mut args = vec!["run", "--rm", tag];
+    args.extend_from_slice(cmd);
+    let output = std::process::Command::new("docker")
+        .args(&args)
+        .output()
+        .expect("docker run should run");
+    assert!(
+        output.status.success(),
+        "docker run {} {:?} failed: {}",
+        tag,
+        cmd,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
 #[test]
 fn test_build_force_flag_bypasses_cache() {
     let temp_dir = TempDir::new().unwrap();
