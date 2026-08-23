@@ -5104,6 +5104,61 @@
         "tempdir": true
       },
       "notes": "[#652](https://github.com/get2knowio/deacon/issues/652). On a resume — a second `up` against the container the first one created — deacon skipped `onCreate`, `updateContent` and `postCreate` on their completion markers and then installed the dotfiles AGAIN. Both authorities say skip: the reference short-circuits its whole dotfiles script on a container-side `.dotfilesMarker` (its second run logs `dotfiles marker found` and does nothing else), and deacon's own 008 SC-002 names dotfiles in the list of phases a resume skips.\n\nThe decision was simply never asked for. `commands/up/lifecycle.rs` ran `InvocationContext::should_skip_phase` over an array of five phases that did not include `Dotfiles`, and built the dotfiles configuration from the CLI flags alone. `should_skip_phase` had handled the case correctly the whole time — `Dotfiles` is not a runtime hook, so a prior `Executed` marker returns `Some(\"prior completion marker\")` — and deacon wrote a `dotfiles.json` marker after every run and read it as a gate nowhere.\n\nMEASURED at oracle 0.87.0 on a fixture whose hooks and install script each append a line to the bind-mounted workspace: after two `up`s the reference's counts are onCreate 1 / postCreate 1 / dotfiles 1 / postStart 1, and deacon's were 1 / 1 / **2** / 2. The `postStart` difference is deliberate and stays — deacon treats it as a runtime hook that runs whenever the container is brought up, where the reference's marker suppresses it — which is why this case counts the DOTFILES runs and not the hooks.\n\nTHE LINE COUNT IS THE OBSERVATION. Both `up`s exit 0 before and after the fix, and the dotfiles directory is present either way; only the number of times the install script ran distinguishes them. Watched to fail against the pre-fix binary, where the file holds two lines.\n\nThe fix puts dotfiles on deacon's EXISTING marker semantics rather than adopting the reference's container-side marker, so it inherits the trade its sibling phases already make: markers are host-side and survive `down`, and they are cleared by `--remove-existing-container` (#117) — measured, a third `up` with that flag re-installs."
+    },
+    {
+      "id": "case-up-dotfiles-secrets-reach-install-script",
+      "behaviors": [
+        "bhv-up-dotfiles-secrets-reach-install-script"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dotfiles-repository",
+            "/tmp/dotsrc",
+            "--secrets-file",
+            "${WORKSPACE}/secrets.json"
+          ],
+          "fixtures": [
+            "fx-up-dotfiles-secrets-reach-install-script"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "dotfile-envs.txt": "SecretValue1|Value 1\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "dotfile-envs.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The last unmined arm of the reference's `src/test/dotfiles.test.ts`, and the only one of the eight that found NO defect: `--secrets-file` values and the configuration's `remoteEnv` both reach the dotfiles install command, on both sides. MEASURED at oracle 0.87.0 — the file this case asserts is byte-identical between the two CLIs.\n\nWorth a case anyway, because the two sides arrive at it differently and nothing pinned deacon's route. The reference builds an `${allEnv}` prefix by hand and prepends it to both the `git clone` and the install command (`src/spec-common/dotfiles.ts`); deacon passes the same values as `-e` flags on the `docker exec` that runs the phase, via `ContainerLifecycleConfig::container_env`. A change to how the dotfiles phase is exec'd — the very thing [#647](https://github.com/get2knowio/deacon/issues/647) rewrote — could drop that env without touching any behavior this batch's other five cases observe.\n\nThe install script writes ONE line holding both values so the assertion fails informatively: an empty field on either side of the `|` names which of the two sources was lost, where a per-variable `grep` would only say \"missing\". Hermetic: the secrets file is a fixture and the dotfiles source repository is built inside the container by `postCreateCommand`."
     }
   ]
 }
