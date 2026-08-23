@@ -1,0 +1,9 @@
+{
+	"name": "ParityUpDotfilesLinkOnly",
+	"image": "mcr.microsoft.com/devcontainers/base:bookworm",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"remoteUser": "vscode",
+	"postCreateCommand": "mkdir -p /tmp/dotsrc && cd /tmp/dotsrc && echo 'alias hi=hello' > .dotalias && git init -q -b main . && git -c user.email=parity@example.com -c user.name=parity add -A && git -c user.email=parity@example.com -c user.name=parity commit -q -m fixture",
+	"postStartCommand": "readlink /home/vscode/.dotalias > /workspace/dotfiles-link.txt || echo NONE > /workspace/dotfiles-link.txt"
+}

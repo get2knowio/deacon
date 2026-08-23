@@ -1,0 +1,7 @@
+{
+	"name": "ParityUpDotfilesUnreachableRepository",
+	"image": "mcr.microsoft.com/devcontainers/base:bookworm",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"remoteUser": "vscode"
+}

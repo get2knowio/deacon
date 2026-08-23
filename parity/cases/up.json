@@ -4768,6 +4768,279 @@
         "tempdir": true
       },
       "notes": "The other half of the pair, and the half that can only pass for the right reason. The config here is `.devcontainer.json` at the WORKSPACE ROOT and the same two Feature directories are named `./.devcontainer/localFeatureA` and `./.devcontainer/localFeatureB` — paths that are correct only if resolution is anchored at the ACTIVE CONFIG's own directory. An installer that hardcoded `<workspace>/.devcontainer` as the anchor looks for `.devcontainer/.devcontainer/localFeatureA` and fails; one that hardcoded the workspace root fails the sibling case instead. `case-readconfig-upstream-local-feature-config-at-workspace-root` pins the same pairing at READ time; this pins it at INSTALL time, where the directory is actually copied into a build context.\n\nSame two commands, same three claims as the sibling: both Features installed, both authored option values delivered (`gold` over the default `red`, `Hello there` + `!!!!` over the defaults `hey` + `?????`), and `whoami` inside `hello` reporting the effective remote user.\n\nMEASURED at oracle 0.87.0: both CLIs exit 0 from both operations and print byte-identical output.\n\nMined from the reference CLI's own e2e suite (`src/test/container-features/e2e.test.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 8."
+    },
+    {
+      "id": "case-up-dotfiles-default-install-script-runs",
+      "behaviors": [
+        "bhv-up-dotfiles-default-install-script-runs"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dotfiles-repository",
+            "/tmp/dotsrc"
+          ],
+          "fixtures": [
+            "fx-up-dotfiles-install-script"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "dotfiles-install-log.txt": "/home/vscode/dotfiles\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "dotfiles-install-log.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "[#647](https://github.com/get2knowio/deacon/issues/647). With no `--dotfiles-install-command`, deacon cloned the repository and ran NOTHING — for every dotfiles repository, always. The detection was its own `docker exec` whose `stdout` was read back, and a `silent: false` exec never captures stdout (it forwards it to deacon's own stderr), so `!result.stdout.trim().is_empty()` was false on every input. One run showed the whole thing: the detector's output `install.sh` on deacon's stderr, immediately followed by the log line `No install script found in dotfiles repository`.\n\nThe file asserted here carries the install script's `pwd`, so ONE assertion pins two of the six divergences in #647: that the script runs at all, and that the clone lives at `~/dotfiles` rather than deacon's old `~/.dotfiles` — the target path the reference documents as its default and that deacon's own `--help` already claimed.\n\nMEASURED at oracle 0.87.0 against deacon at the fix commit, on this exact fixture and argv (the fixture builds its own dotfiles source repository inside the container in `postCreateCommand`, which runs before the dotfiles phase, so the case needs no network and no committed git objects): both sides produce the file this case asserts, byte for byte.\n\nSpec-expectation rather than live-differential so it runs on `parity_docker`, which gates pull requests and the release: this is newly corrected behavior and the regression it guards against is invisible in the exit code (deacon exited 0 the whole time it was doing nothing)."
+    },
+    {
+      "id": "case-up-dotfiles-no-install-script-links-into-home",
+      "behaviors": [
+        "bhv-up-dotfiles-no-install-script-links-into-home"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dotfiles-repository",
+            "/tmp/dotsrc"
+          ],
+          "fixtures": [
+            "fx-up-dotfiles-link-only"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "dotfiles-link.txt": "/home/vscode/dotfiles/.dotalias\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "dotfiles-link.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "[#647](https://github.com/get2knowio/deacon/issues/647). A dotfiles repository carrying no installer is not an edge case — it is the plain shape of most of them — and for it the reference symlinks every dotfile in the clone into the home directory. deacon cloned and stopped, so the repository was on disk and nothing used it.\n\nObserved through `postStartCommand`, which runs AFTER the dotfiles phase, reading back `readlink /home/vscode/.dotalias` into the workspace; the fixture writes `NONE` on failure so the pre-fix behavior produces a file with different CONTENT rather than no file, and cannot pass by accident of absence.\n\nMEASURED at oracle 0.87.0 against deacon at the fix commit, on this exact fixture and argv (the fixture builds its own dotfiles source repository inside the container in `postCreateCommand`, which runs before the dotfiles phase, so the case needs no network and no committed git objects): both sides produce the file this case asserts, byte for byte."
+    },
+    {
+      "id": "case-up-dotfiles-install-command-resolved-as-a-path",
+      "behaviors": [
+        "bhv-up-dotfiles-install-command-resolved-as-a-path"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dotfiles-repository",
+            "/tmp/dotsrc",
+            "--dotfiles-install-command",
+            ".run-my-dotfiles-script"
+          ],
+          "fixtures": [
+            "fx-up-dotfiles-nonexecutable-install-command"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "dotfiles-custom-log.txt": "/home/vscode/dotfiles\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "dotfiles-custom-log.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "[#647](https://github.com/get2knowio/deacon/issues/647). `--dotfiles-install-command` names a FILE; deacon spliced it into `sh -c \"cd <target> && <cmd>\"`, which made it a PATH lookup. Both of the reference's own e2e arms for this flag therefore failed under deacon with `sh: 1: <cmd>: not found`, exit 127 — a bare filename (`install.sh`), and this one, a script the repository ships non-executable.\n\nThe fixture commits the script at mode 644 on purpose: the reference chmods it before running it, so a fix that resolved `./<cmd>` but skipped the chmod would still fail here with exit 126. That is the discriminating half — resolution alone is not enough.\n\nMEASURED at oracle 0.87.0 against deacon at the fix commit, on this exact fixture and argv (the fixture builds its own dotfiles source repository inside the container in `postCreateCommand`, which runs before the dotfiles phase, so the case needs no network and no committed git objects): both sides produce the file this case asserts, byte for byte."
+    },
+    {
+      "id": "case-up-dotfiles-existing-target-is-not-re-cloned",
+      "behaviors": [
+        "bhv-up-dotfiles-existing-target-is-not-re-cloned"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dotfiles-repository",
+            "/tmp/dotsrc",
+            "--dotfiles-target-path",
+            "/workspace/dotfiles"
+          ],
+          "fixtures": [
+            "fx-up-dotfiles-existing-target-preserved"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "dotfiles/marker.txt": "preexisting\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "dotfiles/marker.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "[#649](https://github.com/get2knowio/deacon/issues/649). deacon's dotfiles phase opened with `test -d <target>` and, on a hit, `rm -rf <target>` — a recursive removal of a path the user supplies via `--dotfiles-target-path`. A second `up` therefore deleted the dotfiles directory in the container's home and cloned it again, taking anything the user had changed in it with it. The reference's guard for the same condition is `[ -e ${targetPath} ] || git clone …`: an existing target is a reason to leave it alone.\n\nONE operation, not two. A two-`up` shape would have observed the removal only through some file written between the runs, and every candidate for writing it — the install script, `postStartCommand` — is itself subject to the separately characterized difference that deacon re-runs a completed hook where the reference's container-side marker skips it (measured here: on a second `up` the reference does not re-run `postStart` at all). Shipping the pre-existing directory IN THE FIXTURE isolates the guard from all of that: the target already exists on the first and only `up`, and the assertion is simply whether its contents survived.\n\nMEASURED at oracle 0.87.0 against deacon at the fix commit, on this exact fixture and argv (the fixture builds its own dotfiles source repository inside the container in `postCreateCommand`, which runs before the dotfiles phase, so the case needs no network and no committed git objects): both sides produce the file this case asserts, byte for byte.\n\nWhat this case deliberately does NOT pin: that a second `up` skips the install command. The reference short-circuits its whole dotfiles script on a container-side `.dotfilesMarker`; deacon's markers are host-side by design, and adopting a container-side one here would be the wrong trade — a host marker that gated the phase would leave a container recreated after `down` with no dotfiles at all. That residual difference belongs to the existing re-run family (`wvr-ruc-completed-hooks-not-rerun`), not to this fix."
+    },
+    {
+      "id": "case-up-dotfiles-failure-does-not-fail-up",
+      "behaviors": [
+        "bhv-up-dotfiles-failure-does-not-fail-up"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dotfiles-repository",
+            "/nope-not-a-repo"
+          ],
+          "fixtures": [
+            "fx-up-dotfiles-unreachable-repository"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success"
+            }
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-up",
+          "assertion": {
+            "contains": "fatal: repository"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "[#648](https://github.com/get2knowio/deacon/issues/648). A dotfiles repository that cannot be cloned used to fail the whole `up`: exit 1, `\"outcome\": \"error\"`, and no `containerId` — even though the container was created, the image built and every lifecycle hook ran, so the caller lost the handle it needed to `exec` into or `down` the container that exists. The reference wraps its dotfiles invocation in a `try`/`catch` that emits a `failed` progress event and does not re-throw (`src/spec-common/dotfiles.ts`).\n\nMEASURED at oracle 0.87.0 on this fixture and argv: both CLIs run the same `git clone`, both see exit 128, both report `{\"outcome\":\"success\"}` with a real `containerId`, and both leave `fatal: repository '/nope-not-a-repo' does not exist` on stderr.\n\nTHREE ASSERTIONS, and the third is the one that keeps the fix honest. Exit code and `outcome` alone would also be satisfied by a deacon that never attempted the clone, or that attempted it and said nothing — which is the failure mode a \"do not fail on dotfiles errors\" change invites. The `chan-stderr` assertion pins that the attempt happened and that its diagnosis reached the user; the phase is additionally recorded as failed, which is what suppresses its completion marker so a later run retries rather than assuming success.\n\nHermetic: the repository path does not exist, so nothing is fetched and no source repository has to be built."
     }
   ]
 }
