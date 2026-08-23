@@ -1750,9 +1750,17 @@ async fn execute_compose_build(
     let short_hash = &config_hash[..12.min(config_hash.len())];
     // Outside the workspace, like the single-container path's own temp context:
     // the workspace may be read-only, and it is not deacon's to write into.
-    let synth_dir = TempDirGuard::new(
-        std::env::temp_dir().join(format!("deacon-compose-build-{}", short_hash)),
-    );
+    //
+    // The process id is part of the name and is LOAD-BEARING, not decoration.
+    // `calculate_config_hash` deliberately ignores the workspace folder — it
+    // hashes the build description and the files' CONTENT — so two `deacon build`
+    // processes running the same configuration from different directories derive
+    // the SAME hash and would name the same directory. This guard removes its
+    // directory on drop, so the first to finish deleted a context the second was
+    // still building from: `unable to prepare context: path "…" not found`. Two
+    // parity cases share one fixture and found it in CI. A per-process suffix
+    // keeps the path unique while leaving the guard's cleanup exactly as narrow.
+    let synth_dir = TempDirGuard::new(private_build_temp_dir("deacon-compose-build", short_hash));
     let deterministic_tag = format!("deacon-build:{}", short_hash);
     let synthesized = match (&plan.build, &plan.image) {
         (None, Some(image)) => {
@@ -2069,6 +2077,25 @@ async fn execute_compose_build_with_features(
     })
 }
 
+/// A private temp directory for one build's synthesized context, named so that no
+/// two concurrent `deacon build` processes can pick the same path.
+///
+/// [`TempDirGuard`] deletes the directory it names on drop, which makes a SHARED
+/// name a use-after-free across processes: the first invocation to finish removes
+/// a context the second is still building from, and Docker reports `unable to
+/// prepare context: path "…" not found`. The discriminator therefore has to be
+/// per-process — the caller's hash is not enough on its own, and on the Compose
+/// path it is not even workspace-unique, since `calculate_config_hash` hashes the
+/// build description and file content rather than the location.
+fn private_build_temp_dir(prefix: &str, discriminator: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "{}-{}-{}",
+        prefix,
+        discriminator,
+        std::process::id()
+    ))
+}
+
 /// RAII guard that removes a temporary directory on drop.
 ///
 /// Covers the error/early-return (`?`), panic, and unwind paths that an explicit
@@ -2167,8 +2194,13 @@ async fn execute_single_container_build(
         Some(image) => {
             info!("Building from image reference: {}", image);
             let workspace_hash = ContainerIdentity::new(workspace_folder, config).workspace_hash;
-            let temp_dir =
-                std::env::temp_dir().join(format!("deacon-temp-build-{}", workspace_hash));
+            // Per-process, for the reason the Compose sibling's name carries: this
+            // guard deletes the directory on drop, so any two invocations sharing
+            // the name race, and the loser builds from a context that has just been
+            // removed. Here the hash is workspace-derived, so the collision needs
+            // two concurrent builds of the SAME workspace rather than of the same
+            // configuration — narrower, and the same defect.
+            let temp_dir = private_build_temp_dir("deacon-temp-build", &workspace_hash);
             tokio::fs::create_dir_all(&temp_dir).await?;
             // Guard cleanup against early `?` returns, panics, and unwinds. SIGKILL
             // can't be handled in-process; the next run's `create_dir_all` is idempotent.
@@ -3906,6 +3938,43 @@ mod tests {
             ImageNameShape::Array,
         );
         assert!(result_call.is_ok(), "Output should not fail");
+    }
+
+    /// A synthesized build context must be PRIVATE to the process that writes it.
+    /// `TempDirGuard` deletes the directory on drop, so a name two concurrent
+    /// builds can both derive is a use-after-free across processes — the first to
+    /// finish removes a context the second is still building from. That is not
+    /// hypothetical: two parity cases share one fixture, `calculate_config_hash`
+    /// ignores the workspace folder, and CI reported `unable to prepare context:
+    /// path "/tmp/deacon-compose-build-8da4bef2c8b1" not found`.
+    #[test]
+    fn a_synthesized_build_context_is_private_to_this_process() {
+        let mine = private_build_temp_dir("deacon-compose-build", "8da4bef2c8b1");
+        let name = mine
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("a file name");
+
+        // The caller's discriminator is kept — the path stays diagnosable.
+        assert!(
+            name.starts_with("deacon-compose-build-8da4bef2c8b1"),
+            "the hash must survive in the name; got {name}"
+        );
+        // …and is NOT the whole of it, which is the property under test: another
+        // process deriving the same hash must not derive the same path.
+        assert_ne!(
+            name, "deacon-compose-build-8da4bef2c8b1",
+            "a hash-only name is shared with every other process computing it"
+        );
+        assert!(
+            name.ends_with(&format!("-{}", std::process::id())),
+            "expected a per-process suffix; got {name}"
+        );
+        // Two different discriminators still separate within one process.
+        assert_ne!(
+            mine,
+            private_build_temp_dir("deacon-compose-build", "0000cafe0000")
+        );
     }
 
     /// #632: the whole nine-cell matrix, as one table. `--image-name` wins on
