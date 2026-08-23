@@ -351,3 +351,173 @@ fn build_honors_a_container_driver_builder_and_can_oci_export() {
         tar_path.display()
     );
 }
+
+/// A container-driver builder must also be able to export a LOCAL BUILD CACHE, on a
+/// configuration that declares Features — the other half of the surface [#595] took
+/// back, and the half its sibling above does not reach.
+///
+/// `build_honors_a_container_driver_builder_and_can_oci_export` covers OCI export on
+/// a plain Dockerfile. This one differs on both axes that matter, and each was chosen
+/// rather than varied for variety's sake:
+///
+/// * **`--cache-to type=local`** is what the old `--builder default` pin cost users
+///   most concretely. The `docker` driver cannot serve a local cache export at all,
+///   so a build silently redirected onto it produced no cache and still reported
+///   success — the flag taken and dropped, which is the silent-fallback shape
+///   constitution IV rules out. `parity/cases/build.json`'s `case-build-cache-to-flag`
+///   deliberately narrowed to `type=inline` for exactly this reason and recorded that
+///   local export was out of its reach; this is where that claim gets made.
+/// * **A Feature** puts the build on the merged base + install-stage path
+///   (`prepare_feature_layer` / `merge_dockerfile_with_feature_stage`), which is the
+///   path that used to chain through a daemon-local tag and is therefore the path the
+///   pin existed to prop up. A featureless build would exercise the easier half.
+///
+/// Upstream asserts exactly this pair — `should execute successfully and export
+/// buildx cache with container builder`, over a Dockerfile-with-Features and an
+/// image-with-Features config (`src/test/cli.build.test.ts` at v0.87.0). Both were
+/// MEASURED to agree at oracle 0.87.0 before this landed: deacon and the reference
+/// each exit 0 and each write `index.json` under the destination.
+///
+/// It is not a parity case because the harness has no vocabulary for creating a
+/// buildx builder — an operation takes argv and fixtures, not host setup — and
+/// inventing that primitive for one claim is a harness design decision, not a data
+/// edit. The Docker-gated-test fallback is the same one #619 took for the Compose
+/// `--image-name` claim, for the same kind of reason.
+///
+/// `BUILDX_BUILDER` rather than `docker buildx use`: the latter mutates host-global
+/// state that concurrent tests share.
+///
+/// What each assertion is worth, stated because it is not uniform and its sibling
+/// learned the same lesson: on a daemon WITHOUT the containerd image store — the
+/// common case, and GitHub's runners — the docker driver cannot serve this exporter,
+/// so the `index.json` assertion is the one that bites and a redirected build fails
+/// it outright. On a daemon WITH it (this repo's dev container) the docker driver
+/// CAN serve it: measured here, a deliberate `BUILDX_BUILDER=default` run of this
+/// exact configuration exits 0 and writes `index.json` too. There the discriminating
+/// assertion is the builder identity, which holds on every substrate. Both are kept
+/// for that reason, and neither is redundant.
+///
+/// [#595]: https://github.com/get2knowio/deacon/issues/595
+#[test]
+fn build_honors_a_container_driver_builder_and_can_export_a_local_cache() {
+    let builder = format!("deacon-t595-cache-{}", std::process::id());
+
+    let created = std::process::Command::new("docker")
+        .args([
+            "buildx",
+            "create",
+            "--name",
+            &builder,
+            "--driver",
+            "docker-container",
+        ])
+        .output();
+    match created {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            eprintln!(
+                "skipping: could not create a docker-container builder ({})",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+            return;
+        }
+        Err(e) => {
+            eprintln!("skipping: docker buildx unavailable ({e})");
+            return;
+        }
+    }
+
+    let temp_dir = TempDir::new().unwrap();
+    let dc = temp_dir.path().join(".devcontainer");
+    let feature = dc.join("features/marker");
+    fs::create_dir_all(&feature).unwrap();
+    fs::write(dc.join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+    fs::write(
+        dc.join("devcontainer.json"),
+        r#"{
+    "name": "Container Builder Cache Export",
+    "build": { "dockerfile": "Dockerfile" },
+    "features": { "./features/marker": {} }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        feature.join("devcontainer-feature.json"),
+        r#"{ "id": "marker", "version": "1.0.0", "name": "Marker" }"#,
+    )
+    .unwrap();
+    // `/bin/sh`, not bash: the base is alpine, where a bash shebang exits 127.
+    fs::write(
+        feature.join("install.sh"),
+        "#!/bin/sh\nset -e\necho installed > /usr/local/share/marker\n",
+    )
+    .unwrap();
+
+    let cache_dir = temp_dir.path().join("build-cache");
+
+    let output = Command::cargo_bin("deacon")
+        .unwrap()
+        .current_dir(&temp_dir)
+        .env("BUILDX_BUILDER", &builder)
+        .arg("build")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        // Without --force a previous run's cached image would satisfy this one and
+        // no build — and so no cache export — would happen at all.
+        .arg("--force")
+        .arg("--cache-to")
+        .arg(format!("type=local,dest={}", cache_dir.display()))
+        .arg("--output-format")
+        .arg("json")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    let _ = std::process::Command::new("docker")
+        .args(["buildx", "rm", &builder])
+        .output();
+
+    if !output.status.success() && is_docker_unavailable(&stderr) {
+        eprintln!("skipping: docker unavailable ({})", stderr.trim());
+        return;
+    }
+
+    assert!(
+        output.status.success(),
+        "a local cache export on the selected container-driver builder must succeed; \
+         stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("\"outcome\":\"success\""),
+        "the result document must report success; stdout:\n{stdout}"
+    );
+    // The builder identity is half the claim: a pinned `default` would report the
+    // docker driver here, which cannot serve this exporter at all.
+    assert!(
+        stderr.contains(&builder),
+        "the build must run on the selected builder `{builder}`; stderr:\n{stderr}"
+    );
+    // The other half, and the one an `outcome: success` cannot give: the cache has
+    // to actually be on disk. Upstream asserts on this same file.
+    assert!(
+        cache_dir.join("index.json").exists(),
+        "the build reported success but exported no cache to {}",
+        cache_dir.display()
+    );
+
+    // Best-effort: don't leave the produced image on the daemon.
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(stdout.trim()) {
+        if let Some(name) = v.get("imageName").and_then(|n| {
+            n.as_str()
+                .map(str::to_string)
+                .or_else(|| n.as_array()?.first()?.as_str().map(str::to_string))
+        }) {
+            let _ = std::process::Command::new("docker")
+                .args(["rmi", "-f", &name])
+                .output();
+        }
+    }
+}
