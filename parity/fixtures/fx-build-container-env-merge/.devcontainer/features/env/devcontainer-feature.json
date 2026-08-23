@@ -1,0 +1,9 @@
+{
+	"id": "env",
+	"version": "1.0.0",
+	"name": "Conformance containerEnv",
+	"containerEnv": {
+		"PARITY_FEATURE_ONLY": "from-feature",
+		"PARITY_OVERRIDDEN": "from-feature"
+	}
+}

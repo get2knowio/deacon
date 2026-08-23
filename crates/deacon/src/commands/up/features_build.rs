@@ -221,6 +221,7 @@ pub(crate) async fn prepare_feature_layer(
         features_source_dir: staged.features_source_dir.display().to_string(),
         feature_install_env,
         host_ca_build_context: host_ca_dir.as_ref().map(|p| p.display().to_string()),
+        config_container_env: config.container_env().clone(),
     });
     let install_stage = generator.generate_install_stage_from(&staged.plan, base_stage)?;
 
@@ -349,6 +350,7 @@ pub(crate) async fn build_image_with_features(
         features_source_dir: staged.features_source_dir.display().to_string(),
         feature_install_env,
         host_ca_build_context,
+        config_container_env: config.container_env().clone(),
     };
 
     let generator = DockerfileGenerator::new(dockerfile_config.clone());
