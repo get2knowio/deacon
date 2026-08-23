@@ -1,0 +1,8 @@
+{
+	"name": "ConformanceRucLifecyclePhases",
+	"image": "alpine:3.19",
+	"postCreateCommand": "sh -c 'echo postCreate >> /tmp/ruc-phases'",
+	"postStartCommand": "sh -c 'echo postStart >> /tmp/ruc-phases'",
+	"postAttachCommand": "sh -c 'echo postAttach >> /tmp/ruc-phases'",
+	"remoteUser": "root"
+}

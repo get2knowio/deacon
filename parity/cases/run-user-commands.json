@@ -875,6 +875,239 @@
         "tempdir": true
       },
       "notes": "`--skip-post-attach` is a `run-user-commands` flag as well as an `up` flag, and until this case NOTHING in the suite passed it to either — it appeared only in the prose of three `notes` fields, each reciting it as the opt-out that keeps `run-user-commands` usable as an explicit re-run. A flag argued from in three rationales and exercised by no scenario is exactly the shape this suite exists to close.\n\nThe shape mirrors upstream's own, which drives the flag through `run-user-commands` at the end of `'should not run postAttachCommand when --skip-post-attach is given'` after an `up --skip-post-create`. Deferring first is what makes the observation clean: `up --skip-post-create` leaves the marker file ABSENT (that is #476's case), so every line the file ends up holding was written by the `run-user-commands` pass under test and the count is not diluted by hooks `up` already ran.\n\nMEASURED at oracle 0.87.0 on `fx-up-skip-post-create-phases`: both CLIs exit 0 from both operations, both leave no file after the deferred `up`, and both leave exactly `onCreate\\nupdateContent\\npostCreate\\npostStart\\n` after the flagged `run-user-commands` — four lines, `postAttach` absent.\n\nThe assertion is carried in addition to the comparison (FR-043): a differential alone would stay green if both CLIs started skipping `postStart` as well, and this is a surface where over-reach is the plausible defect — `--skip-post-create`'s twin on `up` (#476) was wrong in precisely that direction, in the other CLI's favour. Deliberately NOT asserted here: what a PLAIN `run-user-commands` re-runs, which is the separately characterized `wvr-ruc-completed-hooks-not-rerun` and is untouched by this case's deferred-then-flagged path.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.exec.base.ts` at v0.87.0), [#480](https://github.com/get2knowio/deacon/issues/480) batch 6."
+    },
+    {
+      "id": "case-run-user-commands-upstream-result-document",
+      "behaviors": [
+        "bhv-run-user-commands-result-document"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-ruc"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Fixes [#635](https://github.com/get2knowio/deacon/issues/635). `run-user-commands` writes a result document to stdout, and this case COMPARES it rather than pinning it — measured at oracle 0.87.0 after the fix, both CLIs print `{\"outcome\":\"success\",\"result\":\"done\"}` and the bytes are identical, so `chan-stdout` is declared alongside `chan-structured-output` and asserts the whole line including its compact spelling.\n\nBEFORE the fix deacon printed NOTHING at all on stdout — not an empty document, no output — which is why this case could not have been green for the wrong reason: `chan-structured-output` verdicts a divergence when stdout is not valid JSON (`structured_output_evidence` records `present: false`), so it was red on the parent commit on both declared channels at once.\n\n`up --skip-post-create` first, so the `run-user-commands` pass under test is the one that runs `postCreate` — the same isolation `case-run-user-commands-feature-contributed-hook` needs, and for the same reason: hooks that already ran are re-run by deacon and skipped by the reference (`wvr-ruc-completed-hooks-not-rerun`), so a case that let `up` run them would be comparing two different amounts of work.\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 9), `src/test/cli.test.ts` — 'should execute successfully', which does `JSON.parse(res.stdout).outcome`, an assertion that could not run against deacon at all."
+    },
+    {
+      "id": "case-run-user-commands-result-prebuild",
+      "behaviors": [
+        "bhv-run-user-commands-result-document"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--prebuild"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-ruc"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "A VARIANT of `case-run-user-commands-upstream-result-document`, distinguished only by the input flag — a variant adds a case, never a behavior (T039/SC-005). `--prebuild` stops the run after `updateContentCommand`, and the ONLY thing that reports it is the `result` field: the exit code is 0 either way. MEASURED at oracle 0.87.0: both CLIs print `{\"outcome\":\"success\",\"result\":\"prebuild\"}` and both leave the later hooks unrun, so deacon's phase gating already agreed here before [#635](https://github.com/get2knowio/deacon/issues/635) and only the document was missing."
+    },
+    {
+      "id": "case-run-user-commands-result-skip-non-blocking",
+      "behaviors": [
+        "bhv-run-user-commands-result-document"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-up-basic"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-non-blocking-commands"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-ruc"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The second VARIANT: `--skip-non-blocking-commands` cuts the run off at the configured `waitFor`, which neither CLI's fixture sets, so both fall back to `updateContentCommand` and stop before `postCreate`. MEASURED at oracle 0.87.0: both print `{\"outcome\":\"success\",\"result\":\"skipNonBlocking\"}`.\n\nThat agreement is itself the finding worth recording, because the two CLIs could have disagreed about the DEFAULT and still both said `skipNonBlocking` on some other input: a default of `postCreateCommand` would have run `postCreate` and reported the same word. The hooks were measured alongside the document for exactly that reason — neither side ran any — which is what pins the default at `updateContentCommand` on both."
+    },
+    {
+      "id": "case-run-user-commands-upstream-stop-for-personalization",
+      "behaviors": [
+        "bhv-run-user-commands-stop-for-personalization"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-ruc-lifecycle-phases"
+          ]
+        },
+        {
+          "id": "op-clear",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "rm",
+            "-f",
+            "/tmp/ruc-phases"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--stop-for-personalization"
+          ]
+        },
+        {
+          "id": "op-read",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "cat",
+            "/tmp/ruc-phases"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-read",
+          "assertion": {
+            "matches": "^postCreate\\s*$"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Fixes [#637](https://github.com/get2knowio/deacon/issues/637). `--stop-for-personalization` stops the run after `postCreateCommand` so dotfiles / personalization can be applied before the attach-time hooks fire. deacon parsed the flag and dropped it — the field carried `#[allow(dead_code)] // Future feature` — so `postStartCommand` and `postAttachCommand` ran anyway.\n\n**It asserts the MARKER SET, not the outcome, and that is the whole point**: both CLIs exited 0 and both would have gone on exiting 0, so a case built on `chan-exit-code` would have been green against the defect. MEASURED at oracle 0.87.0 on this fixture from a clean slate, BEFORE the fix: the reference left `postCreate` and deacon left `postCreate`, `postStart` and `postAttach`. AFTER: byte-identical documents and identical marker files.\n\n`op-clear` between `up` and `run-user-commands` is load-bearing rather than tidiness. `up --skip-post-create` still runs `postStart` and `postAttach`, so their markers are in the file before the pass under test begins; without the truncation the assertion would be reading `up`'s work and could never distinguish the two behaviors.\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 9)."
     }
   ]
 }
