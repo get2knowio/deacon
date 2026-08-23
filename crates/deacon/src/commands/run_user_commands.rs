@@ -30,7 +30,7 @@ pub struct RunUserCommandsArgs {
     pub skip_post_attach: bool,
     pub skip_non_blocking_commands: bool,
     pub prebuild: bool,
-    #[allow(dead_code)] // Future feature: stop for personalization
+    /// Stop after `postCreateCommand`, before `postStartCommand` (#637).
     pub stop_for_personalization: bool,
     /// When set, target this container directly; skips workspace-based discovery.
     pub container_id: Option<String>,
@@ -51,12 +51,167 @@ pub struct RunUserCommandsArgs {
     pub user_data_folder: Option<std::path::PathBuf>,
 }
 
-/// Execute the run-user-commands command
+/// How far the run got, reported as the `result` field of the success document.
+///
+/// The four values are the reference CLI's own (#635), and each corresponds to a
+/// flag deacon already parses. They are not decoration: "stopped early because you
+/// asked me to" and "ran everything" are both exit 0, so `result` is the ONLY thing
+/// that tells a caller which one happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunOutcome {
+    /// `--skip-non-blocking-commands` cut the run off at the `waitFor` phase.
+    SkipNonBlocking,
+    /// `--prebuild`: stops after `updateContentCommand`.
+    Prebuild,
+    /// `--stop-for-personalization`: stops after `postCreateCommand`.
+    StopForPersonalization,
+    /// Ran to the end.
+    Done,
+}
+
+impl RunOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            RunOutcome::SkipNonBlocking => "skipNonBlocking",
+            RunOutcome::Prebuild => "prebuild",
+            RunOutcome::StopForPersonalization => "stopForPersonalization",
+            RunOutcome::Done => "done",
+        }
+    }
+}
+
+/// Decide how far the run will get, from the flags and the configured `waitFor`.
+///
+/// This is a transcription of the reference CLI's own chain at 0.87.0, and the ORDER
+/// is the whole content — each early stop sits at a specific point between two
+/// phases, so a rearrangement changes the answer for flag combinations that reach
+/// more than one checkpoint:
+///
+/// ```text
+///   onCreate, updateContent          → --skip-non-blocking-commands cuts off here first
+///   --prebuild stops here
+///   postCreate                       → --skip-non-blocking-commands cuts off here
+///   --stop-for-personalization stops here
+///   postStart                        → --skip-non-blocking-commands cuts off here
+///   postAttach                       → "done"
+/// ```
+///
+/// It is a pure function of the four inputs BECAUSE the phases themselves cannot
+/// change any of them, which is what makes the reported value and the phases that
+/// actually run derivable from ONE decision — see the `postStart` gate at the call
+/// site. Reporting `stopForPersonalization` while `postStart` had in fact run is
+/// precisely the defect [#637](https://github.com/get2knowio/deacon/issues/637) is
+/// about, and it can only reappear if these two are computed separately again.
+fn run_outcome(
+    skip_non_blocking_commands: bool,
+    wait_for: LifecyclePhase,
+    prebuild: bool,
+    stop_for_personalization: bool,
+) -> RunOutcome {
+    let cuts_off_at = |phase| {
+        skip_non_blocking_commands
+            && !should_queue_phase_for_wait_for(skip_non_blocking_commands, wait_for, phase)
+    };
+
+    if cuts_off_at(LifecyclePhase::PostCreate) {
+        // `waitFor` is initializeCommand, onCreateCommand or updateContentCommand:
+        // the run stops before postCreate, ahead of --prebuild's own stop.
+        RunOutcome::SkipNonBlocking
+    } else if prebuild {
+        RunOutcome::Prebuild
+    } else if cuts_off_at(LifecyclePhase::PostStart) {
+        RunOutcome::SkipNonBlocking
+    } else if stop_for_personalization {
+        RunOutcome::StopForPersonalization
+    } else if cuts_off_at(LifecyclePhase::PostAttach) {
+        RunOutcome::SkipNonBlocking
+    } else {
+        RunOutcome::Done
+    }
+}
+
+/// The result document written to stdout on success (#635).
+///
+/// The reference CLI prints this on every terminating path and its own e2e suite
+/// parses it; deacon printed nothing at all, on success and on failure alike.
+#[derive(Debug, serde::Serialize)]
+struct RunUserCommandsSuccess {
+    outcome: &'static str,
+    result: &'static str,
+}
+
+/// The result document written to stdout on failure (#635).
+#[derive(Debug, serde::Serialize)]
+struct RunUserCommandsErrorDocument {
+    outcome: &'static str,
+    message: String,
+    description: String,
+}
+
+/// Render a failure as the result document.
+///
+/// Same split `build` settled on for [#594](https://github.com/get2knowio/deacon/issues/594):
+/// `message` is the outermost context — what deacon was doing — and `description` is
+/// the chain beneath it, where the actionable detail lives. The reference fills both
+/// with the same sentence; deacon's chain carries more, so it goes in the field meant
+/// for it rather than being thrown away.
+fn error_document(err: &anyhow::Error) -> RunUserCommandsErrorDocument {
+    let causes: Vec<String> = err.chain().skip(1).map(|c| c.to_string()).collect();
+    let message = err.to_string();
+    let description = if causes.is_empty() {
+        message.clone()
+    } else {
+        causes.join(": ")
+    };
+    RunUserCommandsErrorDocument {
+        outcome: "error",
+        message,
+        description,
+    }
+}
+
+/// Execute the run-user-commands command, writing the result document to stdout.
+///
+/// Exactly one JSON document reaches stdout on every terminating path — success and
+/// failure alike ([#635](https://github.com/get2knowio/deacon/issues/635)) — which is
+/// what `up`, `set-up` and (since #594) `build` already do, and what the reference
+/// CLI does here. Logs and diagnostics stay on stderr; the error is still propagated
+/// so the binary boundary renders it there and exits 1.
+///
+/// Unconditional rather than gated on an output-format flag, because
+/// `run-user-commands` has none — on either CLI.
 #[instrument(skip(args, runtime))]
 pub async fn execute_run_user_commands(
     args: RunUserCommandsArgs,
     runtime: Option<RuntimeKind>,
 ) -> Result<()> {
+    match execute_run_user_commands_inner(args, runtime).await {
+        Ok(outcome) => {
+            let document = RunUserCommandsSuccess {
+                outcome: "success",
+                result: outcome.as_str(),
+            };
+            println!(
+                "{}",
+                serde_json::to_string(&document)
+                    .context("Failed to serialize run-user-commands result")?
+            );
+            Ok(())
+        }
+        Err(err) => {
+            if let Ok(json) = serde_json::to_string(&error_document(&err)) {
+                println!("{}", json);
+            }
+            Err(err)
+        }
+    }
+}
+
+#[instrument(skip(args, runtime))]
+async fn execute_run_user_commands_inner(
+    args: RunUserCommandsArgs,
+    runtime: Option<RuntimeKind>,
+) -> Result<RunOutcome> {
     info!("Starting run-user-commands execution");
 
     // Select the runtime (docker/podman) honoring --runtime/DEACON_CONTAINER_RUNTIME.
@@ -195,7 +350,7 @@ pub async fn execute_run_user_commands(
     }
 
     // Execute lifecycle commands
-    execute_lifecycle_commands(
+    let outcome = execute_lifecycle_commands(
         &container_id,
         &config,
         workspace_folder.as_path(),
@@ -206,7 +361,7 @@ pub async fn execute_run_user_commands(
     .await?;
 
     info!("Run-user-commands execution completed successfully");
-    Ok(())
+    Ok(outcome)
 }
 
 /// Execute lifecycle commands in the container
@@ -222,7 +377,7 @@ async fn execute_lifecycle_commands(
     args: &RunUserCommandsArgs,
     cli: &CliRuntime,
     config_hash: &str,
-) -> Result<()> {
+) -> Result<RunOutcome> {
     info!("Executing lifecycle commands in container");
 
     // Create substitution context
@@ -389,6 +544,18 @@ async fn execute_lifecycle_commands(
     // runs before container creation and belongs only to the `up` workflow.
     let wait_for = wait_for_phase(config.wait_for.as_deref())?;
 
+    // How far this run gets. Computed ONCE, here, and used for two things: the
+    // `result` field of the success document (#635) and the `postStart` gate below
+    // (#637). Deriving both from one decision is what keeps them from disagreeing —
+    // before this, `--stop-for-personalization` was parsed and dropped, so `postStart`
+    // and `postAttach` ran anyway and nothing a caller could read said so.
+    let outcome = run_outcome(
+        args.skip_non_blocking_commands,
+        wait_for,
+        args.prebuild,
+        args.stop_for_personalization,
+    );
+
     // Aggregate a phase's commands (features + config); `None` when empty.
     let aggregate = |phase: LifecyclePhase| -> Result<Option<LifecycleCommandList>> {
         let list = aggregate_lifecycle_commands(phase, &resolved_features, config)?;
@@ -436,8 +603,11 @@ async fn execute_lifecycle_commands(
     }
 
     // Phase 4: postStart (container, non-blocking, can be skipped).
-    // Also skipped in prebuild mode (stops after updateContent).
-    if !args.prebuild
+    // Also skipped in prebuild mode (stops after updateContent), and under
+    // `--stop-for-personalization`, which stops the run right here so dotfiles /
+    // personalization can be applied before the attach-time hooks fire (#637).
+    if outcome != RunOutcome::StopForPersonalization
+        && !args.prebuild
         && should_queue_phase_for_wait_for(
             args.skip_non_blocking_commands,
             wait_for,
@@ -511,12 +681,94 @@ async fn execute_lifecycle_commands(
     }
 
     info!("Lifecycle commands execution completed");
-    Ok(())
+    Ok(outcome)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every cell of the reference's chain, and the ORDER between the early stops is
+    /// what the table is really pinning: three of these rows have two flags asking to
+    /// stop at different points, and only one of the two answers is the reference's.
+    #[test]
+    fn run_outcome_transcribes_the_references_chain() {
+        use LifecyclePhase::*;
+        use RunOutcome::*;
+
+        // (skip_non_blocking, waitFor, prebuild, stop_for_personalization) -> result
+        let table: &[(bool, LifecyclePhase, bool, bool, RunOutcome)] = &[
+            // Nothing asked for an early stop.
+            (false, UpdateContent, false, false, Done),
+            (false, PostAttach, false, false, Done),
+            // One flag at a time.
+            (true, Initialize, false, false, SkipNonBlocking),
+            (true, OnCreate, false, false, SkipNonBlocking),
+            (true, UpdateContent, false, false, SkipNonBlocking),
+            (true, PostCreate, false, false, SkipNonBlocking),
+            (true, PostStart, false, false, SkipNonBlocking),
+            (false, UpdateContent, true, false, Prebuild),
+            (false, UpdateContent, false, true, StopForPersonalization),
+            // `waitFor: postAttachCommand` cuts nothing off — there is no checkpoint
+            // after postStart, so the run reaches the end and reports `done`.
+            (true, PostAttach, false, false, Done),
+            // Two flags, different stopping points. `--skip-non-blocking-commands`
+            // wins over `--prebuild` only when it cuts off EARLIER than prebuild does.
+            (true, UpdateContent, true, false, SkipNonBlocking),
+            (true, PostCreate, true, false, Prebuild),
+            (true, PostStart, true, false, Prebuild),
+            // `--prebuild` stops before personalization is ever reached.
+            (false, UpdateContent, true, true, Prebuild),
+            // `--stop-for-personalization` sits after postCreate, so a skip that cuts
+            // off at or before postCreate wins; one that cuts off at postStart loses.
+            (true, UpdateContent, false, true, SkipNonBlocking),
+            (true, PostCreate, false, true, SkipNonBlocking),
+            (true, PostStart, false, true, StopForPersonalization),
+        ];
+
+        for &(skip, wait_for, prebuild, personalize, expected) in table {
+            assert_eq!(
+                run_outcome(skip, wait_for, prebuild, personalize),
+                expected,
+                "skip_non_blocking={skip}, waitFor={wait_for:?}, prebuild={prebuild}, \
+                 stop_for_personalization={personalize}"
+            );
+        }
+    }
+
+    /// The success document is the reference's, field for field (#635).
+    #[test]
+    fn success_document_matches_the_reference_shape() {
+        let document = RunUserCommandsSuccess {
+            outcome: "success",
+            result: RunOutcome::Done.as_str(),
+        };
+        assert_eq!(
+            serde_json::to_string(&document).unwrap(),
+            r#"{"outcome":"success","result":"done"}"#
+        );
+    }
+
+    /// A failure document carries the outermost context as `message` and the cause
+    /// chain as `description`; with no chain to draw on, both say the same thing
+    /// rather than one of them being empty (which is what the reference emits).
+    #[test]
+    fn error_document_splits_the_cause_chain() {
+        let bare = error_document(&anyhow::anyhow!("Dev container not found."));
+        assert_eq!(bare.outcome, "error");
+        assert_eq!(bare.message, "Dev container not found.");
+        assert_eq!(bare.description, "Dev container not found.");
+
+        let chained = error_document(
+            &anyhow::anyhow!("Configuration file not found: /ws/.devcontainer/devcontainer.json")
+                .context("Configuration error"),
+        );
+        assert_eq!(chained.message, "Configuration error");
+        assert_eq!(
+            chained.description,
+            "Configuration file not found: /ws/.devcontainer/devcontainer.json"
+        );
+    }
 
     #[test]
     fn test_run_user_commands_args_defaults() {
