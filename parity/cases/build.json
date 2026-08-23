@@ -2479,6 +2479,147 @@
         "tempdir": true
       },
       "notes": "The NEGATIVE arm of `build`'s cwd default, and upstream's own ('should fail gracefully when no workspace-folder and no config in current directory', `src/test/cli.build.test.ts` at v0.87.0), batch 10 of [#480](https://github.com/get2knowio/deacon/issues/480). An existing current directory with no devcontainer document and no `--workspace-folder` exits 1 with an error document rather than building something arbitrary.\n\n`build`'s positive cwd default has had a case since batch 8 (`case-build-upstream-cwd-default-workspace`) and the negative had none, which is the same asymmetry batch 6 closed for `exec` and batch 9 for `run-user-commands`. This is the third and last consumer subcommand with a cwd default, so the family is now closed on both arms everywhere.\n\nDistinct from `case-build-upstream-missing-config-rejected`, which names a `--workspace-folder` explicitly: this one never passes the flag at all, so it also asserts that the default resolves to the cwd rather than to something else before failing.\n\nIt pins DEACON's answer rather than comparing, and only the SHAPE of the document. The two CLIs word it differently — deacon `Configuration file not found: <abs>`, the reference `Dev container config (<abs>) not found.` — and both name the same absolute path and both exit 1, so the wording gap is not a divergence to fix and freezing deacon's sentence would make improving it a suite edit.\n\nHERMETIC, and verified rather than assumed: re-run with `docker` removed from `PATH` entirely AND `DOCKER_HOST` pointed at a nonexistent socket, deacon produces the identical document on all three channels — config resolution fails before any daemon contact. So it gates every pull request and runs on all three operating systems."
+    },
+    {
+      "id": "case-build-cli-label-dockerfile-shape-spec",
+      "behaviors": [
+        "bhv-build-cli-label-all-shapes"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--label",
+            "name=label-test",
+            "--label",
+            "type=multiple-labels",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "name": "label-test",
+                "type": "multiple-labels",
+                "parity.build.token": "conformance-build-flags"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`build --label` is repeatable and every label reaches the produced image on a `build.dockerfile` configuration. This is the PR-GATING half of `bhv-build-cli-label-all-shapes`; the differential half that records the reference's divergence is `case-build-upstream-cli-label-dockerfile-shape`, and it runs nightly only.\n\nThe image-reference shape has been gated since `case-build-image-reference-custom-tag`, which passes the flag once. Nothing covered the Dockerfile shape, and nothing anywhere covered the flag being passed TWICE — upstream's own test asserts both labels for exactly that reason ('should build successfully with valid image metadata --label property', `src/test/cli.build.test.ts` at v0.87.0), mined in [#480](https://github.com/get2knowio/deacon/issues/480) batch 10.\n\n`parity.build.token` is asserted alongside the two flag labels deliberately: it is the fixture's own Dockerfile `LABEL`, so it proves the tag names the image this configuration built rather than something else that happens to carry the flag's values."
+    },
+    {
+      "id": "case-build-upstream-cli-label-dockerfile-shape",
+      "behaviors": [
+        "bhv-build-cli-label-all-shapes"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--label",
+            "name=label-test",
+            "--label",
+            "type=multiple-labels",
+            "--image-name",
+            "${IMAGE_TAG}"
+          ],
+          "fixtures": [
+            "fx-build-flags"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "labels": {
+                "name": "label-test",
+                "type": "multiple-labels"
+              }
+            }
+          }
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-build-cli-label-all-shapes",
+          "context": [],
+          "observablePath": "chan-image.labels.name",
+          "rationale": "deacon applies a `--label` on a `build.dockerfile` configuration; the reference drops it there while applying it on image-reference configurations (measured at oracle 0.87.0 across all four shapes). One named key, never `chan-image.labels` as a whole — `parity.build.token`, the fixture's own Dockerfile `LABEL`, stays compared and agrees, which is what shows the difference is the FLAG rather than labelling.",
+          "divergenceId": "bhv-build-cli-label-all-shapes"
+        },
+        {
+          "behavior": "bhv-build-cli-label-all-shapes",
+          "context": [],
+          "observablePath": "chan-image.labels.type",
+          "rationale": "The second label the same invocation passed, diverging for the same reason. Both keys are named rather than the map, so a regression on any other label surfaces as a divergence instead of being excused.",
+          "divergenceId": "bhv-build-cli-label-all-shapes"
+        },
+        {
+          "behavior": "bhv-build-cli-label-all-shapes",
+          "context": [],
+          "observablePath": "chan-image.labels.org.deacon.configHash",
+          "rationale": "deacon stamps `org.deacon.configHash` on the image it builds; the reference sets no such label. Identical in scope and reasoning to the tolerance every other `chan-image` differential in this suite carries — one named key in deacon's own namespace, never the `org.deacon.*` namespace as a whole.",
+          "divergenceId": "ext-build-image-bookkeeping-label"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Records, and re-measures every nightly run, that the reference CLI drops `--label` on a `build.dockerfile` configuration while honouring it on an image-reference one. Mined from [#480](https://github.com/get2knowio/deacon/issues/480) batch 10 (`src/test/cli.build.test.ts` at v0.87.0), where upstream's own `--label` test uses an IMAGE configuration and so never touches the shape where its CLI loses them.\n\nMEASURED at oracle 0.87.0 across all four shapes on fresh workspaces: image and image-with-Features carry both labels on both CLIs; `build.dockerfile` and `build.dockerfile`-with-Features carry both on deacon and NEITHER on the reference. The reference's Feature-extended Dockerfile image still carries `devcontainer.metadata`, so the flag's values specifically are lost rather than labelling in general.\n\nTHE TOLERANCE IS THE POINT, and it is self-invalidating: if upstream ever forwards the flag on this shape, the two allowed differences go stale and the run reports it, which is how a documented choice is kept honest rather than left to outlive the difference it describes. `parity.build.token` — the fixture's own Dockerfile `LABEL` — is deliberately NOT tolerated and agrees on both sides.\n\nThe assertions are evaluated against DEACON's side only, which is what lets one case both pin deacon's answer and tolerate the reference's; the PR-gating pin lives in `case-build-cli-label-dockerfile-shape-spec` because this lane is nightly and gates nothing."
     }
   ]
 }
