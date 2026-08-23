@@ -22,7 +22,7 @@ alone. Where a row has no scenario yet, it says so.
 
 ## Summary
 
-Of **177 recorded behaviors**:
+Of **178 recorded behaviors**:
 
 - **0** — open nonconformance
 - **9** — deacon follows the spec where the CLI does not
