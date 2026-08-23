@@ -998,13 +998,36 @@ where
         if let Some(ref dotfiles_config) = config.dotfiles {
             if dotfiles_config.is_configured() {
                 info!("Executing dotfiles phase (after postCreate, before postStart)");
-                let phase_result = execute_dotfiles_in_container(
+                // A dotfiles failure does NOT fail `up` (#648). The reference
+                // wraps its whole dotfiles invocation in a `try`/`catch` that
+                // emits a `failed` progress event and does not re-throw, and the
+                // contract is defensible on its own terms: dotfiles are a
+                // personal convenience layered on a container that is already
+                // correctly provisioned, so a typo in a personal repository URL
+                // should not cost the user the container — or, worse, cost them
+                // the `containerId` they need to reach the container that does
+                // exist. The failure is not swallowed silently: the git or
+                // script output is already on stderr, and the phase is recorded
+                // as failed, which suppresses its completion marker below.
+                let phase_result = match execute_dotfiles_in_container(
                     dotfiles_config,
                     &updated_config,
                     docker,
                     progress_callback.as_ref(),
                 )
-                .await?;
+                .await
+                {
+                    Ok(phase_result) => phase_result,
+                    Err(e) => {
+                        warn!("Dotfiles installation failed, continuing: {}", e);
+                        PhaseResult {
+                            phase: LifecyclePhase::Dotfiles,
+                            commands: Vec::new(),
+                            total_duration: Duration::default(),
+                            success: false,
+                        }
+                    }
+                };
 
                 // Per FR-002: Record marker for blocking phase on successful execution
                 if phase_result.success {
@@ -2377,13 +2400,21 @@ where
     });
 
     if !result.success {
+        // A failed phase, not a failed `up` (#648) — the caller keeps going and
+        // does not record a completion marker for a phase that did not complete.
+        // The script's own diagnosis (`fatal: repository … does not exist`,
+        // `Could not locate '<cmd>'...`) is already on stderr; adding a second
+        // sentence here would be the only place deacon spoke about it, so the
+        // `warn!` is where it belongs rather than an error return.
+        warn!(
+            "Dotfiles installation failed (exit code {}); leaving the container up. \
+             Check that git is installed in the container and that the repository is reachable.",
+            result.exit_code
+        );
         phase_result.success = false;
         phase_result.total_duration = phase_start.elapsed();
         emit_phase_end_event(progress_callback, &phase_result);
-        return Err(DeaconError::Lifecycle(format!(
-            "Dotfiles installation failed (exit code {}). Ensure git is installed in the container and the repository is reachable.",
-            result.exit_code
-        )));
+        return Ok(phase_result);
     }
 
     info!("Dotfiles installation completed successfully");
@@ -3118,6 +3149,75 @@ mod tests {
             !script.contains("&& install.sh"),
             "the command must not be spliced into a shell fragment: {script}"
         );
+    }
+
+    /// A dotfiles failure is a failed PHASE, never a failed `up` (#648).
+    ///
+    /// The reference wraps its whole dotfiles invocation in a `try`/`catch` that
+    /// emits a `failed` progress event and does not re-throw, so a repository
+    /// that cannot be cloned leaves the container up and the result document
+    /// intact. deacon used to return `Err` here, which propagated to the top of
+    /// `up` and cost the caller the `containerId` of a container that had been
+    /// created successfully.
+    ///
+    /// The assertion is deliberately on BOTH halves: `Ok` (so `up` survives) and
+    /// `success == false` (so the phase is recorded as failed, which is what
+    /// suppresses the completion marker and makes the next run retry). Returning
+    /// `Ok` with `success: true` would satisfy a weaker test and silently turn a
+    /// failed install into a permanent one.
+    #[tokio::test]
+    async fn dotfiles_failure_is_a_failed_phase_not_an_error() {
+        use crate::docker::mock::{MockDocker, MockExecResponse};
+
+        let docker = MockDocker::new();
+        docker.update_config(|c| {
+            c.default_exec_response = MockExecResponse {
+                exit_code: 128,
+                success: false,
+                stderr: Some("fatal: repository '/nope-not-a-repo' does not exist\n".to_string()),
+                ..Default::default()
+            };
+        });
+
+        let lifecycle_config = ContainerLifecycleConfig {
+            capture_output: false,
+            container_id: "test-container".to_string(),
+            user: Some("vscode".to_string()),
+            container_workspace_folder: "/workspace".to_string(),
+            substitution_workspace_folder: Some("/workspace".to_string()),
+            container_env: HashMap::new(),
+            skip_post_create: false,
+            skip_non_blocking_commands: false,
+            non_blocking_timeout: Duration::from_secs(300),
+            use_login_shell: true,
+            user_env_probe: crate::container_env_probe::ContainerProbeMode::LoginShell,
+            cache_folder: None,
+            user_data_folder: None,
+            force_pty: false,
+            dotfiles: None,
+            is_prebuild: false,
+            config_hash: None,
+        };
+        let dotfiles = DotfilesConfig {
+            repository: Some("/nope-not-a-repo".to_string()),
+            target_path: None,
+            install_command: None,
+        };
+
+        let phase = execute_dotfiles_in_container(
+            &dotfiles,
+            &lifecycle_config,
+            &docker,
+            None::<&fn(ProgressEvent) -> anyhow::Result<()>>,
+        )
+        .await
+        .expect("a dotfiles failure must not be an error");
+
+        assert!(
+            !phase.success,
+            "the phase must be recorded as failed so no completion marker is written"
+        );
+        assert_eq!(phase.phase, LifecyclePhase::Dotfiles);
     }
 
     /// A path with a space (or a quote) must stay one token.
