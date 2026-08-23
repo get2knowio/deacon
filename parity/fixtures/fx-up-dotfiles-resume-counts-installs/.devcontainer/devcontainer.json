@@ -1,0 +1,8 @@
+{
+	"name": "ParityUpDotfilesResumeCountsInstalls",
+	"image": "mcr.microsoft.com/devcontainers/base:bookworm",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"remoteUser": "vscode",
+	"postCreateCommand": "mkdir -p /tmp/dotsrc && cd /tmp/dotsrc && printf '#!/bin/sh\\necho ran >> /workspace/dotfiles-runs.txt\\n' > install.sh && chmod +x install.sh && git init -q -b main . && git -c user.email=parity@example.com -c user.name=parity add -A && git -c user.email=parity@example.com -c user.name=parity commit -q -m fixture"
+}

@@ -233,7 +233,21 @@ pub(crate) async fn execute_lifecycle_commands(
     }
 
     // Build dotfiles configuration from CLI args (T009: per SC-001 lifecycle ordering)
+    //
+    // The invocation context decides this phase exactly as it decides the five
+    // command phases below (#652). It was not asked before, so a resume `up`
+    // re-installed dotfiles that had already completed — `onCreate` and
+    // `postCreate` were skipped by their markers while dotfiles ran again, which
+    // contradicts both the reference (its container-side `.dotfilesMarker` short-
+    // circuits the whole script on a second run) and 008 SC-002, which names
+    // dotfiles in the list of phases a resume skips. A `dotfiles.json` completion
+    // marker was written after every run and read by nothing.
+    let dotfiles_skip_reason = invocation_context.should_skip_phase(LifecyclePhase::Dotfiles);
+    if let Some(reason) = dotfiles_skip_reason {
+        debug!("Skipping dotfiles phase: {}", reason);
+    }
     let dotfiles_config = if args.dotfiles_repository.is_some()
+        && dotfiles_skip_reason.is_none()
         && should_run_dotfiles_for_wait_for(args.skip_non_blocking_commands, wait_for)
     {
         Some(DotfilesConfig {

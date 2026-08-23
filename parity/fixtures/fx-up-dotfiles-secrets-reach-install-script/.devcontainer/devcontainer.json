@@ -1,0 +1,9 @@
+{
+	"name": "ParityUpDotfilesSecretsReachInstallScript",
+	"image": "mcr.microsoft.com/devcontainers/base:bookworm",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"remoteUser": "vscode",
+	"remoteEnv": { "TEST_REMOTE_ENV": "Value 1" },
+	"postCreateCommand": "mkdir -p /tmp/dotsrc && cd /tmp/dotsrc && printf '#!/bin/sh\\necho \"$SECRET1|$TEST_REMOTE_ENV\" > /workspace/dotfile-envs.txt\\n' > install.sh && chmod +x install.sh && git init -q -b main . && git -c user.email=parity@example.com -c user.name=parity add -A && git -c user.email=parity@example.com -c user.name=parity commit -q -m fixture"
+}
