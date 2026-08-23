@@ -478,10 +478,27 @@ pub fn normalize_channel(
 /// token policy lives (Constitution VIII: channel-specific normalization belongs in the
 /// normalizer, not in the runner).
 ///
-/// `chan-container-state` additionally tokenizes the workspace BASENAME
-/// (`workspace_basename_token`), because its evidence carries container-side paths
-/// derived from the per-side temp workspace name. Every other channel gets the plain
-/// full-path map, so this change cannot alter what any existing channel compares.
+/// `chan-container-state` and `chan-structured-output` additionally tokenize the
+/// workspace BASENAME (`workspace_basename_token`), because both carry container-side
+/// paths derived from the per-side temp workspace name. Every other channel gets the
+/// plain full-path map.
+///
+/// `chan-structured-output` joined them when the first case ran `read-configuration`
+/// after an `up` (#636's `case-readconfig-upstream-containerenv-resolved-against-container`).
+/// Its result document carries a `workspace` block — `workspaceFolder`
+/// (`/workspaces/<basename>`) and `workspaceMount`'s `target` — which the full-path map
+/// cannot reach, because the container-side path contains only the basename and never the
+/// host path. That is the identical artifact this rule was written for, on a second
+/// channel: two isolated temp workspaces, two different basenames, a difference the runner
+/// itself imposed.
+///
+/// It cannot mask anything on the hermetic cases that make up the rest of the channel's
+/// users: those run BOTH sides against the same committed fixture directory, so the
+/// basename is one string and rewriting it is symmetric. And it cannot hide a structural
+/// difference even where the basenames differ — the rewrite replaces the leaf only, so
+/// `/workspace/<TOKEN>` and `/workspaces/<TOKEN>` still compare unequal, which is the
+/// [#273](https://github.com/get2knowio/deacon/issues/273) regression `chan-container-state`
+/// relies on this same rule to keep catching.
 ///
 /// **Rule `image_tag_token`.** When the case built into a runner-assigned tag
 /// (`--image-name ${IMAGE_TAG}`), that tag rewrites to `<IMAGE_TAG>`. The tag is unique per
@@ -490,7 +507,10 @@ pub fn normalize_channel(
 /// and no case could assert the tag it asked for. Rewritten, never dropped: an operation
 /// that reported NO image name still differs from one that reported the tag.
 pub fn tokens_for_channel(channel: &str, workspace: &Path, image_tag: Option<&str>) -> TokenMap {
-    let mut m = if channel == crate::model::CHAN_CONTAINER_STATE {
+    let mut m = if matches!(
+        channel,
+        crate::model::CHAN_CONTAINER_STATE | crate::model::CHAN_STRUCTURED_OUTPUT
+    ) {
         TokenMap::workspace_with_basename(workspace)
     } else {
         TokenMap::workspace(workspace)
@@ -1698,6 +1718,59 @@ mod tests {
                 "{key} must NOT be dropped by the normalizer"
             );
         }
+    }
+
+    /// The same rule on `chan-structured-output`, which joined its scope for #636's
+    /// case — the first to run `read-configuration` after an `up`, and so the first whose
+    /// result document carries the `workspace` block's container-side paths.
+    ///
+    /// Both halves matter. The two sides must normalize EQUAL despite different temp
+    /// basenames, and a structural difference must still survive the rewrite — a leaf
+    /// token cannot be allowed to paper over `/workspace/` versus `/workspaces/`, which
+    /// is the #273 regression the rule's original channel depends on it to keep catching.
+    #[test]
+    fn workspace_basename_token_reaches_the_structured_output_workspace_block() {
+        use crate::model::CHAN_STRUCTURED_OUTPUT;
+        let document = |name: &str, root: &str| {
+            json!({
+                "workspace": {
+                    "workspaceFolder": format!("{root}/{name}"),
+                    "workspaceMount": format!("type=bind,source=/tmp/{name},target={root}/{name}")
+                }
+            })
+        };
+        let normalized = |name: &str, root: &str| {
+            apply_channel_rules(
+                CHAN_STRUCTURED_OUTPUT,
+                &document(name, root),
+                &tokens_for_channel(
+                    CHAN_STRUCTURED_OUTPUT,
+                    Path::new(&format!("/tmp/{name}")),
+                    None,
+                ),
+                Side::Deacon,
+            )
+        };
+
+        let a = normalized("deacon-conf-aaa", "/workspaces");
+        let b = normalized("deacon-conf-bbb", "/workspaces");
+        assert_eq!(
+            a, b,
+            "two isolated temp workspaces must normalize equal on this channel"
+        );
+        assert_eq!(
+            a["workspace"]["workspaceFolder"],
+            json!("/workspaces/<WORKSPACE_NAME>"),
+            "the basename is TOKENIZED, not removed: {a}"
+        );
+
+        // A CLI mounting at `/workspace/<name>` instead of `/workspaces/<name>` still
+        // diverges — the rewrite replaces the leaf, never the path around it.
+        assert_ne!(
+            normalized("deacon-conf-aaa", "/workspace"),
+            b,
+            "a structural mount-root difference must survive the basename token"
+        );
     }
 
     #[test]

@@ -1851,8 +1851,23 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             }
         }
     } else {
-        // No container discovery requested
-        debug!("No container discovery requested");
+        // No SELECTOR was named — which is not the same as "no container".
+        //
+        // #636: the reference resolves `${containerEnv:*}` against a container that is
+        // already running for this workspace, without being told which one. deacon
+        // deferred the token forever instead, in both `configuration` and
+        // `mergedConfiguration`, even though `--container-id` on the same workspace and
+        // the same container produced the reference's answer — the probe, the
+        // substitution pass and the merge were all correct and only the LOOKUP was
+        // missing. Third subcommand in this family and the last one out of step; `up`
+        // was #608, `set-up` #616, and all three now run the one shared pass.
+        let config = adopt_running_container_for_substitution(
+            config,
+            workspace_folder,
+            &args,
+            secrets.as_ref(),
+        )
+        .await;
         (config, None, None, None, None)
     };
 
@@ -2214,6 +2229,141 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     );
 
     Ok(())
+}
+
+/// Does this configuration ask for anything only a running container can answer?
+///
+/// The gate is what keeps [`adopt_running_container_for_substitution`] off the fast
+/// path. `read-configuration` resolves a document and touches no daemon, which is why
+/// every one of its parity cases is HERMETIC and runs in the no-network lane; probing
+/// for a container on every invocation would spend a `docker ps` on the overwhelming
+/// majority of runs that have nothing to gain from one. A configuration that never
+/// writes `${containerEnv:` cannot observe the difference, so it never pays for it.
+///
+/// Serialized rather than walked field by field, deliberately: the token is legal in
+/// `containerEnv`, `remoteEnv`, `mounts`, `customizations` and any unmodeled key the
+/// `extra` passthrough carries, so a field-by-field predicate would be a second
+/// enumeration to keep in step with `apply_variable_substitution` — the drift CLAUDE.md
+/// already has a checklist about. Serializing asks the document itself.
+fn references_container_env(config: &DevContainerConfig) -> bool {
+    serde_json::to_string(config)
+        .map(|json| json.contains("${containerEnv:"))
+        .unwrap_or(false)
+}
+
+/// Resolve `${containerEnv:*}` against a container already running for this workspace,
+/// when the caller named no container at all (#636).
+///
+/// The reference does this and deacon did not: with a container up, its
+/// `read-configuration` reports the container's own values in `configuration.remoteEnv`
+/// and `mergedConfiguration.remoteEnv` where deacon reported the literal token. Deferring
+/// the token while no container exists is correct and both CLIs agree there; this is the
+/// other half.
+///
+/// **Best-effort and silent, which is a requirement rather than a convenience.** Every
+/// failure — no daemon, `docker` not on `PATH`, no container for this workspace, an
+/// inspect that does not answer — leaves the configuration exactly as it was and the
+/// token deferred, which is both the pre-existing behavior and what the reference does
+/// (measured at oracle 0.87.0: with `docker` removed from `PATH` it still exits 0 and
+/// still prints `${containerEnv:PATH}`). A `read-configuration` that started failing
+/// because a daemon was down would be a far worse regression than the one being fixed.
+///
+/// Scoped to `${containerEnv:*}` and nothing else. The context deliberately keeps
+/// `resolve_devcontainer_id = false` and does NOT set `container_workspace_folder`:
+/// both tokens have their own characterized answers on this path — the latter is seeded
+/// from `container_workspace_folder()` by the "Divergence A" seam further down — and
+/// resolving them here would change behaviors this fix is not about, on cases that
+/// currently agree with the reference.
+async fn adopt_running_container_for_substitution(
+    config: DevContainerConfig,
+    workspace_folder: &Path,
+    args: &ReadConfigurationArgs,
+    secrets: Option<&SecretsCollection>,
+) -> DevContainerConfig {
+    if !references_container_env(&config) {
+        return config;
+    }
+
+    let docker = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
+
+    // Compose files resolve against the directory holding devcontainer.json, not the
+    // workspace folder — the same rule `exec` and `run-user-commands` follow into this
+    // helper.
+    let config_dir = match args.config_path.as_deref() {
+        Some(cfg) if cfg.is_dir() => cfg.to_path_buf(),
+        Some(cfg) => cfg.parent().unwrap_or(workspace_folder).to_path_buf(),
+        None => {
+            let nested = workspace_folder.join(".devcontainer");
+            if nested.is_dir() {
+                nested
+            } else {
+                workspace_folder.to_path_buf()
+            }
+        }
+    };
+
+    let container_id = match crate::commands::exec::resolve_target_container(
+        &docker,
+        workspace_folder,
+        &config,
+        &config_dir,
+        None,
+        &args.docker_path,
+        &[],
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(error) => {
+            debug!(
+                "No running container to resolve ${{containerEnv:*}} against; \
+                 reporting the tokens deferred: {}",
+                error
+            );
+            return config;
+        }
+    };
+
+    let Some(container_env) =
+        crate::commands::shared::container_substitution::container_env_for_substitution(
+            &docker,
+            &container_id,
+        )
+        .await
+    else {
+        return config;
+    };
+
+    let mut context = match SubstitutionContext::new(workspace_folder) {
+        Ok(context) => context,
+        Err(error) => {
+            debug!(
+                "Could not build a substitution context for the discovered container: {}",
+                error
+            );
+            return config;
+        }
+    };
+    // `${devcontainerId}` stays literal here exactly as it did before this path existed
+    // (`substitution_context.resolve_devcontainer_id` is keyed on an EXPLICIT container
+    // context further up). Discovering a container must not silently start resolving a
+    // different token.
+    context.resolve_devcontainer_id = false;
+    if let Some(secrets) = secrets {
+        for (key, value) in secrets.as_env_vars() {
+            context.local_env.insert(key.clone(), value.clone());
+        }
+    }
+
+    debug!(
+        container_id = %container_id,
+        "Resolving ${{containerEnv:*}} against the container already running for this workspace"
+    );
+    crate::commands::shared::container_substitution::container_substituted_with_context(
+        &config,
+        &context,
+        Some(&container_env),
+    )
 }
 
 #[cfg(test)]

@@ -711,3 +711,84 @@ fn test_extends_output_is_raw_unmerged_with_extends_preserved() -> Result<()> {
 
     Ok(())
 }
+
+/// `${containerEnv:*}` discovery (#636) must be BEST-EFFORT: with no Docker CLI to be
+/// found, `read-configuration` still exits 0 and reports the token deferred.
+///
+/// This is the property a `docker-shared` parity case cannot assert — it cannot create
+/// the absence of a daemon — and it is the one that matters most, because
+/// `read-configuration` touched no daemon at all before #636 and a regression here would
+/// make it fail on machines that never needed Docker. Measured the same way against the
+/// reference at oracle 0.87.0: with `docker` off `PATH` it also exits 0 and also prints
+/// `${containerEnv:PATH}`.
+///
+/// The PATH is narrowed rather than emptied so the binary can still resolve the ordinary
+/// system utilities; `docker` specifically is what it must not find.
+#[test]
+fn container_env_discovery_is_silent_when_docker_is_not_on_path() -> Result<()> {
+    let temp = TempDir::new()?;
+    fs::write(
+        temp.path().join(".devcontainer.json"),
+        r#"{ "name": "no-docker", "image": "alpine:3.19",
+             "remoteEnv": { "CONTAINER_PATH": "${containerEnv:PATH}" } }"#,
+    )?;
+    let empty_bin = temp.path().join("empty-bin");
+    fs::create_dir_all(&empty_bin)?;
+
+    let output = Command::cargo_bin("deacon")?
+        .env("PATH", &empty_bin)
+        .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp.path())
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "read-configuration must still succeed with no docker on PATH; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        parsed["configuration"]["remoteEnv"]["CONTAINER_PATH"],
+        Value::String("${containerEnv:PATH}".to_string()),
+        "with no container reachable the token must stay deferred, not collapse to empty"
+    );
+    Ok(())
+}
+
+/// The same guarantee for a daemon that is CONFIGURED but unreachable, which is the
+/// likelier failure in practice: `docker` is installed and on `PATH`, and the socket it
+/// is pointed at does not answer. A discovery attempt that surfaced this as an error
+/// would break `read-configuration` for every developer whose Docker Desktop is not
+/// running.
+#[test]
+fn container_env_discovery_is_silent_when_the_daemon_is_unreachable() -> Result<()> {
+    let temp = TempDir::new()?;
+    fs::write(
+        temp.path().join(".devcontainer.json"),
+        r#"{ "name": "dead-daemon", "image": "alpine:3.19",
+             "remoteEnv": { "CONTAINER_PATH": "${containerEnv:PATH}" } }"#,
+    )?;
+
+    let output = Command::cargo_bin("deacon")?
+        .env(
+            "DOCKER_HOST",
+            "unix:///deacon-nonexistent/does-not-exist.sock",
+        )
+        .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(temp.path())
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "read-configuration must still succeed against an unreachable daemon; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        parsed["configuration"]["remoteEnv"]["CONTAINER_PATH"],
+        Value::String("${containerEnv:PATH}".to_string())
+    );
+    Ok(())
+}

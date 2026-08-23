@@ -4716,6 +4716,71 @@
         "tempdir": true
       },
       "notes": "The NEGATIVE arm of the cwd default: an EXISTING current directory with no devcontainer document, no `--workspace-folder`, no `--config` and no container selector exits 1 naming the absolute path it looked for. Upstream covers the same pair for `up` and `exec`; this is `read-configuration`'s.\n\nNOT VACUOUS, which is the whole reason it lands with the fix for [#615](https://github.com/get2knowio/deacon/issues/615) rather than ahead of it. Before the fix deacon also exited 1 here — but on a missing FLAG, printing `Missing required argument: …`, so an exit-code assertion would have been green for the wrong reason, the trap `docs/PARITY.md` names. The `chan-stderr` assertion is what distinguishes the two reasons, and it could not have passed at the parent commit.\n\nIt pins DEACON's answer rather than comparing, and the measurement is why: at oracle 0.87.0 in an empty directory the reference exits 1 and prints NOTHING on either stream beyond its version banner. deacon names the document it could not find (`Configuration file not found: <abs>/.devcontainer/devcontainer.json`), which is the more useful of the two answers and not a divergence to fix; a differential could only compare the exit code, which is `case-errors-decl-missing-config`'s job with the flag passed explicitly.\n\nDISTINCT from `bhv-readconfig-missing-config`, which passes `--workspace-folder` and fails on the same missing document: this one has to RESOLVE the workspace first, from the cwd, and the path a developer meets is `cd`-ing into the wrong directory.\n\nIt costs nothing to express: the runner already anchors each operation's cwd to the case's workspace — for a config-only case that is the committed fixture directory itself, read only, since only Docker-backed and `fs-heavy` cases are materialized into an isolated temp copy (`runner.rs`) — so OMITTING the flag is the whole test. That is also the case's one fragility, recorded here because it is invisible in an empty `argv`: if the runner ever stops anchoring cwd to the workspace, this case starts failing for a reason that has nothing to do with `read-configuration`. Its `up`, `exec` and `build` siblings carry the same note.\n\nHERMETIC, and `fx-errors-missing-config` (a directory holding only a `.gitkeep`) is a cwd with nothing in it by construction."
+    },
+    {
+      "id": "case-readconfig-upstream-containerenv-resolved-against-container",
+      "behaviors": [
+        "bhv-readconfig-containerenv-resolved-against-running-container"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-runargs-env-subst"
+          ]
+        },
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        },
+        {
+          "id": "op-read-merged",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--include-merged-configuration"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read-merged"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read-merged"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Fixes [#636](https://github.com/get2knowio/deacon/issues/636), and it is the SECOND HALF of a behavior whose first half was already recorded. Deferring `${containerEnv:*}` while no container exists is correct, both CLIs agree on it, and `case-readconfig-upstream-runargs-env-subst` compares exactly that on this same fixture, hermetically. This case is the other half: once a container IS running for the workspace, the token resolves.\n\nMEASURED at oracle 0.87.0 on a root `.devcontainer.json` declaring `remoteEnv: {LOCAL_PATH: ${localEnv:PATH}, CONTAINER_PATH: ${containerEnv:PATH}}`. With no container the two CLIs are byte-identical, both leaving `CONTAINER_PATH` literal. After `up` they parted: the reference reported the container's own PATH in BOTH blocks, deacon reported the literal token in both. **The capability was already there and the DISCOVERY was what was missing** — `deacon read-configuration --container-id <cid>` on the same workspace and the same container produced the reference's answer, so the probe, the substitution pass and the merge were all correct; deacon simply never went looking for a container when none was named on the command line.\n\nThird subcommand in this family and the last one out of step, all three now on the one shared pass (`shared::container_substitution`): [#608](https://github.com/get2knowio/deacon/issues/608) closed it for `up --include-configuration`, [#616](https://github.com/get2knowio/deacon/issues/616) for `set-up`. The helper's own module doc had already named the pattern — 'every consumer subcommand that PRINTS a configuration alongside a live container owes this pass, and each one of them got it late'.\n\nBOTH blocks are asserted, as two operations rather than one, because upstream covers them as two `it`s and because they reach the reported document by different code: `mergedConfiguration` is SYNTHESIZED rather than echoed, so a fix that resolved the token in `configuration` alone would leave the merged block wrong and this case green on the half that happened to work.\n\nTHE FIRST CASE IN THE SUITE to run `read-configuration` after another subcommand — every other one is config-only — which is what makes the claim expressible at all and is worth noting for anyone reading the area expecting hermetic cases.\n\nIT COST ONE NORMALIZER CHANGE, and the reason is worth reading before touching it. Being the first case to run `read-configuration` on a Docker-backed workspace, it is the first whose result document carries the `workspace` block — `workspaceFolder` (`/workspaces/<basename>`) and `workspaceMount`'s `target` — for two workspaces the runner deliberately isolates from each other. Those are container-side paths derived from the temp directory's BASENAME, which the full-path token map cannot reach (the container path never contains the host path), so the case reported `workspace.workspaceFolder` and `workspace.workspaceMount` diverging on top of the two `remoteEnv` values it was written for. That is an artifact of the isolation the runner imposes, not a difference between the CLIs — measured directly on two identically-named directories, where the two blocks agree — so the answer is the normalizer, NOT a tolerance: a tolerance would record a deacon-vs-reference difference that does not exist. `workspace_basename_token` already existed for exactly this, scoped to `chan-container-state` because that was the only channel that had ever carried such a path; `chan-structured-output` now shares it. Verified rather than assumed: all four lanes re-run green afterwards (94 differential cases, `parity_docker`, `parity_registry`, `parity_hermetic` including its no-network namespace guard), and a unit test pins both halves — two basenames normalize equal, and `/workspace/` versus `/workspaces/` still diverges.\n\nNOT asserted here, deliberately: that discovery stays SILENT when it fails. That is a property of the absence of a daemon, which a `docker-shared` case cannot create; it is verified by hermetic tests instead (`docker` off `PATH`, and `DOCKER_HOST` at a dead socket — both exit 0 with the token deferred, which is also what the reference does, measured the same two ways).\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 9), `src/test/cli.test.ts` — 'should replace environment variables' and its `--include-merged-configuration` twin."
     }
   ]
 }
