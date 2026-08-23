@@ -5041,6 +5041,69 @@
         "tempdir": true
       },
       "notes": "[#648](https://github.com/get2knowio/deacon/issues/648). A dotfiles repository that cannot be cloned used to fail the whole `up`: exit 1, `\"outcome\": \"error\"`, and no `containerId` — even though the container was created, the image built and every lifecycle hook ran, so the caller lost the handle it needed to `exec` into or `down` the container that exists. The reference wraps its dotfiles invocation in a `try`/`catch` that emits a `failed` progress event and does not re-throw (`src/spec-common/dotfiles.ts`).\n\nMEASURED at oracle 0.87.0 on this fixture and argv: both CLIs run the same `git clone`, both see exit 128, both report `{\"outcome\":\"success\"}` with a real `containerId`, and both leave `fatal: repository '/nope-not-a-repo' does not exist` on stderr.\n\nTHREE ASSERTIONS, and the third is the one that keeps the fix honest. Exit code and `outcome` alone would also be satisfied by a deacon that never attempted the clone, or that attempted it and said nothing — which is the failure mode a \"do not fail on dotfiles errors\" change invites. The `chan-stderr` assertion pins that the attempt happened and that its diagnosis reached the user; the phase is additionally recorded as failed, which is what suppresses its completion marker so a later run retries rather than assuming success.\n\nHermetic: the repository path does not exist, so nothing is fetched and no source repository has to be built."
+    },
+    {
+      "id": "case-up-dotfiles-resume-does-not-reinstall",
+      "behaviors": [
+        "bhv-up-dotfiles-resume-does-not-reinstall"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up-first",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dotfiles-repository",
+            "/tmp/dotsrc"
+          ],
+          "fixtures": [
+            "fx-up-dotfiles-resume-counts-installs"
+          ]
+        },
+        {
+          "id": "op-up-resume",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--dotfiles-repository",
+            "/tmp/dotsrc"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up-resume",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up-resume",
+          "assertion": {
+            "jsonSubset": {
+              "dotfiles-runs.txt": "ran\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "dotfiles-runs.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "[#652](https://github.com/get2knowio/deacon/issues/652). On a resume — a second `up` against the container the first one created — deacon skipped `onCreate`, `updateContent` and `postCreate` on their completion markers and then installed the dotfiles AGAIN. Both authorities say skip: the reference short-circuits its whole dotfiles script on a container-side `.dotfilesMarker` (its second run logs `dotfiles marker found` and does nothing else), and deacon's own 008 SC-002 names dotfiles in the list of phases a resume skips.\n\nThe decision was simply never asked for. `commands/up/lifecycle.rs` ran `InvocationContext::should_skip_phase` over an array of five phases that did not include `Dotfiles`, and built the dotfiles configuration from the CLI flags alone. `should_skip_phase` had handled the case correctly the whole time — `Dotfiles` is not a runtime hook, so a prior `Executed` marker returns `Some(\"prior completion marker\")` — and deacon wrote a `dotfiles.json` marker after every run and read it as a gate nowhere.\n\nMEASURED at oracle 0.87.0 on a fixture whose hooks and install script each append a line to the bind-mounted workspace: after two `up`s the reference's counts are onCreate 1 / postCreate 1 / dotfiles 1 / postStart 1, and deacon's were 1 / 1 / **2** / 2. The `postStart` difference is deliberate and stays — deacon treats it as a runtime hook that runs whenever the container is brought up, where the reference's marker suppresses it — which is why this case counts the DOTFILES runs and not the hooks.\n\nTHE LINE COUNT IS THE OBSERVATION. Both `up`s exit 0 before and after the fix, and the dotfiles directory is present either way; only the number of times the install script ran distinguishes them. Watched to fail against the pre-fix binary, where the file holds two lines.\n\nThe fix puts dotfiles on deacon's EXISTING marker semantics rather than adopting the reference's container-side marker, so it inherits the trade its sibling phases already make: markers are host-side and survive `down`, and they are cleared by `--remove-existing-container` (#117) — measured, a third `up` with that flag re-installs."
     }
   ]
 }
