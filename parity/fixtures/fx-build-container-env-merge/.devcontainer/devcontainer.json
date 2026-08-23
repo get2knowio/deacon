@@ -1,0 +1,13 @@
+{
+	"name": "ConformanceBuildContainerEnvMerge",
+	"image": "alpine:3.19",
+	"features": { "./features/env": {} },
+	"containerEnv": {
+		"PARITY_OVERRIDDEN": "from-config",
+		"PARITY_CONFIG_ONLY": "from-config",
+		"PARITY_WITH_SPACES": "  value with spaces  ",
+		"PARITY_WITH_QUOTES": "value with \"quotes\" we want to keep",
+		"PARITY_WITH_DOLLAR": "value with $dollar sign",
+		"PARITY_WITH_BACKSLASH": "value with \\back slash"
+	}
+}

@@ -7,6 +7,7 @@
 use crate::build::BuildOptions;
 use crate::errors::{FeatureError, Result};
 use crate::features::{InstallationPlan, OptionValue, ResolvedFeature};
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::{debug, instrument};
@@ -60,6 +61,19 @@ pub struct DockerfileConfig {
     /// `--build-context deacon_ca_source=<dir>`. `dir` holds `host-ca.crt` and
     /// `install.sh`. `None` ⇒ no build-time injection (output unchanged).
     pub host_ca_build_context: Option<String>,
+    /// The CONFIGURATION's own `containerEnv`, baked into the produced image as
+    /// `ENV` lines emitted LAST — after every Feature's install `RUN` and after
+    /// every Feature's own `containerEnv` (#641).
+    ///
+    /// Last is the whole point: it is what makes the configuration win where a
+    /// Feature declares the same name. Without it a `build` hands out an image
+    /// missing the variables its author configured and carrying a Feature's
+    /// value for the ones they overrode — invisible in the result document,
+    /// since `outcome: success` is unaffected.
+    ///
+    /// Authored order is preserved (`IndexMap`), matching the reference CLI's
+    /// `Object.keys` iteration.
+    pub config_container_env: IndexMap<String, String>,
 }
 
 /// The four well-known env vars the features spec guarantees to every
@@ -123,6 +137,7 @@ impl Default for DockerfileConfig {
             features_source_dir: String::new(),
             feature_install_env: FeatureInstallEnv::default(),
             host_ca_build_context: None,
+            config_container_env: IndexMap::new(),
         }
     }
 }
@@ -196,6 +211,8 @@ impl DockerfileGenerator {
             dockerfile.push('\n');
         }
 
+        dockerfile.push_str(&self.config_container_env_lines());
+
         Ok(dockerfile)
     }
 
@@ -263,7 +280,41 @@ impl DockerfileGenerator {
             dockerfile.push('\n');
         }
 
+        dockerfile.push_str(&self.config_container_env_lines());
+
         Ok(dockerfile)
+    }
+
+    /// The configuration's own `containerEnv` as `ENV` lines, emitted at the very
+    /// end of the Feature-install stage by both entry points (#641).
+    ///
+    /// Position and escaping are both load-bearing, and they differ from the
+    /// per-Feature `ENV` lines in [`Self::generate_feature_install_command`]:
+    ///
+    /// - **Last.** A Feature's `ENV` sits immediately after its own install
+    ///   `RUN`, so it is visible to later installs. The configuration's comes
+    ///   after all of them, which is what makes the configuration's value win
+    ///   where both declare a name — the reference CLI orders its template the
+    ///   same way, for the same reason.
+    /// - **`$` is escaped here and deliberately is not there.** A Feature's
+    ///   value legitimately self-references the environment it is extending
+    ///   (`PATH="/usr/local/share/nvm/current/bin:${PATH}"`) and must go through
+    ///   Docker's `ENV` expansion. A configuration's value is meant literally:
+    ///   `"value with $dollar sign"` must reach the image with the `$` intact
+    ///   rather than expanding to nothing.
+    ///
+    /// Emits an empty string when the configuration declares no `containerEnv`,
+    /// so a build's Dockerfile is byte-identical to what it was before this
+    /// existed.
+    fn config_container_env_lines(&self) -> String {
+        let mut lines = String::new();
+        for (key, value) in &self.config.config_container_env {
+            lines.push_str(&format!(
+                "ENV {}\n",
+                Self::format_env_var_literal(key, value)
+            ));
+        }
+        lines
     }
 
     /// Generate the RUN command for installing a single feature.
@@ -491,6 +542,19 @@ impl DockerfileGenerator {
         format!("{}=\"{}\"", key, escaped_value)
     }
 
+    /// Like [`Self::format_env_var`] but also escapes `$`, so the value reaches
+    /// the image LITERALLY instead of going through Docker's `ENV` expansion.
+    ///
+    /// Used for the configuration's own `containerEnv` (#641). `\` is escaped
+    /// first so the backslashes this inserts are not themselves doubled.
+    fn format_env_var_literal(key: &str, value: &str) -> String {
+        let escaped_value = value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$");
+        format!("{}=\"{}\"", key, escaped_value)
+    }
+
     /// Generate build context arguments for docker buildx build command
     ///
     /// When `build_options` is provided and not default, cache arguments are included
@@ -662,6 +726,143 @@ mod tests {
         // A feature with an empty containerEnv emits no stray ENV line for it.
         // (Only the two node ENV lines exist in the whole file.)
         assert_eq!(dockerfile.matches("\nENV ").count(), 2);
+    }
+
+    /// #641 — the CONFIGURATION's `containerEnv` is emitted after every Feature's,
+    /// which is what makes it win where both declare a name. Asserted on BOTH
+    /// entry points, because the reference has one template for all build shapes
+    /// and covering only the one `build` happens to use would leave `up`'s
+    /// `image:` shape and the Compose path silently divergent.
+    #[test]
+    fn config_container_env_is_emitted_after_every_feature_env() {
+        let mut feature_env = HashMap::new();
+        feature_env.insert("FEATURE_VAR".to_string(), "from-feature".to_string());
+        feature_env.insert("OVERRIDDEN_VAR".to_string(), "from-feature".to_string());
+        let plan = InstallationPlan::new(vec![create_test_feature_with_env(
+            "localfeat",
+            HashMap::new(),
+            feature_env,
+        )]);
+
+        let mut config_env = IndexMap::new();
+        config_env.insert("OVERRIDDEN_VAR".to_string(), "from-config".to_string());
+        config_env.insert("CONFIG_VAR".to_string(), "from-config".to_string());
+
+        let config = DockerfileConfig {
+            base_image: "debian:bookworm-slim".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            config_container_env: config_env,
+            ..Default::default()
+        };
+        let generator = DockerfileGenerator::new(config);
+
+        for (which, dockerfile) in [
+            ("generate", generator.generate(&plan).unwrap()),
+            (
+                "generate_install_stage_from",
+                generator
+                    .generate_install_stage_from(&plan, "base_stage")
+                    .unwrap(),
+            ),
+        ] {
+            let feature_wins = dockerfile
+                .find("ENV OVERRIDDEN_VAR=\"from-feature\"")
+                .unwrap_or_else(|| panic!("{which}: feature ENV missing:\n{dockerfile}"));
+            let config_wins = dockerfile
+                .find("ENV OVERRIDDEN_VAR=\"from-config\"")
+                .unwrap_or_else(|| panic!("{which}: config ENV missing:\n{dockerfile}"));
+            assert!(
+                feature_wins < config_wins,
+                "{which}: the config's ENV must come LAST, or the Feature's value survives"
+            );
+            assert!(
+                dockerfile.contains("ENV CONFIG_VAR=\"from-config\""),
+                "{which}: a config-only variable must reach the image:\n{dockerfile}"
+            );
+            // Authored order, not sorted — `OVERRIDDEN_VAR` was written first.
+            assert!(
+                config_wins < dockerfile.find("ENV CONFIG_VAR=").unwrap(),
+                "{which}: the config's authored order must be preserved"
+            );
+        }
+    }
+
+    /// #641 — a configuration's value is meant LITERALLY, so `$` is escaped along
+    /// with `"` and `\`. Without the `$` escape, `value with $dollar sign` reaches
+    /// the image as `value with ` — Docker expands the unset `$dollar` to nothing.
+    /// The Feature half deliberately does NOT escape `$` (a Feature's
+    /// `${PATH}` self-reference must still expand), so the two forms are asserted
+    /// against each other rather than in isolation.
+    #[test]
+    fn config_container_env_values_reach_the_image_literally() {
+        let awkward = [
+            ("VAR_WITH_SPACES", "value with spaces", "value with spaces"),
+            (
+                "VAR_WITH_LOTS_OF_SPACES",
+                "    value with lots of spaces.   ",
+                "    value with lots of spaces.   ",
+            ),
+            (
+                "VAR_WITH_QUOTES",
+                "value with \"quotes\" we want to keep",
+                "value with \\\"quotes\\\" we want to keep",
+            ),
+            (
+                "VAR_WITH_DOLLAR_SIGN",
+                "value with $dollar sign",
+                "value with \\$dollar sign",
+            ),
+            (
+                "VAR_WITH_BACK_SLASH",
+                "value with \\back slash",
+                "value with \\\\back slash",
+            ),
+            (
+                "ENV_WITH_COMMAND",
+                "bash -c 'echo -n \"Hello, World!\"'",
+                "bash -c 'echo -n \\\"Hello, World!\\\"'",
+            ),
+        ];
+
+        for (key, value, expected) in awkward {
+            assert_eq!(
+                DockerfileGenerator::format_env_var_literal(key, value),
+                format!("{key}=\"{expected}\""),
+            );
+        }
+
+        // The Feature form differs on exactly one character class.
+        assert_eq!(
+            DockerfileGenerator::format_env_var("PATH", "/nvm/bin:${PATH}"),
+            "PATH=\"/nvm/bin:${PATH}\"",
+            "a Feature's self-reference must stay expandable"
+        );
+    }
+
+    /// #641 — a configuration that declares no `containerEnv` must produce the
+    /// Dockerfile it produced before this existed. Both CLIs bake nothing in that
+    /// case and that agreement is what must not break.
+    #[test]
+    fn no_config_container_env_emits_no_trailing_env_lines() {
+        let plan = InstallationPlan::new(vec![create_test_feature("go", HashMap::new())]);
+        let config = DockerfileConfig {
+            base_image: "debian:bookworm-slim".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
+        };
+        let generator = DockerfileGenerator::new(config);
+        assert_eq!(
+            generator.generate(&plan).unwrap().matches("\nENV ").count(),
+            0
+        );
+        assert_eq!(
+            generator
+                .generate_install_stage_from(&plan, "base_stage")
+                .unwrap()
+                .matches("\nENV ")
+                .count(),
+            0
+        );
     }
 
     /// The staged directory name is keyed on the feature's OWN id and its position in

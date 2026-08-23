@@ -2311,6 +2311,174 @@
         "tempdir": true
       },
       "notes": "Closes the scenario debt [#594](https://github.com/get2knowio/deacon/issues/594) left behind: `build --output-format json` printed a result document on SUCCESS and nothing at all on failure, so a caller doing `| jq -r .outcome` got an empty stdout exactly when it most needed the message — while a perfectly good diagnostic sat on stderr, and while `deacon up` and the reference CLI both printed one either way.\n\nThe failure class is chosen, not convenient. `build`'s PRE-FLIGHT refusals already printed the document before the fix — `--push` with `--output`, the Compose flags, the BuildKit gate — so a case built on one of those would have passed against the defect. This one is detected while doing work (reading a lockfile off disk, after the configuration has loaded), which is the half a caller cannot route around: a pre-flight refusal is a bug in their own command line, a work failure is the thing they asked to be told about.\n\nThree channels, each carrying something the others cannot. `chan-exit-code` was already correct before the fix and is here to keep it correct. `chan-structured-output` needs stdout to PARSE as JSON at all, which is the whole defect — the harness reports `structured output not captured` when it does not, so an empty stdout fails here rather than passing vacuously. `chan-stdout: contains` pins that the document carries the actual REASON: `{\"outcome\":\"error\"}` with an empty message would satisfy the other two while telling the user nothing, and that is the cheapest wrong implementation of this fix. A substring rather than the whole message on purpose — the message names an absolute path inside the case's own temp workspace.\n\nMEASURED at oracle 0.87.0 across four failure classes before the fix (a Dockerfile `RUN` that exits non-zero, an image reference no registry serves, this unparseable lockfile, and a workspace with no `devcontainer.json`): both CLIs exit 1 in all four, the reference printed a document every time and deacon printed none. All four now print one. This is `spec-expectation` rather than `live-differential` because the two CLIs word every one of those messages differently — a differential would report that disagreement forever and need a tolerance to say nothing more than that they phrase it differently.\n\n`fs-heavy` and therefore HERMETIC, matching `case-build-lockfile-unreadable-rejected` on the same fixture: the refusal happens while reading a local file, before any registry or daemon contact, so a regression that moved it after the Feature fetch would fail to reach the assertion at all inside `parity_hermetic`'s network namespace."
+    },
+    {
+      "id": "case-build-upstream-container-env-merge",
+      "behaviors": [
+        "bhv-build-config-container-env-baked"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-container-env-merge"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "env": [
+                "PARITY_FEATURE_ONLY=from-feature",
+                "PARITY_OVERRIDDEN=from-config",
+                "PARITY_CONFIG_ONLY=from-config",
+                "PARITY_WITH_SPACES=  value with spaces  ",
+                "PARITY_WITH_QUOTES=value with \"quotes\" we want to keep",
+                "PARITY_WITH_DOLLAR=value with $dollar sign",
+                "PARITY_WITH_BACKSLASH=value with \\back slash"
+              ]
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "RED BEFORE [#641](https://github.com/get2knowio/deacon/issues/641). The image a `build` produces must carry the CONFIGURATION's own `containerEnv`, and must carry the configuration's value where a Feature declares the same name.\n\nThe fixture is built so no single assertion carries the whole claim, and so it cannot pass for the wrong reason. `PARITY_FEATURE_ONLY` is declared only by the Feature and was already correct — it is here to prove the Feature half did not regress. `PARITY_CONFIG_ONLY` is declared only by the configuration and was ABSENT from deacon's image entirely. `PARITY_OVERRIDDEN` is declared by BOTH, and is the sharp end: deacon's image carried `from-feature`, so the artifact did not merely lack a variable, it contradicted the document that built it. A case asserting only the missing variable would have gone green on a fix that appended the configuration's `ENV` lines in the wrong place.\n\nThe four awkward values are upstream's own (`should follow the correct merge logic for containerEnv`, `src/test/cli.build.test.ts` at v0.87.0) and each one is a distinct way to lose bytes through a Dockerfile `ENV`: leading/trailing spaces are dropped by an unquoted emission, `\"` ends the value early, `\\` escapes whatever follows, and `$` is expanded by Docker to nothing unless it is escaped. `$` is the one that separates this from the Feature half, which deliberately does NOT escape it — a Feature's `PATH=\"…:${PATH}\"` self-reference must still expand, and the reference CLI draws the same line in the same place.\n\nMEASURED at oracle 0.87.0 on this fixture: after the fix the two CLIs' `Config.Env` arrays are IDENTICAL, entry for entry and in the same order. It is a `spec-expectation` rather than a differential on [#570](https://github.com/get2knowio/deacon/issues/570)'s precedent — the differential lane is nightly and gates nothing, and this claim is worth failing a pull request over.\n\nSCOPE, measured rather than assumed: a configuration declaring NO Features bakes nothing on either CLI (both an `image:` and a `build.dockerfile` shape were checked, and they agree), so the emission belongs to the Feature-install stage and nowhere else. `up` was never affected — it applies `containerEnv` as `--env` at create time and both CLIs already agreed inside a running container. What was broken was the artifact, which is the whole of what `build` delivers."
+    },
+    {
+      "id": "case-build-upstream-config-selects-document",
+      "behaviors": [
+        "bhv-build-config-selects-document"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/.devcontainer/subfolder/devcontainer.json",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-upstream-subfolder-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "env": [
+                "SUBFOLDER_CONFIG_IMAGE_ENV=true"
+              ]
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`build --config` acts on the document it names rather than the one discovery would find, AND resolves that document's `build.dockerfile` against the CONFIG's directory rather than the workspace folder. Mined from [#480](https://github.com/get2knowio/deacon/issues/480) (`src/test/cli.build.test.ts` at v0.87.0, 'should build with config in subfolder'), batch 10.\n\nThe second half is what makes it worth a case. `fx-upstream-subfolder-config` carries TWO `Dockerfile`s and BOTH documents say `\"dockerfile\": \"Dockerfile\"`, so a workspace-relative resolution reaches the root one and a config-relative resolution reaches the subfolder one — the same distinction `ComposeManager::create_project` is built on. Only the subfolder's Dockerfile writes `SUBFOLDER_CONFIG_IMAGE_ENV`, so reading either the wrong document or the right document with the wrong base fails the assertion. That is upstream's own assertion, expressed through `chan-image.env` instead of a `docker inspect`.\n\nThe fixture is already vendored (`src/test/configs/dockerfile-without-features`) for the `up` and `run-user-commands` arms of the same upstream shape, so this costs no new fixture; `build` was the third subcommand reading it and the only one with no case. MEASURED at oracle 0.87.0: both CLIs exit 0 and both produce an image carrying `SUBFOLDER_CONFIG_IMAGE_ENV=true` and nothing from the root document."
+    },
+    {
+      "id": "case-build-upstream-no-config-in-cwd-rejected",
+      "behaviors": [
+        "bhv-build-no-config-in-cwd-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error"
+            }
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-build",
+          "assertion": {
+            "contains": "Configuration file not found"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The NEGATIVE arm of `build`'s cwd default, and upstream's own ('should fail gracefully when no workspace-folder and no config in current directory', `src/test/cli.build.test.ts` at v0.87.0), batch 10 of [#480](https://github.com/get2knowio/deacon/issues/480). An existing current directory with no devcontainer document and no `--workspace-folder` exits 1 with an error document rather than building something arbitrary.\n\n`build`'s positive cwd default has had a case since batch 8 (`case-build-upstream-cwd-default-workspace`) and the negative had none, which is the same asymmetry batch 6 closed for `exec` and batch 9 for `run-user-commands`. This is the third and last consumer subcommand with a cwd default, so the family is now closed on both arms everywhere.\n\nDistinct from `case-build-upstream-missing-config-rejected`, which names a `--workspace-folder` explicitly: this one never passes the flag at all, so it also asserts that the default resolves to the cwd rather than to something else before failing.\n\nIt pins DEACON's answer rather than comparing, and only the SHAPE of the document. The two CLIs word it differently — deacon `Configuration file not found: <abs>`, the reference `Dev container config (<abs>) not found.` — and both name the same absolute path and both exit 1, so the wording gap is not a divergence to fix and freezing deacon's sentence would make improving it a suite edit.\n\nHERMETIC, and verified rather than assumed: re-run with `docker` removed from `PATH` entirely AND `DOCKER_HOST` pointed at a nonexistent socket, deacon produces the identical document on all three channels — config resolution fails before any daemon contact. So it gates every pull request and runs on all three operating systems."
     }
   ]
 }
