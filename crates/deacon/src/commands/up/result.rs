@@ -324,6 +324,16 @@ impl UpResult {
                         "No devcontainer.json found in workspace".to_string(),
                         format!("Configuration file not found: {}", path),
                     ),
+                    // `up` normally fails earlier, in `resolve_workspace_folder`, so
+                    // this arm is reached only by a path that discovers config without
+                    // that guard. It carries the same sentence either way (#644).
+                    ConfigError::WorkspaceNotFound { path } => UpResult::error(
+                        "Workspace folder not found".to_string(),
+                        format!(
+                            "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
+                            path
+                        ),
+                    ),
                     ConfigError::Validation { message } => UpResult::error(
                         "Invalid configuration or arguments".to_string(),
                         message.clone(),

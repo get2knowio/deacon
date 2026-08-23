@@ -2620,6 +2620,58 @@
         "tempdir": true
       },
       "notes": "Records, and re-measures every nightly run, that the reference CLI drops `--label` on a `build.dockerfile` configuration while honouring it on an image-reference one. Mined from [#480](https://github.com/get2knowio/deacon/issues/480) batch 10 (`src/test/cli.build.test.ts` at v0.87.0), where upstream's own `--label` test uses an IMAGE configuration and so never touches the shape where its CLI loses them.\n\nMEASURED at oracle 0.87.0 across all four shapes on fresh workspaces: image and image-with-Features carry both labels on both CLIs; `build.dockerfile` and `build.dockerfile`-with-Features carry both on deacon and NEITHER on the reference. The reference's Feature-extended Dockerfile image still carries `devcontainer.metadata`, so the flag's values specifically are lost rather than labelling in general.\n\nTHE TOLERANCE IS THE POINT, and it is self-invalidating: if upstream ever forwards the flag on this shape, the two allowed differences go stale and the run reports it, which is how a documented choice is kept honest rather than left to outlive the difference it describes. `parity.build.token` — the fixture's own Dockerfile `LABEL` — is deliberately NOT tolerated and agrees on both sides.\n\nThe assertions are evaluated against DEACON's side only, which is what lets one case both pin deacon's answer and tolerate the reference's; the PR-gating pin lives in `case-build-cli-label-dockerfile-shape-spec` because this lane is nightly and gates nothing."
+    },
+    {
+      "id": "case-build-missing-workspace-rejected",
+      "behaviors": [
+        "bhv-build-missing-workspace-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--output-format",
+            "json",
+            "--workspace-folder",
+            "${WORKSPACE}/path-that-does-not-exist"
+          ],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error"
+            }
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-build",
+          "assertion": {
+            "contains": "Failed to resolve workspace path"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`build` against a `--workspace-folder` that does not exist, and the LAST straggler of a family the arc has been closing one subcommand at a time. `exec` got this arm in batch 4, `run-user-commands` in batch 9 and `up` in batch 7; `build` had the other two negatives — an explicit workspace that exists with no document (`case-build-upstream-missing-config-rejected`) and the cwd default with no document (`case-build-upstream-no-config-in-cwd-rejected`, batch 10) — and not this one. The three are different code: this fails during workspace RESOLUTION, before a document is looked for at all.\n\nIt lands with [#644](https://github.com/get2knowio/deacon/issues/644) and could not have passed before it. `ConfigLoader::discover_config`'s does-the-workspace-exist guard reused `ConfigError::NotFound`, the variant that means a missing FILE everywhere else, so `build` announced `Configuration file not found: <the directory>` — a directory described as a file, and a path nothing had searched for. Four of deacon's six subcommands did; `up` and `exec` did not, because they validate the workspace first. The guard now has its own `WorkspaceNotFound` carrying the sentence those two already printed, so one condition has one wording everywhere.\n\nIt pins DEACON's answer rather than comparing, on the precedent its three siblings set and for their reason. MEASURED at oracle 0.87.0: both CLIs exit 1 and both print an `outcome: error` document; the reference resolves the path and names a document it never looked for (`Dev container config (<abs>/.devcontainer/devcontainer.json) not found.`), deacon names the directory it could not resolve. `case-up-upstream-missing-workspace-rejected` adjudicated that difference — deacon's is the more accurate of the two, so it is not a divergence to fix — and this case follows it.\n\n`--output-format json` is what makes `chan-structured-output` observable: deacon prints the document only with the flag, the reference always prints one and rejects the flag outright, which is the standing reason no `build` differential declares this channel.\n\nThe `chan-stderr` assertion is `contains` on the sentence and not a regex over the path, because the path inside the quotes uses backslashes on Windows.\n\nHERMETIC — no `resourceGroup`, so it gates every pull request and runs on all three operating systems. Verified rather than assumed: re-run with `docker` off `PATH` and `DOCKER_HOST` pointed at a nonexistent socket, deacon produces the identical document on all three channels. A regression that reached for the daemon before reading the workspace would fail here rather than pass.\n\n[#480](https://github.com/get2knowio/deacon/issues/480) batch 11."
     }
   ]
 }

@@ -2621,7 +2621,7 @@ impl ConfigLoader {
     ///
     /// ## Errors
     ///
-    /// - `ConfigError::NotFound` if `workspace` does not exist
+    /// - `ConfigError::WorkspaceNotFound` if `workspace` does not exist
     /// - `ConfigError::Io` if filesystem enumeration fails
     ///
     /// ## Example
@@ -2647,9 +2647,10 @@ impl ConfigLoader {
             workspace.display()
         );
 
-        // Check if workspace exists
+        // Check if workspace exists. This names the WORKSPACE, not a config file:
+        // nothing has been searched for yet, and `workspace` is a directory (#644).
         if !workspace.exists() {
-            return Err(DeaconError::Config(ConfigError::NotFound {
+            return Err(DeaconError::Config(ConfigError::WorkspaceNotFound {
                 path: workspace.display().to_string(),
             }));
         }
@@ -4320,11 +4321,67 @@ mod tests {
         let result = ConfigLoader::discover_config(Path::new("/nonexistent/workspace")).await;
         assert!(result.is_err());
         match result.unwrap_err() {
-            DeaconError::Config(ConfigError::NotFound { path }) => {
+            DeaconError::Config(ConfigError::WorkspaceNotFound { path }) => {
                 assert!(path.contains("nonexistent"));
             }
-            _ => panic!("Expected Config(NotFound) error"),
+            other => panic!("Expected Config(WorkspaceNotFound) error, got: {other}"),
         }
+    }
+
+    /// A missing workspace DIRECTORY and a missing configuration FILE are two
+    /// different failures, and each diagnostic must name the thing that is
+    /// actually absent (#644).
+    ///
+    /// The regression this pins is not a wording preference: the missing-directory
+    /// guard used to reuse `ConfigError::NotFound`, so it announced
+    /// `Configuration file not found: <a directory>` — calling a directory a file,
+    /// and naming a path that had never been searched for. Asserting on the
+    /// rendered sentences rather than only the variant is deliberate, because the
+    /// sentence is the whole of what a developer sees.
+    #[tokio::test]
+    async fn missing_workspace_and_missing_config_name_different_things() {
+        // (1) The directory does not exist: name the DIRECTORY.
+        let missing_ws = Path::new("/nonexistent/workspace-644");
+        let err = ConfigLoader::discover_config(missing_ws)
+            .await
+            .expect_err("a workspace that does not exist must not discover a config");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("Failed to resolve workspace path")
+                && rendered.contains("workspace-644"),
+            "missing workspace must name the workspace: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Configuration file not found"),
+            "a directory must never be announced as a configuration file: {rendered}"
+        );
+
+        // (2) The directory exists with no config: discovery does NOT error, it
+        // reports the document it looked for, which the caller then reports as a
+        // missing FILE. That path keeps `ConfigError::NotFound` and its wording.
+        let temp = TempDir::new().expect("temp dir");
+        let discovered = ConfigLoader::discover_config(temp.path())
+            .await
+            .expect("an existing workspace with no config is not an error");
+        assert_eq!(
+            discovered,
+            DiscoveryResult::None(temp.path().join(".devcontainer").join("devcontainer.json")),
+            "an existing workspace must report the document it looked for"
+        );
+        let file_err = DeaconError::Config(ConfigError::NotFound {
+            path: temp
+                .path()
+                .join(".devcontainer")
+                .join("devcontainer.json")
+                .display()
+                .to_string(),
+        })
+        .to_string();
+        assert!(
+            file_err.contains("Configuration file not found")
+                && file_err.contains("devcontainer.json"),
+            "missing config must name the file: {file_err}"
+        );
     }
 
     // --- T007: Single named config ---

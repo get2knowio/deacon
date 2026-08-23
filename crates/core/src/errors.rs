@@ -43,6 +43,21 @@ pub enum ConfigError {
     /// Configuration file not found
     #[error("Configuration file not found: {path}")]
     NotFound { path: String },
+
+    /// The workspace FOLDER itself does not exist, so no configuration was ever
+    /// looked for.
+    ///
+    /// Distinct from [`ConfigError::NotFound`], which names a configuration FILE
+    /// that was looked for and was absent. Reusing `NotFound` here produced a
+    /// diagnostic that called a directory a configuration file and named a path
+    /// nothing had searched for ([#644]). The sentence is deliberately the one
+    /// `up` and `exec` already print from
+    /// `commands::shared::workspace::resolve_workspace_folder`, so one condition
+    /// has one wording across every subcommand.
+    ///
+    /// [#644]: https://github.com/get2knowio/deacon/issues/644
+    #[error("Failed to resolve workspace path '{path}': path does not exist or cannot be accessed")]
+    WorkspaceNotFound { path: String },
 }
 
 /// Docker/Runtime-related errors (placeholder implementations)
