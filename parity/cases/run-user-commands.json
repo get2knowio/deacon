@@ -1108,6 +1108,255 @@
         "tempdir": true
       },
       "notes": "Fixes [#637](https://github.com/get2knowio/deacon/issues/637). `--stop-for-personalization` stops the run after `postCreateCommand` so dotfiles / personalization can be applied before the attach-time hooks fire. deacon parsed the flag and dropped it — the field carried `#[allow(dead_code)] // Future feature` — so `postStartCommand` and `postAttachCommand` ran anyway.\n\n**It asserts the MARKER SET, not the outcome, and that is the whole point**: both CLIs exited 0 and both would have gone on exiting 0, so a case built on `chan-exit-code` would have been green against the defect. MEASURED at oracle 0.87.0 on this fixture from a clean slate, BEFORE the fix: the reference left `postCreate` and deacon left `postCreate`, `postStart` and `postAttach`. AFTER: byte-identical documents and identical marker files.\n\n`op-clear` between `up` and `run-user-commands` is load-bearing rather than tidiness. `up --skip-post-create` still runs `postStart` and `postAttach`, so their markers are in the file before the pass under test begins; without the truncation the assertion would be reading `up`'s work and could never distinguish the two behaviors.\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 9)."
+    },
+    {
+      "id": "case-run-user-commands-upstream-subfolder-config-roundtrip",
+      "behaviors": [
+        "bhv-run-user-commands-explicit-config-in-nested-subfolder"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/.devcontainer/subfolder/devcontainer.json",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-upstream-subfolder-config"
+          ]
+        },
+        {
+          "id": "op-check-deferred",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/.devcontainer/subfolder/devcontainer.json",
+            "--",
+            "sh",
+            "-c",
+            "test -f /subfolderConfigPostCreateCommand.txt && echo present || echo absent"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/.devcontainer/subfolder/devcontainer.json"
+          ]
+        },
+        {
+          "id": "op-check-ran",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--config",
+            "${WORKSPACE}/.devcontainer/subfolder/devcontainer.json",
+            "--",
+            "sh",
+            "-c",
+            "test -f /subfolderConfigPostCreateCommand.txt && echo present || echo absent"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-check-deferred",
+          "assertion": {
+            "matches": "^absent\\s*$"
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-check-ran",
+          "assertion": {
+            "matches": "^present\\s*$"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Upstream's 'should run with config in subfolder', RUN rather than parsed. `fx-upstream-subfolder-config` was vendored in batch 1 and covered only by `case-readconfig-upstream-subfolder-config`, which parses it — and the fixture comes from an EXECUTION test, whose `postCreateCommand` (`touch /subfolderConfigPostCreateCommand.txt`) had never been executed by anything here. That is precisely the batch-7 lesson restated: **vendoring a fixture from an execution test and covering it with a parse case records the fixture, not the claim.** This case is the claim.\n\nThree things have to be right at once and only the third is new. `--config` naming a document two levels down must win over the discoverable one; `build.dockerfile` must resolve against the NAMED config's directory (the subfolder has its own Dockerfile, so resolving against the workspace root silently builds the wrong image); and the hook that `up --skip-post-create` DEFERRED must be the one `run-user-commands` then runs, with the same `--config` threaded through both.\n\nMEASURED at oracle 0.87.0 on this fixture, both CLIs: `up --skip-post-create` exits 0 and leaves the marker ABSENT, `run-user-commands` exits 0 printing `{\"outcome\":\"success\",\"result\":\"done\"}`, and the marker is then PRESENT. Identical on both sides.\n\nThe two observations go through `sh -c '… && echo present || echo absent'` rather than a bare `test -f`, deliberately: a failing operation is a case failure the runner reports as such (that is what `expectFailurePhase` is for), so an absent-marker assertion written as a non-zero exit would be indistinguishable from the case breaking. Routing the answer through stdout keeps both halves ordinary comparisons and makes the DEFERRED half — the one that proves `up` skipped the hook — assertable at all.\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 9), `src/test/cli.test.ts`."
+    },
+    {
+      "id": "case-run-user-commands-upstream-cwd-default-workspace",
+      "behaviors": [
+        "bhv-run-user-commands-default-workspace-folder"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--skip-post-create"
+          ],
+          "fixtures": [
+            "fx-ruc-lifecycle-phases"
+          ]
+        },
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": []
+        },
+        {
+          "id": "op-read",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "cat",
+            "/tmp/ruc-phases"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-ruc"
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-read",
+          "assertion": {
+            "contains": "postCreate"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "With no `--workspace-folder`, no `--config` and no container selector, `run-user-commands` resolves its configuration from the CURRENT DIRECTORY — the shape a developer types, `cd` into the project and re-run the hooks. Upstream gives it its own `it` ('run-user-commands should run with default workspace folder (current directory)').\n\n**The gap this closes is a COVERAGE gap, not a defect.** deacon already defaults here and has since the family was closed subcommand by subcommand — `exec` and `build` always did, `up` was [#610](https://github.com/get2knowio/deacon/issues/610), `read-configuration` [#615](https://github.com/get2knowio/deacon/issues/615) — and each of those four has a case pinning it. `run-user-commands` had none, so nothing in the suite would have reported the day it started demanding the flag. MEASURED at oracle 0.87.0: both CLIs exit 0 from a cwd holding the fixture, both print `{\"outcome\":\"success\",\"result\":\"done\"}`, and both leave the `postCreate` marker.\n\nIt asserts the MARKER as well as the document, which is what makes it a claim about WHICH workspace was resolved: a run that resolved some other directory, or that fell through to an empty base configuration, exits 0 and prints the same document but cannot have run this configuration's hook.\n\nIt costs nothing to express — the runner already anchors each operation's cwd to the case's isolated workspace, so OMITTING the flag is the whole test. That is also its one fragility, recorded here because it is invisible in an empty `argv`: if the runner ever stops anchoring cwd to the workspace, this case starts failing for a reason that has nothing to do with `run-user-commands`. Its `up`, `exec`, `build` and `read-configuration` siblings carry the same note.\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 9), `src/test/cli.test.ts`."
+    },
+    {
+      "id": "case-run-user-commands-upstream-no-config-in-cwd-rejected",
+      "behaviors": [
+        "bhv-run-user-commands-no-config-in-cwd-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-ruc",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error"
+            }
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-ruc",
+          "assertion": {
+            "contains": "Configuration file not found"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The NEGATIVE arm of the cwd default, and upstream's own ('run-user-commands should fail gracefully when no config in current directory and no container-id'): an EXISTING current directory with no devcontainer document, no `--workspace-folder`, no `--config` and no container selector exits 1.\n\n**It could not have been written before [#635](https://github.com/get2knowio/deacon/issues/635)**, which is why it lands with it rather than in a mining-only commit. deacon exited 1 here before too, so an exit-code assertion alone would have been green for the wrong reason — the trap `docs/PARITY.md` names. `chan-structured-output` is what makes it a real assertion: deacon printed NOTHING on stdout, so the channel verdicted a divergence, and the `outcome: error` document it now asserts is the behavior #635 added.\n\nIt pins DEACON's answer rather than comparing, and only the SHAPE of the document — `{\"outcome\": \"error\"}` — not its wording. The two CLIs word it differently (deacon names the absolute path of the document it looked for, the reference names the same path in its own phrasing), and the wording is deliberately left unpinned: a case that froze deacon's exact sentence would have to be edited by anyone improving the message, which is a change this suite should not have an opinion about.\n\nHERMETIC, and the lane is a claim rather than a convenience: config resolution fails before any daemon contact, verified by re-running with `docker` off `PATH` and getting identical output on all three channels. `fx-errors-missing-config` (a directory holding only a `.gitkeep`) is a cwd with nothing in it by construction.\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 9), `src/test/cli.test.ts`."
+    },
+    {
+      "id": "case-run-user-commands-upstream-missing-workspace-rejected",
+      "behaviors": [
+        "bhv-run-user-commands-missing-workspace-rejected"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-ruc",
+          "subcommand": "run-user-commands",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}/path-that-does-not-exist"
+          ],
+          "fixtures": [
+            "fx-errors-missing-config"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-ruc",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-ruc",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Upstream's 'should fail with \"not found\" error when config is not found', which names a `--workspace-folder` that does not exist and asserts on `JSON.parse(error.stdout)` — an assertion that could not run against deacon at all until [#635](https://github.com/get2knowio/deacon/issues/635), because there was no stdout to parse.\n\nDISTINCT from its `no-config-in-cwd` sibling, which resolves a real directory and finds no document; this one names a directory that is not there. The `up` and `exec` families keep the same pair for the same reason.\n\nMEASURED at oracle 0.87.0: both CLIs exit 1 and both print an `outcome: error` document. **The wording differs and is deliberately NOT pinned, because deacon's is the worse of the two here and should be free to improve**: the reference resolves the relative path and names the document it looked for (`Dev container config (<abs>/.devcontainer/devcontainer.json) not found.`), while deacon reports `Configuration file not found: path-that-does-not-exist` — the raw argument, described as a configuration file when it is a workspace directory. deacon's own `up` says the accurate thing (`Failed to resolve workspace path …`) because it routes through `shared::workspace::resolve_workspace_folder`, which validates the directory; `run-user-commands` reaches its cwd default incidentally, through the config loader, and never validates. That is an internal inconsistency worth closing on its own terms, and pinning only `{\"outcome\": \"error\"}` and the exit code leaves it free to be closed without editing this case.\n\nHERMETIC: workspace and config resolution both fail before any daemon contact, verified with `docker` off `PATH`.\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 9), `src/test/cli.test.ts`."
     }
   ]
 }
