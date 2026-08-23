@@ -4128,6 +4128,65 @@
       "notes": "GREEN as of [#609](https://github.com/get2knowio/deacon/issues/609). It was written RED ON PURPOSE — asserting the FIXED behaviour so it would turn green on the fix and not on an assertion edit, the `case-build-upstream-buildkit-never-platform-refused` precedent — and it did exactly that: NOT ONE BYTE of this case changed when the defect was closed. What follows is kept in the past tense because the measurement is the record.\n\nMEASURED at oracle 0.87.0 on `fx-upstream-containerenv-dollar-escape`, byte for byte through `od -c`. The configuration authors `\"VAR_WITH_BACK_SLASH\": \"value with \\\\back slash\"`, i.e. the eleven characters `value with ` followed by a literal `\\`, then `back slash`. The reference delivers exactly that. deacon USED TO deliver `value with ` followed by **0x08**, then `ack slash` — the backslash and the `b` collapsed into a BACKSPACE control character. It now delivers the literal backslash, byte-identical to the reference, re-measured through `od -c` at the fix.\n\nThe cause was `escape_yaml_value` in `crates/core/src/compose.rs`. It had two branches: a value that 'needs quoting' was escaped (backslashes doubled) and wrapped in `\"…\"`; a value that did not was wrapped in `\"…\"` **without escaping anything**. `value with \\back slash` contains no newline, colon, hash, quote or leading/trailing space, so it took the second branch and landed in a DOUBLE-QUOTED YAML scalar with its backslash intact, where `\\b` is YAML's escape for backspace. The branch that skipped escaping was the one that emitted quotes, which is why the bug was invisible on every value that happened to trip the first branch. The fix deletes the predicate: every value is emitted double-quoted, so every value is escaped. A lone TRAILING backslash was the same defect at its worst — it escaped the closing quote and produced an override Compose could not parse at all.\n\nCOMPOSE-ONLY, and that is measured rather than assumed: the identical value on the identical `containerEnv` key reaches the container correctly on the image path, asserted by `case-up-upstream-containerenv-merge-image`. The image path passes the value as a `docker create -e` argument and never crosses a YAML writer.\n\nOBSERVED THROUGH `exec` STDOUT RATHER THAN `chan-container-state`, deliberately. The difference is one environment value, and a whole-channel container-state differential on a Compose fixture drags in the keep-alive `cmd`/`entrypoint` split, deacon's identity labels and Compose's `config_files`/`config-hash` pair — eight tolerances for a case whose entire subject is a single string. `printenv` on both sides prints that string and nothing else, so the case needs NO tolerance at all and its verdict is unambiguous.\n\nBoth a comparison and an assertion are declared: the comparison is what makes this a record of a divergence, and the `contains` pins deacon's own side so the case cannot go green by the reference regressing to match.\n\nIt STAYS `live-differential` now that it is green. The claim is 'the two CLIs deliver the same bytes', the reference is the authority on a surface the spec says nothing about, and a comparison keeps asserting that; demoting it to `spec-expectation` to move it into a blocking lane would trade the claim for the schedule.\n\nMined from the reference CLI's own e2e suite (`src/test/cli.up.test.ts` at v0.87.0, 'should follow the correct merge logic for containerEnv using docker compose'), [#480](https://github.com/get2knowio/deacon/issues/480) batch 7."
     },
     {
+      "id": "case-up-upstream-containerenv-compose-newline",
+      "behaviors": [
+        "bhv-up-container-env-newline-fidelity-compose"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-upstream-containerenv-dollar-escape"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-injected-process",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "env": {
+                "Test_Message": "H\"\n\ne\"'''llo M:;a/t?h&^iKa%#@!``ni,sk_a-"
+              }
+            }
+          }
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-up-container-env-newline-fidelity-compose",
+          "context": [],
+          "observablePath": "chan-injected-process.env.Test_Message",
+          "rationale": "The ONE path this fixture's process context diverges on, and the whole subject of the case: deacon delivers the authored real newlines, the reference delivers the two-character sequence `\\n`. Scoped to the single key rather than to `env` or the channel, so any OTHER environment difference on this fixture — a dropped name, a mangled `$$` escape, a changed PATH — still fails. Measured at oracle 0.87.0: every other field of `.Config` this channel reads (`user`, `cwd`, `tty`, `path`, and all nine sibling names) is byte-identical on the two sides, so this tolerance is the only one the case needs.",
+          "divergenceId": "bhv-compose-containerenv-newline-fidelity"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Closes the open decision batch 7 referred up, under the maintainer ruling of 2026-08-22 on [#480](https://github.com/get2knowio/deacon/issues/480): deacon KEEPS preserving authored real newlines in a Compose `containerEnv` value, and the divergence is recorded rather than matched. See the ledger row for the argument; this case is what makes the record self-invalidating.\n\nWHY A DIFFERENTIAL AND NOT A SPEC-EXPECTATION. A spec-expectation would pin deacon's value and say nothing about the reference, so the day upstream fixes its flattening nothing here would notice and the ledger row would quietly become fiction. As a live-differential with ONE tolerance, the harness re-measures the divergence every nightly run and FAILS the tolerance as stale the moment it stops reproducing — the paper trail closes itself. The `assertion` is still carried, and is evaluated against DEACON's side alone: a differential cannot fail when both sides are equally wrong, and deacon's half of this row is a positive claim (the authored bytes survive) that deserves to be checked on its own.\n\nWHY `chan-injected-process`. MEASURED before choosing: on this fixture the two CLIs' `.Config` process contexts are identical but for `Test_Message` — same `user`, `cwd`, `tty`, `PATH`, same nine other `containerEnv` names — so this channel costs exactly one tolerance. `chan-container-state` would have cost eight (the keep-alive `cmd`/`entrypoint` split, deacon's five identity labels, Compose's project name and its `config_files`/`config-hash` pair) for a case whose entire subject is one string, which is why batch 7 declined to write it at all. Same fixture as `case-up-upstream-containerenv-merge-compose` and `case-up-upstream-containerenv-compose-backslash`, each observing a different one of its names.\n\nThe assertion carries the value with REAL newline bytes, which is the point — a case file that spelled them `\\\\n` would assert the reference's behavior while claiming to assert deacon's."
+    },
+    {
       "id": "case-up-upstream-subfolder-config-executes",
       "behaviors": [
         "bhv-up-config-flag-selects-subfolder-config"
