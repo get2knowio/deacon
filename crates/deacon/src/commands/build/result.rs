@@ -15,16 +15,17 @@ use serde::{Deserialize, Serialize};
 /// ```json
 /// {
 ///   "outcome": "success",
-///   "imageName": ["myimage:latest", "myimage:v1.0"],  // always an array on output (issue #310)
+///   "imageName": ["myimage:latest", "myimage:v1.0"],  // an array, except on Compose (#632)
 ///   "exportPath": "/path/to/export.tar",  // optional
 ///   "pushed": true  // optional
 /// }
 /// ```
 ///
-/// On output `imageName` is always a JSON array, matching the reference CLI, even
-/// for a single tag. The [`ImageNameOutput::Single`] variant remains only so a
-/// bare-string value still *deserializes* (input tolerance); it is never produced
-/// on the success path.
+/// On output `imageName` is a JSON array on every configuration shape but one:
+/// a Compose build with no `--image-name` reports a single BARE STRING, which is
+/// what the reference CLI does there and only there (#632 narrowing #310 — see
+/// `ImageNameShape` in the build command). [`ImageNameOutput::Single`] carries
+/// that case, and also keeps a bare-string value *deserializing* on input.
 #[allow(dead_code)] // Used in Phase 3 implementation
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,8 +33,8 @@ pub struct BuildSuccess {
     /// Always "success" for successful builds
     outcome: String,
 
-    /// The tag(s) the build produced. Always serialized as an array on output
-    /// (issue #310); the `Single` variant exists only for deserialization tolerance.
+    /// The tag(s) the build produced. An array on every shape except a Compose
+    /// build with no `--image-name`, which is a bare string (#632).
     #[serde(skip_serializing_if = "Option::is_none")]
     image_name: Option<ImageNameOutput>,
 
@@ -230,20 +231,44 @@ mod tests {
 
     #[test]
     fn test_build_success_single_tag_serializes_as_array() {
-        // The success path builds imageName via new_multiple even for one tag, so a
-        // single custom tag must render as a one-element ARRAY, not a bare string,
-        // matching the reference CLI (issue #310).
+        // Every shape but Compose-without-`--image-name` builds imageName via
+        // new_multiple even for one tag, so a single custom tag must render as a
+        // one-element ARRAY, not a bare string, matching the reference CLI (#310).
+        // The one shape that does spell it as a string is the sibling test below.
         let result = BuildSuccess::new_multiple(vec!["myimage:latest".to_string()]);
         let json = serde_json::to_string(&result).unwrap();
 
         assert!(json.contains(r#""imageName":["myimage:latest"]"#));
-        // Guard against the regression: never a bare-string imageName on output.
+        // Guard against the regression this test was written for: an array shape
+        // must never collapse to a bare string.
         assert!(!json.contains(r#""imageName":"myimage:latest"#));
 
         // And it round-trips back to the array variant.
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed["imageName"].is_array());
         assert_eq!(parsed["imageName"][0], "myimage:latest");
+    }
+
+    /// #632: the one shape that is NOT an array — a Compose build with no
+    /// `--image-name` reports the produced image as a bare string, which is what
+    /// the reference CLI does there and only there.
+    #[test]
+    fn test_build_success_compose_default_name_serializes_as_bare_string() {
+        let result = BuildSuccess::new_single("deacon_proj_ab12cd34-app".to_string());
+        let json = serde_json::to_string(&result).unwrap();
+
+        assert!(
+            json.contains(r#""imageName":"deacon_proj_ab12cd34-app""#),
+            "expected a bare-string imageName; got {json}"
+        );
+        // Pinned from the other side too: the value must not be wrapped, which a
+        // `contains` on the name alone would not notice.
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed["imageName"].is_string(),
+            "expected a JSON string; got {}",
+            parsed["imageName"]
+        );
     }
 
     #[test]
