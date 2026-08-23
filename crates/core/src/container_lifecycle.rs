@@ -1002,7 +1002,6 @@ where
                     dotfiles_config,
                     &updated_config,
                     docker,
-                    detected_shell.as_deref(),
                     progress_callback.as_ref(),
                 )
                 .await?;
@@ -2087,20 +2086,33 @@ where
     Ok(phase_result)
 }
 
-/// Execute dotfiles installation in the container
+/// The install-script names the reference CLI looks for, in its order.
 ///
-/// Per spec SC-001, dotfiles execute at the `postCreate -> dotfiles -> postStart` boundary.
-/// This function:
-/// 1. Clones the dotfiles repository into the container
-/// 2. Executes the install script (custom or auto-detected install.sh/setup.sh)
-///
+/// Transcribed from `installCommands` in the pinned reference source
+/// (`src/spec-common/dotfiles.ts`, oracle 0.87.0) and echoed by its own
+/// `--dotfiles-install-command` help text. The ORDER is part of the behavior:
+/// the first name that exists in the clone wins, so a repository carrying both
+/// `install` and `setup.sh` runs `install`.
+const DOTFILES_INSTALL_COMMANDS: [&str; 8] = [
+    "install.sh",
+    "install",
+    "bootstrap.sh",
+    "bootstrap",
+    "script/bootstrap",
+    "setup.sh",
+    "setup",
+    "script/setup",
+];
+
+/// The reference CLI's default clone target (`--dotfiles-target-path` default).
+const DOTFILES_DEFAULT_TARGET_PATH: &str = "~/dotfiles";
+
 /// Expand a leading `~` / `~/…` in a container-side path to `home_dir`.
 ///
-/// `git clone` (and the other dotfiles commands) receive the target path as a
-/// literal argv element, so the shell never expands `~`. A bare `~` maps to
-/// the home directory; `~/x` maps to `home_dir/x`. Anything else (including
-/// `~otheruser`, which we can't resolve without a passwd lookup) is returned
-/// unchanged.
+/// The dotfiles script quotes the target path so the container's shell will not
+/// expand `~` for us. A bare `~` maps to the home directory; `~/x` maps to
+/// `home_dir/x`. Anything else (including `~otheruser`, which we can't resolve
+/// without a passwd lookup) is returned unchanged.
 fn expand_container_tilde(path: &str, home_dir: &str) -> String {
     if path == "~" {
         home_dir.to_string()
@@ -2111,19 +2123,156 @@ fn expand_container_tilde(path: &str, home_dir: &str) -> String {
     }
 }
 
+/// Resolve a `--dotfiles-repository` value into something `git clone` accepts.
+///
+/// The reference rewrites a bare `owner/repo` into a GitHub HTTPS URL and leaves
+/// everything else alone (`src/spec-common/dotfiles.ts`):
+///
+/// ```text
+/// if (repository.indexOf(':') === -1 && !/^\.{0,2}\//.test(repository)) {
+///     repository = `https://github.com/${repository}.git`;
+/// }
+/// ```
+///
+/// A value containing `:` is already a URL or an scp-style remote
+/// (`git@github.com:owner/repo`); one starting with `/`, `./` or `../` is a
+/// path. Everything else is the shorthand — which deacon's own `--help` has
+/// advertised since before it was implemented (#647).
+fn normalize_dotfiles_repository(repository: &str) -> String {
+    let is_path = repository.starts_with('/')
+        || repository.starts_with("./")
+        || repository.starts_with("../");
+    if repository.contains(':') || is_path {
+        repository.to_string()
+    } else {
+        format!("https://github.com/{}.git", repository)
+    }
+}
+
+/// Build the single shell script that installs dotfiles inside the container.
+///
+/// This mirrors `installDotfiles` in the pinned reference source, and being one
+/// script rather than a sequence of `docker exec`s is the point rather than an
+/// optimization: the previous shape ran the install-script detection as its own
+/// exec and read the result's `stdout`, which is always empty for a
+/// `silent: false` exec because that branch forwards the child's stdout to
+/// deacon's stderr instead of capturing it. The detector therefore never
+/// detected anything, and no dotfiles repository's install script had ever run
+/// under deacon unless `--dotfiles-install-command` was passed (#647). A shell
+/// that decides for itself cannot lose the answer on the way back.
+///
+/// `repository`, `target_path` and `install_command` are all user-supplied and
+/// are interpolated exactly once each, shell-quoted. In particular the install
+/// command is a FILE NAME, not a shell fragment: the reference tests `-f`, makes
+/// it executable and execs it, so `--dotfiles-install-command 'echo hi'` exits
+/// 126 with `Could not locate 'echo hi'...` rather than running `echo`
+/// (measured at oracle 0.87.0).
+fn build_dotfiles_script(
+    repository: &str,
+    target_path: &str,
+    install_command: Option<&str>,
+) -> String {
+    let target = shell_words::quote(target_path).into_owned();
+    let repo = shell_words::quote(repository).into_owned();
+
+    // `[ -e <target> ] ||` is the reference's guard, and it is why an existing
+    // dotfiles directory is left alone instead of being removed and re-cloned
+    // (#649).
+    let mut script = format!(
+        "command -v git >/dev/null 2>&1 || {{ echo 'git not found' >&2; exit 1; }}\n\
+         [ -e {target} ] || git clone --depth 1 {repo} {target} || exit $?\n\
+         cd {target} || exit $?\n"
+    );
+
+    match install_command {
+        Some(command) => {
+            // Resolve as `./<cmd>` first, then as an absolute/relative path,
+            // chmod'ing a non-executable target — the reference's own three
+            // arms, including its 126 for "neither exists".
+            script.push_str(&format!("installCommand={}\n", shell_words::quote(command)));
+            script.push_str(
+                "if [ -f \"./$installCommand\" ]; then\n\
+                 \tif [ ! -x \"./$installCommand\" ]; then\n\
+                 \t\techo \"Setting './$installCommand' as executable\"\n\
+                 \t\tchmod +x \"./$installCommand\"\n\
+                 \tfi\n\
+                 \techo \"Executing command './$installCommand'...\"\n\
+                 \t\"./$installCommand\"\n\
+                 elif [ -f \"$installCommand\" ]; then\n\
+                 \tif [ ! -x \"$installCommand\" ]; then\n\
+                 \t\techo \"Setting '$installCommand' as executable\"\n\
+                 \t\tchmod +x \"$installCommand\"\n\
+                 \tfi\n\
+                 \techo \"Executing command '$installCommand'...\"\n\
+                 \t\"$installCommand\"\n\
+                 else\n\
+                 \techo \"Could not locate '$installCommand'...\"\n\
+                 \texit 126\n\
+                 fi\n",
+            );
+        }
+        None => {
+            // No install command: take the first known name that exists, and
+            // failing that link the repository's dotfiles into the home
+            // directory — which is the whole of what a dotfiles repo with no
+            // installer is for, and which deacon did not do at all (#647).
+            script.push_str(&format!(
+                "installCommand=\n\
+                 for f in {names}\n\
+                 do\n\
+                 \tif [ -e \"$f\" ]; then\n\
+                 \t\tinstallCommand=$f\n\
+                 \t\tbreak\n\
+                 \tfi\n\
+                 done\n",
+                names = DOTFILES_INSTALL_COMMANDS.join(" "),
+            ));
+            // The reference's exclusion pattern is `/(.|..|.git)$` with
+            // unescaped dots, so it also drops any two-character entry such as
+            // `.z`. deacon escapes them; the difference is only observable for
+            // a dotfile whose name is one or two characters long, and importing
+            // a latent bug for that is the worse trade.
+            script.push_str(&format!(
+                "if [ -z \"$installCommand\" ]; then\n\
+                 \tdotfiles=$(ls -d {target}/.* 2>/dev/null | grep -v -E '/(\\.|\\.\\.|\\.git)$')\n\
+                 \tif [ -n \"$dotfiles\" ]; then\n\
+                 \t\techo \"Linking dotfiles: $dotfiles\"\n\
+                 \t\tln -sf $dotfiles ~ 2>/dev/null\n\
+                 \telse\n\
+                 \t\techo 'No dotfiles found.'\n\
+                 \tfi\n\
+                 else\n\
+                 \tif [ ! -x \"$installCommand\" ]; then\n\
+                 \t\techo \"Setting '$installCommand' as executable\"\n\
+                 \t\tchmod +x \"$installCommand\"\n\
+                 \tfi\n\
+                 \techo \"Executing command '$installCommand'...\"\n\
+                 \t./\"$installCommand\"\n\
+                 fi\n"
+            ));
+        }
+    }
+
+    script
+}
+
+/// Execute dotfiles installation in the container.
+///
+/// Per spec SC-001, dotfiles execute at the `postCreate -> dotfiles -> postStart`
+/// boundary. One `sh -c` runs the whole of it — see [`build_dotfiles_script`]
+/// for why that shape, and not a sequence of execs, is load-bearing.
+///
 /// # Arguments
 ///
 /// * `dotfiles_config` - Configuration for dotfiles (repository, target path, install command)
 /// * `lifecycle_config` - Container lifecycle configuration
 /// * `docker` - Docker client for executing commands
-/// * `detected_shell` - Shell detected for the container
 /// * `progress_callback` - Optional callback for progress events
 #[instrument(skip(dotfiles_config, lifecycle_config, docker, progress_callback))]
 async fn execute_dotfiles_in_container<D, F>(
     dotfiles_config: &DotfilesConfig,
     lifecycle_config: &ContainerLifecycleConfig,
     docker: &D,
-    detected_shell: Option<&str>,
     progress_callback: Option<&F>,
 ) -> Result<PhaseResult>
 where
@@ -2138,22 +2287,6 @@ where
         lifecycle_config.container_id
     );
 
-    // Emit phase begin event
-    if let Some(callback) = progress_callback {
-        let event = ProgressEvent::LifecyclePhaseBegin {
-            id: ProgressTracker::next_event_id(),
-            timestamp: ProgressTracker::current_timestamp(),
-            phase: phase.as_str().to_string(),
-            commands: vec![format!(
-                "dotfiles: {}",
-                dotfiles_config.repository.as_deref().unwrap_or("none")
-            )],
-        };
-        if let Err(e) = callback(event) {
-            debug!("Failed to emit phase begin event: {}", e);
-        }
-    }
-
     let mut phase_result = PhaseResult {
         phase,
         commands: Vec::new(),
@@ -2163,7 +2296,7 @@ where
 
     // Get repository URL
     let repository = match &dotfiles_config.repository {
-        Some(repo) => repo.clone(),
+        Some(repo) => normalize_dotfiles_repository(repo),
         None => {
             debug!("No dotfiles repository configured");
             phase_result.total_duration = phase_start.elapsed();
@@ -2171,33 +2304,42 @@ where
         }
     };
 
+    // Emit phase begin event
+    if let Some(callback) = progress_callback {
+        let event = ProgressEvent::LifecyclePhaseBegin {
+            id: ProgressTracker::next_event_id(),
+            timestamp: ProgressTracker::current_timestamp(),
+            phase: phase.as_str().to_string(),
+            commands: vec![format!("dotfiles: {}", repository)],
+        };
+        if let Err(e) = callback(event) {
+            debug!("Failed to emit phase begin event: {}", e);
+        }
+    }
+
     // Determine user and target path
     let user = lifecycle_config
         .user
         .clone()
         .unwrap_or_else(|| "root".to_string());
-    // The container-side home directory for the resolved user. Used both for
-    // the default target and to expand a leading `~` in a user-supplied path.
+    // The container-side home directory for the resolved user, used to expand a
+    // leading `~` in the default target and in a user-supplied one.
     let home_dir = if user == "root" {
         "/root".to_string()
     } else {
         format!("/home/{}", user)
     };
-    let default_target_path = format!("{}/.dotfiles", home_dir);
-
-    // git clone receives the target path as a literal argv element, so it does
-    // NOT perform shell tilde expansion. Expand a leading `~`/`~/…` ourselves
-    // to the user's home — otherwise `--dotfiles-target-path ~/x` clones into a
-    // literal `~` directory relative to cwd and fails with a permission error.
-    let target_path = dotfiles_config
-        .target_path
-        .clone()
-        .map(|p| expand_container_tilde(&p, &home_dir))
-        .unwrap_or(default_target_path);
+    let target_path = expand_container_tilde(
+        dotfiles_config
+            .target_path
+            .as_deref()
+            .unwrap_or(DOTFILES_DEFAULT_TARGET_PATH),
+        &home_dir,
+    );
 
     debug!(
-        "Installing dotfiles to container path: {} as user: {}",
-        target_path, user
+        "Installing dotfiles from {} to container path: {} as user: {}",
+        repository, target_path, user
     );
 
     let exec_config = ExecConfig {
@@ -2212,198 +2354,39 @@ where
         terminal_size: None,
     };
 
-    // Step 1: Check if dotfiles directory already exists (idempotency)
-    let check_exists_command = vec![
-        "sh".to_string(),
-        "-c".to_string(),
-        format!("test -d {}", target_path),
-    ];
+    let script = build_dotfiles_script(
+        &repository,
+        &target_path,
+        dotfiles_config.install_command.as_deref(),
+    );
+    let command = vec!["sh".to_string(), "-c".to_string(), script];
 
-    let exists_result = docker
-        .exec(
-            &lifecycle_config.container_id,
-            &check_exists_command,
-            exec_config.clone(),
-        )
+    let start = Instant::now();
+    let result = docker
+        .exec(&lifecycle_config.container_id, &command, exec_config)
         .await
-        .map_err(|e| {
-            DeaconError::Lifecycle(format!("Failed to check dotfiles directory: {}", e))
-        })?;
-
-    if exists_result.success {
-        info!(
-            "Dotfiles directory already exists at {}, removing to clone fresh",
-            target_path
-        );
-        let remove_command = vec!["rm".to_string(), "-rf".to_string(), target_path.clone()];
-        let remove_result = docker
-            .exec(
-                &lifecycle_config.container_id,
-                &remove_command,
-                exec_config.clone(),
-            )
-            .await
-            .map_err(|e| {
-                DeaconError::Lifecycle(format!("Failed to remove existing dotfiles: {}", e))
-            })?;
-
-        if !remove_result.success {
-            phase_result.success = false;
-            phase_result.total_duration = phase_start.elapsed();
-            emit_phase_end_event(progress_callback, &phase_result);
-            return Err(DeaconError::Lifecycle(format!(
-                "Failed to remove existing dotfiles directory (exit code {}): {}{}",
-                remove_result.exit_code, remove_result.stdout, remove_result.stderr
-            )));
-        }
-    }
-
-    // Step 2: Clone dotfiles repository inside container
-    info!("Cloning dotfiles repository: {}", repository);
-    let clone_command = vec![
-        "git".to_string(),
-        "clone".to_string(),
-        repository.clone(),
-        target_path.clone(),
-    ];
-
-    let clone_start = Instant::now();
-    let clone_result = docker
-        .exec(
-            &lifecycle_config.container_id,
-            &clone_command,
-            exec_config.clone(),
-        )
-        .await
-        .map_err(|e| DeaconError::Lifecycle(format!("Failed to execute git clone: {}", e)))?;
+        .map_err(|e| DeaconError::Lifecycle(format!("Failed to install dotfiles: {}", e)))?;
 
     phase_result.commands.push(CommandResult {
-        command: format!("git clone {} {}", repository, target_path),
-        exit_code: clone_result.exit_code,
-        duration: clone_start.elapsed(),
-        success: clone_result.success,
-        stdout: clone_result.stdout.clone(),
-        stderr: clone_result.stderr.clone(),
+        command: format!("dotfiles: git clone {} {}", repository, target_path),
+        exit_code: result.exit_code,
+        duration: start.elapsed(),
+        success: result.success,
+        stdout: result.stdout.clone(),
+        stderr: result.stderr.clone(),
     });
 
-    if !clone_result.success {
+    if !result.success {
         phase_result.success = false;
         phase_result.total_duration = phase_start.elapsed();
         emit_phase_end_event(progress_callback, &phase_result);
         return Err(DeaconError::Lifecycle(format!(
-            "Failed to clone dotfiles repository (exit code {}): {}{}. Ensure git is installed and the repository URL is valid.",
-            clone_result.exit_code, clone_result.stdout, clone_result.stderr
+            "Dotfiles installation failed (exit code {}). Ensure git is installed in the container and the repository is reachable.",
+            result.exit_code
         )));
     }
 
-    info!("Dotfiles repository cloned successfully");
-
-    // Step 3: Determine and execute install command
-    let install_command_str = if let Some(ref custom_command) = dotfiles_config.install_command {
-        debug!("Using custom dotfiles install command: {}", custom_command);
-        Some(custom_command.clone())
-    } else {
-        // Auto-detect install script
-        debug!("Auto-detecting install script in dotfiles repository");
-
-        // `target_path` derives from `--dotfiles-target-path` (user-controllable)
-        // or from `$HOME` inside the container. Quote it so paths with spaces,
-        // single-quotes, or `$(...)` interpolate as a single shell token rather
-        // than allowing command injection.
-        let target_quoted = shell_words::quote(target_path.as_str()).into_owned();
-        let detect_script_command = vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            format!(
-                "if [ -f {tq}/install.sh ]; then echo 'install.sh'; elif [ -f {tq}/setup.sh ]; then echo 'setup.sh'; fi",
-                tq = target_quoted,
-            ),
-        ];
-
-        let detect_result = docker
-            .exec(
-                &lifecycle_config.container_id,
-                &detect_script_command,
-                exec_config.clone(),
-            )
-            .await;
-
-        match detect_result {
-            Ok(result) if !result.stdout.trim().is_empty() => {
-                let script_name = result.stdout.trim();
-                debug!("Auto-detected install script: {}", script_name);
-
-                // Use detected shell or fallback to bash. Script name is one
-                // of "install.sh" / "setup.sh" (known-safe), but the path
-                // gets quoted unconditionally.
-                let shell = detected_shell.unwrap_or("bash");
-                Some(format!(
-                    "{shell} {tq}/{name}",
-                    shell = shell,
-                    tq = target_quoted,
-                    name = script_name
-                ))
-            }
-            _ => {
-                debug!("No install script found in dotfiles repository");
-                None
-            }
-        }
-    };
-
-    // Step 4: Execute install command if present
-    if let Some(install_cmd) = install_command_str {
-        info!("Executing dotfiles install command: {}", install_cmd);
-
-        // `cd` target gets shell-quoted; the install command itself is
-        // user-supplied shell (custom install command) and inherently
-        // executes as shell — that trust boundary is the workspace-trust
-        // gate (separate concern, tracked in gap #3), not this layer.
-        let install_command = vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            format!(
-                "cd {tq} && {cmd}",
-                tq = shell_words::quote(target_path.as_str()),
-                cmd = install_cmd
-            ),
-        ];
-
-        let install_start = Instant::now();
-        let install_result = docker
-            .exec(
-                &lifecycle_config.container_id,
-                &install_command,
-                exec_config,
-            )
-            .await
-            .map_err(|e| {
-                DeaconError::Lifecycle(format!("Failed to execute install command: {}", e))
-            })?;
-
-        phase_result.commands.push(CommandResult {
-            command: install_cmd.clone(),
-            exit_code: install_result.exit_code,
-            duration: install_start.elapsed(),
-            success: install_result.success,
-            stdout: install_result.stdout.clone(),
-            stderr: install_result.stderr.clone(),
-        });
-
-        if !install_result.success {
-            phase_result.success = false;
-            phase_result.total_duration = phase_start.elapsed();
-            emit_phase_end_event(progress_callback, &phase_result);
-            return Err(DeaconError::Lifecycle(format!(
-                "Dotfiles install script failed (exit code {}): {}{}",
-                install_result.exit_code, install_result.stdout, install_result.stderr
-            )));
-        }
-
-        info!("Dotfiles install command completed successfully");
-    } else {
-        info!("No install script to execute, dotfiles cloned only");
-    }
+    info!("Dotfiles installation completed successfully");
 
     phase_result.total_duration = phase_start.elapsed();
     emit_phase_end_event(progress_callback, &phase_result);
@@ -3024,6 +3007,135 @@ mod tests {
             "~otheruser/x"
         );
         assert_eq!(expand_container_tilde("/a/~/b", "/home/vscode"), "/a/~/b");
+    }
+
+    /// `owner/repo` is a GitHub shorthand; a URL or a path is not (#647).
+    ///
+    /// deacon's `--help` advertised the shorthand long before anything
+    /// implemented it, so a repository named `codspace/test-dotfiles` was
+    /// handed to `git clone` verbatim and failed with
+    /// `fatal: repository 'codspace/test-dotfiles' does not exist`.
+    #[test]
+    fn normalize_dotfiles_repository_expands_only_the_shorthand() {
+        assert_eq!(
+            normalize_dotfiles_repository("codspace/test-dotfiles"),
+            "https://github.com/codspace/test-dotfiles.git"
+        );
+        // Anything carrying a `:` is already a remote — https, ssh:// and the
+        // scp-style form alike.
+        for already_a_remote in [
+            "https://github.com/o/r",
+            "https://github.com/o/r.git",
+            "ssh://git@github.com/o/r.git",
+            "git@github.com:o/r.git",
+        ] {
+            assert_eq!(
+                normalize_dotfiles_repository(already_a_remote),
+                already_a_remote,
+                "a remote must be left alone: {already_a_remote}"
+            );
+        }
+        // Paths are left alone: the leading-slash forms the reference's own
+        // `/^\.{0,2}\//` matches.
+        for path in ["/dotsrc.git", "./dotfiles", "../dotfiles"] {
+            assert_eq!(
+                normalize_dotfiles_repository(path),
+                path,
+                "a path must be left alone: {path}"
+            );
+        }
+    }
+
+    /// The default-install script is the half that had never run (#647).
+    ///
+    /// The detection used to be its own `docker exec` whose stdout was read
+    /// back — and for a `silent: false` exec that stdout is never captured, so
+    /// the answer was discarded every time. Asserting on the SCRIPT is the
+    /// point: the decision now happens in the container's shell, where there is
+    /// no return trip to lose it on.
+    #[test]
+    fn dotfiles_script_without_an_install_command_searches_then_links() {
+        let script = build_dotfiles_script("/dotsrc.git", "/home/vscode/dotfiles", None);
+
+        // The reference's eight names, in the reference's order.
+        assert!(
+            script.contains(
+                "for f in install.sh install bootstrap.sh bootstrap script/bootstrap setup.sh setup script/setup"
+            ),
+            "the search list and its order are the behavior: {script}"
+        );
+        // The clone is skipped when the target exists — never removed (#649).
+        assert!(
+            script.contains("[ -e /home/vscode/dotfiles ] || git clone --depth 1 /dotsrc.git"),
+            "an existing target must gate the clone: {script}"
+        );
+        assert!(
+            !script.contains("rm -rf"),
+            "the dotfiles phase must never remove a user-supplied path: {script}"
+        );
+        // With no install script, the dotfiles are linked into the home dir.
+        assert!(
+            script.contains("ln -sf $dotfiles ~"),
+            "a repository with no installer must still be linked: {script}"
+        );
+    }
+
+    /// A custom install command is a FILE NAME, not a shell fragment (#647).
+    ///
+    /// Measured at oracle 0.87.0: `--dotfiles-install-command 'echo hi'` prints
+    /// `Could not locate echo hi...` rather than running `echo`. deacon used to
+    /// splice the string into `sh -c "cd <target> && <cmd>"`, which ran it as
+    /// shell — and therefore turned the reference's two documented arms (a bare
+    /// filename, and a non-executable script) into `sh: 1: install.sh: not
+    /// found`, exit 127.
+    #[test]
+    fn dotfiles_script_resolves_a_custom_install_command_as_a_path() {
+        let script =
+            build_dotfiles_script("/dotsrc.git", "/home/vscode/dotfiles", Some("install.sh"));
+
+        assert!(
+            script.contains("installCommand=install.sh"),
+            "the command is bound once, quoted: {script}"
+        );
+        // `./<cmd>` first, then the absolute/relative form.
+        assert!(
+            script.contains("if [ -f \"./$installCommand\" ]")
+                && script.contains("elif [ -f \"$installCommand\" ]"),
+            "both resolution arms must be present: {script}"
+        );
+        // Non-executable is a thing to fix, not a thing to fail on.
+        assert!(
+            script.contains("chmod +x \"./$installCommand\""),
+            "a non-executable script must be made executable: {script}"
+        );
+        // Neither arm found is the reference's 126.
+        assert!(
+            script.contains("exit 126"),
+            "a command that resolves to nothing exits 126: {script}"
+        );
+        // The command is never evaluated as shell.
+        assert!(
+            !script.contains("&& install.sh"),
+            "the command must not be spliced into a shell fragment: {script}"
+        );
+    }
+
+    /// A path with a space (or a quote) must stay one token.
+    #[test]
+    fn dotfiles_script_quotes_its_interpolations() {
+        let script = build_dotfiles_script(
+            "/src/my repo.git",
+            "/home/vscode/my dotfiles",
+            Some("my install.sh"),
+        );
+        assert!(
+            script.contains("git clone --depth 1 '/src/my repo.git' '/home/vscode/my dotfiles'"),
+            "repository and target must be quoted: {script}"
+        );
+        assert!(
+            script.contains("installCommand='my install.sh'"),
+            "the install command must be quoted: {script}"
+        );
     }
 
     #[test]

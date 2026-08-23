@@ -7,9 +7,32 @@
 //! - Dotfiles execute after updateContent and features, before postCreate
 //! - Errors during dotfiles installation are surfaced as JSON errors
 //!
-//! **NOTE**: These tests are IGNORED - dotfiles is NOT part of MVP.
-//! Container-side dotfiles installation is incomplete (see docs/MVP-ROADMAP.md).
-//! Host-side dotfiles work, but container clone/install is deferred to Iteration 1.
+//! **NOTE**: every test here is `#[ignore]`d, and the reason has changed.
+//!
+//! It used to be that container-side dotfiles installation was incomplete. It is
+//! not: #647 and #649 brought the installer in line with the reference CLI, and the
+//! behavior is now pinned hermetically — four Docker-lane parity cases
+//! (`case-up-dotfiles-*` in `parity/cases/up.json`, whose fixtures build their own
+//! dotfiles source repository inside the container) plus unit tests over the
+//! generated install script in `deacon_core::container_lifecycle`.
+//!
+//! What keeps these ignored is what they cost and what they prove. Each one needs
+//! network and clones `https://github.com/devcontainers/cli` — a ~100MB external
+//! repository — to assert, in most cases, only that `up` printed
+//! `outcome: success`; several say in their own comments that the real check is
+//! "deferred to manual testing". The parity cases assert the container state these
+//! never looked at, without leaving the machine.
+//!
+//! They are kept rather than deleted because they still record intent that is
+//! cheaper to read here than to reconstruct. Rewriting them against a
+//! container-local source repository (the trick the parity fixtures use) would make
+//! them hermetic and worth running; until someone does that, they are documentation.
+//!
+//! One test was removed rather than kept: `test_dotfiles_installation_with_custom_command`
+//! passed `--dotfiles-install-command "echo 'Custom dotfiles install'"` and expected
+//! success. That expectation encoded the behavior #647 corrected — the flag names a
+//! FILE in the clone, not a shell fragment, so a value resolving to no file exits 126.
+//! `case-up-dotfiles-install-command-resolved-as-a-path` covers the claim properly.
 //!
 //! To run these tests manually: cargo test --test up_dotfiles -- --ignored
 //!
@@ -97,46 +120,7 @@ fn single_container_fixture() -> tempfile::TempDir {
 }
 
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
-fn test_dotfiles_installation_with_custom_command() {
-    if !can_run_dotfiles_tests() {
-        eprintln!(
-            "Skipping test_dotfiles_installation_with_custom_command: Docker or network not available"
-        );
-        return;
-    }
-
-    // Verify that dotfiles are cloned and custom install command is executed
-    // Uses fixture with features to ensure dotfiles run in correct lifecycle order
-
-    let _fixture = feature_dotfiles_fixture();
-    let fixture_path = _fixture.path().to_path_buf();
-    let config_path = fixture_path.join("devcontainer.json");
-    // The TempDir workspace is always fresh, so no pre-existing lifecycle
-    // markers need clearing.
-
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.arg("up")
-        .arg("--workspace-folder")
-        .arg(&fixture_path)
-        .arg("--config")
-        .arg(&config_path)
-        .arg("--dotfiles-repository")
-        .arg("https://github.com/devcontainers/cli") // Minimal public test repo
-        .arg("--dotfiles-install-command")
-        .arg("echo 'Custom dotfiles install'")
-        .arg("--skip-non-blocking-commands")
-        .arg("--remove-existing-container") // Ensure fresh container with git installed
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("outcome").and(predicate::str::contains("success")));
-
-    // Dotfiles should be cloned to container and install command executed
-    // Verification requires container inspection (deferred to manual testing)
-}
-
-#[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_dotfiles_idempotency_on_rerun() {
     if !can_run_dotfiles_tests() {
         eprintln!("Skipping test_dotfiles_idempotency_on_rerun: Docker or network not available");
@@ -183,7 +167,7 @@ fn test_dotfiles_idempotency_on_rerun() {
 }
 
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_dotfiles_auto_detected_install_script() {
     if !can_run_dotfiles_tests() {
         eprintln!(
@@ -217,7 +201,7 @@ fn test_dotfiles_auto_detected_install_script() {
 }
 
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_dotfiles_custom_target_path() {
     if !can_run_dotfiles_tests() {
         eprintln!("Skipping test_dotfiles_custom_target_path: Docker or network not available");
@@ -252,7 +236,7 @@ fn test_dotfiles_custom_target_path() {
 }
 
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_dotfiles_invalid_repository_error() {
     if !can_run_dotfiles_tests() {
         eprintln!(
@@ -286,7 +270,7 @@ fn test_dotfiles_invalid_repository_error() {
 }
 
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_dotfiles_install_script_failure_error() {
     if !can_run_dotfiles_tests() {
         eprintln!(
@@ -322,7 +306,7 @@ fn test_dotfiles_install_script_failure_error() {
 }
 
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_dotfiles_without_features() {
     if !can_run_dotfiles_tests() {
         eprintln!("Skipping test_dotfiles_without_features: Docker or network not available");
@@ -354,7 +338,7 @@ fn test_dotfiles_without_features() {
 }
 
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_dotfiles_with_prebuild_mode() {
     if !can_run_dotfiles_tests() {
         eprintln!("Skipping test_dotfiles_with_prebuild_mode: Docker or network not available");
@@ -399,7 +383,7 @@ fn test_dotfiles_with_prebuild_mode() {
 /// 2. Running `up` with dotfiles configured
 /// 3. Verifying the dotfiles install command runs at the expected position in the sequence
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_dotfiles_ordering_between_post_create_and_post_start() {
     if !can_run_dotfiles_tests() {
         eprintln!(
@@ -587,7 +571,7 @@ fn test_dotfiles_ordering_between_post_create_and_post_start() {
 /// 4. Verify NO marker exists — every hook, and dotfiles, was deferred
 /// 5. Verify command succeeded (exit code 0)
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_skip_post_create_defers_every_hook_and_dotfiles() {
     if !can_run_dotfiles_tests() {
         eprintln!(
@@ -691,7 +675,7 @@ fn test_skip_post_create_defers_every_hook_and_dotfiles() {
 /// This is important for automation and tooling that needs to understand why
 /// certain lifecycle phases did not execute.
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_skip_post_create_reports_skip_reasons_in_output_sc003() {
     if !can_run_dotfiles_tests() {
         eprintln!(
@@ -764,7 +748,7 @@ fn test_skip_post_create_reports_skip_reasons_in_output_sc003() {
 /// #476 without dotfiles: `--skip-post-create` defers every phase even when no
 /// dotfiles repository is configured.
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_skip_post_create_without_dotfiles_defers_every_phase() {
     if !is_docker_available() {
         eprintln!(
@@ -862,7 +846,7 @@ fn test_skip_post_create_without_dotfiles_defers_every_phase() {
 /// again without the flag, and every phase runs exactly once — the first run wrote
 /// no completion markers because it ran nothing.
 #[test]
-#[ignore = "Dotfiles not in MVP - container-side installation incomplete"]
+#[ignore = "superseded by the hermetic case-up-dotfiles-* parity cases; needs network"]
 fn test_skip_post_create_then_normal_up_runs_every_deferred_phase() {
     if !is_docker_available() {
         eprintln!(
