@@ -5159,6 +5159,71 @@
         "tempdir": true
       },
       "notes": "The last unmined arm of the reference's `src/test/dotfiles.test.ts`, and the only one of the eight that found NO defect: `--secrets-file` values and the configuration's `remoteEnv` both reach the dotfiles install command, on both sides. MEASURED at oracle 0.87.0 — the file this case asserts is byte-identical between the two CLIs.\n\nWorth a case anyway, because the two sides arrive at it differently and nothing pinned deacon's route. The reference builds an `${allEnv}` prefix by hand and prepends it to both the `git clone` and the install command (`src/spec-common/dotfiles.ts`); deacon passes the same values as `-e` flags on the `docker exec` that runs the phase, via `ContainerLifecycleConfig::container_env`. A change to how the dotfiles phase is exec'd — the very thing [#647](https://github.com/get2knowio/deacon/issues/647) rewrote — could drop that env without touching any behavior this batch's other five cases observe.\n\nThe install script writes ONE line holding both values so the assertion fails informatively: an empty field on either side of the `|` names which of the two sources was lost, where a per-variable `grep` would only say \"missing\". Hermetic: the secrets file is a fixture and the dotfiles source repository is built inside the container by `postCreateCommand`."
+    },
+    {
+      "id": "case-up-mount-comma-quoted",
+      "behaviors": [
+        "bhv-up-mount-comma-quoting"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-mount-comma-quoted"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "test -d '/opt/a,b' && echo MOUNTED"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "contains": "MOUNTED"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "A `--mount` argument is CSV, so a value holding a comma must be quoted — and an author may write that form directly, as Docker's own documentation does. The reference forwards an authored mount string verbatim; deacon parses and re-emits it, so its parser has to understand what Docker accepts, and #663 is the defect where it did not: `up` exited 1 with `bind mount requires a source` against a string the reference mounted fine. The assertion reads the directory INSIDE the container rather than the outcome, because a mount silently dropped on the way out would still report success. The other half of #663 — a comma in the WORKSPACE path, which broke `up` outright — is not expressible here: the workspace directory's name is the harness's to choose, not the case's, so it is carried by `integration_up_worktree_mounts::up_starts_in_a_workspace_whose_path_contains_a_comma`."
     }
   ]
 }

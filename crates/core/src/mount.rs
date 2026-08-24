@@ -167,6 +167,71 @@ pub struct Mount {
     pub options: HashMap<String, String>,
 }
 
+/// Format one `key=value` field of a `--mount` argument, quoting it when the value
+/// contains a comma.
+///
+/// A `--mount` argument is CSV, so a value holding a comma has to be quoted or Docker reads
+/// the text after the comma as a further field (`invalid field 'ma' must be a key=value
+/// pair`). The reference CLI quotes the whole `key=value` — not just the value — when and
+/// only when the value contains a comma (`spec-node/utils.ts:412-417`); matching that keeps
+/// every comma-free mount string byte-identical to what deacon emitted before (#663).
+pub fn format_mount_field(key: &str, value: &str) -> String {
+    if value.contains(',') {
+        format!("\"{}={}\"", key, value)
+    } else {
+        format!("{}={}", key, value)
+    }
+}
+
+/// Split a `--mount` specification into its fields, honouring the double-quoting above.
+///
+/// Docker parses the argument with Go's `encoding/csv`, so a field that *starts* with a
+/// double quote runs to its closing quote (with `""` for a literal quote) and commas inside
+/// it are data. A user may write that form in `mounts` directly — the reference forwards an
+/// authored mount string verbatim, and deacon parses and re-emits it, so its parser has to
+/// understand what Docker accepts (#663).
+fn split_mount_fields(spec: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut chars = spec.chars().peekable();
+    let mut at_field_start = true;
+    let mut in_quotes = false;
+
+    while let Some(c) = chars.next() {
+        if at_field_start {
+            if c == ' ' || c == '\t' {
+                continue;
+            }
+            at_field_start = false;
+            if c == '"' {
+                in_quotes = true;
+                continue;
+            }
+        }
+
+        if in_quotes {
+            if c == '"' {
+                // `""` inside a quoted field is a literal quote; a lone one closes it.
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    current.push('"');
+                } else {
+                    in_quotes = false;
+                }
+            } else {
+                current.push(c);
+            }
+        } else if c == ',' {
+            fields.push(std::mem::take(&mut current));
+            at_field_start = true;
+        } else {
+            current.push(c);
+        }
+    }
+    fields.push(current);
+    fields
+}
+
 impl Mount {
     /// Convert mount to Docker CLI arguments
     ///
@@ -217,11 +282,11 @@ impl Mount {
                 // Volume and other mount types don't need path conversion
                 source.clone()
             };
-            mount_str.push_str(&format!(",source={}", source_path));
+            mount_str.push_str(&format!(",{}", format_mount_field("source", &source_path)));
         }
 
         // Add target
-        mount_str.push_str(&format!(",target={}", self.target));
+        mount_str.push_str(&format!(",{}", format_mount_field("target", &self.target)));
 
         // Add read-only flag if needed
         if self.mode == MountMode::ReadOnly {
@@ -247,7 +312,7 @@ impl Mount {
             if value.is_empty() {
                 mount_str.push_str(&format!(",{}", key));
             } else {
-                mount_str.push_str(&format!(",{}={}", key, value));
+                mount_str.push_str(&format!(",{}", format_mount_field(key, value)));
             }
         }
 
@@ -600,11 +665,11 @@ fn normalize_mount_to_string(mount: &Mount) -> String {
     // Add source for bind and named-volume mounts. An anonymous volume
     // (`type=volume` with no source) keeps its source absent (#617).
     if let Some(ref source) = mount.source {
-        parts.push(format!("source={}", source));
+        parts.push(format_mount_field("source", source));
     }
 
     // Add target
-    parts.push(format!("target={}", mount.target));
+    parts.push(format_mount_field("target", &mount.target));
 
     // Add read-only flag if needed
     if mount.mode == MountMode::ReadOnly {
@@ -623,7 +688,7 @@ fn normalize_mount_to_string(mount: &Mount) -> String {
         if value.is_empty() {
             parts.push(key.clone());
         } else {
-            parts.push(format!("{}={}", key, value));
+            parts.push(format_mount_field(key, value));
         }
     }
 
@@ -662,7 +727,7 @@ fn convert_object_mount_to_string(
 
     // Extract source (optional, but required for bind/volume)
     if let Some(source) = obj.get("source").and_then(|v| v.as_str()) {
-        parts.push(format!("source={}", source));
+        parts.push(format_mount_field("source", source));
     }
 
     // Extract target (required)
@@ -672,7 +737,7 @@ fn convert_object_mount_to_string(
             .ok_or_else(|| ConfigError::Validation {
                 message: "Mount object must have 'target' field".to_string(),
             })?;
-    parts.push(format!("target={}", target));
+    parts.push(format_mount_field("target", target));
 
     // Extract consistency (optional)
     if let Some(consistency) = obj.get("consistency").and_then(|v| v.as_str()) {
@@ -696,7 +761,7 @@ fn convert_object_mount_to_string(
             _ => {
                 // Add as additional option
                 if let Some(str_value) = value.as_str() {
-                    parts.push(format!("{}={}", key, str_value));
+                    parts.push(format_mount_field(key, str_value));
                 } else if value.is_boolean() && value.as_bool() == Some(true) {
                     parts.push(key.clone());
                 }
@@ -745,7 +810,7 @@ impl MountParser {
         let mut consistency = None;
         let mut options = HashMap::new();
 
-        for part in mount_spec.split(',') {
+        for part in split_mount_fields(mount_spec) {
             let part = part.trim();
 
             if part.is_empty() {
@@ -2456,5 +2521,109 @@ mod merge_mounts_tests {
                 .mounts
                 .contains(&"type=volume,source=vol3,target=/vol3".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod comma_quoting_tests {
+    //! A `--mount` argument is CSV, so a value holding a comma has to be quoted on the way
+    //! out and unquoted on the way in — the reference CLI quotes it (`spec-node/utils.ts`)
+    //! and Docker parses the argument with Go's `encoding/csv`. Without both halves, a
+    //! workspace whose path contains a comma cannot be mounted at all (#663).
+
+    use super::*;
+
+    #[test]
+    fn a_field_is_quoted_only_when_its_value_holds_a_comma() {
+        assert_eq!(
+            format_mount_field("source", "/host/path"),
+            "source=/host/path"
+        );
+        assert_eq!(
+            format_mount_field("source", "/host/com,ma"),
+            "\"source=/host/com,ma\""
+        );
+        // The quotes wrap the whole `key=value`, as the reference writes it.
+        assert_eq!(
+            format_mount_field("target", "/workspaces/a,b"),
+            "\"target=/workspaces/a,b\""
+        );
+    }
+
+    #[test]
+    fn splitting_honours_quoted_fields() {
+        assert_eq!(
+            split_mount_fields("type=bind,source=/a,target=/b"),
+            vec!["type=bind", "source=/a", "target=/b"]
+        );
+        assert_eq!(
+            split_mount_fields("type=bind,\"source=/a,b\",\"target=/c,d\",ro"),
+            vec!["type=bind", "source=/a,b", "target=/c,d", "ro"]
+        );
+        // `""` inside a quoted field is a literal quote.
+        assert_eq!(
+            split_mount_fields("\"source=/a\"\"b\",target=/c"),
+            vec!["source=/a\"b", "target=/c"]
+        );
+    }
+
+    #[test]
+    fn a_comma_bearing_workspace_path_round_trips() {
+        let spec = "type=bind,\"source=/host/com,ma\",\"target=/workspaces/com,ma\"";
+        let mount = MountParser::parse_mount(spec).unwrap();
+        assert_eq!(mount.source.as_deref(), Some("/host/com,ma"));
+        assert_eq!(mount.target, "/workspaces/com,ma");
+        assert_eq!(normalize_mount_to_string(&mount), spec);
+        // `to_docker_args` additionally resolves a bind source against the cwd and applies
+        // Docker Desktop path conversion, so its OUTPUT is platform-shaped; the quoting is
+        // not. Assert the whole string only where the path shape is the one written here.
+        #[cfg(unix)]
+        assert_eq!(
+            mount.to_docker_args(),
+            vec!["--mount".to_string(), spec.to_string()]
+        );
+    }
+
+    #[test]
+    fn a_comma_free_mount_is_emitted_exactly_as_before() {
+        let mount = Mount {
+            mount_type: MountType::Bind,
+            source: Some("/host/path".to_string()),
+            target: "/container/path".to_string(),
+            mode: MountMode::ReadWrite,
+            consistency: None,
+            options: HashMap::new(),
+        };
+        assert_eq!(
+            normalize_mount_to_string(&mount),
+            "type=bind,source=/host/path,target=/container/path"
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            mount.to_docker_args(),
+            vec![
+                "--mount".to_string(),
+                "type=bind,source=/host/path,target=/container/path".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn an_object_mount_with_a_comma_is_normalized_quoted() {
+        let object = serde_json::json!({
+            "type": "bind",
+            "source": "/host/com,ma",
+            "target": "/opt/com,ma",
+        });
+        let rendered = convert_object_mount_to_string(object.as_object().unwrap())
+            .expect("object mount should normalize");
+        assert_eq!(
+            rendered,
+            "type=bind,\"source=/host/com,ma\",\"target=/opt/com,ma\""
+        );
+        // …and Docker's own reader gets the paths back intact.
+        let mount = MountParser::parse_mount(&rendered).unwrap();
+        assert_eq!(mount.source.as_deref(), Some("/host/com,ma"));
+        assert_eq!(mount.target, "/opt/com,ma");
     }
 }

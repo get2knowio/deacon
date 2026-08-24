@@ -326,6 +326,161 @@ fn parse_git_file(git_file_path: &Path) -> Result<Option<PathBuf>> {
     Ok(None)
 }
 
+/// Where a git worktree's common `.git` directory has to be mounted for git to work
+/// inside the container, and the container-side folder the worktree itself moves to.
+///
+/// A worktree's `.git` is a file holding `gitdir: <path>`. When that path is **relative**
+/// (`git worktree add --relative-paths`), it only resolves container-side if the worktree
+/// and the common dir keep the same relative arrangement they have on the host — which is
+/// why the worktree stops being mounted at `/workspaces/<basename>` and moves up to the
+/// nearest ancestor that also contains the common dir.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GitWorktreeCommonDir {
+    /// Container path the workspace is bind-mounted at, replacing `/workspaces/<basename>`.
+    pub container_mount_folder: String,
+    /// Host path of the common `.git` directory.
+    pub host_common_dir: PathBuf,
+    /// Container path the common `.git` directory must be mounted at.
+    pub container_common_dir: String,
+}
+
+impl GitWorktreeCommonDir {
+    /// The `--mount` specification for the common directory, in the same Docker CLI string
+    /// form as every other mount deacon emits (comma-bearing paths quoted, #663).
+    pub fn additional_mount_string(&self) -> String {
+        format!(
+            "type=bind,{},{}",
+            crate::mount::format_mount_field("source", &self.host_common_dir.to_string_lossy()),
+            crate::mount::format_mount_field("target", &self.container_common_dir),
+        )
+    }
+}
+
+/// Resolve the extra mount `--mount-git-worktree-common-dir` asks for, if this folder is a
+/// git worktree created with relative paths.
+///
+/// Mirrors the reference CLI's `getWorkspaceConfiguration`
+/// (`spec-node/utils.ts:390-419`): only a `.git` **file** with a **relative** `gitdir:`
+/// qualifies; an absolute one yields `None` and nothing is renamed. `gitdir` names
+/// `<common>/worktrees/<name>`, so the common dir is two levels above it.
+///
+/// Both resolutions are purely lexical, matching `path.resolve` — no filesystem access
+/// beyond reading the `.git` file, and no symlink resolution.
+pub fn resolve_git_worktree_common_dir(host_mount_folder: &Path) -> Option<GitWorktreeCommonDir> {
+    let dot_git = host_mount_folder.join(".git");
+    if !dot_git.is_file() {
+        return None;
+    }
+    let gitdir = parse_git_file(&dot_git).ok().flatten()?;
+    if gitdir.is_absolute() {
+        debug!(
+            "Worktree gitdir '{}' is absolute; no common-dir mount",
+            gitdir.display()
+        );
+        return None;
+    }
+
+    let host_common_dir = lexical_join(host_mount_folder, &gitdir.join("..").join(".."));
+
+    // Walk up from the workspace until the current directory contains the common dir, so
+    // the mount covers both. The segments collected on the way (root-most first) are the
+    // container-side path the workspace lands at.
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = host_mount_folder.to_path_buf();
+    loop {
+        if host_common_dir.starts_with(&current) && host_common_dir != current {
+            break;
+        }
+        let parent = match current.parent() {
+            Some(parent) if parent != current => parent.to_path_buf(),
+            _ => break,
+        };
+        segments.insert(
+            0,
+            current
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        );
+        current = parent;
+    }
+
+    let container_mount_folder = format!("/workspaces/{}", segments.join("/"));
+    let container_common_dir = lexical_join(
+        Path::new(&container_mount_folder),
+        &gitdir.join("..").join(".."),
+    )
+    .to_string_lossy()
+    .replace('\\', "/");
+
+    Some(GitWorktreeCommonDir {
+        container_mount_folder,
+        host_common_dir,
+        container_common_dir,
+    })
+}
+
+/// Join `relative` onto `base` and collapse `.` / `..` textually, the way `path.resolve`
+/// does. `Path::join` alone leaves the `..` components in the result.
+fn lexical_join(base: &Path, relative: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in base.join(relative).components() {
+        match component {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// [`container_workspace_folder`], re-based when the worktree's common dir is mounted.
+///
+/// The reference computes the container-side workspace folder from the *mount folder*, so
+/// once `--mount-git-worktree-common-dir` moves that mount up the tree, the workspace
+/// folder moves with it — `/workspaces/worktrees/feature/packages/app` rather than
+/// `/workspaces/feature/packages/app`. An authored `workspaceFolder` still wins verbatim.
+pub fn container_workspace_folder_for_worktree(
+    workspace_folder: &Path,
+    config_workspace_folder: Option<&str>,
+    mount_workspace_git_root: bool,
+    worktree: Option<&GitWorktreeCommonDir>,
+) -> String {
+    let Some(worktree) = worktree else {
+        return container_workspace_folder(
+            workspace_folder,
+            config_workspace_folder,
+            mount_workspace_git_root,
+        );
+    };
+    if let Some(wf) = config_workspace_folder {
+        if !wf.trim().is_empty() {
+            return wf.to_string();
+        }
+    }
+
+    let canonical_ws = workspace_folder
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_folder.to_path_buf());
+    let root = if mount_workspace_git_root {
+        resolve_workspace_root(&canonical_ws).unwrap_or_else(|_| canonical_ws.clone())
+    } else {
+        canonical_ws.clone()
+    };
+
+    match canonical_ws
+        .strip_prefix(&root)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .filter(|s| !s.is_empty())
+    {
+        Some(sub) => format!("{}/{}", worktree.container_mount_folder, sub),
+        None => worktree.container_mount_folder.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,5 +820,130 @@ mod tests {
             "/workspaces/myproj"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod worktree_common_dir_tests {
+    //! `--mount-git-worktree-common-dir` (#664). The trees here are built by hand rather
+    //! than by `git worktree add --relative-paths`: the resolution reads the `.git` file and
+    //! resolves lexically, so it needs no git binary — and `--relative-paths` only exists
+    //! from git 2.48, which no CI runner is guaranteed to have.
+
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Lay out `<root>/<repo>/.git/worktrees/<name>` and a worktree at `<root>/<worktree>`
+    /// whose `.git` file holds `gitdir`.
+    fn worktree(root: &Path, repo: &str, worktree: &str, gitdir: &str) -> PathBuf {
+        fs::create_dir_all(root.join(repo).join(".git").join("worktrees")).unwrap();
+        let worktree_path = root.join(worktree);
+        fs::create_dir_all(&worktree_path).unwrap();
+        fs::write(worktree_path.join(".git"), format!("gitdir: {}\n", gitdir)).unwrap();
+        worktree_path
+    }
+
+    #[test]
+    fn a_sibling_worktree_moves_nothing_and_mounts_the_common_dir_beside_it() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let path = worktree(
+            root,
+            "mainrepo",
+            "feature",
+            "../mainrepo/.git/worktrees/feature",
+        );
+
+        let resolved = resolve_git_worktree_common_dir(&path).expect("relative gitdir resolves");
+        assert_eq!(resolved.container_mount_folder, "/workspaces/feature");
+        assert_eq!(resolved.host_common_dir, root.join("mainrepo").join(".git"));
+        assert_eq!(resolved.container_common_dir, "/workspaces/mainrepo/.git");
+        assert_eq!(
+            resolved.additional_mount_string(),
+            format!(
+                "type=bind,source={},target=/workspaces/mainrepo/.git",
+                root.join("mainrepo").join(".git").display()
+            )
+        );
+    }
+
+    #[test]
+    fn a_worktree_two_levels_down_is_mounted_from_the_common_ancestor() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let path = worktree(
+            root,
+            "repos/main",
+            "worktrees/feature",
+            "../../repos/main/.git/worktrees/feature",
+        );
+
+        let resolved = resolve_git_worktree_common_dir(&path).expect("relative gitdir resolves");
+        // NOT `/workspaces/feature`: the worktree moves up so the sibling repo fits beside it,
+        // which is the only arrangement in which the relative `gitdir` still resolves.
+        assert_eq!(
+            resolved.container_mount_folder,
+            "/workspaces/worktrees/feature"
+        );
+        assert_eq!(resolved.container_common_dir, "/workspaces/repos/main/.git");
+        assert_eq!(
+            resolved.host_common_dir,
+            root.join("repos").join("main").join(".git")
+        );
+    }
+
+    #[test]
+    fn an_absolute_gitdir_is_left_alone() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let absolute = root.join("mainrepo/.git/worktrees/absfeat");
+        let path = worktree(root, "mainrepo", "absfeat", &absolute.display().to_string());
+
+        // The reference only handles the relative form; an absolute gitdir already resolves
+        // to nothing container-side and renaming the mount would not help.
+        assert!(resolve_git_worktree_common_dir(&path).is_none());
+    }
+
+    #[test]
+    fn an_ordinary_repository_is_not_a_worktree() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("repo");
+        fs::create_dir_all(path.join(".git")).unwrap();
+        assert!(resolve_git_worktree_common_dir(&path).is_none());
+
+        let no_git = temp.path().join("plain");
+        fs::create_dir_all(&no_git).unwrap();
+        assert!(resolve_git_worktree_common_dir(&no_git).is_none());
+    }
+
+    #[test]
+    fn the_container_workspace_folder_follows_the_relocated_mount() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let path = worktree(
+            root,
+            "repos/main",
+            "worktrees/feature",
+            "../../repos/main/.git/worktrees/feature",
+        );
+        let sub = path.join("packages").join("app");
+        fs::create_dir_all(&sub).unwrap();
+        let resolved = resolve_git_worktree_common_dir(&path).unwrap();
+
+        assert_eq!(
+            container_workspace_folder_for_worktree(&sub, None, true, Some(&resolved)),
+            "/workspaces/worktrees/feature/packages/app"
+        );
+        // An authored `workspaceFolder` still wins verbatim…
+        assert_eq!(
+            container_workspace_folder_for_worktree(&sub, Some("/opt/app"), true, Some(&resolved)),
+            "/opt/app"
+        );
+        // …and with no worktree the answer is the unrelocated default.
+        assert_eq!(
+            container_workspace_folder_for_worktree(&sub, None, true, None),
+            container_workspace_folder(&sub, None, true)
+        );
     }
 }

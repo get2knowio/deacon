@@ -44,6 +44,10 @@ pub struct ReadConfigurationArgs {
     /// When true (default), uses Git worktree detection to find the true workspace root.
     /// When false, uses the workspace folder path as-is.
     pub mount_workspace_git_root: bool,
+    /// Mount a git worktree's common `.git` directory (`--mount-git-worktree-common-dir`).
+    /// Only meaningful together with `mount_workspace_git_root`, and only for a worktree
+    /// created with relative paths; see [`deacon_core::workspace::resolve_git_worktree_common_dir`].
+    pub mount_git_worktree_common_dir: bool,
     pub additional_features: Option<String>,
     /// Drop `additional_features` entirely, resolving only the Features the configuration
     /// declared. A deacon extension (#498) with no counterpart in the reference CLI,
@@ -263,6 +267,10 @@ pub struct WorkspaceConfig {
     /// Workspace mount specification (if applicable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_mount: Option<String>,
+    /// The extra bind mount `--mount-git-worktree-common-dir` asks for, present only when
+    /// that flag is set and the workspace is a relative-paths git worktree (#664).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_mount_string: Option<String>,
 }
 
 impl WorkspaceConfig {
@@ -271,6 +279,7 @@ impl WorkspaceConfig {
         Self {
             workspace_folder: None,
             workspace_mount: None,
+            additional_mount_string: None,
         }
     }
 }
@@ -367,6 +376,7 @@ pub(crate) fn insert_config_file_path(
 fn resolve_workspace_configuration(
     workspace_folder: &Path,
     mount_workspace_git_root: bool,
+    mount_git_worktree_common_dir: bool,
     config: &DevContainerConfig,
 ) -> Result<WorkspaceConfig> {
     // The mount SOURCE: the git root when git-root mounting is active, else the workspace
@@ -379,6 +389,13 @@ fn resolve_workspace_configuration(
             .unwrap_or_else(|_| workspace_folder.to_path_buf())
     };
 
+    // `--mount-git-worktree-common-dir` re-bases the workspace mount so the worktree's
+    // relative `gitdir:` still resolves container-side, and adds the common dir as a second
+    // mount. Gated on git-root mounting, exactly as the reference gates it (#664).
+    let worktree = (mount_workspace_git_root && mount_git_worktree_common_dir)
+        .then(|| deacon_core::workspace::resolve_git_worktree_common_dir(&mount_source))
+        .flatten();
+
     // Compute workspace folder and mount. For compose flows, preserve authored
     // workspaceFolder and do not inject single-container default mounts.
     let (container_workspace_folder, workspace_mount) = if config.uses_compose() {
@@ -388,16 +405,24 @@ fn resolve_workspace_configuration(
             .unwrap_or_else(|| "/".to_string());
         (folder, config.workspace_mount.clone())
     } else {
-        let folder = deacon_core::workspace::container_workspace_folder(
+        let folder = deacon_core::workspace::container_workspace_folder_for_worktree(
             workspace_folder,
             config.workspace_folder.as_deref(),
             mount_workspace_git_root,
+            worktree.as_ref(),
         );
+        let target = match worktree.as_ref() {
+            Some(worktree) => worktree.container_mount_folder.clone(),
+            None => deacon_core::docker::default_workspace_mount_target(&mount_source),
+        };
         let mount = config.workspace_mount.clone().or_else(|| {
             Some(format!(
-                "type=bind,source={},target={}",
-                mount_source.display(),
-                deacon_core::docker::default_workspace_mount_target(&mount_source),
+                "type=bind,{},{}",
+                deacon_core::mount::format_mount_field(
+                    "source",
+                    &mount_source.display().to_string()
+                ),
+                deacon_core::mount::format_mount_field("target", &target),
             ))
         });
         (folder, mount)
@@ -406,6 +431,10 @@ fn resolve_workspace_configuration(
     Ok(WorkspaceConfig {
         workspace_folder: Some(container_workspace_folder),
         workspace_mount,
+        // Compose flows never derive a workspace mount, so they never derive this one either.
+        additional_mount_string: worktree
+            .filter(|_| !config.uses_compose())
+            .map(|worktree| worktree.additional_mount_string()),
     })
 }
 
@@ -1772,8 +1801,13 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     } else if (has_container_id || has_id_label) && args.workspace_folder.is_none() {
         Some(WorkspaceConfig::unnamed())
     } else {
-        resolve_workspace_configuration(workspace_folder, args.mount_workspace_git_root, &config)
-            .ok()
+        resolve_workspace_configuration(
+            workspace_folder,
+            args.mount_workspace_git_root,
+            args.mount_git_worktree_common_dir,
+            &config,
+        )
+        .ok()
     };
 
     // Load secrets separately from config loading for container-specific substitution
@@ -2548,6 +2582,7 @@ mod tests {
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -2722,6 +2757,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec!["invalid".to_string()], // Missing '='
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -2769,6 +2805,7 @@ API_KEY=another-secret
             container_id: None, // No container discovery
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -2809,6 +2846,7 @@ API_KEY=another-secret
             container_id: Some("abc123".to_string()),
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -2860,6 +2898,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: false,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -2887,6 +2926,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -2927,6 +2967,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -2978,6 +3019,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -3019,6 +3061,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: false,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -3060,6 +3103,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -3117,6 +3161,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -3164,6 +3209,7 @@ API_KEY=another-secret
             container_id: Some("nonexistent-container-id".to_string()),
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -3221,6 +3267,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4110,6 +4157,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4143,7 +4191,8 @@ API_KEY=another-secret
             ..Default::default()
         };
 
-        let workspace = resolve_workspace_configuration(temp_dir.path(), true, &config).unwrap();
+        let workspace =
+            resolve_workspace_configuration(temp_dir.path(), true, false, &config).unwrap();
 
         assert_eq!(
             workspace.workspace_folder.as_deref(),
@@ -4163,7 +4212,8 @@ API_KEY=another-secret
             ..Default::default()
         };
 
-        let workspace = resolve_workspace_configuration(temp_dir.path(), true, &config).unwrap();
+        let workspace =
+            resolve_workspace_configuration(temp_dir.path(), true, false, &config).unwrap();
 
         assert_eq!(workspace.workspace_folder.as_deref(), Some("/"));
         assert!(workspace.workspace_mount.is_none());
@@ -4188,6 +4238,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: Some(
                 r#"{"ghcr.io/devcontainers/features/node:1": "lts"}"#.to_string(),
             ),
@@ -4230,6 +4281,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4270,6 +4322,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: true,
             docker_path: "docker".to_string(),
@@ -4314,6 +4367,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4356,6 +4410,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: Some("{}".to_string()),
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4396,6 +4451,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: Some("not valid json".to_string()),
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4442,6 +4498,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: Some(r#"["not", "an", "object"]"#.to_string()),
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4560,6 +4617,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4604,6 +4662,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4652,6 +4711,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4700,6 +4760,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4736,6 +4797,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4769,6 +4831,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "/usr/local/bin/docker".to_string(),
@@ -4802,6 +4865,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4834,6 +4898,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4877,6 +4942,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4923,6 +4989,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),
@@ -4967,6 +5034,7 @@ API_KEY=another-secret
             container_id: None,
             id_label: vec![],
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             additional_features: None,
             ignore_additional_features: false,
             docker_path: "docker".to_string(),

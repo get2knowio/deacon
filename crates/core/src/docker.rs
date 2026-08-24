@@ -2277,7 +2277,11 @@ impl ContainerOps for CliRuntime {
                 } else {
                     workspace_path.display().to_string()
                 };
-                format!("type=bind,source={},target={}", source_path, target_path)
+                format!(
+                    "type=bind,{},{}",
+                    crate::mount::format_mount_field("source", &source_path),
+                    crate::mount::format_mount_field("target", &target_path)
+                )
             };
             args.push("--mount".to_string());
             args.push(workspace_mount);

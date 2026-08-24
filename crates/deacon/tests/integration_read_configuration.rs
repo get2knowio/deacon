@@ -792,3 +792,188 @@ fn container_env_discovery_is_silent_when_the_daemon_is_unreachable() -> Result<
     );
     Ok(())
 }
+
+/// Build a git worktree by hand: `<root>/<repo>/.git/worktrees/<name>` plus a worktree
+/// directory whose `.git` **file** holds `gitdir`, with a devcontainer.json in it.
+///
+/// Written directly rather than via `git worktree add --relative-paths`, which needs git
+/// 2.48. Nothing here runs git — deacon reads the `.git` file and resolves lexically.
+fn write_worktree(
+    root: &Path,
+    repo: &str,
+    worktree: &str,
+    gitdir: &str,
+) -> Result<std::path::PathBuf> {
+    fs::create_dir_all(root.join(repo).join(".git").join("worktrees"))?;
+    let worktree_path = root.join(worktree);
+    fs::create_dir_all(worktree_path.join(".devcontainer"))?;
+    fs::write(worktree_path.join(".git"), format!("gitdir: {}\n", gitdir))?;
+    fs::write(
+        worktree_path
+            .join(".devcontainer")
+            .join("devcontainer.json"),
+        r#"{"image": "alpine:3.19"}"#,
+    )?;
+    Ok(worktree_path)
+}
+
+fn read_workspace_block(workspace: &Path, extra: &[&str]) -> Result<Value> {
+    let mut cmd = Command::cargo_bin("deacon")?;
+    cmd.arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(workspace);
+    for arg in extra {
+        cmd.arg(arg);
+    }
+    let output = cmd.output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "read-configuration failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout)?;
+    Ok(parsed["workspace"].clone())
+}
+
+/// #664: without the flag a worktree is reported exactly as any other workspace — this is
+/// the control arm that keeps the relocation from being applied unconditionally.
+#[test]
+fn worktree_common_dir_is_not_mounted_unless_asked_for() -> Result<()> {
+    let temp = TempDir::new()?;
+    let workspace = write_worktree(
+        temp.path(),
+        "repos/main",
+        "worktrees/feature",
+        "../../repos/main/.git/worktrees/feature",
+    )?;
+
+    let workspace_block = read_workspace_block(&workspace, &[])?;
+    assert_eq!(workspace_block["workspaceFolder"], "/workspaces/feature");
+    assert!(
+        workspace_block.get("additionalMountString").is_none(),
+        "no additional mount without the flag: {workspace_block}"
+    );
+    Ok(())
+}
+
+/// #664, measured against `@devcontainers/cli@0.87.0`: the worktree is mounted from the
+/// nearest ancestor it shares with the common dir — `/workspaces/worktrees/feature`, NOT
+/// `/workspaces/feature` — so the relative `gitdir:` still resolves container-side, and the
+/// common dir is mounted beside it.
+#[test]
+fn worktree_common_dir_relocates_the_mount_and_adds_the_git_dir() -> Result<()> {
+    let temp = TempDir::new()?;
+    let workspace = write_worktree(
+        temp.path(),
+        "repos/main",
+        "worktrees/feature",
+        "../../repos/main/.git/worktrees/feature",
+    )?;
+    let workspace_block = read_workspace_block(&workspace, &["--mount-git-worktree-common-dir"])?;
+    assert_eq!(
+        workspace_block["workspaceFolder"],
+        "/workspaces/worktrees/feature"
+    );
+
+    // The mount SOURCEs are host paths, and deacon canonicalizes — on Windows that means a
+    // `\\?\` verbatim prefix with 8.3 names expanded, on macOS `/var` becomes
+    // `/private/var` — so the source is matched by its leaf rather than by the spelling
+    // this test happens to hold. The targets are container paths and are exact.
+    let workspace_mount = workspace_block["workspaceMount"].as_str().unwrap();
+    assert!(
+        workspace_mount.starts_with("type=bind,source="),
+        "{workspace_mount}"
+    );
+    assert!(
+        workspace_mount.ends_with(",target=/workspaces/worktrees/feature"),
+        "{workspace_mount}"
+    );
+    let additional = workspace_block["additionalMountString"].as_str().unwrap();
+    assert!(
+        additional.ends_with(",target=/workspaces/repos/main/.git"),
+        "{additional}"
+    );
+    assert!(
+        additional.contains(&format!(
+            "{}main{}.git",
+            std::path::MAIN_SEPARATOR,
+            std::path::MAIN_SEPARATOR
+        )),
+        "the common dir's own path is the source: {additional}"
+    );
+    Ok(())
+}
+
+/// #664: an **absolute** `gitdir:` gets no additional mount and no relocation — the
+/// reference handles only the relative form, and the flag must not rename anything else.
+#[test]
+fn worktree_common_dir_ignores_an_absolute_gitdir() -> Result<()> {
+    let temp = TempDir::new()?;
+    let absolute = temp
+        .path()
+        .join("mainrepo/.git/worktrees/absfeat")
+        .display()
+        .to_string();
+    let workspace = write_worktree(temp.path(), "mainrepo", "absfeat", &absolute)?;
+
+    let workspace_block = read_workspace_block(&workspace, &["--mount-git-worktree-common-dir"])?;
+    assert_eq!(workspace_block["workspaceFolder"], "/workspaces/absfeat");
+    assert!(workspace_block.get("additionalMountString").is_none());
+    Ok(())
+}
+
+/// #663: a `--mount` argument is CSV, so a workspace path holding a comma has to be quoted
+/// or Docker reads the text after the comma as another field. Measured against the
+/// reference, which emits exactly this.
+#[test]
+fn a_comma_in_the_workspace_path_is_quoted_in_the_mount_string() -> Result<()> {
+    let temp = TempDir::new()?;
+    let workspace = temp.path().join("com,ma");
+    fs::create_dir_all(workspace.join(".devcontainer"))?;
+    fs::write(
+        workspace.join(".devcontainer").join("devcontainer.json"),
+        r#"{"image": "alpine:3.19"}"#,
+    )?;
+
+    let workspace_block = read_workspace_block(&workspace, &[])?;
+    assert_eq!(workspace_block["workspaceFolder"], "/workspaces/com,ma");
+    let workspace_mount = workspace_block["workspaceMount"].as_str().unwrap();
+    assert!(
+        workspace_mount.starts_with("type=bind,\"source="),
+        "the source is quoted: {workspace_mount}"
+    );
+    assert!(
+        workspace_mount.ends_with("com,ma\",\"target=/workspaces/com,ma\""),
+        "the source's closing quote and the quoted target: {workspace_mount}"
+    );
+    Ok(())
+}
+
+/// #663 control: a path with no comma is not quoted. Gratuitous quoting would be a silent
+/// change to every mount string deacon has ever emitted.
+#[test]
+fn a_comma_free_workspace_path_is_not_quoted() -> Result<()> {
+    let temp = TempDir::new()?;
+    let workspace = temp.path().join("plain");
+    fs::create_dir_all(workspace.join(".devcontainer"))?;
+    fs::write(
+        workspace.join(".devcontainer").join("devcontainer.json"),
+        r#"{"image": "alpine:3.19"}"#,
+    )?;
+
+    let workspace_block = read_workspace_block(&workspace, &[])?;
+    let workspace_mount = workspace_block["workspaceMount"].as_str().unwrap();
+    assert!(
+        !workspace_mount.contains('"'),
+        "nothing is quoted: {workspace_mount}"
+    );
+    assert!(
+        workspace_mount.starts_with("type=bind,source="),
+        "{workspace_mount}"
+    );
+    assert!(
+        workspace_mount.ends_with(",target=/workspaces/plain"),
+        "{workspace_mount}"
+    );
+    Ok(())
+}

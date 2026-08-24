@@ -296,6 +296,11 @@ pub enum Commands {
         /// Mount workspace git root instead of workspace folder
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         mount_workspace_git_root: bool,
+        /// Mount the Git worktree common dir for Git operations to work in the container.
+        /// This requires the worktree to be created with relative paths
+        /// (`git worktree add --relative-paths`).
+        #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+        mount_git_worktree_common_dir: bool,
         /// Workspace mount consistency (consistent, cached, delegated)
         #[arg(long)]
         workspace_mount_consistency: Option<String>,
@@ -558,6 +563,10 @@ pub enum Commands {
         /// `--workspace-folder` regardless of this flag.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         mount_workspace_git_root: bool,
+        /// No-op for `exec`, for the same reason as `--mount-workspace-git-root`: `exec`
+        /// attaches to a container whose mounts are already fixed.
+        #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+        mount_git_worktree_common_dir: bool,
         /// Target specific service in Docker Compose projects (defaults to the primary service).
         #[arg(long)]
         service: Option<String>,
@@ -598,6 +607,11 @@ pub enum Commands {
         /// Mount workspace git root (default: true)
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         mount_workspace_git_root: bool,
+        /// Mount the Git worktree common dir for Git operations to work in the container.
+        /// This requires the worktree to be created with relative paths
+        /// (`git worktree add --relative-paths`).
+        #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+        mount_git_worktree_common_dir: bool,
         /// Additional features to install (JSON map of id -> value/options)
         #[arg(long)]
         additional_features: Option<String>,
@@ -1403,6 +1417,7 @@ impl Cli {
                 mount,
                 remote_env,
                 mount_workspace_git_root,
+                mount_git_worktree_common_dir,
                 workspace_mount_consistency,
                 build_no_cache,
                 cache_from,
@@ -1467,6 +1482,7 @@ impl Cli {
                     mount,
                     remote_env,
                     mount_workspace_git_root,
+                    mount_git_worktree_common_dir,
                     workspace_mount_consistency,
                     build_no_cache,
                     cache_from,
@@ -1706,6 +1722,7 @@ impl Cli {
                 container_id,
                 id_label,
                 mount_workspace_git_root,
+                mount_git_worktree_common_dir: _,
                 service,
                 env_file,
                 default_user_env_probe,
@@ -1757,6 +1774,7 @@ impl Cli {
                 container_id,
                 id_label,
                 mount_workspace_git_root,
+                mount_git_worktree_common_dir,
                 additional_features,
                 ignore_additional_features,
                 skip_feature_auto_mapping,
@@ -1787,6 +1805,7 @@ impl Cli {
                     container_id,
                     id_label,
                     mount_workspace_git_root,
+                    mount_git_worktree_common_dir,
                     additional_features,
                     ignore_additional_features,
                     docker_path: self.docker_path.clone(),
