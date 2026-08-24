@@ -1,0 +1,9 @@
+{
+  "name": "ConformanceReadConfigTemplatedWorkspaceFolder",
+  "image": "alpine:3.19",
+  "workspaceFolder": "/baz/${localWorkspaceFolderBasename}",
+  "containerEnv": {
+    "CWF": "[${containerWorkspaceFolder}]",
+    "CWFB": "[${containerWorkspaceFolderBasename}]"
+  }
+}

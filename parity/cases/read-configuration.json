@@ -4910,6 +4910,258 @@
         "tempdir": true
       },
       "notes": "`--config` selects WHICH DOCUMENT to read, never where the workspace is. An operation runs with the workspace as its cwd, so naming only `--config` here is the reference's `--config`-alone invocation: the workspace is the cwd, and the reported folder is `/workspaces/<basename(cwd)>`. deacon used to re-anchor it at the config file's PARENT — which for the standard layout is `.devcontainer`, so this same case reported `/workspaces/.devcontainer` before #660 was fixed. `--mount-workspace-git-root false` is load-bearing for the ASSERTION, not for the claim: a hermetic case runs against the fixture directory in place, which lives inside this repository, so the default git-root walk would report the checkout's own root and make the expected string depend on where deacon was cloned. With the walk off, the cwd's basename is the answer and the normalizer's `<WORKSPACE_NAME>` token pins it. The anchor is not confined to this block: it also feeds `${localWorkspaceFolder}` and local feature-path resolution, which is why the fix was a ruling first. The symlink half of the same question (#665) is not expressible as a case — `copy_tree` cannot stage a symlinked directory into an isolated workspace — so it is carried by `integration_up_symlinked_workspace` and one hermetic `read-configuration` test."
+    },
+    {
+      "id": "case-readconfig-upstream-env-default-multi-colon",
+      "behaviors": [
+        "bhv-readconfig-env-default-first-segment-only"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [],
+          "fixtures": [
+            "fx-readconfig-env-default-multi-colon"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "containerEnv": {
+                  "MULTI": "[default]",
+                  "MULTI_ALIAS": "[default]",
+                  "SINGLE": "[default]",
+                  "NONE": "[]",
+                  "EMPTY_NAME": "[]"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Colons are separators all the way down: `${localEnv:NAME:default:a:b:c}` falls back to `default`, and everything past it is DISCARDED. deacon split the lookup body on the FIRST colon only and folded the rest into the default, so this fixture reported `[default:a:b:c]` before [#668](https://github.com/get2knowio/deacon/issues/668).\n\nThe reference splits the whole token on `:`, treats `parts[0]` as the variable name and `parts[1..]` as arguments, and `lookupValue` reads only `args[0]` and `args[1]` (`spec-common/variableSubstitution.ts:85-89` and `:137-155`). It has an explicit test for this exact shape at `src/test/variableSubstitution.test.ts:122`.\n\n**The spec is the reason this is deacon's difference rather than a coin flip.** It documents no `:default` suffix at all — `${localEnv:VARIABLE_NAME}`, *\"Unset variables are left blank\"*, is the whole of it (`devcontainerjson-reference.md:155`). Defaults are a reference-CLI extension, so on this surface the reference is the authority by the standing rule and there is no second answer to weigh.\n\nFOUR of the five keys are control arms, and they are what stop a wrong fix from passing: `SINGLE` pins that a single-segment default still works, `NONE` that a missing variable with no default is still the empty string, `EMPTY_NAME` that `${localEnv:}` — which reaches the same code with an empty name — is empty rather than an error, and `MULTI_ALIAS` that the `${env:*}` alias resolves through the identical rule. A fix that simply dropped everything after the first colon, or that stopped honouring defaults, fails on one of them.\n\n`DEACON_PARITY_NO_SUCH_VAR` is never set by the harness or by CI, which is what makes the default the observable; a run in an environment that defined it would report the value and fail loudly rather than pass vacuously.\n\nHermetic — `read-configuration` on an image configuration touches no daemon — so this gates every pull request on Linux, macOS and Windows. Mined from the reference CLI's own unit suite at v0.87.0, `src/test/variableSubstitution.test.ts` ([#480](https://github.com/get2knowio/deacon/issues/480) batch 16)."
+    },
+    {
+      "id": "case-readconfig-upstream-env-default-multi-colon-differential",
+      "behaviors": [
+        "bhv-readconfig-env-default-first-segment-only"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [],
+          "fixtures": [
+            "fx-readconfig-env-default-multi-colon"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "Colons are separators all the way down: `${localEnv:NAME:default:a:b:c}` falls back to `default`, and everything past it is DISCARDED. deacon split the lookup body on the FIRST colon only and folded the rest into the default, so this fixture reported `[default:a:b:c]` before [#668](https://github.com/get2knowio/deacon/issues/668).\n\nThe reference splits the whole token on `:`, treats `parts[0]` as the variable name and `parts[1..]` as arguments, and `lookupValue` reads only `args[0]` and `args[1]` (`spec-common/variableSubstitution.ts:85-89` and `:137-155`). It has an explicit test for this exact shape at `src/test/variableSubstitution.test.ts:122`.\n\n**The spec is the reason this is deacon's difference rather than a coin flip.** It documents no `:default` suffix at all — `${localEnv:VARIABLE_NAME}`, *\"Unset variables are left blank\"*, is the whole of it (`devcontainerjson-reference.md:155`). Defaults are a reference-CLI extension, so on this surface the reference is the authority by the standing rule and there is no second answer to weigh.\n\nFOUR of the five keys are control arms, and they are what stop a wrong fix from passing: `SINGLE` pins that a single-segment default still works, `NONE` that a missing variable with no default is still the empty string, `EMPTY_NAME` that `${localEnv:}` — which reaches the same code with an empty name — is empty rather than an error, and `MULTI_ALIAS` that the `${env:*}` alias resolves through the identical rule. A fix that simply dropped everything after the first colon, or that stopped honouring defaults, fails on one of them.\n\n`DEACON_PARITY_NO_SUCH_VAR` is never set by the harness or by CI, which is what makes the default the observable; a run in an environment that defined it would report the value and fail loudly rather than pass vacuously.\n\nHermetic — `read-configuration` on an image configuration touches no daemon — so this gates every pull request on Linux, macOS and Windows. Mined from the reference CLI's own unit suite at v0.87.0, `src/test/variableSubstitution.test.ts` ([#480](https://github.com/get2knowio/deacon/issues/480) batch 16).\n\nThe `live-differential` twin of `case-readconfig-upstream-env-default-multi-colon` — the hermetic one pins deacon's answer and gates every pull request, this one asserts the two CLIs still AGREE and runs only in the nightly lane, which gates nothing. Worth landing because the agreement was measured rather than assumed: at oracle 0.87.0, after the fix, both CLIs print the same `containerEnv` for this fixture, and before it they differed on the keys named above — so the comparison is over a surface where a real difference shows."
+    },
+    {
+      "id": "case-readconfig-upstream-templated-workspace-folder",
+      "behaviors": [
+        "bhv-readconfig-templated-workspacefolder-seeds-container-folder"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [],
+          "fixtures": [
+            "fx-readconfig-templated-workspace-folder"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "workspaceFolder": "/baz/<WORKSPACE_NAME>",
+                "containerEnv": {
+                  "CWF": "[/baz/<WORKSPACE_NAME>]",
+                  "CWFB": "[<WORKSPACE_NAME>]"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "An authored `workspaceFolder` that is ITSELF a template seeds `${containerWorkspaceFolder}` with its RESOLVED value. deacon refused to seed any value containing `${` — a deliberate guard, with a comment saying so, in both the shared loader and `read-configuration` — so the token survived as a literal for exactly the common idiom `\"workspaceFolder\": \"/workspaces/${localWorkspaceFolderBasename}\"` ([#669](https://github.com/get2knowio/deacon/issues/669)).\n\nThe reference resolves that one value in `substitute()`'s prologue, before it substitutes the document (`spec-common/variableSubstitution.ts:30-32`), and tests the shape at `src/test/variableSubstitution.test.ts:60`.\n\n**`workspaceFolder` is asserted alongside the two probes on purpose, and it is the sharp part of the case.** That field was substituted correctly BEFORE the fix as well — the defect was never in the document, it was in the CONTEXT built from it. Asserting the resolved field and the two tokens together is what says the two agree; a case that asserted only `workspaceFolder` would have been green throughout.\n\nThe two neighbouring shapes are NOT in this fixture and are carried by hermetic tests instead (`the_untemplated_workspace_folder_shapes_are_unchanged`): a literal `workspaceFolder` is seeded verbatim, and an unauthored one falls back to the container-side default `/workspaces/<basename>`. Both already matched the reference, measured at 0.87.0, and both must keep matching — without them, \"seed whatever is authored\" and \"always use the default\" would each pass this case.\n\nWritten in POST-NORMALIZATION vocabulary: `<WORKSPACE_NAME>` is the normalizer's token for the workspace basename, which is what `${localWorkspaceFolderBasename}` resolves to and therefore appears inside `/baz/…` here rather than only in a `/workspaces/…` path. That token reaches `chan-structured-output` because #636's case brought it there.\n\nHermetic, so it gates every pull request on all three operating systems. Mined from the reference CLI's own unit suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480) batch 16)."
+    },
+    {
+      "id": "case-readconfig-upstream-templated-workspace-folder-differential",
+      "behaviors": [
+        "bhv-readconfig-templated-workspacefolder-seeds-container-folder"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [],
+          "fixtures": [
+            "fx-readconfig-templated-workspace-folder"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "An authored `workspaceFolder` that is ITSELF a template seeds `${containerWorkspaceFolder}` with its RESOLVED value. deacon refused to seed any value containing `${` — a deliberate guard, with a comment saying so, in both the shared loader and `read-configuration` — so the token survived as a literal for exactly the common idiom `\"workspaceFolder\": \"/workspaces/${localWorkspaceFolderBasename}\"` ([#669](https://github.com/get2knowio/deacon/issues/669)).\n\nThe reference resolves that one value in `substitute()`'s prologue, before it substitutes the document (`spec-common/variableSubstitution.ts:30-32`), and tests the shape at `src/test/variableSubstitution.test.ts:60`.\n\n**`workspaceFolder` is asserted alongside the two probes on purpose, and it is the sharp part of the case.** That field was substituted correctly BEFORE the fix as well — the defect was never in the document, it was in the CONTEXT built from it. Asserting the resolved field and the two tokens together is what says the two agree; a case that asserted only `workspaceFolder` would have been green throughout.\n\nThe two neighbouring shapes are NOT in this fixture and are carried by hermetic tests instead (`the_untemplated_workspace_folder_shapes_are_unchanged`): a literal `workspaceFolder` is seeded verbatim, and an unauthored one falls back to the container-side default `/workspaces/<basename>`. Both already matched the reference, measured at 0.87.0, and both must keep matching — without them, \"seed whatever is authored\" and \"always use the default\" would each pass this case.\n\nWritten in POST-NORMALIZATION vocabulary: `<WORKSPACE_NAME>` is the normalizer's token for the workspace basename, which is what `${localWorkspaceFolderBasename}` resolves to and therefore appears inside `/baz/…` here rather than only in a `/workspaces/…` path. That token reaches `chan-structured-output` because #636's case brought it there.\n\nHermetic, so it gates every pull request on all three operating systems. Mined from the reference CLI's own unit suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480) batch 16).\n\nThe `live-differential` twin of `case-readconfig-upstream-templated-workspace-folder` — the hermetic one pins deacon's answer and gates every pull request, this one asserts the two CLIs still AGREE and runs only in the nightly lane, which gates nothing. Worth landing because the agreement was measured rather than assumed: at oracle 0.87.0, after the fix, both CLIs print the same `containerEnv` for this fixture, and before it they differed on the keys named above — so the comparison is over a surface where a real difference shows."
+    },
+    {
+      "id": "case-readconfig-upstream-env-name-missing-left-literal",
+      "behaviors": [
+        "bhv-readconfig-env-name-missing-left-literal"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [],
+          "fixtures": [
+            "fx-readconfig-env-name-missing"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "configuration": {
+                "containerEnv": {
+                  "BARE_LOCAL": "[${localEnv}]",
+                  "BARE_ALIAS": "[${env}]",
+                  "BARE_CONTAINER": "[${containerEnv}]"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`${localEnv}` with NO variable name — and its `${env}` and `${containerEnv}` siblings — is left LITERAL, and `read-configuration` exits 0. **This case pins deacon's own answer, because the reference has no usable one to match.**\n\nMEASURED at oracle 0.87.0 on this fixture: the reference exits **1** and prints NOTHING to stdout, and nothing to stderr beyond its version banner. Its `lookupValue` throws a `ContainerError` whose message would read *\"'${localEnv}' in devcontainer.json can not be resolved because no environment variable name is given\"* (`spec-common/variableSubstitution.ts:156-158`), but on this path the message never reaches the caller — so what a user actually gets is a silent exit 1 on a whole configuration because one token in it was malformed.\n\n**DOCUMENTED CHOICE rather than a nonconformance, and the standing spec-silent rule is why the distinction has to be stated.** That rule — on a surface the spec does not describe, the reference is the authority — presupposes the reference produces an observable answer. A silent non-zero exit is a failure mode, not a behavior to conform to, and the spec describes neither this token nor any diagnostic for it. deacon's answer falls out of a rule it already has and applies everywhere else: an unrecognised variable is left unchanged (the module's documented workflow step 5, and the same answer this suite pins for `${notAVariable}`). `${localEnv}` names no variable, so it is not a variable reference.\n\nThe related shapes that DO agree are deliberately not in this fixture, and are pinned by `case-readconfig-upstream-env-default-multi-colon` instead: `${localEnv:}` — an empty name, which the reference resolves to the empty string rather than throwing — resolves to empty on both. The line between the two is one colon, which is exactly why this is worth a record: the neighbouring token is agreed behavior, not an error on either side.\n\nBacked by `bhv-readconfig-env-name-missing-left-literal` in `parity/ALLOWLIST.json`, whose tolerances live on the `live-differential` twin. The twin is worth having even though the two sides differ on BOTH declared channels, because the tolerances are SELF-INVALIDATING: if upstream ever lets that diagnostic reach the caller, or stops failing the whole document over one malformed token, the record fails as stale and that failure is the signal to revisit the choice. This case is the one that gates, and it is hermetic, so it gates every pull request on all three operating systems. Mined from the reference CLI's own unit suite at v0.87.0, `src/test/variableSubstitution.test.ts` ([#480](https://github.com/get2knowio/deacon/issues/480) batch 16)."
+    },
+    {
+      "id": "case-readconfig-upstream-env-name-missing-differential",
+      "behaviors": [
+        "bhv-readconfig-env-name-missing-left-literal"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [],
+          "fixtures": [
+            "fx-readconfig-env-name-missing"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read"
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read"
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-readconfig-env-name-missing-left-literal",
+          "context": [],
+          "observablePath": "chan-exit-code",
+          "rationale": "deacon exits 0 and reports the configuration with the malformed tokens left literal; the reference exits 1. Measured at oracle 0.87.0.",
+          "divergenceId": "bhv-readconfig-env-name-missing-left-literal"
+        },
+        {
+          "behavior": "bhv-readconfig-env-name-missing-left-literal",
+          "context": [],
+          "observablePath": "chan-structured-output",
+          "rationale": "The reference prints no result document at all on this input, so there is no key to name — the tolerance is the channel, which is the honest scope here and nowhere else. Measured at oracle 0.87.0.",
+          "divergenceId": "bhv-readconfig-env-name-missing-left-literal"
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The `live-differential` twin of `case-readconfig-upstream-env-name-missing-left-literal`. Its sibling pins deacon's answer and gates every pull request; this one re-measures the difference every nightly run.\n\n**Both declared channels carry a tolerance, which is unusual enough to justify.** The reference exits 1 and prints NO result document at all, so there is no narrower path to name — the difference is the whole operation, not a key inside it. What makes the twin worth landing anyway is that the tolerances are self-invalidating: the day upstream surfaces the diagnostic its own code composes, or stops failing a whole configuration over one malformed token, this record fails as STALE rather than quietly outliving the difference it describes. That failure is the signal to reopen the choice recorded in `bhv-readconfig-env-name-missing-left-literal`.\n\nMEASURED at oracle 0.87.0: reference exit 1, empty stdout, nothing on stderr past its version banner; deacon exit 0 with the three tokens reported unchanged."
     }
   ]
 }
