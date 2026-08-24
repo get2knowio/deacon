@@ -28,29 +28,36 @@ use deacon_core::docker::Mount;
 /// every `SubstitutionContext` it builds — would otherwise see `None` on exactly the
 /// paths that never consult the loader. Materializing once, up front, is what makes a
 /// defaulted cwd indistinguishable from an explicit `--workspace-folder $(pwd)` on
-/// every one of them, canonicalization included.
+/// every one of them.
 ///
-/// Passing `Some(path)` canonicalizes it exactly as `up` always has; passing `None`
-/// canonicalizes the current directory. `read-configuration` calls it only with
-/// `None`: its explicit `--workspace-folder` stays verbatim, because canonicalizing
-/// it would change what `configFilePath` and `${localWorkspaceFolder}` report for an
-/// explicitly-passed symlinked path — a separate, user-visible contract that #615
-/// does not touch.
+/// Whether the path came in explicitly or from the cwd, it is **absolutized, never
+/// canonicalized** ([#665]): the reference preserves the path the user named, and the
+/// spec defines `${localWorkspaceFolder}` as the folder *that was opened*. `exec` and
+/// `up` both route through here so their container identities agree on a symlinked
+/// workspace — the earlier arrangement, where `read-configuration` kept an explicit
+/// `--workspace-folder` verbatim while `up` canonicalized it, was the two halves of that
+/// contract disagreeing.
 ///
 /// [#610]: https://github.com/get2knowio/deacon/issues/610
 /// [#615]: https://github.com/get2knowio/deacon/issues/615
+/// [#665]: https://github.com/get2knowio/deacon/issues/665
 pub(crate) fn resolve_workspace_folder(explicit: Option<PathBuf>) -> Result<PathBuf> {
     let ws = match explicit {
         Some(ws) => ws,
         None => std::env::current_dir()
             .context("Failed to resolve the current directory as the default workspace folder")?,
     };
-    ws.canonicalize().with_context(|| {
-        format!(
+    // Absolutized, never canonicalized: the reference preserves the path the user named and
+    // the spec defines `${localWorkspaceFolder}` as the folder *that was opened* (#665).
+    // The existence check the old `canonicalize()` gave for free is kept explicitly, since
+    // a workspace that does not exist is still a user error worth failing on.
+    if !ws.exists() {
+        anyhow::bail!(
             "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
             ws.display()
-        )
-    })
+        );
+    }
+    Ok(deacon_core::workspace::absolutize(&ws))
 }
 
 /// Recover the container workspace folder from a RUNNING container's actual

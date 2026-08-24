@@ -147,6 +147,13 @@ pub fn trust_store_path(user_data_folder: Option<&Path>) -> Result<PathBuf> {
 
 /// Best-effort canonicalization. When the path does not exist yet we fall back
 /// to lexical normalization so callers can still compare/store the value.
+///
+/// This one deliberately still resolves symlinks, and must NOT be unified with
+/// [`crate::workspace::absolutize`], which stopped doing so in #665. That change is about
+/// what deacon *reports and mounts* — the path the user named. Trust is a security
+/// boundary, and it has to key on the directory whose contents will actually be executed:
+/// a trusted symlink that is later repointed at a different tree must not carry its trust
+/// across, and an untrusted tree must not become trusted by being reached through a link.
 pub fn canonicalize_workspace(workspace: &Path) -> PathBuf {
     match std::fs::canonicalize(workspace) {
         Ok(canon) => canon,

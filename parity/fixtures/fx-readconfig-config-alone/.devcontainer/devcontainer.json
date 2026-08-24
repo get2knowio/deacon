@@ -1,0 +1,4 @@
+{
+  "name": "ConformanceReadConfigConfigAlone",
+  "image": "alpine:3.19"
+}

@@ -168,8 +168,10 @@ fn test_down_all_sweeps_stale_by_local_folder() {
         return;
     }
     let temp_dir = TempDir::new().unwrap();
-    // Canonical workspace path — matches what deacon writes to the
-    // devcontainer.local_folder label and what we filter on below.
+    // The workspace is NAMED in canonical form, so it is also what deacon writes to the
+    // devcontainer.local_folder label and what we filter on below. Since #665 deacon
+    // absolutizes rather than canonicalizes, so what goes in is what comes out — passing the
+    // canonical spelling here keeps the filter exact on macOS's `/var` symlink too.
     let workspace = temp_dir.path().canonicalize().unwrap();
 
     let devcontainer_config = r#"{

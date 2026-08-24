@@ -19,8 +19,9 @@ use tempfile::TempDir;
 #[test]
 fn test_no_selectors_defaults_workspace_to_current_directory() {
     let temp_dir = TempDir::new().unwrap();
-    // Canonicalize: deacon canonicalizes the defaulted cwd, and on macOS
-    // `/var/folders/...` resolves to `/private/var/folders/...`.
+    // NAME the workspace in canonical form. Since #665 deacon reports the defaulted cwd as
+    // given rather than canonicalizing it, so the process cwd set below has to already be the
+    // spelling the assertions expect — on macOS `/var/folders/...` vs `/private/var/...`.
     let workspace = temp_dir.path().canonicalize().unwrap();
     let config_dir = workspace.join(".devcontainer");
     fs::create_dir_all(&config_dir).unwrap();

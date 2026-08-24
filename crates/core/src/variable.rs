@@ -138,17 +138,26 @@ impl SubstitutionContext {
             workspace_path.display()
         );
 
-        // Canonicalize workspace path
-        let canonical_path = workspace_path.canonicalize().map_err(|e| {
-            debug!("Failed to canonicalize workspace path: {}", e);
-            DeaconError::Config(ConfigError::Validation {
+        // Absolutize the workspace path WITHOUT resolving symlinks. `${localWorkspaceFolder}`
+        // is spec-defined as the path of the folder *that was opened*
+        // (`devcontainerjson-reference.md:157`), and the reference preserves it; deacon used
+        // to canonicalize, renaming a symlinked workspace to its real path (#665).
+        //
+        // The path must still EXIST — an unreadable workspace is a user error worth failing
+        // on, and this is the one place that check lived.
+        if !workspace_path.exists() {
+            debug!(
+                "Workspace path does not exist: {}",
+                workspace_path.display()
+            );
+            return Err(DeaconError::Config(ConfigError::Validation {
                 message: format!(
-                    "Invalid workspace path '{}': {}",
+                    "Invalid workspace path '{}': no such file or directory",
                     workspace_path.display(),
-                    e
                 ),
-            })
-        })?;
+            }));
+        }
+        let canonical_path = crate::workspace::absolutize(workspace_path);
 
         let local_workspace_folder = canonical_path.to_string_lossy().to_string();
 

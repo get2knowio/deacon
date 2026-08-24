@@ -7,7 +7,7 @@ use crate::commands::shared::{
     ConfigLoadArgs, ConfigLoadResult, NormalizedRemoteEnv, TerminalDimensions,
     canonical_reconnect_identity, load_config, resolve_env_and_user,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use deacon_core::IndexMap;
 use deacon_core::compose::{ComposeManager, ComposeProject};
 use deacon_core::config::DevContainerConfig;
@@ -512,13 +512,10 @@ where
                 // --workspace-folder X` agree on which container to target,
                 // even when X is a sub-project inside a larger git repo.
                 // `exec` doesn't bind-mount, so the flag is a no-op here.
-                let resolved = ws.canonicalize().with_context(|| {
-                    format!(
-                        "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
-                        ws.display()
-                    )
-                })?;
-                args.workspace_folder = Some(resolved);
+                // Absolutized, not canonicalized — the shared funnel, so `up`'s identity
+                // and `exec`'s reconnect agree on a symlinked workspace too (#665).
+                args.workspace_folder =
+                    Some(crate::commands::shared::workspace::resolve_workspace_folder(Some(ws))?);
             }
         }
 

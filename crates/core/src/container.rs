@@ -149,12 +149,12 @@ impl ContainerIdentity {
         let config_hash = Self::hash_config(config);
         let name = config.name.clone();
 
-        // Canonicalize the workspace path for the `devcontainer.local_folder`
-        // label so consumers can do `docker ps --filter label=...=<abs>`
-        // reliably. If canonicalization fails (path no longer exists,
-        // permission), fall through to None — better to skip the label
-        // than emit a relative or symlinked one (#68).
-        let local_folder = workspace_path.canonicalize().ok();
+        // Absolutize the workspace path for the `devcontainer.local_folder` label so
+        // consumers can do `docker ps --filter label=...=<abs>` reliably (#68). NOT
+        // canonicalized: the label is the identity, and the reference records the path the
+        // user named — resolving a symlink here would make two spellings of the same
+        // invocation disagree with the reference and with the reported workspace (#665).
+        let local_folder = Some(crate::workspace::absolutize(workspace_path));
 
         debug!(
             workspace_hash = %workspace_hash,
@@ -182,10 +182,9 @@ impl ContainerIdentity {
     /// the `devcontainer.config_file` label can be emitted (#68).
     pub fn with_config_file(mut self, config_file: impl Into<PathBuf>) -> Self {
         let p = config_file.into();
-        // Canonicalize for the label; fall back to the raw path if the
-        // file has been deleted between load and container create (rare,
-        // but emit *something* useful rather than dropping the label).
-        self.config_file = Some(p.canonicalize().unwrap_or(p));
+        // Absolutized, not canonicalized, for the same reason as `local_folder` (#665):
+        // the label records the path the caller named.
+        self.config_file = Some(crate::workspace::absolutize(&p));
         self
     }
 
@@ -229,12 +228,12 @@ impl ContainerIdentity {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
-        // Use worktree-aware resolution to get the canonical workspace root
-        let canonical_path = resolve_workspace_root(workspace_path).unwrap_or_else(|_| {
-            workspace_path
-                .canonicalize()
-                .unwrap_or_else(|_| workspace_path.to_path_buf())
-        });
+        // Use worktree-aware resolution to get the canonical workspace root. Since #665 that
+        // resolution absolutizes without following symlinks, so two spellings of the same
+        // directory are two identities — which is what the reference does, its
+        // `devcontainer.local_folder` label carrying the path as given.
+        let canonical_path = resolve_workspace_root(workspace_path)
+            .unwrap_or_else(|_| crate::workspace::absolutize(workspace_path));
 
         let mut hasher = DefaultHasher::new();
         canonical_path.hash(&mut hasher);
@@ -510,14 +509,18 @@ mod tests {
         assert_eq!(labels.get(LABEL_CONFIG_HASH), Some(&identity.config_hash));
         assert_eq!(labels.get(LABEL_NAME), Some(&"test-container".to_string()));
 
-        // #68: devcontainer.local_folder is the canonical absolute
-        // workspace path. devcontainer.config_file is only emitted once
+        // #68: devcontainer.local_folder is the absolute workspace path — absolutized, not
+        // canonicalized (#665), so the expectation is the path AS GIVEN. Canonicalizing here
+        // would pass on Linux and fail on macOS, where a temp dir lives under the `/var` →
+        // `/private/var` symlink. devcontainer.config_file is only emitted once
         // `with_config_file` has been called (see test below).
-        let expected_local_folder = workspace_path.canonicalize().unwrap().display().to_string();
+        let expected_local_folder = crate::workspace::absolutize(workspace_path)
+            .display()
+            .to_string();
         assert_eq!(
             labels.get(LABEL_LOCAL_FOLDER),
             Some(&expected_local_folder),
-            "devcontainer.local_folder must be the canonical absolute workspace path"
+            "devcontainer.local_folder must be the absolute workspace path as named"
         );
         assert!(
             !labels.contains_key(LABEL_CONFIG_FILE),
@@ -547,7 +550,9 @@ mod tests {
             ContainerIdentity::new(workspace_path, &config).with_config_file(config_file.clone());
         let labels = identity.labels();
 
-        let expected_config_file = config_file.canonicalize().unwrap().display().to_string();
+        let expected_config_file = crate::workspace::absolutize(&config_file)
+            .display()
+            .to_string();
         assert_eq!(
             labels.get(LABEL_CONFIG_FILE),
             Some(&expected_config_file),
@@ -618,7 +623,9 @@ mod tests {
             .workspace_label_selector()
             .expect("local_folder should be set for an existing temp dir");
 
-        let expected_local_folder = workspace_path.canonicalize().unwrap().display().to_string();
+        let expected_local_folder = crate::workspace::absolutize(workspace_path)
+            .display()
+            .to_string();
         assert_eq!(
             selector,
             format!("{}={}", LABEL_LOCAL_FOLDER, expected_local_folder),

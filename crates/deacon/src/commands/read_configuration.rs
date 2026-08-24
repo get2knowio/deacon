@@ -323,15 +323,10 @@ pub struct ReadConfigurationOutput {
 /// with `--config` — the same path yields different schemes depending only on that, which
 /// is why `explicitly_named` is a parameter rather than something derivable from the path.
 fn config_file_path_value(config_path: &Path, explicitly_named: bool) -> serde_json::Value {
-    // Always absolute. The reference reports the real location of the file regardless of
-    // how the workspace was named on the command line, so a relative `--workspace-folder`
-    // must not leak a relative path into the output. Canonicalization is best-effort:
-    // if the file cannot be resolved the un-absolutized path is still better than nothing,
-    // and the caller only reaches here with a path a load already succeeded from.
-    let rendered = config_path
-        .canonicalize()
-        .or_else(|_| std::path::absolute(config_path))
-        .unwrap_or_else(|_| config_path.to_path_buf())
+    // Always absolute, so a relative `--workspace-folder` cannot leak a relative path into
+    // the output — but absolutized, NOT canonicalized: the reference reports the file under
+    // the path the caller named, symlinks and all (#665).
+    let rendered = deacon_core::workspace::absolutize(config_path)
         .to_string_lossy()
         .to_string();
     serde_json::json!({
@@ -384,9 +379,7 @@ fn resolve_workspace_configuration(
     let mount_source = if mount_workspace_git_root {
         deacon_core::workspace::resolve_workspace_root(workspace_folder)?
     } else {
-        workspace_folder
-            .canonicalize()
-            .unwrap_or_else(|_| workspace_folder.to_path_buf())
+        deacon_core::workspace::absolutize(workspace_folder)
     };
 
     // `--mount-git-worktree-common-dir` re-bases the workspace mount so the worktree's
@@ -1698,9 +1691,8 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
     // would silently start reading the cwd's configuration instead.
     let has_container_id = args.container_id.is_some();
     let has_id_label = !args.id_label.is_empty();
-    let has_config = args.config_path.is_some();
     let mut args = args;
-    if args.workspace_folder.is_none() && !has_container_id && !has_id_label && !has_config {
+    if args.workspace_folder.is_none() && !has_container_id && !has_id_label {
         args.workspace_folder = Some(resolve_workspace_folder(None)?);
     }
     let args = args;
@@ -1739,22 +1731,14 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
 
     // Determine workspace folder.
     //
-    // Spec parity (#66): when only `--config` is provided (no
-    // `--workspace-folder`), default workspace to the directory containing
-    // the config file. This matches the upstream reference CLI behavior of
-    // accepting `--config` on its own and keeps `${localWorkspaceFolder}`
-    // substitutions meaningful.
-    let config_parent_workspace = args
-        .workspace_folder
-        .is_none()
-        .then(|| args.config_path.as_deref().and_then(|p| p.parent()))
-        .flatten()
-        .map(|p| p.to_path_buf());
-    let workspace_folder = args
-        .workspace_folder
-        .as_deref()
-        .or(config_parent_workspace.as_deref())
-        .unwrap_or(Path::new("."));
+    // `--config` selects WHICH DOCUMENT to read, never where the workspace is: the
+    // workspace is `--workspace-folder` or the current directory, on every subcommand,
+    // which is the reference's own uniform rule. deacon used to re-anchor the workspace at
+    // the config file's parent directory for a `--config`-alone invocation, on the strength
+    // of #66's claim that the reference "treats `workspace` as undefined when absent" —
+    // measurement at oracle 0.87.0 refutes that: it defaults to the cwd (#660). The cwd is
+    // materialized above, so the only remaining `None` here is container-only mode.
+    let workspace_folder = args.workspace_folder.as_deref().unwrap_or(Path::new("."));
 
     // Load configuration using shared helper (aligns with up/exec behavior)
     // The actual config file that was loaded/discovered (may differ from the CLI

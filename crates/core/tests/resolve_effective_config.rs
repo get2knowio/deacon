@@ -33,7 +33,15 @@ fn test_resolve_effective_config_merges_labels_and_substitutes() -> anyhow::Resu
     // Workspace folder substitution should replace variable
     let wf = resolved.workspace_folder.clone().unwrap();
     assert!(wf.ends_with("/project"));
-    assert!(wf.contains(&workspace_path.canonicalize()?.to_string_lossy().to_string()));
+    // Absolutized, not canonicalized (#665): substitution reports the path as named, which
+    // on macOS is `/var/…` rather than the `/private/var/…` a canonicalization would give.
+    assert!(
+        wf.contains(
+            &deacon_core::workspace::absolutize(workspace_path)
+                .to_string_lossy()
+                .to_string()
+        )
+    );
 
     // Label should have overridden BASE_VAR
     assert_eq!(
