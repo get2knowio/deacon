@@ -1755,6 +1755,8 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
         (substituted_config, report)
     } else {
         // Use shared config loader for consistent behavior across subcommands
+        let readconfig_id_labels =
+            deacon_core::container::ContainerSelector::parse_labels(&args.id_label)?;
         let config_result = load_config(ConfigLoadArgs {
             workspace_folder: Some(workspace_folder),
             config_path: args.config_path.as_deref(),
@@ -1765,6 +1767,9 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
             // read-configuration has no container identity yet: leave
             // ${devcontainerId} literal in the output, matching the reference.
             resolve_devcontainer_id: false,
+            // Irrelevant while the flag above is false, but kept accurate so a
+            // future pass that flips it resolves the token from the right set.
+            id_labels: &readconfig_id_labels,
         })
         .await?;
         resolved_config_path = Some(config_result.config_path);

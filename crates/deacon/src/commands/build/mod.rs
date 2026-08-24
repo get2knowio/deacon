@@ -763,6 +763,8 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
         override_config_path: args.override_config_path.as_deref(),
         secrets_files: &args.secrets_files,
         resolve_devcontainer_id: true,
+        // `build` has no `--id-label`; the default pair is the answer.
+        id_labels: &[],
     })
     .await?;
 

@@ -250,6 +250,10 @@ async fn execute_run_user_commands_inner(
         )?;
         (DevContainerConfig::default(), cwd)
     } else {
+        // `${devcontainerId}` is resolved during this load and computed from the
+        // caller's id-labels when given (#670).
+        let ruc_id_labels =
+            deacon_core::container::ContainerSelector::parse_labels(&args.id_label)?;
         let ConfigLoadResult {
             config,
             workspace_folder,
@@ -262,6 +266,7 @@ async fn execute_run_user_commands_inner(
             override_config_path: args.override_config_path.as_deref(),
             secrets_files: &args.secrets_files,
             resolve_devcontainer_id: true,
+            id_labels: &ruc_id_labels,
         })
         .await?;
         (config, workspace_folder)

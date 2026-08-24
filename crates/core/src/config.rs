@@ -3292,9 +3292,44 @@ impl ConfigLoader {
             secrets,
             workspace_path,
             resolve_devcontainer_id,
+            // No `--id-label` on this convenience wrapper: it is used where the
+            // default `{local_folder, config_file}` pair is the answer.
+            &[],
         )
         .await?;
         Ok((substituted, report))
+    }
+
+    /// The id-labels that `${devcontainerId}` is computed from, per the
+    /// reference's `findContainerAndIdLabels` (`spec-node/utils.ts:682-726`):
+    /// the caller's `--id-label` pairs when given, otherwise
+    /// `{devcontainer.local_folder, devcontainer.config_file}`.
+    ///
+    /// Both paths are absolutized so they equal the labels `ContainerIdentity`
+    /// stamps on the container — the id and the labels it is derived from must
+    /// not disagree about the spelling of the same path (#665, #670).
+    fn id_labels_for(
+        config_path: &Path,
+        workspace_path: &Path,
+        provided: &[(String, String)],
+    ) -> Vec<(String, String)> {
+        if !provided.is_empty() {
+            return provided.to_vec();
+        }
+        vec![
+            (
+                crate::container::LABEL_LOCAL_FOLDER.to_string(),
+                crate::workspace::absolutize(workspace_path)
+                    .display()
+                    .to_string(),
+            ),
+            (
+                crate::container::LABEL_CONFIG_FILE.to_string(),
+                crate::workspace::absolutize(config_path)
+                    .display()
+                    .to_string(),
+            ),
+        ]
     }
 
     /// As [`Self::load_with_overrides_and_substitution`], but also returns the
@@ -3317,6 +3352,7 @@ impl ConfigLoader {
         secrets: Option<&crate::secrets::SecretsCollection>,
         workspace_path: &Path,
         resolve_devcontainer_id: bool,
+        id_labels: &[(String, String)],
     ) -> Result<(
         DevContainerConfig,
         DevContainerConfig,
@@ -3356,6 +3392,17 @@ impl ConfigLoader {
         // pass (it has no container identity yet), so it asks us to leave the
         // token literal. Runtime callers (`up`/`exec`/…) keep the default.
         substitution_context.resolve_devcontainer_id = resolve_devcontainer_id;
+        // `${devcontainerId}` is the spec computation over the container's
+        // ID-LABELS, and this is the pass that resolves the token for every
+        // runtime caller — so the labels have to arrive here rather than be
+        // recovered later (#670). The reference does the same thing in the same
+        // order: `findContainerAndIdLabels` runs before `beforeContainerSubstitute`
+        // (`spec-node/configContainer.ts:57-58`).
+        substitution_context.set_devcontainer_id_from_labels(&Self::id_labels_for(
+            path,
+            workspace_path,
+            id_labels,
+        ));
 
         // When the config sets an explicit `workspaceFolder`, that IS the
         // container workspace folder, so `${containerWorkspaceFolder}` can be
