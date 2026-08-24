@@ -77,6 +77,11 @@ pub struct ContainerIdentity {
     /// User-provided identification labels (for example, from `--id-label`)
     /// that should be stamped onto created containers.
     pub additional_labels: HashMap<String, String>,
+    /// The caller's `--id-label` pairs, when given, used as the identity set
+    /// behind `${devcontainerId}` in place of the default
+    /// `{local_folder, config_file}` pair — see [`Self::id_hash_labels`] (#670).
+    /// `None` means "no override", which is not the same as an empty set.
+    pub id_labels: Option<Vec<(String, String)>>,
     /// The merged `devcontainer.metadata` array (JSON string) to stamp on the
     /// created container, so config that lives only in `devcontainer.json`
     /// (notably `remoteEnv`) survives on the container and is recoverable by
@@ -174,6 +179,7 @@ impl ContainerIdentity {
             host_ca_bundle_path: None,
             host_ca_subjects: None,
             additional_labels: HashMap::new(),
+            id_labels: None,
             metadata_label: None,
         }
     }
@@ -335,25 +341,33 @@ impl ContainerIdentity {
         labels
     }
 
-    /// The subset of labels that define container IDENTITY and therefore feed
-    /// `${devcontainerId}` ([`compute_dev_container_id`]). Excludes the purely
-    /// informational labels (`host_ca*`, `--id-label` additions, and the
-    /// `devcontainer.metadata` payload) so adding any of them never churns the
-    /// user-visible `devcontainerId` (which keys named volumes, caches, etc.).
-    /// For a container with no informational labels this equals [`Self::labels`],
-    /// so the common-case `devcontainerId` is unchanged.
+    /// The labels that define container IDENTITY and therefore feed
+    /// `${devcontainerId}` ([`compute_dev_container_id`]).
+    ///
+    /// This is the reference CLI's `idLabels` set, and matching it is half of
+    /// matching the id ([#670]) — the algorithm alone would still produce a third
+    /// value that agreed with nobody. `findContainerAndIdLabels`
+    /// (`spec-node/utils.ts:682-726`) answers it in exactly two ways:
+    ///
+    /// - `--id-label` given → **those pairs, and only those**. They REPLACE the
+    ///   default set rather than adding to it, which is why the override here is
+    ///   whole-set rather than a merge.
+    /// - otherwise → `{devcontainer.local_folder, devcontainer.config_file}`.
+    ///
+    /// Everything else deacon stamps stays out: `devcontainer.source`,
+    /// `workspaceHash`, `configHash` and `devcontainer.name` are deacon's own
+    /// bookkeeping, `host_ca*` and `devcontainer.metadata` are informational, and
+    /// none of them exist on a container the reference created. Keeping them out
+    /// is also what makes the id stable across the things that SHOULD not churn
+    /// it — the spec requires stability across rebuilds, and `configHash` moves
+    /// whenever the configuration is edited.
+    ///
+    /// [#670]: https://github.com/get2knowio/deacon/issues/670
     pub fn id_hash_labels(&self) -> Vec<(String, String)> {
-        let mut out = vec![
-            (LABEL_SOURCE.to_string(), DEACON_SOURCE.to_string()),
-            (
-                LABEL_WORKSPACE_HASH.to_string(),
-                self.workspace_hash.clone(),
-            ),
-            (LABEL_CONFIG_HASH.to_string(), self.config_hash.clone()),
-        ];
-        if let Some(ref name) = self.name {
-            out.push((LABEL_NAME.to_string(), name.clone()));
+        if let Some(ref provided) = self.id_labels {
+            return provided.clone();
         }
+        let mut out = Vec::with_capacity(2);
         if let Some(ref local_folder) = self.local_folder {
             out.push((
                 LABEL_LOCAL_FOLDER.to_string(),
@@ -367,6 +381,22 @@ impl ContainerIdentity {
             ));
         }
         out
+    }
+
+    /// Use the caller's `--id-label` pairs as the identity set behind
+    /// `${devcontainerId}`, replacing the default
+    /// `{local_folder, config_file}` pair ([`Self::id_hash_labels`]).
+    ///
+    /// Separate from [`Self::with_additional_labels`] on purpose: that one
+    /// decides what gets STAMPED on the container, this one decides what the id
+    /// is computed FROM, and the reference treats them as one input only because
+    /// it has a single list. Passing an empty slice leaves the default in place,
+    /// so a caller can hand its parsed flag through unconditionally.
+    pub fn with_id_labels(mut self, id_labels: &[(String, String)]) -> Self {
+        if !id_labels.is_empty() {
+            self.id_labels = Some(id_labels.to_vec());
+        }
+        self
     }
 
     /// Create a label selector string for finding matching containers
@@ -890,6 +920,78 @@ mod tests {
         assert!(labels.contains_key(LABEL_HOST_CA_BUNDLE_PATH));
     }
 
+    /// The other half of #670: the id-label SET is the reference's, not deacon's
+    /// bookkeeping. `devcontainer.source`, `workspaceHash`, `configHash` and
+    /// `devcontainer.name` are deacon-only labels that no reference-created
+    /// container carries, so including them would produce a third value agreeing
+    /// with neither CLI even with the right algorithm.
+    ///
+    /// The `name` + `configHash` arm is also the spec's one MUST on this
+    /// surface — *"stable across rebuilds of dev containers"*
+    /// (`devcontainer-id-variable.md:19`). `config_hash` moves whenever the
+    /// configuration is edited, so a `${devcontainerId}`-named volume would be
+    /// orphaned on every edit if it fed the id.
+    #[test]
+    fn the_id_labels_are_the_workspace_and_config_paths_alone() {
+        let before: DevContainerConfig =
+            serde_json::from_str(r#"{ "name": "demo", "image": "alpine:3.19" }"#).unwrap();
+        let after: DevContainerConfig = serde_json::from_str(
+            r#"{ "name": "renamed", "image": "alpine:3.20", "remoteUser": "root" }"#,
+        )
+        .unwrap();
+
+        let identity_of = |config: &DevContainerConfig| {
+            ContainerIdentity::new(Path::new("/ws/proj"), config)
+                .with_config_file("/ws/proj/.devcontainer/devcontainer.json")
+        };
+
+        let before_labels = identity_of(&before).id_hash_labels();
+        assert_eq!(
+            before_labels
+                .iter()
+                .map(|(k, _)| k.as_str())
+                .collect::<Vec<_>>(),
+            vec![LABEL_LOCAL_FOLDER, LABEL_CONFIG_FILE],
+            "only the two labels the reference uses may feed the id"
+        );
+
+        assert_eq!(
+            compute_dev_container_id(&before_labels),
+            compute_dev_container_id(&identity_of(&after).id_hash_labels()),
+            "editing the configuration must not change ${{devcontainerId}}"
+        );
+    }
+
+    /// `--id-label` REPLACES the default pair rather than adding to it, which is
+    /// what `findContainerAndIdLabels` does (`spec-node/utils.ts:682-687`).
+    #[test]
+    fn provided_id_labels_replace_the_default_pair() {
+        let config: DevContainerConfig =
+            serde_json::from_str(r#"{ "image": "alpine:3.19" }"#).unwrap();
+        let identity = ContainerIdentity::new(Path::new("/ws/proj"), &config)
+            .with_config_file("/ws/proj/.devcontainer/devcontainer.json");
+
+        let overridden = identity
+            .clone()
+            .with_id_labels(&[("foo".to_string(), "bar".to_string())]);
+        assert_eq!(
+            overridden.id_hash_labels(),
+            vec![("foo".to_string(), "bar".to_string())]
+        );
+        // And it lands on the value the reference produced for that same flag.
+        assert_eq!(
+            compute_dev_container_id(&overridden.id_hash_labels()),
+            "0uhonu0v70vmigpqqrkg1kqr7ohoam9veqjrfaqt8darhei1toib"
+        );
+
+        // An empty slice is "no override", so a caller can pass its parsed flag
+        // through unconditionally without erasing the default.
+        assert_eq!(
+            identity.clone().with_id_labels(&[]).id_hash_labels(),
+            identity.id_hash_labels()
+        );
+    }
+
     #[test]
     fn test_compute_dev_container_id_basic() {
         let labels = vec![
@@ -897,9 +999,91 @@ mod tests {
             ("env".to_string(), "prod".to_string()),
         ];
         let id = compute_dev_container_id(&labels);
-        assert_eq!(id.len(), 12);
-        // Should be hexadecimal
-        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(id.len(), 52);
+        assert!(
+            id.chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='v').contains(&c))
+        );
+    }
+
+    /// The two vectors that pin the ALGORITHM, measured against the reference CLI
+    /// rather than derived from deacon's own code ([#670]).
+    ///
+    /// Both were produced by running `devcontainer up --id-label …` at oracle
+    /// 0.87.0 on a config whose `containerEnv` echoes `${devcontainerId}`, then
+    /// reading the value back out of the running container. `--id-label` is what
+    /// makes them SYNTHETIC and therefore portable: with it, the reference's id
+    /// labels are exactly the pairs given, with no host paths in them, so the
+    /// expected strings are constants on every machine.
+    ///
+    /// A test that recomputed the expectation from `compute_dev_container_id`
+    /// would pass for any algorithm at all. These do not.
+    ///
+    /// [#670]: https://github.com/get2knowio/deacon/issues/670
+    #[test]
+    fn the_id_matches_the_reference_cli_byte_for_byte() {
+        assert_eq!(
+            compute_dev_container_id(&[("foo".to_string(), "bar".to_string())]),
+            "0uhonu0v70vmigpqqrkg1kqr7ohoam9veqjrfaqt8darhei1toib",
+            "measured at oracle 0.87.0: devcontainer up --id-label foo=bar"
+        );
+        assert_eq!(
+            compute_dev_container_id(&[
+                ("foo".to_string(), "bar".to_string()),
+                ("baz".to_string(), "qux".to_string()),
+            ]),
+            "1og6o4ofpm4echrl8crv0sf9g2btg2i0hgiq83563kvr5k3cfn27",
+            "measured at oracle 0.87.0: --id-label foo=bar --id-label baz=qux"
+        );
+    }
+
+    /// The spec's three shape requirements, stated as assertions:
+    /// base-32 over `0-9a-v`, exactly 52 characters, left-padded with `'0'`
+    /// (`devcontainer-id-variable.md:44-68`).
+    ///
+    /// The padding half needs a digest whose leading byte is small, which is why
+    /// this searches for one rather than asserting on a single hand-picked input:
+    /// a 52-digit encoder that dropped leading zeros would still pass on most
+    /// inputs and fail only on the rare short one.
+    #[test]
+    fn every_id_is_52_base32_digits_including_the_short_ones() {
+        let mut saw_leading_zero = false;
+        for n in 0..512 {
+            let id = compute_dev_container_id(&[("k".to_string(), n.to_string())]);
+            assert_eq!(id.len(), 52, "id for k={n} was {id:?}");
+            assert!(
+                id.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'v').contains(&b)),
+                "id for k={n} left the base-32 alphabet: {id:?}"
+            );
+            saw_leading_zero |= id.starts_with('0');
+        }
+        assert!(
+            saw_leading_zero,
+            "no sampled input produced a leading zero, so the padding rule went untested"
+        );
+    }
+
+    /// Upstream asserts that adding a label changes the id and that label ORDER
+    /// does not (`src/test/variableSubstitution.test.ts:153` and `:162`). deacon's
+    /// order-independence test below covers the second; this covers the first at
+    /// the same granularity upstream uses, and pins that a duplicate key resolves
+    /// to the last one — the JavaScript object semantics the reference inherits
+    /// from building its labels out of a `key=value` list.
+    #[test]
+    fn the_label_set_is_the_input_and_duplicates_take_the_last() {
+        let one = compute_dev_container_id(&[("a".to_string(), "b".to_string())]);
+        let two = compute_dev_container_id(&[
+            ("a".to_string(), "b".to_string()),
+            ("c".to_string(), "d".to_string()),
+        ]);
+        assert_ne!(one, two, "an additional id-label must change the id");
+
+        let duplicated = compute_dev_container_id(&[
+            ("a".to_string(), "first".to_string()),
+            ("a".to_string(), "b".to_string()),
+        ]);
+        assert_eq!(duplicated, one, "the last value for a repeated key wins");
     }
 
     #[test]
@@ -955,9 +1139,12 @@ mod tests {
     fn test_compute_dev_container_id_empty_labels() {
         let labels = vec![];
         let id = compute_dev_container_id(&labels);
-        assert_eq!(id.len(), 12);
-        // Should still produce a valid ID (hash of empty string)
-        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(id.len(), 52);
+        // Still a valid id — the SHA-256 of the empty JSON object `{}`.
+        assert!(
+            id.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'v').contains(&b))
+        );
     }
 }
 
@@ -1147,19 +1334,51 @@ impl ContainerSelector {
     }
 }
 
-/// Compute deterministic dev container ID from id-labels
+/// Base-32 alphabet produced by JavaScript's `BigInt.prototype.toString(32)`:
+/// the digits `0-9` followed by the lowercase letters `a-v`. This is NOT RFC 4648
+/// base32 (which is `A-Z2-7`), and the difference is the whole point — the spec's
+/// reference implementation is JavaScript, so its alphabet is the contract.
+const DEVCONTAINER_ID_ALPHABET: &[u8; 32] = b"0123456789abcdefghijklmnopqrstuv";
+
+/// Number of base-32 digits in a `${devcontainerId}`: 52, left-padded with `'0'`.
+const DEVCONTAINER_ID_LEN: usize = 52;
+
+/// Compute the dev container ID from its id-labels, per the spec's own algorithm.
 ///
-/// Creates a deterministic 12-character hex ID from a set of id-labels.
-/// The ID is independent of label order - labels are sorted before hashing.
-/// Adding or removing labels changes the ID.
+/// The spec spells this out step by step in `devcontainer-id-variable.md:44-68`:
+///
+/// 1. Take the labels as a JSON object, **keys sorted**, with all optional
+///    whitespace removed.
+/// 2. SHA-256 the UTF-8 encoded string.
+/// 3. Render it base-32, left-padded with `'0'` to 52 characters.
+///
+/// # Why this exact shape
+///
+/// The spec permits an implementation to choose its own computation — it only
+/// REQUIRES that the id be unique on the host, stable across rebuilds, and
+/// alphanumeric. deacon used to take a 12-character BLAKE3 prefix, which met all
+/// three. It was changed ([#670]) because the spec describes this computation
+/// *"to ensure implementations get to the same result"*, and `${devcontainerId}`
+/// names durable resources: the spec's own example is a `docker-in-docker`
+/// volume, `dind-var-lib-docker-${devcontainerId}`. Two CLIs that disagree on
+/// the id give the same workspace two volumes and silently split its state.
+///
+/// Step 1 is `JSON.stringify(idLabels, Object.keys(idLabels).sort())` in the
+/// reference — the array argument is a key *filter and ordering*, and
+/// `JSON.stringify` emits no whitespace, so a `BTreeMap` serialized by
+/// `serde_json` produces the identical bytes.
+///
+/// Step 3 is `BigInt(...).toString(32).padStart(52, '0')` there. Because 32 is a
+/// power of two this needs no bignum arithmetic: 52 digits × 5 bits is 260 bits,
+/// so the 256-bit digest is simply read as 5-bit groups after four leading zero
+/// bits. Leading zeros then fall out of the encoding rather than needing a pad
+/// step, which is why a digest with a small leading byte still yields 52 digits.
 ///
 /// # Arguments
 ///
-/// * `id_labels` - Slice of (key, value) tuples representing container labels
-///
-/// # Returns
-///
-/// A 12-character hexadecimal string representing the deterministic container ID
+/// * `id_labels` - Slice of (key, value) tuples. Duplicate keys resolve to the
+///   last one, matching the JavaScript object the reference builds from its
+///   `key=value` list.
 ///
 /// # Examples
 ///
@@ -1171,37 +1390,54 @@ impl ContainerSelector {
 ///     ("env".to_string(), "prod".to_string()),
 /// ];
 /// let id1 = compute_dev_container_id(&labels);
-/// assert_eq!(id1.len(), 12);
+/// assert_eq!(id1.len(), 52);
 ///
-/// // Order doesn't matter
+/// // Order doesn't matter: the keys are sorted before hashing.
 /// let labels_reversed = vec![
 ///     ("env".to_string(), "prod".to_string()),
 ///     ("app".to_string(), "web".to_string()),
 /// ];
-/// let id2 = compute_dev_container_id(&labels_reversed);
-/// assert_eq!(id1, id2);
+/// assert_eq!(id1, compute_dev_container_id(&labels_reversed));
 /// ```
+///
+/// [#670]: https://github.com/get2knowio/deacon/issues/670
 pub fn compute_dev_container_id(id_labels: &[(String, String)]) -> String {
-    // Sort labels to ensure determinism regardless of order
-    let mut sorted_labels = id_labels.to_vec();
-    sorted_labels.sort_by(|a, b| match a.0.cmp(&b.0) {
-        std::cmp::Ordering::Equal => a.1.cmp(&b.1),
-        other => other,
+    use sha2::{Digest, Sha256};
+
+    // A BTreeMap gives the spec's "keys must be sorted" for free, and
+    // `serde_json` emits compact JSON, which is its "optional whitespace
+    // removed". Last write wins on a duplicate key, as in JavaScript.
+    let sorted: std::collections::BTreeMap<&str, &str> = id_labels
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let json = serde_json::to_string(&sorted).unwrap_or_else(|_| {
+        // `BTreeMap<&str, &str>` cannot fail to serialize; keep the fallback
+        // total rather than panicking on an impossible branch.
+        String::new()
     });
 
-    // Create string representation: "key1=value1,key2=value2,..."
-    let label_string = sorted_labels
-        .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
-        .collect::<Vec<_>>()
-        .join(",");
+    let digest = Sha256::digest(json.as_bytes());
 
-    // Use blake3 for stable, cross-platform hashing
-    let hash = blake3::hash(label_string.as_bytes());
-    let hex_digest = hash.to_hex();
-
-    // Return first 12 characters of hex representation (lowercase)
-    hex_digest.as_str()[..12].to_string()
+    // 52 digits × 5 bits = 260 bits over a 256-bit digest, so the value is read
+    // as if left-padded with four zero bits.
+    let mut out = String::with_capacity(DEVCONTAINER_ID_LEN);
+    for index in 0..DEVCONTAINER_ID_LEN {
+        // Bit offset of this digit within the 260-bit, four-zero-prefixed value.
+        let high_bit = index * 5;
+        let mut digit = 0u8;
+        for bit in 0..5 {
+            let position = high_bit + bit;
+            // The first four positions are the synthetic zero prefix.
+            let value = match position.checked_sub(4) {
+                Some(p) => (digest[p / 8] >> (7 - (p % 8))) & 1,
+                None => 0,
+            };
+            digit = (digit << 1) | value;
+        }
+        out.push(DEVCONTAINER_ID_ALPHABET[digit as usize] as char);
+    }
+    out
 }
 
 /// Container lookup operations
@@ -1868,6 +2104,7 @@ mod supersede_tests {
             host_ca_bundle_path: None,
             host_ca_subjects: None,
             additional_labels: HashMap::new(),
+            id_labels: None,
             metadata_label: None,
         }
     }

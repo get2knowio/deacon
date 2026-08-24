@@ -4039,6 +4039,7 @@ mod tests {
             host_ca_bundle_path: None,
             host_ca_subjects: None,
             additional_labels: HashMap::new(),
+            id_labels: None,
             metadata_label: None,
         };
 

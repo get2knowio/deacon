@@ -133,8 +133,8 @@ pub const ABSENT_OPTIONAL_KEYS: &[&str] = &[
 /// The FINITE, ENUMERATED properties inside which [`devcontainer_id_token`] applies its
 /// hex rewrite (023 T063) — the fields a substituted `${devcontainerId}` can reach.
 ///
-/// Everywhere else a 12-char lowercase-hex run is left alone, so two genuinely different
-/// digests can no longer be collapsed to one token and mask a divergence.
+/// Everywhere else a devcontainer-id-shaped run is left alone, so two genuinely
+/// different digests can no longer be collapsed to one token and mask a divergence.
 pub const DEVCONTAINER_ID_FIELDS: &[&str] = &[
     "containerEnv",
     "mounts",
@@ -886,7 +886,7 @@ fn carries_no_information(v: &Value) -> bool {
 /// `field:/configuration` + `field:/mergedConfiguration`).
 ///
 /// Rewrites the literal `${devcontainerId}` template token to `<ID>` everywhere, and a
-/// 12-character lowercase-hex run to `<ID>` **only inside the enumerated
+/// substituted devcontainer id to `<ID>` **only inside the enumerated
 /// [`DEVCONTAINER_ID_FIELDS`]** — the properties a substituted devcontainer id can
 /// legitimately reach.
 ///
@@ -894,9 +894,22 @@ fn carries_no_information(v: &Value) -> bool {
 /// the document. Applied to both sides it could not manufacture a false pass on equal
 /// inputs, but it could — and this is the defect research D3 names — collapse two
 /// GENUINELY DIFFERENT hex values (a short digest, a hash, a hex-looking identifier) to
-/// the same token and mask a real divergence. Scoping the hex rewrite to the fields that
+/// the same token and mask a real divergence. Scoping the rewrite to the fields that
 /// actually carry a devcontainer id removes that blast radius; the literal-token rewrite
 /// is an exact string match and was never open-ended.
+///
+/// **The id's SHAPE changed with #670** and this rule followed it: deacon now computes
+/// the spec's own value — 52 base-32 digits over `0-9a-v` — where it used to emit a
+/// 12-character BLAKE3 hex prefix. Two consequences worth stating, because they pull in
+/// opposite directions:
+///
+/// - The rewrite is no longer hiding a DIFFERENCE. The two CLIs now produce the same id
+///   byte for byte, so a differential that compared the raw values would pass. What the
+///   rewrite still buys is ASSERTABILITY: a `spec-expectation` case cannot hardcode an
+///   id derived from the machine's own workspace path, so `<ID>` is how it names one.
+/// - Collapsing risk went DOWN rather than up. A 52-character run confined to the
+///   base-32 alphabet is far harder to hit by accident than a 12-character hex one, and
+///   the enumerated-field scope still bounds it.
 pub fn devcontainer_id_token(value: &Value) -> Value {
     rewrite_ids(value, false)
 }
@@ -908,7 +921,7 @@ fn rewrite_ids(value: &Value, in_id_field: bool) -> Value {
         Value::String(s) => {
             let literal = s.replace("${devcontainerId}", "<ID>");
             Value::String(if in_id_field {
-                tokenize_hex12(&literal)
+                tokenize_devcontainer_id(&literal)
             } else {
                 literal
             })
@@ -935,25 +948,32 @@ fn parse(case: &str, raw: &str) -> Result<Value, HarnessError> {
     })
 }
 
-/// Rewrite each 12-char contiguous lowercase-hex run to `<ID>` (char-safe).
+/// Length of a substituted `${devcontainerId}`: 52 base-32 digits
+/// (`devcontainer-id-variable.md:44-68`).
+const DEVCONTAINER_ID_DIGITS: usize = 52;
+
+/// Rewrite each contiguous 52-digit base-32 run to `<ID>` (char-safe).
 ///
 /// Deliberately NOT named `replace_hex12` any more: that name belonged to the retired
 /// BLANKET rule that applied this to every string in the document (023 T063). This is
 /// the same mechanism confined to [`DEVCONTAINER_ID_FIELDS`] by
 /// [`devcontainer_id_token`], and the name says so — a scoped helper reading as a
 /// document-wide replacement is how the blanket behavior would creep back.
-fn tokenize_hex12(input: &str) -> String {
+///
+/// The alphabet is `0-9a-v`, which is what JavaScript's `BigInt.toString(32)` emits and
+/// therefore what both CLIs produce (#670). It is NOT RFC 4648 base32.
+fn tokenize_devcontainer_id(input: &str) -> String {
     let chars: Vec<char> = input.chars().collect();
     let mut out = String::with_capacity(input.len());
     let mut i = 0;
     while i < chars.len() {
-        if i + 12 <= chars.len()
-            && chars[i..i + 12]
+        if i + DEVCONTAINER_ID_DIGITS <= chars.len()
+            && chars[i..i + DEVCONTAINER_ID_DIGITS]
                 .iter()
-                .all(|c| matches!(c, '0'..='9' | 'a'..='f'))
+                .all(|c| matches!(c, '0'..='9' | 'a'..='v'))
         {
             out.push_str("<ID>");
-            i += 12;
+            i += DEVCONTAINER_ID_DIGITS;
         } else {
             out.push(chars[i]);
             i += 1;
@@ -1937,11 +1957,21 @@ mod tests {
         // 023 T063: the retired `replace_hex12` rewrote ANY 12-char lowercase-hex run in
         // ANY string, which could collapse two genuinely different digests to one token
         // and mask a divergence. It now applies ONLY inside DEVCONTAINER_ID_FIELDS.
-        let raw = r#"{
-            "mounts": [ "source=vol_0123456789ab_tail,target=/d,type=volume" ],
-            "customizations": { "vscode": { "digest": "0123456789ab" } }
-        }"#;
-        let n = config("dyn", raw, Side::Deacon).unwrap();
+        //
+        // The SHAPE it matches changed with #670: a substituted `${devcontainerId}` is
+        // now the spec's 52 base-32 digits, not a 12-character hex prefix. The scoping
+        // claim below is unchanged and is the reason this test exists — but note the
+        // rule is no longer hiding a DIFFERENCE between the two CLIs, which now agree
+        // on the value; it buys assertability for cases that cannot hardcode a
+        // machine-derived id.
+        const ID: &str = "0uhonu0v70vmigpqqrkg1kqr7ohoam9veqjrfaqt8darhei1toib";
+        let raw = format!(
+            r#"{{
+            "mounts": [ "source=vol_{ID}_tail,target=/d,type=volume" ],
+            "customizations": {{ "vscode": {{ "digest": "{ID}" }} }}
+        }}"#
+        );
+        let n = config("dyn", &raw, Side::Deacon).unwrap();
         assert_eq!(
             n["mounts"][0],
             json!("source=vol_<ID>_tail,target=/d,type=volume"),
@@ -1949,22 +1979,36 @@ mod tests {
         );
         assert_eq!(
             n["customizations"]["vscode"]["digest"],
-            json!("0123456789ab"),
-            "a hex value OUTSIDE the enumerated fields is left alone, so two different \
-             digests still compare unequal"
+            json!(ID),
+            "an id-shaped value OUTSIDE the enumerated fields is left alone, so two \
+             different digests still compare unequal"
+        );
+
+        // A 12-char hex run is no longer an id and must survive even INSIDE an id
+        // field — the shape narrowed, so the blast radius did too.
+        let hex = config(
+            "hex",
+            r#"{ "mounts": [ "source=vol_0123456789ab_tail,target=/d,type=volume" ] }"#,
+            Side::Deacon,
+        )
+        .unwrap();
+        assert_eq!(
+            hex["mounts"][0],
+            json!("source=vol_0123456789ab_tail,target=/d,type=volume"),
+            "12 hex characters are not a devcontainer id any more"
         );
 
         // The masking the narrow rule prevents: two DIFFERENT digests outside the id
         // fields must still diverge.
         let a = config(
             "a",
-            r#"{ "customizations": { "d": "0123456789ab" } }"#,
+            &format!(r#"{{ "customizations": {{ "d": "{ID}" }} }}"#),
             Side::Deacon,
         )
         .unwrap();
         let b = config(
             "b",
-            r#"{ "customizations": { "d": "ffffffffffff" } }"#,
+            r#"{ "customizations": { "d": "1og6o4ofpm4echrl8crv0sf9g2btg2i0hgiq83563kvr5k3cfn27" } }"#,
             Side::Deacon,
         )
         .unwrap();

@@ -183,6 +183,16 @@ pub(crate) async fn execute_up_with_runtime(
     debug!("Starting up command execution");
     debug!("Up args: {:?}", args);
 
+    // Parsed BEFORE the load, because `${devcontainerId}` is resolved during it
+    // and is computed from these labels when they are given (#670). The parse is
+    // pure, so doing it early costs nothing and the later reuse below is the same
+    // value.
+    let parsed_labels = ContainerSelector::parse_labels(&args.id_label).map_err(|err| {
+        DeaconError::Config(deacon_core::errors::ConfigError::Validation {
+            message: err.to_string(),
+        })
+    })?;
+
     // Load configuration with shared resolution (workspace/config/override/secrets)
     let ConfigLoadResult {
         mut config,
@@ -198,6 +208,7 @@ pub(crate) async fn execute_up_with_runtime(
         override_config_path: args.override_config_path.as_deref(),
         secrets_files: &args.secrets_files,
         resolve_devcontainer_id: true,
+        id_labels: &parsed_labels,
     })
     .await?;
 
@@ -423,12 +434,9 @@ pub(crate) async fn execute_up_with_runtime(
             .or_insert_with(|| "true".to_string());
     }
 
-    // T029: Discover id-labels from configuration if not provided via CLI
-    let parsed_labels = ContainerSelector::parse_labels(&args.id_label).map_err(|err| {
-        DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-            message: err.to_string(),
-        })
-    })?;
+    // T029: Discover id-labels from configuration if not provided via CLI.
+    // `parsed_labels` was resolved before the config load (it feeds
+    // `${devcontainerId}` there, #670); this is the same value.
     let discovered_labels =
         discover_id_labels_from_config(&parsed_labels, workspace_folder.as_path(), &config);
     debug!("Discovered id-labels: {:?}", discovered_labels);
@@ -547,7 +555,13 @@ pub(crate) async fn execute_up_with_runtime(
         Some(set) => identity.with_host_ca(HOST_CA_BUNDLE_PATH, &set.subjects),
         None => identity,
     }
-    .with_additional_labels(&discovered_labels);
+    .with_additional_labels(&discovered_labels)
+    // `--id-label` REPLACES the identity set behind `${devcontainerId}`, as it
+    // does in the reference (`spec-node/utils.ts:682-687`); with none given the
+    // default `{local_folder, config_file}` pair stands (#670). Distinct from
+    // `with_additional_labels` above, which decides what is STAMPED — the
+    // reference conflates them only because it carries one list.
+    .with_id_labels(&parsed_labels);
     let workspace_hash = identity.workspace_hash.clone();
 
     // Initialize state manager

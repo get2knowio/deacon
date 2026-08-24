@@ -169,14 +169,24 @@ fn table() -> Vec<Row> {
             expected: diverges_at("name"),
         },
         // The ONLY difference is a dynamic id inside an ENUMERATED id-bearing field
-        // (`mounts`): deacon emits a 12-hex hash where the reference emits the
+        // (`mounts`): one side emits a substituted id where the other emits the
         // `${devcontainerId}` template. Both tokenize to <ID>, so this is not a
-        // divergence.
+        // divergence. The substituted form is 52 base-32 digits since #670 — the
+        // spec's own computation, which both CLIs now produce.
         Row {
             name: "dynamic-id-only",
-            deacon: r#"{ "mounts": ["vol_0123456789ab_data"] }"#,
+            deacon: r#"{ "mounts": ["vol_0uhonu0v70vmigpqqrkg1kqr7ohoam9veqjrfaqt8darhei1toib_data"] }"#,
             reference: r#"{ "configuration": { "mounts": ["vol_${devcontainerId}_data"] } }"#,
             expected: Verdict::Equal,
+        },
+        // The negative twin, and the reason the rewrite is still SCOPED: a run that is
+        // id-SHAPED but sits outside `DEVCONTAINER_ID_FIELDS` is left alone, so two
+        // genuinely different values there still diverge.
+        Row {
+            name: "id-shaped-run-outside-an-id-field-is-compared",
+            deacon: r#"{ "name": "x", "image": "img:0uhonu0v70vmigpqqrkg1kqr7ohoam9veqjrfaqt8darhei1toib" }"#,
+            reference: r#"{ "configuration": { "name": "x", "image": "img:1og6o4ofpm4echrl8crv0sf9g2btg2i0hgiq83563kvr5k3cfn27" } }"#,
+            expected: diverges_at("image"),
         },
         // …but a 12-hex run OUTSIDE the enumerated id fields is NOT collapsed, so two
         // genuinely different digests still diverge (023 T063).

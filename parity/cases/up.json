@@ -5224,6 +5224,59 @@
         "tempdir": true
       },
       "notes": "A `--mount` argument is CSV, so a value holding a comma must be quoted — and an author may write that form directly, as Docker's own documentation does. The reference forwards an authored mount string verbatim; deacon parses and re-emits it, so its parser has to understand what Docker accepts, and #663 is the defect where it did not: `up` exited 1 with `bind mount requires a source` against a string the reference mounted fine. The assertion reads the directory INSIDE the container rather than the outcome, because a mount silently dropped on the way out would still report success. The other half of #663 — a comma in the WORKSPACE path, which broke `up` outright — is not expressible here: the workspace directory's name is the harness's to choose, not the case's, so it is carried by `integration_up_worktree_mounts::up_starts_in_a_workspace_whose_path_contains_a_comma`."
+    },
+    {
+      "id": "case-up-devcontainer-id-spec-value",
+      "behaviors": [
+        "bhv-up-devcontainer-id-spec-computation"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--id-label",
+            "foo=bar"
+          ],
+          "fixtures": [
+            "fx-up-devcontainer-id-spec-value"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-file-content",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "devcontainer-id.txt": "id=[0uhonu0v70vmigpqqrkg1kqr7ohoam9veqjrfaqt8darhei1toib]\n"
+            }
+          }
+        }
+      ],
+      "fsAllowlist": [
+        "devcontainer-id.txt"
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`${devcontainerId}` is the SPEC's own computation over the container's id-labels — a SHA-256 rendered base-32 and left-padded to 52 digits (`devcontainer-id-variable.md:44-68`) — and `--id-label` REPLACES the default `{local_folder, config_file}` pair as the input to it (`spec-node/utils.ts:682-687`). deacon emitted a 12-character BLAKE3 prefix that ignored `--id-label` entirely ([#670](https://github.com/get2knowio/deacon/issues/670), [#672](https://github.com/get2knowio/deacon/issues/672)).\n\n**`--id-label foo=bar` is what makes this case possible at all, and it is worth understanding why.** The id is a hash of the id-labels, and the DEFAULT labels contain the workspace path — which the runner makes per-side and per-run. So the default shape produces a genuinely different id on each side, and no normalizer token can bridge it: the value is a digest OF the thing the token would rewrite. With `--id-label` the input is two literal strings, the id is a machine-independent CONSTANT, and the case can assert it absolutely. That constant was MEASURED against oracle 0.87.0 — it is the reference's output, not deacon's own computation echoed back — which is what makes this an assertion about parity rather than a tautology.\n\n**Observed through a FILE rather than the result document, deliberately.** The normalizer's `devcontainer_id_token` rule rewrites any id-shaped run to `<ID>` inside `configuration`/`mergedConfiguration`, so a `chan-structured-output` assertion on this variable can pin its PRESENCE but never its VALUE — the trap the `case-set-up-substitution-scope` notes recorded when the id was still 12 hex characters. A `postCreateCommand` writing the substituted value into a bind-mounted file puts it on a channel that compares raw bytes. The fixture pins `workspaceFolder: /work` with a matching `workspaceMount` so the hook writes to an absolute host-visible path, rather than to a per-side `/workspaces/<basename>` the two CLIs need not agree on.\n\nThe hook is also a sharper probe than it looks: the value is substituted HOST-side, so if substitution failed the container shell would receive the literal `${devcontainerId}`, expand the unset name to empty, and write `id=[]` — a visible failure rather than a silent one.\n\nWhat this case CANNOT reach, recorded so the gap is deliberate: the default `{local_folder, config_file}` label set, for the path reason above. That half is carried by unit tests (`the_id_labels_are_the_workspace_and_config_paths_alone`, which also pins the spec's stability MUST by editing the configuration and requiring the id not to move) and by a direct measurement recorded on the issue: on one shared workspace both CLIs produced `157p2d57rcuei8mjomedb8jm89v2nemrk78ve69rrdvu4g892ouf` in `containerEnv` and in a `${devcontainerId}`-named volume.\n\n**There is deliberately NO `live-differential` twin, and the reason is a harness invariant rather than a preference.** A successful Docker `up` must leave a container discoverable by `devcontainer.local_folder=<workspace>` — `runner.rs`'s `require_observed_container`, which exists so a case that observed nothing can never pass vacuously. `--id-label` REPLACES that label, so the very flag that makes this case's expectation machine-independent also makes its container undiscoverable, and a twin was written, run, and removed after it failed on exactly that guard. The guard is right and the case is right; they are simply incompatible, and teaching the harness to discover by a case's own declared id-labels is harness surgery that belongs to its own change.\n\nThe COST of having no twin is worth stating plainly, because it is the one soft spot here: the expected value is a hard-coded digest measured against oracle 0.87.0, and nothing in the nightly lane will notice if upstream changes its id-label set or its computation. It is cheap to re-verify by hand — `devcontainer up --id-label foo=bar` on this fixture prints it — and the derivation is recorded on [#670](https://github.com/get2knowio/deacon/issues/670) in full, including a twelve-line reproduction of the algorithm. Re-measure it at the next oracle bump.\n\nMined from the reference CLI's own unit suite at v0.87.0, `src/test/variableSubstitution.test.ts` ([#480](https://github.com/get2knowio/deacon/issues/480) batch 16)."
     }
   ]
 }

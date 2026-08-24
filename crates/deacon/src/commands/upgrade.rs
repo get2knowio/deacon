@@ -98,6 +98,8 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
         override_config_path: args.override_config.as_deref(),
         secrets_files: &[],
         resolve_devcontainer_id: true,
+        // `upgrade` has no `--id-label`; the default pair is the answer.
+        id_labels: &[],
     })
     .await?;
     let config_path = initial.config_path.clone();
@@ -126,6 +128,7 @@ pub async fn execute_upgrade(args: UpgradeArgs) -> Result<()> {
             override_config_path: args.override_config.as_deref(),
             secrets_files: &[],
             resolve_devcontainer_id: true,
+            id_labels: &[],
         })
         .await?
         .config

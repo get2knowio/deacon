@@ -12,12 +12,12 @@
 //! - `${localEnv:VAR}` / `${localEnv:VAR:default}` - Host env var with optional default.
 //!   The default is the FIRST segment after the name; anything past it is discarded.
 //! - `${env:VAR}` / `${env:VAR:default}` - Alias for `localEnv:` per upstream spec
-//! - `${devcontainerId}` - Deterministic id over the container's identity labels
-//!   ([`crate::container::compute_dev_container_id`]): the first 12 hex characters of a
-//!   BLAKE3 hash. The spec permits an implementation to choose its own computation, but
-//!   describes one specifically so that implementations agree; the reference CLI uses that
-//!   one (base-32 SHA-256, 52 characters) and deacon's value therefore differs from it —
-//!   see <https://github.com/get2knowio/deacon/issues/670>.
+//! - `${devcontainerId}` - The spec's own computation over the container's identity
+//!   labels ([`crate::container::compute_dev_container_id`]): a SHA-256 rendered base-32
+//!   and left-padded to 52 digits. Byte-identical to the reference CLI's value, which is
+//!   the point of the spec describing a computation at all — the variable names durable
+//!   resources such as volumes, so two implementations that disagree split a workspace's
+//!   state (#670, #672).
 //! - `${containerWorkspaceFolder}` - Container workspace path (available after container start)
 //! - `${containerWorkspaceFolderBasename}` - Basename of the container workspace path
 //! - `${containerEnv:VAR}` / `${containerEnv:VAR:default}` - Container env var with optional default
@@ -228,20 +228,41 @@ impl SubstitutionContext {
         })
     }
 
-    /// Generate a deterministic devcontainer ID from workspace path
+    /// The `${devcontainerId}` a context starts with when nobody has told it the
+    /// container's id-labels: the spec computation over the workspace label alone.
     ///
-    /// Uses SHA256 hash of the canonical workspace path and returns the first 12 characters
-    /// for a compact, deterministic identifier.
+    /// **This used to be a different algorithm entirely** — a `DefaultHasher` of
+    /// the workspace path string, truncated to 12 hex characters — and because
+    /// the config loader resolves the token at load time, it was the value users
+    /// actually saw, while [`crate::container::compute_dev_container_id`] reached
+    /// only Feature-declared mounts. Two implementations of one token, disagreeing
+    /// ([#670]). `DefaultHasher` also carries no stability guarantee across Rust
+    /// releases, so that value could change under a rebuild of deacon itself,
+    /// which is the one thing the spec REQUIRES of this id.
+    ///
+    /// Callers that know the real id-labels replace this via
+    /// [`Self::set_devcontainer_id_from_labels`] — the loader does it for every
+    /// `up`/`exec`/`build` invocation, from `{local_folder, config_file}` or the
+    /// caller's `--id-label` pairs. What is left here is the fallback for a
+    /// context built with nothing but a workspace path, and it is at least the
+    /// same algorithm over a smaller label set rather than a second one.
+    ///
+    /// [#670]: https://github.com/get2knowio/deacon/issues/670
     fn generate_devcontainer_id(workspace_path: &str) -> String {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        crate::container::compute_dev_container_id(&[(
+            crate::container::LABEL_LOCAL_FOLDER.to_string(),
+            workspace_path.to_string(),
+        )])
+    }
 
-        let mut hasher = DefaultHasher::new();
-        workspace_path.hash(&mut hasher);
-        let hash = hasher.finish();
-
-        // Convert to hex and take first 12 characters for deterministic ID
-        format!("{:016x}", hash)[..12].to_string()
+    /// Set `${devcontainerId}` from the container's id-labels, which is the only
+    /// input the spec's computation takes (`devcontainer-id-variable.md:44-68`).
+    ///
+    /// Mirrors the reference's `beforeContainerSubstitute` pass: the id is known
+    /// once the id-labels are, which is before the container exists but after the
+    /// workspace and config file are resolved.
+    pub fn set_devcontainer_id_from_labels(&mut self, id_labels: &[(String, String)]) {
+        self.devcontainer_id = crate::container::compute_dev_container_id(id_labels);
     }
 
     /// Set container workspace folder path for in-container variable substitution
@@ -770,8 +791,8 @@ mod tests {
         // Should have environment variables
         assert!(!context.local_env.is_empty());
 
-        // Should have deterministic devcontainer ID
-        assert_eq!(context.devcontainer_id.len(), 12);
+        // Should have deterministic devcontainer ID, in the spec's shape (#670)
+        assert_eq!(context.devcontainer_id.len(), 52);
 
         // ID should be deterministic
         let context2 = SubstitutionContext::new(temp_dir.path())?;
@@ -807,7 +828,8 @@ mod tests {
         let result = VariableSubstitution::substitute_string(input, &context, &mut report);
 
         assert!(result.starts_with("container-"));
-        assert_eq!(result.len(), "container-".len() + 12); // 12-char ID
+        // 52 base-32 digits, per `devcontainer-id-variable.md:44-68` (#670).
+        assert_eq!(result.len(), "container-".len() + 52);
         assert!(report.replacements.contains_key("devcontainerId"));
 
         Ok(())
@@ -1227,15 +1249,15 @@ mod tests {
         // IDs should be identical for the same path
         assert_eq!(context1.devcontainer_id, context2.devcontainer_id);
 
-        // ID should be 12 characters
-        assert_eq!(context1.devcontainer_id.len(), 12);
+        // ID should be 52 base-32 digits (#670)
+        assert_eq!(context1.devcontainer_id.len(), 52);
 
-        // ID should be hexadecimal
+        // ID should be in the base-32 alphabet `0-9a-v`, NOT hexadecimal
         assert!(
             context1
                 .devcontainer_id
-                .chars()
-                .all(|c| c.is_ascii_hexdigit())
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'v').contains(&b))
         );
 
         Ok(())

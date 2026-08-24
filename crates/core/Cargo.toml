@@ -43,7 +43,6 @@ num_cpus = "1.0"
 directories-next = "2.0"
 bytesize = "2.0.1"
 semver = "1.0"
-blake3 = "1"
 futures = "0.3"
 # Advisory file locking for the host-global port-forward registry (cross-platform API).
 fs2.workspace = true

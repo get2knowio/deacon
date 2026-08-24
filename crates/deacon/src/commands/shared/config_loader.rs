@@ -33,6 +33,14 @@ pub struct ConfigLoadArgs<'a> {
     /// `read-configuration` passes `false` so the token stays literal in its
     /// pre-container output, matching the reference CLI.
     pub resolve_devcontainer_id: bool,
+    /// The caller's `--id-label` pairs, empty when none were given.
+    ///
+    /// `${devcontainerId}` is computed from the container's ID-LABELS, and this
+    /// is the pass that resolves the token for every runtime caller, so the
+    /// labels have to arrive with the load rather than be recovered afterwards
+    /// (#670). Empty means the default `{local_folder, config_file}` pair, which
+    /// is what the reference falls back to.
+    pub id_labels: &'a [(String, String)],
 }
 
 /// Loaded configuration and supporting context.
@@ -125,6 +133,7 @@ pub async fn load_config(args: ConfigLoadArgs<'_>) -> Result<ConfigLoadResult> {
             secrets.as_ref(),
             &workspace_folder,
             args.resolve_devcontainer_id,
+            args.id_labels,
         )
         .await?;
 
@@ -161,6 +170,7 @@ mod tests {
             override_config_path: Some(override_path.as_path()),
             secrets_files: &[],
             resolve_devcontainer_id: true,
+            id_labels: &[],
         })
         .await
         .unwrap();
@@ -198,6 +208,7 @@ mod tests {
             override_config_path: Some(override_path.as_path()),
             secrets_files: &[],
             resolve_devcontainer_id: true,
+            id_labels: &[],
         })
         .await
         .unwrap();
@@ -230,6 +241,7 @@ mod tests {
             override_config_path: Some(override_path.as_path()),
             secrets_files: &[],
             resolve_devcontainer_id: true,
+            id_labels: &[],
         })
         .await
         .unwrap();
@@ -252,6 +264,7 @@ mod tests {
             override_config_path: None,
             secrets_files: &[],
             resolve_devcontainer_id: true,
+            id_labels: &[],
         })
         .await
         .unwrap_err();
@@ -290,6 +303,7 @@ mod tests {
             override_config_path: None,
             secrets_files: &[],
             resolve_devcontainer_id: true,
+            id_labels: &[],
         })
         .await
         .unwrap();
@@ -330,6 +344,7 @@ mod tests {
             override_config_path: None,
             secrets_files: &[],
             resolve_devcontainer_id: true,
+            id_labels: &[],
         })
         .await
         .unwrap();
@@ -354,6 +369,7 @@ mod tests {
             override_config_path: None,
             secrets_files: &[],
             resolve_devcontainer_id: true,
+            id_labels: &[],
         })
         .await
         .unwrap_err();

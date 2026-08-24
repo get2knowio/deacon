@@ -519,6 +519,11 @@ where
             }
         }
 
+        // `${devcontainerId}` is resolved during the load below and computed from
+        // the caller's id-labels when given (#670).
+        let exec_id_labels =
+            deacon_core::container::ContainerSelector::parse_labels(&args.id_label)?;
+
         let mut resolved_config: Option<ConfigLoadResult> = None;
 
         if needs_workspace_context {
@@ -531,6 +536,7 @@ where
                     override_config_path: args.override_config_path.as_deref(),
                     secrets_files: &args.secrets_files,
                     resolve_devcontainer_id: true,
+                    id_labels: &exec_id_labels,
                 })
                 .await
                 .map_err(map_config_error)?,

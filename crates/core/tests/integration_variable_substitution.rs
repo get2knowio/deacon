@@ -75,7 +75,13 @@ async fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
     assert!(workspace_root.starts_with(workspace_canon_str));
 
     let container_id = config.container_env().get("CONTAINER_ID").unwrap();
-    assert_eq!(container_id.len(), 12); // Should be 12-character deterministic ID
+    // 52 base-32 digits, the spec's own computation (#670).
+    assert_eq!(container_id.len(), 52);
+    assert!(
+        container_id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'v').contains(&b))
+    );
 
     // Check host USER environment variable (if set)
     if let Ok(host_user) = env::var("USER") {
