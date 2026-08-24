@@ -6,11 +6,18 @@
 //!
 //! ## Supported Variables
 //!
-//! - `${localWorkspaceFolder}` - Canonical workspace path
+//! - `${localWorkspaceFolder}` - The workspace path as the caller named it (absolutized,
+//!   never canonicalized — see [`crate::workspace::absolutize`])
 //! - `${localWorkspaceFolderBasename}` - Basename of the workspace path
-//! - `${localEnv:VAR}` / `${localEnv:VAR:default}` - Host env var with optional default
+//! - `${localEnv:VAR}` / `${localEnv:VAR:default}` - Host env var with optional default.
+//!   The default is the FIRST segment after the name; anything past it is discarded.
 //! - `${env:VAR}` / `${env:VAR:default}` - Alias for `localEnv:` per upstream spec
-//! - `${devcontainerId}` - Deterministic hash ID (first 12 chars of SHA256 of workspace path)
+//! - `${devcontainerId}` - Deterministic id over the container's identity labels
+//!   ([`crate::container::compute_dev_container_id`]): the first 12 hex characters of a
+//!   BLAKE3 hash. The spec permits an implementation to choose its own computation, but
+//!   describes one specifically so that implementations agree; the reference CLI uses that
+//!   one (base-32 SHA-256, 52 characters) and deacon's value therefore differs from it —
+//!   see <https://github.com/get2knowio/deacon/issues/670>.
 //! - `${containerWorkspaceFolder}` - Container workspace path (available after container start)
 //! - `${containerWorkspaceFolderBasename}` - Basename of the container workspace path
 //! - `${containerEnv:VAR}` / `${containerEnv:VAR:default}` - Container env var with optional default
@@ -258,6 +265,37 @@ impl SubstitutionContext {
     /// Add a single feature variable
     pub fn add_feature_var(&mut self, key: String, value: String) {
         self.feature_vars.insert(key, value);
+    }
+
+    /// Seed `${containerWorkspaceFolder}` from the config's authored
+    /// `workspaceFolder`, RESOLVING it first if it is itself a template.
+    ///
+    /// This is the reference CLI's own prologue: `substitute()` resolves
+    /// `context.containerWorkspaceFolder` against the context being built before
+    /// it substitutes the document, so an authored
+    /// `"workspaceFolder": "/baz/${localWorkspaceFolderBasename}"` makes every
+    /// later `${containerWorkspaceFolder}` expand to `/baz/red` rather than
+    /// surviving as a literal (`spec-common/variableSubstitution.ts:30-32`, with
+    /// a test at `src/test/variableSubstitution.test.ts:60`).
+    ///
+    /// Both callers previously refused to seed a value containing `${`, which
+    /// left the token literal everywhere for exactly the common idiom
+    /// `"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}"` (#669).
+    ///
+    /// An empty or whitespace-only value is still ignored: it is not a folder,
+    /// and answering the token with `""` would be worse than deferring it.
+    /// Resolution is single-pass and deliberately non-recursive, so a
+    /// self-referential `${containerWorkspaceFolder}` inside `workspaceFolder`
+    /// stays literal instead of looping.
+    pub fn seed_container_workspace_folder(&mut self, authored: &str) {
+        if authored.trim().is_empty() {
+            return;
+        }
+        let mut report = SubstitutionReport::default();
+        let resolved = VariableSubstitution::substitute_string(authored, self, &mut report);
+        if !resolved.trim().is_empty() {
+            self.container_workspace_folder = Some(resolved);
+        }
     }
 }
 
@@ -592,16 +630,24 @@ impl VariableSubstitution {
 }
 
 /// Split an env-variable lookup body of the form `VAR` or `VAR:default` into
-/// the variable name and an optional fallback. The default may itself contain
-/// colons; only the *first* colon separates the name from the default.
+/// the variable name and an optional fallback.
 ///
-/// Per upstream containers.dev, both `${localEnv:VAR:fallback}` and
-/// `${env:VAR:fallback}` resolve via this rule.
+/// Colons are separators all the way down, and anything past the default is
+/// DISCARDED — `${localEnv:VAR:default:a:b:c}` falls back to `default`, not to
+/// `default:a:b:c`. That is the reference CLI's rule: it splits the whole token
+/// on `:`, treats `parts[0]` as the variable and `parts[1..]` as arguments, and
+/// `lookupValue` reads only `args[0]` (the name) and `args[1]` (the default)
+/// (`spec-common/variableSubstitution.ts:85-89` and `:137-155`, with an explicit
+/// test at `src/test/variableSubstitution.test.ts:122`). The spec documents no
+/// `:default` suffix at all, so on this surface the reference is the authority
+/// (#668).
+///
+/// Both `${localEnv:VAR:fallback}` and `${env:VAR:fallback}` resolve via this
+/// rule, as does `${containerEnv:VAR:fallback}`.
 fn split_env_default(body: &str) -> (&str, Option<&str>) {
-    match body.split_once(':') {
-        Some((name, default)) => (name, Some(default)),
-        None => (body, None),
-    }
+    let mut parts = body.split(':');
+    let name = parts.next().unwrap_or("");
+    (name, parts.next())
 }
 
 /// Resolve `${localEnv:VAR}` / `${env:VAR}` (with optional default) against
@@ -931,6 +977,111 @@ mod tests {
             &mut report,
         );
         assert_eq!(set, "real-value");
+        Ok(())
+    }
+
+    /// Colons are separators all the way down: everything past the default is
+    /// discarded, on all three env families ([#668]). The reference's own test
+    /// for this asserts `${localEnv:baz:default:a:b:c}` → `default`
+    /// (`src/test/variableSubstitution.test.ts:122`).
+    ///
+    /// [#668]: https://github.com/get2knowio/deacon/issues/668
+    #[test]
+    fn a_default_stops_at_the_next_colon() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let mut context = SubstitutionContext::new(temp_dir.path())?;
+        context.local_env.remove("DEACON_TEST_MULTI_COLON");
+        context.container_env = Some(HashMap::new());
+        let mut report = SubstitutionReport::new();
+
+        for token in [
+            "${localEnv:DEACON_TEST_MULTI_COLON:default:a:b:c}",
+            "${env:DEACON_TEST_MULTI_COLON:default:a:b:c}",
+            "${containerEnv:DEACON_TEST_MULTI_COLON:default:a:b:c}",
+        ] {
+            assert_eq!(
+                VariableSubstitution::substitute_string(token, &context, &mut report),
+                "default",
+                "{token} must fall back to the first default segment alone"
+            );
+        }
+
+        // The neighbours that already agreed, kept as control arms so a fix that
+        // simply dropped everything after the first colon would not pass.
+        assert_eq!(
+            VariableSubstitution::substitute_string(
+                "${localEnv:DEACON_TEST_MULTI_COLON:default}",
+                &context,
+                &mut report
+            ),
+            "default"
+        );
+        assert_eq!(
+            VariableSubstitution::substitute_string(
+                "${localEnv:DEACON_TEST_MULTI_COLON:}",
+                &context,
+                &mut report
+            ),
+            "",
+            "an empty default segment is still a default"
+        );
+        Ok(())
+    }
+
+    /// An authored `workspaceFolder` that is itself a template is resolved
+    /// before it seeds `${containerWorkspaceFolder}` ([#669]) — the reference's
+    /// `substitute()` prologue (`spec-common/variableSubstitution.ts:30-32`).
+    ///
+    /// [#669]: https://github.com/get2knowio/deacon/issues/669
+    #[test]
+    fn a_templated_workspace_folder_is_resolved_before_it_seeds_the_context() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path().join("red");
+        std::fs::create_dir_all(&workspace)?;
+        let mut context = SubstitutionContext::new(&workspace)?;
+        context.seed_container_workspace_folder("/baz/${localWorkspaceFolderBasename}");
+        assert_eq!(
+            context.container_workspace_folder.as_deref(),
+            Some("/baz/red")
+        );
+
+        let mut report = SubstitutionReport::new();
+        assert_eq!(
+            VariableSubstitution::substitute_string(
+                "${containerWorkspaceFolder}|${containerWorkspaceFolderBasename}",
+                &context,
+                &mut report
+            ),
+            "/baz/red|red"
+        );
+        Ok(())
+    }
+
+    /// The seeding rule's edges: a literal value is seeded verbatim, and a value
+    /// that is empty — authored empty, or resolving to empty — is NOT seeded, so
+    /// the token defers to a later container-aware pass rather than being
+    /// answered with nothing.
+    #[test]
+    fn seeding_ignores_a_value_that_is_not_a_folder() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let mut context = SubstitutionContext::new(temp_dir.path())?;
+        context.local_env.remove("DEACON_TEST_NO_SUCH_FOLDER");
+
+        context.seed_container_workspace_folder("/plain/folder");
+        assert_eq!(
+            context.container_workspace_folder.as_deref(),
+            Some("/plain/folder")
+        );
+
+        context.container_workspace_folder = None;
+        for authored in ["", "   ", "${localEnv:DEACON_TEST_NO_SUCH_FOLDER}"] {
+            context.seed_container_workspace_folder(authored);
+            assert_eq!(
+                context.container_workspace_folder, None,
+                "{authored:?} is not a folder and must not answer the token"
+            );
+        }
         Ok(())
     }
 

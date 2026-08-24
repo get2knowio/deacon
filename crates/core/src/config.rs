@@ -3364,12 +3364,11 @@ impl ConfigLoader {
         // pass during `up` (derived from the real mount target), so we don't
         // bake a wrong default here.
         if let Some(ref wf) = merged.workspace_folder {
-            // Only seed from a literal folder; if it carries its own `${...}`
-            // template, defer to the container-aware pass rather than seeding a
-            // template that would leak into `${containerWorkspaceFolder}`.
-            if !wf.trim().is_empty() && !wf.contains("${") {
-                substitution_context.container_workspace_folder = Some(wf.clone());
-            }
+            // A templated `workspaceFolder` is RESOLVED and then seeded, not
+            // skipped — the reference resolves this one value before it
+            // substitutes the document (#669). See
+            // `SubstitutionContext::seed_container_workspace_folder`.
+            substitution_context.seed_container_workspace_folder(wf);
         }
 
         // Add secrets to local environment for substitution

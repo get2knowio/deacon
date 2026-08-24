@@ -1076,3 +1076,121 @@ fn a_symlinked_workspace_is_reported_under_the_path_that_was_named() -> Result<(
     );
     Ok(())
 }
+
+/// #668: colons are separators all the way down. deacon split the env-lookup body on the
+/// FIRST colon only, so `${localEnv:NAME:default:a:b:c}` fell back to `default:a:b:c`.
+/// The reference splits the whole token and reads only the name and the first default
+/// (`spec-common/variableSubstitution.ts:85-89`, `:137-155`), with an explicit test at
+/// `src/test/variableSubstitution.test.ts:122`. Measured against oracle 0.87.0, whose
+/// output for this fixture is now byte-identical to deacon's.
+#[test]
+fn an_env_default_stops_at_the_next_colon() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+            "image": "alpine:3.19",
+            "containerEnv": {
+                "MULTI": "[${localEnv:DEACON_NO_SUCH_VAR_B16:default:a:b:c}]",
+                "MULTI_ALIAS": "[${env:DEACON_NO_SUCH_VAR_B16:default:a:b:c}]",
+                "SINGLE": "[${localEnv:DEACON_NO_SUCH_VAR_B16:default}]",
+                "NONE": "[${localEnv:DEACON_NO_SUCH_VAR_B16}]",
+                "EMPTY_NAME": "[${localEnv:}]"
+            }
+        }"#,
+    )?;
+
+    let env = &helper.run_with_workspace(&[])?["configuration"]["containerEnv"];
+
+    assert_eq!(env["MULTI"], "[default]");
+    assert_eq!(env["MULTI_ALIAS"], "[default]");
+    // The neighbours, as control arms: a fix that discarded the default entirely, or that
+    // stopped honouring defaults at all, would fail here rather than pass quietly.
+    assert_eq!(env["SINGLE"], "[default]");
+    assert_eq!(env["NONE"], "[]");
+    assert_eq!(env["EMPTY_NAME"], "[]");
+    Ok(())
+}
+
+/// #669: an authored `workspaceFolder` that is itself a template seeds
+/// `${containerWorkspaceFolder}` with its RESOLVED value. deacon refused to seed anything
+/// containing `${`, so the token survived as a literal for exactly the common idiom
+/// `"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}"`. The reference
+/// resolves that one value before substituting the document
+/// (`spec-common/variableSubstitution.ts:30-32`, tested at
+/// `src/test/variableSubstitution.test.ts:60`).
+#[test]
+fn a_templated_workspace_folder_answers_container_workspace_folder() -> Result<()> {
+    let helper = ReadConfigurationTestHelper::new()?;
+    helper.create_config(
+        r#"{
+            "image": "alpine:3.19",
+            "workspaceFolder": "/baz/${localWorkspaceFolderBasename}",
+            "containerEnv": {
+                "CWF": "[${containerWorkspaceFolder}]",
+                "CWFB": "[${containerWorkspaceFolderBasename}]"
+            }
+        }"#,
+    )?;
+    let basename = helper
+        .temp_dir()
+        .file_name()
+        .expect("temp dir has a basename")
+        .to_string_lossy()
+        .into_owned();
+
+    let configuration = helper.run_with_workspace(&[])?["configuration"].clone();
+
+    assert_eq!(
+        configuration["workspaceFolder"],
+        Value::String(format!("/baz/{basename}")),
+        "the field itself was already substituted before this fix — it is the CONTEXT that was not"
+    );
+    assert_eq!(
+        configuration["containerEnv"]["CWF"],
+        Value::String(format!("[/baz/{basename}]"))
+    );
+    assert_eq!(
+        configuration["containerEnv"]["CWFB"],
+        Value::String(format!("[{basename}]"))
+    );
+    Ok(())
+}
+
+/// The two control arms for #669, which both already matched the reference and must keep
+/// matching: a literal `workspaceFolder` is seeded verbatim, and an unauthored one falls
+/// back to the container-side default `/workspaces/<basename>`. Without these, "seed
+/// whatever is authored, resolved or not" and "always use the default" would both pass the
+/// test above.
+#[test]
+fn the_untemplated_workspace_folder_shapes_are_unchanged() -> Result<()> {
+    let literal = ReadConfigurationTestHelper::new()?;
+    literal.create_config(
+        r#"{"image": "alpine:3.19",
+            "workspaceFolder": "/baz/plain",
+            "containerEnv": {"CWF": "[${containerWorkspaceFolder}]",
+                             "CWFB": "[${containerWorkspaceFolderBasename}]"}}"#,
+    )?;
+    let env = &literal.run_with_workspace(&[])?["configuration"]["containerEnv"];
+    assert_eq!(env["CWF"], "[/baz/plain]");
+    assert_eq!(env["CWFB"], "[plain]");
+
+    let unauthored = ReadConfigurationTestHelper::new()?;
+    unauthored.create_config(
+        r#"{"image": "alpine:3.19",
+            "containerEnv": {"CWF": "[${containerWorkspaceFolder}]",
+                             "CWFB": "[${containerWorkspaceFolderBasename}]"}}"#,
+    )?;
+    let basename = unauthored
+        .temp_dir()
+        .file_name()
+        .expect("temp dir has a basename")
+        .to_string_lossy()
+        .into_owned();
+    let env = &unauthored.run_with_workspace(&[])?["configuration"]["containerEnv"];
+    assert_eq!(
+        env["CWF"],
+        Value::String(format!("[/workspaces/{basename}]"))
+    );
+    assert_eq!(env["CWFB"], Value::String(format!("[{basename}]")));
+    Ok(())
+}

@@ -2016,8 +2016,10 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                     ctx.resolve_devcontainer_id = false;
                     // Mirror the shared loader (fix #4) + Divergence A seam.
                     match raw.workspace_folder.as_deref() {
-                        Some(wf) if !wf.trim().is_empty() && !wf.contains("${") => {
-                            ctx.container_workspace_folder = Some(wf.to_string());
+                        // A templated value is resolved and then seeded, not
+                        // skipped (#669) — same rule as the shared loader.
+                        Some(wf) => {
+                            ctx.seed_container_workspace_folder(wf);
                         }
                         None => {
                             ctx.container_workspace_folder =
@@ -2027,7 +2029,6 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
                                     args.mount_workspace_git_root,
                                 ));
                         }
-                        _ => {}
                     }
                     if let Some(secrets) = &secrets {
                         for (key, value) in secrets.as_env_vars() {

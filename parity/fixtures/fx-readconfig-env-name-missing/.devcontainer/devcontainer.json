@@ -1,0 +1,9 @@
+{
+  "name": "ConformanceReadConfigEnvNameMissing",
+  "image": "alpine:3.19",
+  "containerEnv": {
+    "BARE_LOCAL": "[${localEnv}]",
+    "BARE_ALIAS": "[${env}]",
+    "BARE_CONTAINER": "[${containerEnv}]"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "ConformanceReadConfigEnvDefaultMultiColon",
+  "image": "alpine:3.19",
+  "containerEnv": {
+    "MULTI": "[${localEnv:DEACON_PARITY_NO_SUCH_VAR:default:a:b:c}]",
+    "MULTI_ALIAS": "[${env:DEACON_PARITY_NO_SUCH_VAR:default:a:b:c}]",
+    "SINGLE": "[${localEnv:DEACON_PARITY_NO_SUCH_VAR:default}]",
+    "NONE": "[${localEnv:DEACON_PARITY_NO_SUCH_VAR}]",
+    "EMPTY_NAME": "[${localEnv:}]"
+  }
+}

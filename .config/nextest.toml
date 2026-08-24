@@ -371,6 +371,17 @@ status-level = "none"
 # Exclude them here so even the "full" lane is truthful by non-selection (FR-014).
 default-filter = 'not (binary(=parity_differential))'
 
+# `parity_docker`'s two group tests each drive every Docker-backed case in their tier as ONE
+# test, so the blanket 90s above terminates a lane that is working: measured at 107s here for
+# `docker_group_shared` with every fixture image pre-pulled and the daemon otherwise idle.
+# The `ci` profile's 120s is no less arbitrary — it just happens to sit on the other side of
+# the number. Give it the same headroom the other Docker-heavy binaries get, so
+# `make test-nextest` (the documented pre-PR gate) fails on parity DIVERGENCES rather than on
+# how many containers a tier happens to create.
+[[profile.full.overrides]]
+filter = 'binary(=parity_docker)'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
 
 [profile.long-running]
 retries = 0
