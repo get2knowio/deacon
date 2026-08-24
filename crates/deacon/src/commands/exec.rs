@@ -732,23 +732,30 @@ where
             debug!("Using working directory from CLI: {}", cli_workdir);
             cli_workdir.clone()
         } else {
-            match resolved_config.as_ref() {
-                Some(config_ctx) => {
-                    // Prefer the running container's ACTUAL workspace bind-mount
-                    // (flag-independent, matches where `up` mounted) over host-side
-                    // re-derivation; for a Compose config without an explicit
-                    // workspaceFolder this resolves to `/` (the reference default,
-                    // a valid chdir target) instead of the single-container
-                    // `/workspaces/<basename>` the Compose service never mounts.
-                    crate::commands::shared::resolve_container_cwd(
-                        &config_ctx.config,
-                        config_ctx.workspace_folder.as_path(),
-                        &resolved_container_mounts,
-                        args.mount_workspace_git_root,
-                    )
-                }
+            // Prefer the running container's ACTUAL workspace bind-mount
+            // (flag-independent, matches where `up` mounted) over host-side
+            // re-derivation; for a Compose config without an explicit
+            // workspaceFolder this resolves to `/` (the reference default,
+            // a valid chdir target) instead of the single-container
+            // `/workspaces/<basename>` the Compose service never mounts.
+            //
+            // A config that resolves to no workspace at all takes the SAME home-folder
+            // branch as having no config — the container was not created for this
+            // workspace, so `/workspaces/<basename>` names nothing and the exec dies
+            // with rc 127 (#655). That is what makes the `|| homeFolder` half of the
+            // rule above reachable: it used to be unreachable whenever a config existed.
+            let from_config = resolved_config.as_ref().and_then(|config_ctx| {
+                crate::commands::shared::resolve_container_cwd(
+                    &config_ctx.config,
+                    config_ctx.workspace_folder.as_path(),
+                    &resolved_container_mounts,
+                    args.mount_workspace_git_root,
+                )
+            });
+            match from_config {
+                Some(folder) => folder,
                 None => {
-                    debug!("No config context; resolving home folder as cwd");
+                    debug!("No container workspace folder; resolving home folder as cwd");
                     deacon_core::container_env_probe::resolve_home_folder(
                         docker_client,
                         &container_id,

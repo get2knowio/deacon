@@ -166,7 +166,7 @@ pub struct ContainerResolvedConfig {
 /// `devcontainer.local_folder`. Values are NOT compared: with `--container-id`
 /// the reference never compares them either (measured), and when discovery went
 /// by label they matched by construction.
-fn carries_workspace_identity_labels(container: &ContainerInfo) -> bool {
+pub fn carries_workspace_identity_labels(container: &ContainerInfo) -> bool {
     container
         .labels
         .get(deacon_core::container::LABEL_LOCAL_FOLDER)

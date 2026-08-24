@@ -251,11 +251,28 @@ pub enum SourceInformation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceConfig {
-    /// Resolved workspace folder path (container path after substitution)
-    pub workspace_folder: String,
+    /// Resolved workspace folder path (container path after substitution).
+    ///
+    /// `None` — serializing the whole block as `{}` — is the answer when a container
+    /// selector named the target and no `--workspace-folder` did (#659). There is no
+    /// workspace in that mode, and the reference reports exactly that; deriving one
+    /// from the `--config` path would report a bind mount for a directory nobody asked
+    /// to mount, against a container that does not have it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_folder: Option<String>,
     /// Workspace mount specification (if applicable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_mount: Option<String>,
+}
+
+impl WorkspaceConfig {
+    /// The block for an invocation that named no workspace: serializes as `{}`.
+    fn unnamed() -> Self {
+        Self {
+            workspace_folder: None,
+            workspace_mount: None,
+        }
+    }
 }
 
 /// Output payload structure for read-configuration command
@@ -387,7 +404,7 @@ fn resolve_workspace_configuration(
     };
 
     Ok(WorkspaceConfig {
-        workspace_folder: container_workspace_folder,
+        workspace_folder: Some(container_workspace_folder),
         workspace_mount,
     })
 }
@@ -1186,33 +1203,47 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
     );
 
     if let Some(container_info) = container_info {
-        // Container-based merge: extract devcontainer.metadata label.
-        let metadata_label = container_info.labels.get("devcontainer.metadata");
-        let metadata_str = metadata_label.ok_or_else(|| {
-            anyhow::anyhow!(
-                "Container '{}' does not have required 'devcontainer.metadata' label. \
-                 Cannot compute merged configuration without container metadata.",
-                container_info.id
-            )
-        })?;
+        // Container-based merge: fold the container's `devcontainer.metadata` label,
+        // when it has one, underneath the caller's configuration.
+        //
+        // The label is a SOURCE, not a precondition (#657). A container deacon did not
+        // create — a plain `docker run` target named with `--container-id` — carries no
+        // such label, and the reference CLI merges the supplied `--config` alone rather
+        // than refusing: `read-configuration --container-id <bare> --config <path>
+        // --include-merged-configuration` exits 0 there and exited 1 here. Absent label
+        // means no entries to prepend, nothing more. A label that is PRESENT and
+        // unparseable stays fatal — that is a corrupted record, not a missing one.
+        let entries: Vec<serde_json::Value> = match container_info
+            .labels
+            .get("devcontainer.metadata")
+        {
+            Some(metadata_str) => {
+                debug!("Found devcontainer.metadata label: {}", metadata_str);
 
-        debug!("Found devcontainer.metadata label: {}", metadata_str);
+                // The label MAY be either:
+                // - A JSON array of partial config entries (spec form, devcontainers/cli#1199, v0.86.0)
+                // - A single JSON object (legacy form from older Deacon builds)
+                // Tolerate both.
+                let metadata_value: serde_json::Value = serde_json::from_str(metadata_str)
+                    .with_context(|| {
+                        format!(
+                            "Failed to parse devcontainer.metadata JSON from container '{}': {}",
+                            container_info.id, metadata_str
+                        )
+                    })?;
 
-        // The label MAY be either:
-        // - A JSON array of partial config entries (spec form, devcontainers/cli#1199, v0.86.0)
-        // - A single JSON object (legacy form from older Deacon builds)
-        // Tolerate both.
-        let metadata_value: serde_json::Value =
-            serde_json::from_str(metadata_str).with_context(|| {
-                format!(
-                    "Failed to parse devcontainer.metadata JSON from container '{}': {}",
-                    container_info.id, metadata_str
-                )
-            })?;
-
-        let entries: Vec<serde_json::Value> = match metadata_value {
-            serde_json::Value::Array(arr) => arr,
-            other => vec![other],
+                match metadata_value {
+                    serde_json::Value::Array(arr) => arr,
+                    other => vec![other],
+                }
+            }
+            None => {
+                debug!(
+                    "Container '{}' has no devcontainer.metadata label; merging the supplied configuration alone",
+                    container_info.id
+                );
+                Vec::new()
+            }
         };
 
         let container_context = container_context.ok_or_else(|| {
@@ -1225,21 +1256,31 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
         //
         // In parallel, retain each entry's raw collected-property fields so the
         // upstream merge shape (entrypoints + plural lifecycle arrays) can be
-        // emitted afterwards. Per upstream `getImageMetadataFromContainer`,
-        // when the container's id-labels match, base config contributes only
-        // `pickUpdateableConfigProperties` (remoteUser/userEnvProbe/remoteEnv) —
-        // none of which are collected — so base lifecycle commands are NOT
-        // added to the plural arrays in this path.
+        // emitted afterwards. WHICH entries those are is chosen by the container's
+        // own labels, exactly as `exec` and `run-user-commands` choose it (#527,
+        // `shared::container_metadata`) — this path used to assume the first branch
+        // unconditionally, which is right for a container `up` created and wrong for
+        // every other one (#658):
+        //
+        //   * identity labels present (upstream `Tr`) — the label IS the complete
+        //     record, and base config contributes only `pickUpdateableConfigProperties`
+        //     (remoteUser/userEnvProbe/remoteEnv), none of which are collected, so its
+        //     lifecycle commands and customizations stay out of the plural arrays;
+        //   * otherwise (upstream `Tt`) — the label's entries are layers BENEATH the
+        //     caller's configuration, which is appended last and does contribute.
+        let complete_record =
+            crate::commands::shared::container_metadata::carries_workspace_identity_labels(
+                container_info,
+            );
         let mut chain: Vec<deacon_core::config::DevContainerConfig> =
             Vec::with_capacity(1 + entries.len());
         chain.push(base_config.clone());
         let mut metadata_entries: Vec<serde_json::Map<String, serde_json::Value>> =
-            Vec::with_capacity(entries.len());
-        // Per-entry customizations objects, captured pre-substitution. Per upstream
-        // `getImageMetadataFromContainer` with id-labels match, base config contributes
-        // only `pickUpdateableConfigProperties` (remoteUser/userEnvProbe/remoteEnv) — so
-        // base config's customizations are intentionally NOT included here.
-        let mut customizations_entries: Vec<serde_json::Value> = Vec::with_capacity(entries.len());
+            Vec::with_capacity(entries.len() + 1);
+        // Per-entry customizations objects, captured pre-substitution, in the same
+        // `[…labelEntries, config]` order the plural arrays use.
+        let mut customizations_entries: Vec<serde_json::Value> =
+            Vec::with_capacity(entries.len() + 1);
         for (idx, entry) in entries.into_iter().enumerate() {
             // Pre-substitution capture of the original entry's collected fields preserves
             // the literal label content for the plural arrays even if substitution would
@@ -1274,6 +1315,22 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
                 metadata_entries.push(entry_map);
             }
             chain.push(substituted);
+        }
+
+        // The layered branch appends the caller's own configuration last, so its
+        // lifecycle hooks and customizations land in the plural arrays after the
+        // label's — upstream's `[…labelEntries, …featureEntries, SI(config, SV)]`.
+        if !complete_record {
+            let base_json = serde_json::to_value(base_config)?;
+            let base_entry = collect_entry_from_config_json(&base_json);
+            if !base_entry.is_empty() {
+                metadata_entries.push(base_entry);
+            }
+            if let Some(serde_json::Value::Object(map)) = base_json.get("customizations") {
+                if !map.is_empty() {
+                    customizations_entries.push(serde_json::Value::Object(map.clone()));
+                }
+            }
         }
 
         let merged = deacon_core::config::ConfigMerger::merge_configs(&chain);
@@ -1703,8 +1760,17 @@ pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<(
 
     // Always try to resolve workspace configuration (unless container-only mode)
     // Per spec: workspace is omitted only if it cannot be resolved
+    //
+    // Three answers, all measured against the reference at 0.87.0 (#659):
+    //   * container-only mode (a selector and nothing else) — the key is OMITTED;
+    //   * a selector plus a `--config` but no `--workspace-folder` — the block is
+    //     PRESENT and EMPTY. A container named directly has no workspace, and the
+    //     `--config` path is a document location, not a workspace;
+    //   * anything that names a workspace — the derived block, as before.
     let workspace_config = if container_only_mode {
         None
+    } else if (has_container_id || has_id_label) && args.workspace_folder.is_none() {
+        Some(WorkspaceConfig::unnamed())
     } else {
         resolve_workspace_configuration(workspace_folder, args.mount_workspace_git_root, &config)
             .ok()
@@ -3458,7 +3524,9 @@ API_KEY=another-secret
     /// Container-label merged output must collect customizations per tool key into arrays
     /// rather than deep-merging objects (matches upstream `mergeConfiguration`). Per
     /// `pickUpdateableConfigProperties`, the base config's own customizations do NOT
-    /// contribute when the container's id-labels match.
+    /// contribute when the container's id-labels match — so this container carries one.
+    /// Without it the container is a foreign one and the base DOES contribute; that is
+    /// the sibling test below (#658).
     #[tokio::test]
     async fn test_container_metadata_collects_customizations_per_tool() {
         let temp_dir = TempDir::new().unwrap();
@@ -3471,6 +3539,10 @@ API_KEY=another-secret
         };
 
         let mut labels = HashMap::new();
+        labels.insert(
+            deacon_core::container::LABEL_LOCAL_FOLDER.to_string(),
+            "/host/workspace".to_string(),
+        );
         labels.insert(
             "devcontainer.metadata".to_string(),
             serde_json::json!([
@@ -3528,6 +3600,83 @@ API_KEY=another-secret
                 ],
                 "jetbrains": [
                     { "plugins": ["plug-1"] }
+                ]
+            }))
+        );
+    }
+
+    /// The other branch of the same rule (#658): a container carrying NO identity
+    /// label is not this workspace's dev container, so its metadata label is a set of
+    /// layers BENEATH the caller's configuration — whose own hooks and customizations
+    /// are appended LAST. Measured at oracle 0.87.0 on both shapes; deacon used to
+    /// apply the complete-record branch unconditionally and dropped the caller's
+    /// contribution on every foreign container.
+    #[tokio::test]
+    async fn container_without_identity_labels_layers_the_callers_config_last() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_config = DevContainerConfig {
+            post_attach_command: Some(serde_json::json!("touch /from-config.txt")),
+            customizations: Some(serde_json::json!({
+                "vscode": { "extensions": ["base.ext"] }
+            })),
+            ..Default::default()
+        };
+
+        let mut labels = HashMap::new();
+        labels.insert(
+            "devcontainer.metadata".to_string(),
+            serde_json::json!([{
+                "postCreateCommand": "touch /from-label.txt",
+                "customizations": { "vscode": { "extensions": ["label.ext"] } }
+            }])
+            .to_string(),
+        );
+
+        let container_info = deacon_core::docker::ContainerInfo {
+            id: "cid".to_string(),
+            names: vec![],
+            image: "alpine:3.17".to_string(),
+            status: "running".to_string(),
+            state: "running".to_string(),
+            exposed_ports: vec![],
+            port_mappings: vec![],
+            env: HashMap::new(),
+            labels,
+            mounts: vec![],
+        };
+        let context = SubstitutionContext::new(temp_dir.path()).unwrap();
+        let fetcher =
+            deacon_core::oci::FeatureFetcher::new(deacon_core::oci::MockHttpClient::new());
+
+        let merged = compute_merged_configuration(
+            &base_config,
+            Some(&container_info),
+            Some(&context),
+            None,
+            None,
+            &fetcher,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        // The label's own hook still lands in its phase, and the caller's lands in
+        // its own — the defect was the caller's disappearing entirely.
+        assert_eq!(
+            merged.get("postCreateCommands"),
+            Some(&serde_json::json!(["touch /from-label.txt"]))
+        );
+        assert_eq!(
+            merged.get("postAttachCommands"),
+            Some(&serde_json::json!(["touch /from-config.txt"]))
+        );
+        // Caller's customizations are appended after the label's, not dropped.
+        assert_eq!(
+            merged.get("customizations"),
+            Some(&serde_json::json!({
+                "vscode": [
+                    { "extensions": ["label.ext"] },
+                    { "extensions": ["base.ext"] }
                 ]
             }))
         );
@@ -3996,7 +4145,10 @@ API_KEY=another-secret
 
         let workspace = resolve_workspace_configuration(temp_dir.path(), true, &config).unwrap();
 
-        assert_eq!(workspace.workspace_folder, "/workspaces/compose-basic");
+        assert_eq!(
+            workspace.workspace_folder.as_deref(),
+            Some("/workspaces/compose-basic")
+        );
         assert!(workspace.workspace_mount.is_none());
     }
 
@@ -4013,7 +4165,7 @@ API_KEY=another-secret
 
         let workspace = resolve_workspace_configuration(temp_dir.path(), true, &config).unwrap();
 
-        assert_eq!(workspace.workspace_folder, "/");
+        assert_eq!(workspace.workspace_folder.as_deref(), Some("/"));
         assert!(workspace.workspace_mount.is_none());
     }
 

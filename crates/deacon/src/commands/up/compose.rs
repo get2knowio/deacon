@@ -1027,12 +1027,15 @@ async fn execute_compose_lifecycle(
             Vec::new()
         }
     };
+    // Always `Some` here: a compose config with no explicit `workspaceFolder` takes
+    // the `/` branch. The fallback keeps that guarantee visible rather than implied.
     let container_workspace_folder = crate::commands::shared::resolve_container_cwd(
         config,
         workspace_folder,
         &mounts,
         args.mount_workspace_git_root,
-    );
+    )
+    .unwrap_or_else(|| "/".to_string());
 
     // Prior phase markers for the resume decision, filtered by the current
     // config hash — the same read the single-container path performs (#93/#117).

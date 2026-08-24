@@ -219,21 +219,53 @@ async fn execute_run_user_commands_inner(
     // lives in podman → "Dev container not found" (mirrors the up/exec/down fix).
     let cli = resolve_runtime(runtime, &args.docker_path).cli_docker();
 
+    // Container-only mode: a selector named the target and nothing named a
+    // configuration, so there is no document to discover — the container's own
+    // `devcontainer.metadata` label is the configuration, folded in further down by
+    // `resolve_config_against_container` (#656).
+    //
+    // Discovering one from the current directory instead is what deacon used to do,
+    // and it is wrong twice over. It FAILED outright when the cwd held no document —
+    // `run-user-commands --container-id <id>` against a metadata-labelled container
+    // exited 1 with `Configuration file not found`, where every sibling subcommand
+    // (`set-up`, `read-configuration`, `exec`) already succeeded. And when the cwd
+    // DID hold one it silently used it: measured at oracle 0.87.0 from a directory
+    // with its own `postCreateCommand`, the reference ran the LABEL's hook and
+    // ignored the cwd entirely.
+    //
+    // The gate is deliberately narrow. Without a container selector, a missing
+    // document is still an error — `case-runusercommands-upstream-no-config-in-cwd-rejected`
+    // pins that — and naming any of `--config` / `--override-config` /
+    // `--workspace-folder` still means the caller chose a configuration.
+    let container_only_mode = (args.container_id.is_some() || !args.id_label.is_empty())
+        && args.config_path.is_none()
+        && args.override_config_path.is_none()
+        && args.workspace_folder.is_none();
+
     // Load configuration with override and secrets support via shared helper
-    let ConfigLoadResult {
-        mut config,
-        workspace_folder,
-        ..
-    } = load_config(ConfigLoadArgs {
-        workspace_folder: args.workspace_folder.as_deref(),
-        config_path: args.config_path.as_deref(),
-        settings_merge_paths: &[],
-        cli_merge_paths: &args.cli_merge_paths,
-        override_config_path: args.override_config_path.as_deref(),
-        secrets_files: &args.secrets_files,
-        resolve_devcontainer_id: true,
-    })
-    .await?;
+    let (mut config, workspace_folder) = if container_only_mode {
+        debug!("Container-only mode: taking the configuration from the container's metadata label");
+        let cwd = std::env::current_dir().context(
+            "Failed to resolve the current directory for container-only run-user-commands",
+        )?;
+        (DevContainerConfig::default(), cwd)
+    } else {
+        let ConfigLoadResult {
+            config,
+            workspace_folder,
+            ..
+        } = load_config(ConfigLoadArgs {
+            workspace_folder: args.workspace_folder.as_deref(),
+            config_path: args.config_path.as_deref(),
+            settings_merge_paths: &[],
+            cli_merge_paths: &args.cli_merge_paths,
+            override_config_path: args.override_config_path.as_deref(),
+            secrets_files: &args.secrets_files,
+            resolve_devcontainer_id: true,
+        })
+        .await?;
+        (config, workspace_folder)
+    };
 
     debug!("Loaded configuration with overrides and secrets support");
 
@@ -430,8 +462,35 @@ async fn execute_lifecycle_commands(
     };
     let config = &merged_config;
 
-    let container_workspace_folder =
+    // `None` means the target has no workspace at all — a container this deacon did
+    // not create, named with `--container-id`. The reference's rule there is
+    // `remoteCwd = remoteWorkspaceFolder || homeFolder`; deriving `/workspaces/<x>`
+    // anyway made every hook fail with rc 127, and a non-blocking phase reported
+    // success over it (#655).
+    let resolved_workspace_folder =
         crate::commands::shared::resolve_container_cwd(config, workspace_folder, &mounts, true);
+    let container_workspace_folder = match resolved_workspace_folder.clone() {
+        Some(folder) => folder,
+        None => {
+            debug!(
+                "Container has no workspace folder; using the container user's home as the lifecycle cwd"
+            );
+            deacon_core::container_env_probe::resolve_home_folder(
+                cli,
+                container_id,
+                config
+                    .remote_user
+                    .as_deref()
+                    .or(config.container_user.as_deref()),
+                &config
+                    .container_env()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            )
+            .await
+        }
+    };
 
     // `remoteEnv` is layered over `containerEnv` for user commands, matching the
     // `up` flow (`resolve_env_and_user` → `build_effective_env`) and the
@@ -450,10 +509,11 @@ async fn execute_lifecycle_commands(
             .remote_user
             .clone()
             .or_else(|| config.container_user.clone()),
-        // `run-user-commands` takes `--workspace-folder`, so it always resolves a
-        // real container cwd and the substitution value is that same path (#513
-        // changed only who may leave it absent).
-        substitution_workspace_folder: Some(container_workspace_folder.clone()),
+        // `${containerWorkspaceFolder}` is the WORKSPACE, not the cwd — so it stays
+        // absent when the target has none, leaving the token literal rather than
+        // resolving it to a home directory that is not a workspace (#513 set the
+        // contract; #655 is what first produced a cwd with no workspace behind it).
+        substitution_workspace_folder: resolved_workspace_folder,
         container_workspace_folder,
         // Where the authored-order map (#394) stops, deliberately: the lifecycle
         // environment becomes `docker exec -e K=V` flags — order carries no meaning
