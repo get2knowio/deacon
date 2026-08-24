@@ -7,7 +7,7 @@ use crate::commands::shared::{
     ConfigLoadArgs, ConfigLoadResult, NormalizedRemoteEnv, TerminalDimensions,
     canonical_reconnect_identity, load_config, resolve_env_and_user,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use deacon_core::IndexMap;
 use deacon_core::compose::{ComposeManager, ComposeProject};
 use deacon_core::config::DevContainerConfig;
@@ -512,13 +512,10 @@ where
                 // --workspace-folder X` agree on which container to target,
                 // even when X is a sub-project inside a larger git repo.
                 // `exec` doesn't bind-mount, so the flag is a no-op here.
-                let resolved = ws.canonicalize().with_context(|| {
-                    format!(
-                        "Failed to resolve workspace path '{}': path does not exist or cannot be accessed",
-                        ws.display()
-                    )
-                })?;
-                args.workspace_folder = Some(resolved);
+                // Absolutized, not canonicalized — the shared funnel, so `up`'s identity
+                // and `exec`'s reconnect agree on a symlinked workspace too (#665).
+                args.workspace_folder =
+                    Some(crate::commands::shared::workspace::resolve_workspace_folder(Some(ws))?);
             }
         }
 
@@ -1387,23 +1384,21 @@ services:
         let nested = repo.join("nested/deeper");
         std::fs::create_dir_all(&nested).unwrap();
 
-        let canonical_nested = nested.canonicalize().unwrap();
-        let canonical_repo = repo.canonicalize().unwrap();
-        assert_ne!(
-            canonical_nested, canonical_repo,
-            "test fixture must have nested != repo"
-        );
-
-        // The post-#111 branch is `ws.canonicalize()`. Prove the chosen
-        // branch resolves to the leaf — NOT the git root — even though
-        // `mount_workspace_git_root` is true (the spec default).
-        let resolved = nested.canonicalize().unwrap();
+        // Call the resolution `exec` actually uses. This used to re-implement it
+        // (`nested.canonicalize()` compared against `nested.canonicalize()`), which passed on
+        // every platform without touching deacon's code at all; #665 moved `exec` onto the
+        // shared funnel, so the real thing is reachable and the claim is testable.
+        let resolved =
+            crate::commands::shared::workspace::resolve_workspace_folder(Some(nested.clone()))
+                .expect("nested workspace resolves");
         assert_eq!(
-            resolved, canonical_nested,
+            resolved,
+            deacon_core::workspace::absolutize(&nested),
             "exec must anchor workspace_folder to the user-supplied path, not the git root"
         );
         assert_ne!(
-            resolved, canonical_repo,
+            resolved,
+            deacon_core::workspace::absolutize(&repo),
             "exec must NOT walk up to the enclosing git root (regression check for #111)"
         );
     }
@@ -1417,19 +1412,13 @@ services:
         let nested = repo.join("nested/deeper");
         std::fs::create_dir_all(&nested).unwrap();
 
-        let canonical_nested = nested.canonicalize().unwrap();
-        let canonical_repo = repo.canonicalize().unwrap();
-        assert_ne!(
-            canonical_nested, canonical_repo,
-            "test fixture must have nested != repo"
-        );
-
-        // The "use as-is" branch in execute_exec_with_docker is just `ws.canonicalize()`.
-        // Proving the chosen branch here keeps the test independent of mock-container
-        // wiring while still exercising the user-visible behavior.
-        let resolved = nested.canonicalize().unwrap();
-        assert_eq!(resolved, canonical_nested);
-        assert_ne!(resolved, canonical_repo);
+        // Same shared funnel as the arm above; the flag is inert for `exec` either way, so
+        // the workspace is the path the caller named.
+        let resolved =
+            crate::commands::shared::workspace::resolve_workspace_folder(Some(nested.clone()))
+                .expect("nested workspace resolves");
+        assert_eq!(resolved, deacon_core::workspace::absolutize(&nested));
+        assert_ne!(resolved, deacon_core::workspace::absolutize(&repo));
     }
 
     /// BEAD-10-T03: with --container-id and no workspace context, the flag is

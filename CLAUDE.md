@@ -312,7 +312,10 @@ config in the workspace) MUST go through `crates/core/src/trust.rs`.
    (persist also records to `{user_data_folder}/trusted_workspaces.json`).
 2. `DEACON_NO_PROMPT=1` → `Deny` (CI fail-closed).
 3. Default → `Allowlist({user_data_folder}/trusted_workspaces.json)`;
-   pass only if the canonicalized workspace path is in the store.
+   pass only if the canonicalized workspace path is in the store. `trust.rs`'s
+   `canonicalize_workspace` still resolves symlinks ON PURPOSE and must not be unified
+   with `workspace::absolutize`, which stopped doing so in #665: trust keys on the
+   directory whose contents will actually run, not on the path the user typed.
 
 On deny, return `DeaconError::WorkspaceUntrusted { workspace, reason,
 instructions }`. The display string already names the workspace and the
@@ -828,12 +831,14 @@ We ship Windows binaries, so keep this lane green. Hard-won lessons:
   (`std::os::unix`, `PermissionsExt`, `from_mode`) on Windows, use a `#[cfg(unix)]`
   **attribute** block (or gate the whole test). nextest compiles *all* test binaries
   before filtering, so even `dev-fast`-excluded Docker tests must compile on Windows.
-- **Windows paths use `\` and get canonicalized** (`\\?\` verbatim prefix, 8.3 short-name
-  expansion in `SubstitutionContext`). deacon's path output is correct (the reference CLI
-  also emits `\` on Windows). Make path assertions separator-agnostic
-  (`.replace('\\', "/")`) for relative fragments; for substituted absolute paths compare
-  the **leaf component** (`dest_dir.file_name()`), which survives canonicalization, rather
-  than the full path string.
+- **Windows paths use `\`.** deacon's path output is correct (the reference CLI also emits
+  `\` on Windows). Make path assertions separator-agnostic (`.replace('\\', "/")`) for
+  relative fragments; for absolute paths compare the **leaf component**
+  (`dest_dir.file_name()`), which survives any spelling, rather than the full path string.
+  Since #665 the workspace path is **absolutized, not canonicalized**
+  (`deacon_core::workspace::absolutize`), so it no longer acquires the `\\?\` verbatim
+  prefix or 8.3 expansion — but other paths still can, and the leaf-comparison habit costs
+  nothing.
 - **A fixture whose BYTES are the expectation must be pinned `-text` in `.gitattributes`.**
   Git's autocrlf rewrites LF to CRLF on a Windows checkout, so a test comparing a file's
   content to a `"…\n"` literal fails on bytes git introduced, not on anything the code did
@@ -842,11 +847,15 @@ We ship Windows binaries, so keep this lane green. Hard-won lessons:
   and cannot corrupt a binary fixture), and run `git add --renormalize <path>` after adding
   the rule: it must produce NO diff, or every contributor sees the tree as modified.
 - **A test that holds a path and compares it against a path the CLI printed must expect
-  every SPELLING of it.** deacon canonicalizes `--workspace-folder`, and canonicalization
-  renames: Windows returns the `\\?\` verbatim form with 8.3 short names expanded
-  (`RUNNER~1` → `runneradmin`), macOS resolves `/var` → `/private/var`. The string the test
-  passed in is then not a substring of the string it gets back. The parity normalizer's
-  `TokenMap::workspace` registers all three spellings for this reason.
+  every SPELLING of it.** Canonicalization renames: Windows returns the `\\?\` verbatim
+  form with 8.3 short names expanded (`RUNNER~1` → `runneradmin`), macOS resolves `/var` →
+  `/private/var`, and the string the test passed in is then not a substring of what it gets
+  back. The parity normalizer's `TokenMap::workspace` registers all three spellings for this
+  reason. **The WORKSPACE path no longer moves this way (#665)** — it is absolutized, so
+  what goes in comes out — which flips the hazard around: a test that canonicalizes
+  `temp_dir.path()` to build an EXPECTATION now passes on Linux and fails on macOS. Build
+  such expectations with `deacon_core::workspace::absolutize`, or name the workspace in
+  canonical form on the way IN so both sides agree.
 - **`--no-fail-fast`** is set on the test step so one run reports the full failure set
   (a single failure otherwise cancels the run and hides the rest — `nextest` shows
   `N/Total tests run` when cancelled vs `Total tests run` when complete).

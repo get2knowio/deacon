@@ -35,8 +35,9 @@ fn test_workspace_folder_defaults_to_current_directory() {
 
     assert_eq!(
         resolved,
-        cwd.canonicalize().expect("cwd canonicalizes"),
-        "an omitted --workspace-folder must resolve to the canonicalized current directory"
+        deacon_core::workspace::absolutize(&cwd),
+        "an omitted --workspace-folder must resolve to the current directory as named — \
+         absolutized, never canonicalized (#665)"
     );
 }
 
@@ -79,17 +80,17 @@ fn test_explicit_workspace_folder_wins_over_the_default() {
     let resolved =
         resolve_workspace_folder(Some(temp.path().to_path_buf())).expect("temp dir resolves");
 
+    // Absolutized, not canonicalized (#665), so the expectation is the path AS GIVEN.
+    // Canonicalizing here passes on Linux and fails on macOS's `/var` → `/private/var`
+    // symlink and on Windows's `\\?\` verbatim form.
     assert_eq!(
         resolved,
-        temp.path().canonicalize().expect("temp dir canonicalizes"),
+        temp.path(),
         "an explicit --workspace-folder must be honored verbatim"
     );
     assert_ne!(
         resolved,
-        std::env::current_dir()
-            .expect("cwd is readable")
-            .canonicalize()
-            .expect("cwd canonicalizes"),
+        deacon_core::workspace::absolutize(&std::env::current_dir().expect("cwd is readable")),
         "an explicit --workspace-folder must not fall back to the cwd"
     );
 }

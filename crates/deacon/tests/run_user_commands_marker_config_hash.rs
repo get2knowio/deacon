@@ -41,12 +41,11 @@ struct WorkspaceContainers(String);
 
 impl WorkspaceContainers {
     fn new(workspace: &Path) -> Self {
-        let canonical = workspace
-            .canonicalize()
-            .unwrap_or_else(|_| workspace.to_path_buf());
+        // The label carries the path as named (absolutized, never canonicalized — #665).
+        let local_folder = deacon_core::workspace::absolutize(workspace);
         Self(format!(
             "label=devcontainer.local_folder={}",
-            canonical.display()
+            local_folder.display()
         ))
     }
 }

@@ -125,16 +125,17 @@ pub(crate) fn discover_id_labels_from_config(
     let mut labels = Vec::new();
 
     // Add workspace folder as a label (standard devcontainer practice)
-    if let Ok(canonical_path) = workspace_folder.canonicalize() {
-        labels.push((
-            "devcontainer.local_folder".to_string(),
-            canonical_path.to_string_lossy().to_string(),
-        ));
-        debug!(
-            "Discovered id-label from workspace: devcontainer.local_folder={}",
-            canonical_path.display()
-        );
-    }
+    // Absolutized, not canonicalized (#665) — this label must equal the one
+    // `ContainerIdentity` stamps, and the reference records the path the user named.
+    let local_folder = deacon_core::workspace::absolutize(workspace_folder);
+    labels.push((
+        "devcontainer.local_folder".to_string(),
+        local_folder.to_string_lossy().to_string(),
+    ));
+    debug!(
+        "Discovered id-label from workspace: devcontainer.local_folder={}",
+        local_folder.display()
+    );
 
     // Add config name as a label if available
     if let Some(name) = &config.name {

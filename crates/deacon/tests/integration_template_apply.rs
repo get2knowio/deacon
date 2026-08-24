@@ -100,9 +100,10 @@ async fn test_template_apply_with_options() -> anyhow::Result<()> {
     assert!(readme_content.contains("Debug: true"));
     assert!(readme_content.contains("Version: v3"));
 
-    // Use canonicalized path for comparison since that's what the variable substitution uses
-    let canonical_workspace = workspace_dir.canonicalize()?;
-    assert!(readme_content.contains(&format!("Workspace: {}", canonical_workspace.display())));
+    // Absolutized, not canonicalized — since #665 substitution reports the workspace path as
+    // named, so canonicalizing here would pass on Linux and fail on macOS's `/var` symlink.
+    let expected_workspace = deacon_core::workspace::absolutize(&workspace_dir);
+    assert!(readme_content.contains(&format!("Workspace: {}", expected_workspace.display())));
 
     let config_content = fs::read_to_string(workspace_dir.join("src").join("config.json"))?;
     assert!(config_content.contains(r#""name": "awesome-app""#));

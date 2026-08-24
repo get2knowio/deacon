@@ -138,14 +138,7 @@ pub(crate) async fn execute_container_up(
                         .unwrap_or("workspace")
                 )
             });
-            let source_path = workspace_folder
-                .canonicalize()
-                .with_context(|| {
-                    format!(
-                        "Failed to canonicalize workspace folder '{}' for mounting: path does not exist or cannot be accessed",
-                        workspace_folder.display()
-                    )
-                })?
+            let source_path = deacon_core::workspace::absolutize(workspace_folder)
                 .display()
                 .to_string();
             config.workspace_mount = Some(format!(
@@ -173,12 +166,7 @@ pub(crate) async fn execute_container_up(
         }
         deacon_core::workspace::resolve_workspace_root(workspace_folder)?
     } else {
-        workspace_folder.canonicalize().with_context(|| {
-            format!(
-                "Failed to canonicalize workspace folder '{}' for mounting: path does not exist or cannot be accessed",
-                workspace_folder.display()
-            )
-        })?
+        deacon_core::workspace::absolutize(workspace_folder)
     };
 
     // `--mount-git-worktree-common-dir` (#664): a worktree created with relative paths has a

@@ -9,6 +9,51 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
+/// Make `path` absolute against the current directory and collapse `.` / `..`
+/// **lexically** — without resolving symlinks.
+///
+/// This is the workspace path's canonical form everywhere deacon reports it, mounts it,
+/// or hashes it into a container identity. It is deliberately NOT
+/// [`std::fs::canonicalize`]: the reference CLI preserves the path the user named, using
+/// `git rev-parse --show-cdup` rather than `--show-toplevel` for exactly that reason
+/// (`spec-common/git.ts:24`, "Preserves symlinked paths"), and the spec defines
+/// `${localWorkspaceFolder}` as the path of the folder *that was opened*
+/// (`devcontainerjson-reference.md:157`). deacon used to canonicalize, so a workspace
+/// reached through a symlink was silently renamed to its real path — issue #665.
+///
+/// Collapsing `..` textually is what `path.resolve()` does on the reference's side. It can
+/// differ from the kernel's answer when a component is a symlink, and that is the point:
+/// following the link is the behavior being removed.
+pub fn absolutize(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(path),
+            Err(e) => {
+                debug!("No current directory to absolutize against ({e}); using path as given");
+                path.to_path_buf()
+            }
+        }
+    };
+    normalize_lexically(&absolute)
+}
+
+/// Collapse `.` and `..` components textually, touching no filesystem.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// Result of git repository root detection
 #[derive(Debug, Clone, PartialEq)]
 pub struct GitRootResult {
@@ -56,8 +101,10 @@ pub struct GitRootResult {
 pub fn resolve_workspace_root(path: &Path) -> Result<PathBuf> {
     debug!("Resolving workspace root for path: {}", path.display());
 
-    // First canonicalize the path to resolve any symlinks and relative paths
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    // Absolutize WITHOUT resolving symlinks: the reported root, the mount source and the
+    // identity hash all derive from this, and the reference preserves the path as named
+    // (#665). See [`absolutize`].
+    let canonical = absolutize(path);
 
     // Check if this is within a Git worktree
     if let Some(worktree_root) = detect_git_worktree(&canonical)? {
@@ -101,9 +148,7 @@ pub fn container_workspace_folder(
         }
     }
 
-    let canonical_ws = workspace_folder
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_folder.to_path_buf());
+    let canonical_ws = absolutize(workspace_folder);
 
     // Root the container path at the git root (default) or the workspace folder.
     let root = if mount_workspace_git_root {
@@ -161,8 +206,9 @@ pub fn container_workspace_folder(
 pub fn find_git_repository_root(path: &Path) -> Result<Option<GitRootResult>> {
     debug!("Finding git repository root for path: {}", path.display());
 
-    // First canonicalize the path
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    // Absolutize without resolving symlinks (#665) — walking up from the path as named is
+    // what `git rev-parse --show-cdup` does, and `.git` is still reached through the link.
+    let canonical = absolutize(path);
 
     // Walk up the directory tree looking for .git
     let mut current = canonical.as_path();
@@ -423,17 +469,7 @@ pub fn resolve_git_worktree_common_dir(host_mount_folder: &Path) -> Option<GitWo
 /// Join `relative` onto `base` and collapse `.` / `..` textually, the way `path.resolve`
 /// does. `Path::join` alone leaves the `..` components in the result.
 fn lexical_join(base: &Path, relative: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in base.join(relative).components() {
-        match component {
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
+    normalize_lexically(&base.join(relative))
 }
 
 /// [`container_workspace_folder`], re-based when the worktree's common dir is mounted.
@@ -461,9 +497,7 @@ pub fn container_workspace_folder_for_worktree(
         }
     }
 
-    let canonical_ws = workspace_folder
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_folder.to_path_buf());
+    let canonical_ws = absolutize(workspace_folder);
     let root = if mount_workspace_git_root {
         resolve_workspace_root(&canonical_ws).unwrap_or_else(|_| canonical_ws.clone())
     } else {
@@ -945,5 +979,79 @@ mod worktree_common_dir_tests {
             container_workspace_folder_for_worktree(&sub, None, true, None),
             container_workspace_folder(&sub, None, true)
         );
+    }
+}
+
+#[cfg(test)]
+mod absolutize_tests {
+    //! [`absolutize`] is the workspace path's canonical form since #665: absolute and
+    //! lexically normalized, but never symlink-resolved.
+
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn an_absolute_path_keeps_its_spelling() {
+        let temp = TempDir::new().unwrap();
+        assert_eq!(absolutize(temp.path()), temp.path());
+    }
+
+    #[test]
+    fn dot_and_dotdot_are_collapsed_textually() {
+        let temp = TempDir::new().unwrap();
+        let noisy = temp.path().join(".").join("b").join("..").join("c");
+        assert_eq!(absolutize(&noisy), temp.path().join("c"));
+    }
+
+    /// POSIX spellings only: on Windows a rooted-but-prefixless path picks up the cwd's
+    /// drive prefix, so `/a/b/c` is not the same path there.
+    #[test]
+    #[cfg(unix)]
+    fn posix_roots_are_preserved_and_cannot_be_escaped() {
+        assert_eq!(absolutize(Path::new("/a/b/c")), PathBuf::from("/a/b/c"));
+        assert_eq!(absolutize(Path::new("/a/./b/../c")), PathBuf::from("/a/c"));
+        // Popping past the root stays at the root rather than escaping it.
+        assert_eq!(absolutize(Path::new("/../..")), PathBuf::from("/"));
+    }
+
+    #[test]
+    fn a_relative_path_is_rooted_at_the_current_directory() {
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(
+            absolutize(Path::new("sub/dir")),
+            cwd.join("sub").join("dir")
+        );
+        assert_eq!(absolutize(Path::new(".")), cwd);
+    }
+
+    /// The whole point of #665: the reference preserves the path the user named, so a
+    /// workspace reached through a symlink keeps the link's spelling. `canonicalize` is
+    /// what this function exists NOT to be.
+    #[test]
+    #[cfg(unix)]
+    fn a_symlink_is_not_followed() {
+        let temp = TempDir::new().unwrap();
+        let real = temp.path().join("real");
+        fs::create_dir_all(&real).unwrap();
+        let link = temp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        assert_eq!(absolutize(&link), link);
+        assert_ne!(absolutize(&link), link.canonicalize().unwrap());
+        // …and the basename the container path is built from follows the link's name.
+        assert_eq!(
+            absolutize(&link).file_name().and_then(|n| n.to_str()),
+            Some("link")
+        );
+    }
+
+    /// A path that does not exist still absolutizes — `absolutize` touches no filesystem,
+    /// and the existence check belongs to the callers that want one.
+    #[test]
+    fn a_missing_path_still_resolves() {
+        let temp = TempDir::new().unwrap();
+        let missing = temp.path().join("nope").join("..").join("nope");
+        assert_eq!(absolutize(&missing), temp.path().join("nope"));
     }
 }

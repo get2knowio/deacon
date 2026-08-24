@@ -4863,6 +4863,53 @@
         "tempdir": true
       },
       "notes": "Fixes [#659](https://github.com/get2knowio/deacon/issues/659), and it is the ONE claim in batch 13 expressible over a container `op-up` created — which is why it is the only one of the batch's five fixes that reaches `parity_docker` and the release gate. The other four need a container deacon did NOT create (no identity labels, no metadata label, no workspace mount) and are carried by `integration_container_id_foreign`, on the precedent the [#527](https://github.com/get2knowio/deacon/issues/527) row already set.\n\nMEASURED at oracle 0.87.0 across all four selector shapes, which is what scopes the claim: `--container-id` + `--config` → `\"workspace\": {}` on the reference, a full derived block on deacon; `--container-id` + `--workspace-folder` → the derived block on both; `--workspace-folder` alone → the derived block on both; `--container-id` ALONE → the key omitted entirely on both. The reference's rule is that the block describes the workspace the CALLER named — and a `--config` path is a document location, not a workspace.\n\nTWO operations, and the second is the point. `op-read-container` alone would pass against a `read-configuration` that had simply stopped reporting a workspace; `op-read-workspace` runs the SAME container with the SAME `--config` and adds only `--workspace-folder`, so the pair is a claim about the SELECTOR. Either arm alone is green against a deacon that hard-codes one answer.\n\nAsserted on `chan-stdout` with a regex rather than `chan-structured-output` with a `jsonSubset`, deliberately: the matcher iterates the SUBSET's keys, so `{\"workspace\": {}}` has nothing to check and passes against a fully populated block — a vacuous assertion dressed as coverage. The empty block is an ABSENCE of keys, and a regex over the emitted document is the instrument that can see one. The two patterns are each other's negation on the same byte range.\n\n`spec-expectation` rather than `live-differential` because it pins deacon's own answer, on `case-set-up-*`'s precedent: the reference's answer is recorded above and in the ledger row, and a differential would put the claim on the nightly lane, which gates nothing.\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 13), `src/test/cli.set-up.test.ts`, whose four subcommands all target a container by id."
+    },
+    {
+      "id": "case-readconfig-config-alone-anchors-at-cwd",
+      "behaviors": [
+        "bhv-readconfig-config-alone-workspace-anchor"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-read",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--config",
+            "${WORKSPACE}/.devcontainer/devcontainer.json",
+            "--mount-workspace-git-root",
+            "false"
+          ],
+          "fixtures": [
+            "fx-readconfig-config-alone"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-read",
+          "assertion": {
+            "jsonSubset": {
+              "workspace": {
+                "workspaceFolder": "/workspaces/<WORKSPACE_NAME>"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`--config` selects WHICH DOCUMENT to read, never where the workspace is. An operation runs with the workspace as its cwd, so naming only `--config` here is the reference's `--config`-alone invocation: the workspace is the cwd, and the reported folder is `/workspaces/<basename(cwd)>`. deacon used to re-anchor it at the config file's PARENT — which for the standard layout is `.devcontainer`, so this same case reported `/workspaces/.devcontainer` before #660 was fixed. `--mount-workspace-git-root false` is load-bearing for the ASSERTION, not for the claim: a hermetic case runs against the fixture directory in place, which lives inside this repository, so the default git-root walk would report the checkout's own root and make the expected string depend on where deacon was cloned. With the walk off, the cwd's basename is the answer and the normalizer's `<WORKSPACE_NAME>` token pins it. The anchor is not confined to this block: it also feeds `${localWorkspaceFolder}` and local feature-path resolution, which is why the fix was a ruling first. The symlink half of the same question (#665) is not expressible as a case — `copy_tree` cannot stage a symlinked directory into an isolated workspace — so it is carried by `integration_up_symlinked_workspace` and one hermetic `read-configuration` test."
     }
   ]
 }

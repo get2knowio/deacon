@@ -24,8 +24,10 @@ async fn test_discover_and_load_fixture_config() -> anyhow::Result<()> {
     // Create a temporary workspace directory
     let temp_workspace = TempDir::new()?;
     let workspace = temp_workspace.path();
-    // Use a canonicalized workspace path for assertions to avoid macOS /var vs /private/var issues
-    let workspace_canon = std::fs::canonicalize(workspace)?;
+    // Absolutize, don't canonicalize: since #665 substitution reports the workspace path AS
+    // NAMED, so a canonicalized expectation would want macOS's `/private/var/...` and
+    // Windows's `\\?\` verbatim form against a value that now carries neither.
+    let workspace_canon = deacon_core::workspace::absolutize(workspace);
     let workspace_canon_str = workspace_canon
         .to_str()
         .expect("canonicalized workspace path should be valid UTF-8");

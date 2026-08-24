@@ -4658,9 +4658,10 @@ mod tests {
     async fn test_load_with_substitution() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
-        // Use canonical path for comparisons to avoid platform-specific symlink prefixes
-        // (e.g., macOS may canonicalize /var/... to /private/var/...).
-        let workspace_canonical = workspace.canonicalize()?;
+        // Absolutize for comparisons — since #665 substitution reports the workspace path AS
+        // NAMED, so canonicalizing here would expect macOS's `/private/var/...` and Windows's
+        // `\\?\` verbatim form against a value that now carries neither.
+        let workspace_canonical = crate::workspace::absolutize(workspace);
         let workspace_canonical_str = workspace_canonical.to_str().unwrap();
 
         let config_content = r#"{

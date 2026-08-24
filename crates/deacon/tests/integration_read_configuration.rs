@@ -875,10 +875,10 @@ fn worktree_common_dir_relocates_the_mount_and_adds_the_git_dir() -> Result<()> 
         "/workspaces/worktrees/feature"
     );
 
-    // The mount SOURCEs are host paths, and deacon canonicalizes — on Windows that means a
-    // `\\?\` verbatim prefix with 8.3 names expanded, on macOS `/var` becomes
-    // `/private/var` — so the source is matched by its leaf rather than by the spelling
-    // this test happens to hold. The targets are container paths and are exact.
+    // The mount SOURCEs are host paths. Since #665 deacon absolutizes rather than
+    // canonicalizes them, so they no longer move — but matching by trailing fragment rather
+    // than by whole spelling costs nothing and survives any future normalization. The
+    // targets are container paths and are exact.
     let workspace_mount = workspace_block["workspaceMount"].as_str().unwrap();
     assert!(
         workspace_mount.starts_with("type=bind,source="),
@@ -974,6 +974,105 @@ fn a_comma_free_workspace_path_is_not_quoted() -> Result<()> {
     assert!(
         workspace_mount.ends_with(",target=/workspaces/plain"),
         "{workspace_mount}"
+    );
+    Ok(())
+}
+
+/// #660: `--config` selects WHICH DOCUMENT to read, never where the workspace is. deacon
+/// used to re-anchor the workspace at the config file's parent directory; measured at
+/// oracle 0.87.0, the reference anchors at the current directory, uniformly with every
+/// other invocation.
+#[test]
+fn config_alone_anchors_the_workspace_at_the_current_directory() -> Result<()> {
+    let temp = TempDir::new()?;
+    let cwd = temp.path().join("run-from-here");
+    let elsewhere = temp.path().join("elsewhere").join("cfg");
+    fs::create_dir_all(&cwd)?;
+    fs::create_dir_all(&elsewhere)?;
+    fs::write(
+        elsewhere.join("devcontainer.json"),
+        r#"{"image": "alpine:3.19"}"#,
+    )?;
+
+    let output = Command::cargo_bin("deacon")?
+        .current_dir(&cwd)
+        .arg("read-configuration")
+        .arg("--config")
+        .arg(elsewhere.join("devcontainer.json"))
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "read-configuration failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout)?;
+    let workspace_block = &parsed["workspace"];
+
+    assert_eq!(
+        workspace_block["workspaceFolder"], "/workspaces/run-from-here",
+        "the workspace is the cwd, not the config's directory: {workspace_block}"
+    );
+    let workspace_mount = workspace_block["workspaceMount"].as_str().unwrap();
+    assert!(
+        workspace_mount.ends_with("run-from-here,target=/workspaces/run-from-here"),
+        "the mount source is the cwd too: {workspace_mount}"
+    );
+    Ok(())
+}
+
+/// #665: a workspace reached through a symlink keeps the spelling the caller used —
+/// deacon used to canonicalize it away. Measured at oracle 0.87.0, which preserves it
+/// deliberately (`git rev-parse --show-cdup`, not `--show-toplevel`), and the spec defines
+/// `${localWorkspaceFolder}` as the folder *that was opened*.
+#[test]
+#[cfg(unix)]
+fn a_symlinked_workspace_is_reported_under_the_path_that_was_named() -> Result<()> {
+    let temp = TempDir::new()?;
+    let real = temp.path().join("real");
+    fs::create_dir_all(real.join(".devcontainer"))?;
+    fs::write(
+        real.join(".devcontainer").join("devcontainer.json"),
+        r#"{"image": "alpine:3.19",
+            "containerEnv": {"LWF": "${localWorkspaceFolder}",
+                             "LWFB": "${localWorkspaceFolderBasename}"}}"#,
+    )?;
+    let link = temp.path().join("link");
+    std::os::unix::fs::symlink(&real, &link)?;
+
+    let output = Command::cargo_bin("deacon")?
+        .arg("read-configuration")
+        .arg("--workspace-folder")
+        .arg(&link)
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "read-configuration failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout)?;
+
+    assert_eq!(parsed["workspace"]["workspaceFolder"], "/workspaces/link");
+    assert_eq!(
+        parsed["workspace"]["workspaceMount"],
+        Value::String(format!(
+            "type=bind,source={},target=/workspaces/link",
+            link.display()
+        ))
+    );
+    assert_eq!(
+        parsed["configuration"]["containerEnv"]["LWF"],
+        Value::String(link.display().to_string())
+    );
+    assert_eq!(parsed["configuration"]["containerEnv"]["LWFB"], "link");
+    assert_eq!(
+        parsed["configuration"]["configFilePath"]["fsPath"],
+        Value::String(
+            link.join(".devcontainer")
+                .join("devcontainer.json")
+                .display()
+                .to_string()
+        ),
+        "the config is reported under the link, not its target"
     );
     Ok(())
 }
