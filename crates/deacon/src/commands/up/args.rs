@@ -309,6 +309,10 @@ pub struct NormalizedUpInput {
     pub mounts: Vec<NormalizedMount>,
     pub remote_env: Vec<NormalizedRemoteEnv>,
     pub mount_workspace_git_root: bool,
+    /// Mount a git worktree's common `.git` directory so git works inside the container
+    /// (`--mount-git-worktree-common-dir`, #664). Only meaningful together with
+    /// `mount_workspace_git_root`, and only for a worktree created with relative paths.
+    pub mount_git_worktree_common_dir: bool,
 
     // Terminal settings
     pub terminal_dimensions: Option<TerminalDimensions>,
@@ -422,6 +426,7 @@ pub struct UpArgs {
     pub mount: Vec<String>,
     pub remote_env: Vec<String>,
     pub mount_workspace_git_root: bool,
+    pub mount_git_worktree_common_dir: bool,
     pub workspace_mount_consistency: Option<String>,
 
     // Build and cache options
@@ -560,6 +565,7 @@ impl Default for UpArgs {
             mount: Vec::new(),
             remote_env: Vec::new(),
             mount_workspace_git_root: true,
+            mount_git_worktree_common_dir: false,
             workspace_mount_consistency: None,
             build_no_cache: false,
             cache_from: Vec::new(),
@@ -752,6 +758,7 @@ pub(crate) fn normalize_and_validate_args(args: &UpArgs) -> Result<NormalizedUpI
         mounts,
         remote_env,
         mount_workspace_git_root: args.mount_workspace_git_root,
+        mount_git_worktree_common_dir: args.mount_git_worktree_common_dir,
         terminal_dimensions,
         build_no_cache: args.build_no_cache,
         cache_from: args.cache_from.clone(),

@@ -1,0 +1,5 @@
+{
+  "name": "ConformanceUpMountCommaQuoted",
+  "image": "alpine:3.19",
+  "mounts": ["type=bind,\"source=${localWorkspaceFolder}\",\"target=/opt/a,b\""]
+}

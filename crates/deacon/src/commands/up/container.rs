@@ -149,8 +149,10 @@ pub(crate) async fn execute_container_up(
                 .display()
                 .to_string();
             config.workspace_mount = Some(format!(
-                "type=bind,source={},target={},consistency={}",
-                source_path, target_path, consistency
+                "type=bind,{},{},consistency={}",
+                deacon_core::mount::format_mount_field("source", &source_path),
+                deacon_core::mount::format_mount_field("target", &target_path),
+                consistency
             ));
         }
     }
@@ -178,6 +180,43 @@ pub(crate) async fn execute_container_up(
             )
         })?
     };
+
+    // `--mount-git-worktree-common-dir` (#664): a worktree created with relative paths has a
+    // `.git` file whose `gitdir:` only resolves container-side if the worktree and the common
+    // dir keep their host arrangement, so the workspace mount moves up to the nearest common
+    // ancestor and the common dir is mounted beside it. Gated on `--mount-workspace-git-root`,
+    // exactly as the reference gates it.
+    let worktree_common_dir = (args.mount_workspace_git_root && args.mount_git_worktree_common_dir)
+        .then(|| deacon_core::workspace::resolve_git_worktree_common_dir(&workspace_mount_source))
+        .flatten();
+    if let Some(ref worktree) = worktree_common_dir {
+        debug!(
+            container_mount_folder = %worktree.container_mount_folder,
+            host_common_dir = %worktree.host_common_dir.display(),
+            container_common_dir = %worktree.container_common_dir,
+            "Mounting the git worktree common dir"
+        );
+        if config.workspace_mount.is_none() {
+            config.workspace_mount = Some(format!(
+                "type=bind,{},{}",
+                deacon_core::mount::format_mount_field(
+                    "source",
+                    &workspace_mount_source.display().to_string()
+                ),
+                deacon_core::mount::format_mount_field("target", &worktree.container_mount_folder),
+            ));
+        }
+        if config.workspace_folder.is_none() {
+            config.workspace_folder = Some(
+                deacon_core::workspace::container_workspace_folder_for_worktree(
+                    workspace_folder,
+                    None,
+                    args.mount_workspace_git_root,
+                    Some(worktree),
+                ),
+            );
+        }
+    }
 
     if !args.forward_ports.is_empty() {
         use deacon_core::config::PortSpec;
@@ -553,6 +592,11 @@ pub(crate) async fn execute_container_up(
     // the bind-mounted path survives container restarts — rather than inside the project
     // (`<workspace>/.devcontainer/.deacon/`), so `up` leaves no stray files in the repo (#280).
     let mut merged_mounts = merged_mounts;
+    if let Some(ref worktree) = worktree_common_dir {
+        merged_mounts
+            .mounts
+            .push(worktree.additional_mount_string());
+    }
     if let deacon_core::features::EntrypointChain::Chained {
         ref wrapper_path,
         ref entrypoints,
@@ -603,8 +647,9 @@ pub(crate) async fn execute_container_up(
         // Add a bind mount from the host file to the wrapper path inside the container
         let host_path = wrapper_host_path.display().to_string();
         let mount_spec = format!(
-            "type=bind,source={},target={},readonly",
-            host_path, wrapper_path
+            "type=bind,{},{},readonly",
+            deacon_core::mount::format_mount_field("source", &host_path),
+            deacon_core::mount::format_mount_field("target", wrapper_path)
         );
         debug!(
             host_path = %host_path,
