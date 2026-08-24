@@ -190,6 +190,14 @@ slow-timeout = { period = "10m", terminate-after = 1 }
 # #372 marker config-hash regression: runs `up` twice plus `run-user-commands`
 # against its own temp workspace and its own `--user-data-folder`, so it shares
 # nothing with sibling cases but the daemon → docker-shared, not exclusive.
+# #655/#656/#657/#658/#659: `--container-id` against plain `docker run` containers the
+# test creates and removes itself. Shares nothing with sibling cases but the daemon, and
+# publishes no ports → docker-shared, not exclusive.
+[[profile.default.overrides]]
+filter = 'binary(=integration_container_id_foreign)'
+test-group = 'docker-shared'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
 [[profile.default.overrides]]
 filter = 'binary(=run_user_commands_marker_config_hash)'
 test-group = 'docker-shared'
@@ -230,7 +238,7 @@ slow-timeout = "30s"
 # `parity_*` test binaries, not the crate's own unit tests, so the lib joins
 # `parity_harness_faults` / `parity_registry_check` as an explicit exception. Its
 # shell-dependent tests are already `#[cfg(unix)]`-gated, so the Windows lane is unaffected.
-default-filter = 'not (binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_harness) | binary(=parity_hermetic))) | binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_output) | binary(=build_push_metadata) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_marker_config_hash) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=integration_auto_forward) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build) | binary(=docker_channels))'
+default-filter = 'not (binary(#smoke_*) | (binary(#parity_*) & not (binary(=parity_harness_faults) | binary(=parity_harness) | binary(=parity_hermetic))) | binary(=build_consistency) | binary(=integration_build) | binary(=integration_build_output) | binary(=build_push_metadata) | binary(=integration_build_args) | binary(=integration_vulnerability_scan) | binary(#integration_up_*) | binary(=integration_progress) | binary(#integration_env_probe_*) | test(/^env_probe::tests::/) | binary(=integration_exec_id_label) | binary(=integration_exec_selection) | binary(=testcontainers_helpers) | binary(=workspace_mounts) | binary(=up_prebuild) | binary(=run_user_commands_prebuild) | binary(=run_user_commands_marker_config_hash) | binary(=integration_container_id_foreign) | binary(=run_user_commands_feature_lifecycle) | binary(=lifecycle_parallel_output) | binary(=up_reconnect_full_id) | binary(=up_keepalive_path) | binary(=up_dotfiles) | binary(=integration_feature_lifecycle) | binary(=integration_feature_security) | binary(=integration_feature_mounts) | binary(=integration_compose_features_build) | binary(=integration_compose_config_mounts) | binary(=integration_auto_forward) | binary(=integration_host_ca_runtime) | binary(=integration_host_ca_build) | binary(=docker_channels))'
 
 [[profile.dev-fast.overrides]]
 filter = 'binary(=smoke_exec) | binary(=smoke_exec_stdin) | binary(=smoke_up_idempotent) | binary(=smoke_down) | binary(=smoke_spinner) | binary(=smoke_lifecycle)'
@@ -322,6 +330,14 @@ test-group = 'docker-shared'
 slow-timeout = { period = "10m", terminate-after = 1 }
 
 # #372 marker config-hash regression (see the default profile's note).
+# #655/#656/#657/#658/#659: `--container-id` against plain `docker run` containers the
+# test creates and removes itself. Shares nothing with sibling cases but the daemon, and
+# publishes no ports → docker-shared, not exclusive.
+[[profile.dev-fast.overrides]]
+filter = 'binary(=integration_container_id_foreign)'
+test-group = 'docker-shared'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
 [[profile.dev-fast.overrides]]
 filter = 'binary(=run_user_commands_marker_config_hash)'
 test-group = 'docker-shared'
@@ -421,6 +437,14 @@ test-group = 'parity-cli'
 [[profile.docker.overrides]]
 filter = 'binary(=parity_harness_faults) | binary(=raw_outputs) | binary(=observation_faults) | binary(=container_state_channel) | binary(=prereq_faults)'
 test-group = 'fs-heavy'
+# #655/#656/#657/#658/#659: `--container-id` against plain `docker run` containers the
+# test creates and removes itself. Shares nothing with sibling cases but the daemon, and
+# publishes no ports → docker-shared, not exclusive.
+[[profile.docker.overrides]]
+filter = 'binary(=integration_container_id_foreign)'
+test-group = 'docker-shared'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
 [[profile.docker.overrides]]
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'
@@ -609,6 +633,14 @@ test-group = 'parity-cli'
 [[profile.ci.overrides]]
 filter = 'binary(=parity_harness_faults) | binary(=raw_outputs) | binary(=observation_faults) | binary(=container_state_channel) | binary(=prereq_faults)'
 test-group = 'fs-heavy'
+# #655/#656/#657/#658/#659: `--container-id` against plain `docker run` containers the
+# test creates and removes itself. Shares nothing with sibling cases but the daemon, and
+# publishes no ports → docker-shared, not exclusive.
+[[profile.ci.overrides]]
+filter = 'binary(=integration_container_id_foreign)'
+test-group = 'docker-shared'
+slow-timeout = { period = "10m", terminate-after = 1 }
+
 [[profile.ci.overrides]]
 filter = 'binary(#integration_env_probe_*)'
 test-group = 'docker-shared'

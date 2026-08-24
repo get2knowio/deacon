@@ -4781,6 +4781,88 @@
         "tempdir": true
       },
       "notes": "Fixes [#636](https://github.com/get2knowio/deacon/issues/636), and it is the SECOND HALF of a behavior whose first half was already recorded. Deferring `${containerEnv:*}` while no container exists is correct, both CLIs agree on it, and `case-readconfig-upstream-runargs-env-subst` compares exactly that on this same fixture, hermetically. This case is the other half: once a container IS running for the workspace, the token resolves.\n\nMEASURED at oracle 0.87.0 on a root `.devcontainer.json` declaring `remoteEnv: {LOCAL_PATH: ${localEnv:PATH}, CONTAINER_PATH: ${containerEnv:PATH}}`. With no container the two CLIs are byte-identical, both leaving `CONTAINER_PATH` literal. After `up` they parted: the reference reported the container's own PATH in BOTH blocks, deacon reported the literal token in both. **The capability was already there and the DISCOVERY was what was missing** — `deacon read-configuration --container-id <cid>` on the same workspace and the same container produced the reference's answer, so the probe, the substitution pass and the merge were all correct; deacon simply never went looking for a container when none was named on the command line.\n\nThird subcommand in this family and the last one out of step, all three now on the one shared pass (`shared::container_substitution`): [#608](https://github.com/get2knowio/deacon/issues/608) closed it for `up --include-configuration`, [#616](https://github.com/get2knowio/deacon/issues/616) for `set-up`. The helper's own module doc had already named the pattern — 'every consumer subcommand that PRINTS a configuration alongside a live container owes this pass, and each one of them got it late'.\n\nBOTH blocks are asserted, as two operations rather than one, because upstream covers them as two `it`s and because they reach the reported document by different code: `mergedConfiguration` is SYNTHESIZED rather than echoed, so a fix that resolved the token in `configuration` alone would leave the merged block wrong and this case green on the half that happened to work.\n\nTHE FIRST CASE IN THE SUITE to run `read-configuration` after another subcommand — every other one is config-only — which is what makes the claim expressible at all and is worth noting for anyone reading the area expecting hermetic cases.\n\nIT COST ONE NORMALIZER CHANGE, and the reason is worth reading before touching it. Being the first case to run `read-configuration` on a Docker-backed workspace, it is the first whose result document carries the `workspace` block — `workspaceFolder` (`/workspaces/<basename>`) and `workspaceMount`'s `target` — for two workspaces the runner deliberately isolates from each other. Those are container-side paths derived from the temp directory's BASENAME, which the full-path token map cannot reach (the container path never contains the host path), so the case reported `workspace.workspaceFolder` and `workspace.workspaceMount` diverging on top of the two `remoteEnv` values it was written for. That is an artifact of the isolation the runner imposes, not a difference between the CLIs — measured directly on two identically-named directories, where the two blocks agree — so the answer is the normalizer, NOT a tolerance: a tolerance would record a deacon-vs-reference difference that does not exist. `workspace_basename_token` already existed for exactly this, scoped to `chan-container-state` because that was the only channel that had ever carried such a path; `chan-structured-output` now shares it. Verified rather than assumed: all four lanes re-run green afterwards (94 differential cases, `parity_docker`, `parity_registry`, `parity_hermetic` including its no-network namespace guard), and a unit test pins both halves — two basenames normalize equal, and `/workspace/` versus `/workspaces/` still diverges.\n\nNOT asserted here, deliberately: that discovery stays SILENT when it fails. That is a property of the absence of a daemon, which a `docker-shared` case cannot create; it is verified by hermetic tests instead (`docker` off `PATH`, and `DOCKER_HOST` at a dead socket — both exit 0 with the token deferred, which is also what the reference does, measured the same two ways).\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 9), `src/test/cli.test.ts` — 'should replace environment variables' and its `--include-merged-configuration` twin."
+    },
+    {
+      "id": "case-readconfig-container-id-has-no-workspace",
+      "behaviors": [
+        "bhv-readconfig-container-id-empty-workspace-block"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-set-up-configuration-authored"
+          ]
+        },
+        {
+          "id": "op-read-container",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--container-id",
+            "${CONTAINER_ID}",
+            "--config",
+            "${WORKSPACE}/setup-overlay.json"
+          ]
+        },
+        {
+          "id": "op-read-workspace",
+          "subcommand": "read-configuration",
+          "argv": [
+            "--container-id",
+            "${CONTAINER_ID}",
+            "--config",
+            "${WORKSPACE}/setup-overlay.json",
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read-container",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-read-container",
+          "assertion": {
+            "matches": "\"workspace\":\\{\\}"
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-read-workspace",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-read-workspace",
+          "assertion": {
+            "matches": "\"workspace\":\\{\"workspaceFolder\""
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Fixes [#659](https://github.com/get2knowio/deacon/issues/659), and it is the ONE claim in batch 13 expressible over a container `op-up` created — which is why it is the only one of the batch's five fixes that reaches `parity_docker` and the release gate. The other four need a container deacon did NOT create (no identity labels, no metadata label, no workspace mount) and are carried by `integration_container_id_foreign`, on the precedent the [#527](https://github.com/get2knowio/deacon/issues/527) row already set.\n\nMEASURED at oracle 0.87.0 across all four selector shapes, which is what scopes the claim: `--container-id` + `--config` → `\"workspace\": {}` on the reference, a full derived block on deacon; `--container-id` + `--workspace-folder` → the derived block on both; `--workspace-folder` alone → the derived block on both; `--container-id` ALONE → the key omitted entirely on both. The reference's rule is that the block describes the workspace the CALLER named — and a `--config` path is a document location, not a workspace.\n\nTWO operations, and the second is the point. `op-read-container` alone would pass against a `read-configuration` that had simply stopped reporting a workspace; `op-read-workspace` runs the SAME container with the SAME `--config` and adds only `--workspace-folder`, so the pair is a claim about the SELECTOR. Either arm alone is green against a deacon that hard-codes one answer.\n\nAsserted on `chan-stdout` with a regex rather than `chan-structured-output` with a `jsonSubset`, deliberately: the matcher iterates the SUBSET's keys, so `{\"workspace\": {}}` has nothing to check and passes against a fully populated block — a vacuous assertion dressed as coverage. The empty block is an ABSENCE of keys, and a regex over the emitted document is the instrument that can see one. The two patterns are each other's negation on the same byte range.\n\n`spec-expectation` rather than `live-differential` because it pins deacon's own answer, on `case-set-up-*`'s precedent: the reference's answer is recorded above and in the ledger row, and a differential would put the claim on the nightly lane, which gates nothing.\n\nMined from the reference CLI's own e2e suite at v0.87.0 ([#480](https://github.com/get2knowio/deacon/issues/480), batch 13), `src/test/cli.set-up.test.ts`, whose four subcommands all target a container by id."
     }
   ]
 }

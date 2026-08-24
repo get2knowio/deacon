@@ -129,23 +129,46 @@ pub fn container_workspace_folder_from_mounts(
 ///      target (deacon previously used the single-container default
 ///      `/workspaces/<basename>`, which the Compose service doesn't mount, so
 ///      `exec`/lifecycle `chdir` failed with rc 127 — issues #294/#295);
-///   3. otherwise the single-container host-side derivation
-///      (`/workspaces/<basename(root)>[/<subpath>]`).
+///   3. the single-container host-side derivation
+///      (`/workspaces/<basename(root)>[/<subpath>]`) — but ONLY when the container
+///      corroborates it by actually having a mount there, which is what keeps the
+///      volume-workspace case working;
+///   4. otherwise `None`, meaning "this container has no workspace" — the caller
+///      falls back to the container user's home folder.
+///
+/// Step 4 exists because step 3 is a claim about a container `up` created, and
+/// `--container-id` can name one it did not (#655). A plain `docker run` target has
+/// no mount at `/workspaces/<basename(host cwd)>`, so `chdir`-ing there fails the
+/// exec outright with rc 127 — silently, in `run-user-commands`, where a
+/// non-blocking phase still reports success. The reference's rule is
+/// `remoteCwd = remoteWorkspaceFolder || homeFolder`, and returning `Option` is what
+/// makes the second half of it reachable: before this, every config-bearing
+/// invocation produced *some* path and the home-folder branch could never run.
+/// Same failure mode as #294/#295, which is why step 2 exists; this is a second
+/// trigger for it.
 pub fn resolve_container_cwd(
     config: &DevContainerConfig,
     host_workspace_folder: &Path,
     mounts: &[Mount],
     mount_workspace_git_root: bool,
-) -> String {
+) -> Option<String> {
     if let Some(folder) =
         container_workspace_folder_from_mounts(config, host_workspace_folder, mounts)
     {
-        return folder;
+        return Some(folder);
     }
     if config.uses_compose() {
-        return "/".to_string();
+        return Some("/".to_string());
     }
-    derive_container_workspace_folder(config, host_workspace_folder, mount_workspace_git_root)
+    let derived =
+        derive_container_workspace_folder(config, host_workspace_folder, mount_workspace_git_root);
+    // A workspace mounted as a VOLUME leaves no bind mount for step 1 to match, so
+    // the derived path is still right — the container has a mount whose destination
+    // IS that path. A container deacon did not create has nothing there.
+    mounts
+        .iter()
+        .any(|m| m.destination == derived)
+        .then_some(derived)
 }
 
 /// Derive the container workspace folder (the lifecycle & exec working directory)
@@ -295,7 +318,7 @@ mod tests {
         let config = compose_config();
         assert!(config.uses_compose());
         let got = resolve_container_cwd(&config, Path::new("/host/my-project"), &[], false);
-        assert_eq!(got, "/");
+        assert_eq!(got.as_deref(), Some("/"));
     }
 
     #[test]
@@ -303,15 +326,49 @@ mod tests {
         let mut config = compose_config();
         config.workspace_folder = Some("/workspaces/compose-basic".to_string());
         let got = resolve_container_cwd(&config, Path::new("/host/my-project"), &[], false);
-        assert_eq!(got, "/workspaces/compose-basic");
+        assert_eq!(got.as_deref(), Some("/workspaces/compose-basic"));
     }
 
     #[test]
-    fn cwd_single_container_uses_workspaces_basename() {
-        // Non-compose without an explicit folder keeps the single-container default.
+    fn cwd_single_container_uses_workspaces_basename_when_the_container_mounts_it() {
+        // Non-compose without an explicit folder keeps the single-container default —
+        // but only because the container corroborates it. A workspace mounted as a
+        // VOLUME leaves no bind mount for the mount lookup to match, yet the derived
+        // path is where `up` put it, so the destination check is what preserves it.
         let config = minimal_config();
+        let mut vol = bind("workspace-volume", "/workspaces/my-project");
+        vol.mount_type = "volume".to_string();
+        let got = resolve_container_cwd(&config, Path::new("/host/my-project"), &[vol], false);
+        assert_eq!(got.as_deref(), Some("/workspaces/my-project"));
+    }
+
+    #[test]
+    fn cwd_is_none_for_a_container_that_has_no_workspace() {
+        // #655: `--container-id` can name a container deacon did not create. Nothing
+        // is mounted at the derived path, so there is no workspace and the caller
+        // must fall back to the container user's home rather than `chdir`-ing into a
+        // directory that does not exist (rc 127).
+        let config = minimal_config();
+        assert_eq!(
+            resolve_container_cwd(&config, Path::new("/host/my-project"), &[], false),
+            None
+        );
+        // A foreign container with unrelated mounts is still not this workspace.
+        let mounts = vec![bind("/host/other", "/opt/other")];
+        assert_eq!(
+            resolve_container_cwd(&config, Path::new("/host/my-project"), &mounts, false),
+            None
+        );
+    }
+
+    #[test]
+    fn cwd_authored_workspace_folder_wins_without_any_mount() {
+        // An authored `workspaceFolder` is the caller's own claim and is honored
+        // verbatim, mount or no mount — measured on both CLIs (#655).
+        let mut config = minimal_config();
+        config.workspace_folder = Some("/etc".to_string());
         let got = resolve_container_cwd(&config, Path::new("/host/my-project"), &[], false);
-        assert_eq!(got, "/workspaces/my-project");
+        assert_eq!(got.as_deref(), Some("/etc"));
     }
 
     #[test]
@@ -321,7 +378,7 @@ mod tests {
         let config = compose_config();
         let mounts = vec![bind("/host/my-project", "/workspaces/my-project")];
         let got = resolve_container_cwd(&config, Path::new("/host/my-project"), &mounts, false);
-        assert_eq!(got, "/workspaces/my-project");
+        assert_eq!(got.as_deref(), Some("/workspaces/my-project"));
     }
 
     #[test]
