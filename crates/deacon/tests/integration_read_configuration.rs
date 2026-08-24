@@ -875,10 +875,10 @@ fn worktree_common_dir_relocates_the_mount_and_adds_the_git_dir() -> Result<()> 
         "/workspaces/worktrees/feature"
     );
 
-    // The mount SOURCEs are host paths, and deacon canonicalizes — on Windows that means a
-    // `\\?\` verbatim prefix with 8.3 names expanded, on macOS `/var` becomes
-    // `/private/var` — so the source is matched by its leaf rather than by the spelling
-    // this test happens to hold. The targets are container paths and are exact.
+    // The mount SOURCEs are host paths. Since #665 deacon absolutizes rather than
+    // canonicalizes them, so they no longer move — but matching by trailing fragment rather
+    // than by whole spelling costs nothing and survives any future normalization. The
+    // targets are container paths and are exact.
     let workspace_mount = workspace_block["workspaceMount"].as_str().unwrap();
     assert!(
         workspace_mount.starts_with("type=bind,source="),

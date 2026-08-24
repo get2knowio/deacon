@@ -19,10 +19,13 @@ use tempfile::TempDir;
 #[test]
 fn test_no_selectors_defaults_workspace_to_current_directory() {
     let temp_dir = TempDir::new().unwrap();
-    // NAME the workspace in canonical form. Since #665 deacon reports the defaulted cwd as
-    // given rather than canonicalizing it, so the process cwd set below has to already be the
-    // spelling the assertions expect — on macOS `/var/folders/...` vs `/private/var/...`.
-    let workspace = temp_dir.path().canonicalize().unwrap();
+    // The workspace is named as the temp dir gives it. The process's OWN view of its cwd is
+    // what deacon reports since #665, and that view is platform-specific in opposite
+    // directions — macOS's `getcwd` always resolves the `/var` symlink, Windows reports the
+    // non-verbatim `C:\…` form even when the child was started at a `\\?\` path — so
+    // neither spelling this test could hold is right on both. The assertions compare a
+    // TRAILING FRAGMENT instead, anchored on the temp directory's unique basename.
+    let workspace = temp_dir.path().to_path_buf();
     let config_dir = workspace.join(".devcontainer");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
@@ -45,14 +48,17 @@ fn test_no_selectors_defaults_workspace_to_current_directory() {
         .as_str()
         .expect("configFilePath.path must be reported")
         .replace('\\', "/");
-    let expected = config_dir
-        .join("devcontainer.json")
-        .display()
-        .to_string()
-        .replace('\\', "/");
-    assert_eq!(
-        config_file_path, expected,
-        "the defaulted workspace must resolve to the cwd's document"
+    let expected_tail = format!(
+        "{}/.devcontainer/devcontainer.json",
+        workspace
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("temp dir has a basename")
+    );
+    assert!(
+        config_file_path.ends_with(&expected_tail),
+        "the defaulted workspace must resolve to the cwd's document: {config_file_path} \
+         should end with {expected_tail}"
     );
 }
 
@@ -63,12 +69,19 @@ fn test_no_selectors_defaults_workspace_to_current_directory() {
 #[test]
 fn test_no_selectors_no_config_in_cwd_names_the_missing_document() {
     let temp_dir = TempDir::new().unwrap();
-    let workspace = temp_dir.path().canonicalize().unwrap();
-    let expected = workspace
-        .join(".devcontainer")
-        .join("devcontainer.json")
-        .display()
-        .to_string();
+    // Same platform-specific cwd spelling as the test above: anchor on a trailing fragment
+    // built with the platform's own separator rather than on a whole path.
+    let workspace = temp_dir.path().to_path_buf();
+    let expected = std::path::Path::new(
+        workspace
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("temp dir has a basename"),
+    )
+    .join(".devcontainer")
+    .join("devcontainer.json")
+    .display()
+    .to_string();
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.current_dir(&workspace).arg("read-configuration");
