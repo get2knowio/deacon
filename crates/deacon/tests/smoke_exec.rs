@@ -473,16 +473,53 @@ fn test_exec_subfolder_config() {
 }
 
 /// Test TTY detection behavior
+/// `deacon exec` gives the container command a terminal exactly when deacon
+/// itself has one — and passes the exit code and stdin through it.
+///
+/// This replaces a test named `test_exec_tty_detection` that asserted nothing:
+/// it ran `exec test -t 0` and accepted either outcome, commenting that "both
+/// success and failure are valid". Nothing anywhere in the suite proved that a
+/// command run through `deacon exec` ever receives a terminal —
+/// `integration_exec_pty.rs` is mock-based and asserts the `tty` flag on the
+/// `ExecConfig` deacon builds, which is the decision rather than its effect.
+///
+/// The three PTY claims come from the reference CLI's own e2e suite
+/// (`src/test/cli.exec.base.ts` at v0.87.0, the `shellPtyExec` arms): the
+/// command runs in a terminal, its exit code survives, and its stdin is
+/// connected. Measured at oracle 0.87.0 against deacon on this exact fixture —
+/// both CLIs agree on all three.
+///
+/// **Why `script(1)` and not a PTY crate.** Allocating a pty from Rust means
+/// `openpty` + `dup2` in a `pre_exec` hook, which this workspace's
+/// `unsafe_code = "deny"` rules out, or a new dependency that exists to
+/// encapsulate that same `unsafe`. `script -qec CMD /dev/null` runs `CMD` on a
+/// pty and, with `-e`, returns its exit status — no dependency, no `unsafe`.
+/// It is util-linux syntax, so this is `#[cfg(target_os = "linux")]`: a visible
+/// non-selection rather than a runtime skip, and the Docker-bearing CI lanes
+/// are Linux.
+///
+/// **The first assertion is what makes the rest mean something.** Without a pty
+/// the container command must NOT see a terminal, and with one it must. Either
+/// half alone would pass against a deacon that hard-coded `-t` on or off.
 #[test]
-fn test_exec_tty_detection() {
+#[cfg(target_os = "linux")]
+fn exec_propagates_a_terminal_to_the_container_command() {
     if !is_docker_available() {
-        eprintln!("Skipping test_exec_tty_detection: Docker not available");
+        eprintln!(
+            "Skipping exec_propagates_a_terminal_to_the_container_command: Docker not available"
+        );
         return;
     }
+    assert!(
+        std::path::Path::new("/usr/bin/script").exists(),
+        "script(1) from util-linux is required to allocate a pty for this test; \
+         skipping silently would restore the vacuous assertion it replaced"
+    );
+
     let temp_dir = TempDir::new().unwrap();
 
     let devcontainer_config = r#"{
-    "name": "TTY Detection Test",
+    "name": "Exec Terminal Propagation Test",
     "image": "alpine:3.19",
     "workspaceFolder": "/workspace",
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
@@ -495,7 +532,6 @@ fn test_exec_tty_detection() {
     )
     .unwrap();
 
-    // Ensure container is up
     let mut up_cmd = support::deacon_command();
     let up_out = up_cmd
         .current_dir(&temp_dir)
@@ -512,26 +548,63 @@ fn test_exec_tty_detection() {
         String::from_utf8_lossy(&up_out.stderr)
     );
 
-    // Test exec command that checks if running in TTY
-    let mut exec_cmd = support::deacon_command();
-    let exec_output = exec_cmd
+    let workspace = temp_dir.path().display().to_string();
+    let deacon = assert_cmd::cargo::cargo_bin("deacon").display().to_string();
+
+    // (1) No pty: the container command must not see a terminal. Upstream's own
+    // `[ ! -t 1 ]` arm, run the ordinary way.
+    let mut no_pty = support::deacon_command();
+    let no_pty_out = no_pty
         .current_dir(&temp_dir)
         .arg("exec")
         .arg("--workspace-folder")
         .arg(temp_dir.path())
-        .arg("test")
+        .arg("[")
+        .arg("!")
         .arg("-t")
-        .arg("0") // test if stdin is a TTY
+        .arg("1")
+        .arg("]")
         .output()
         .unwrap();
-
-    // Exit code depends on TTY state - both success and failure are valid, but the command must execute.
-    assert!(
-        exec_output.status.code().is_some(),
-        "TTY detection exec did not run"
+    assert_eq!(
+        no_pty_out.status.code(),
+        Some(0),
+        "without a terminal of its own, exec must not give the command one: {}",
+        String::from_utf8_lossy(&no_pty_out.stderr)
     );
 
-    // Cleanup
+    // (2) Under a pty: the command runs in a terminal.
+    let (code, _) = run_under_pty(
+        temp_dir.path(),
+        &format!("{deacon} exec --workspace-folder '{workspace}' [ -t 1 ]"),
+        None,
+    );
+    assert_eq!(
+        code,
+        Some(0),
+        "under a terminal, exec must give the container command one"
+    );
+
+    // (3) Under a pty: the exit code survives the round trip.
+    let (code, _) = run_under_pty(
+        temp_dir.path(),
+        &format!("{deacon} exec --workspace-folder '{workspace}' sh -c 'exit 123'"),
+        None,
+    );
+    assert_eq!(code, Some(123), "exit code must survive the pty");
+
+    // (4) Under a pty: stdin reaches the command, and its output comes back.
+    let (code, output) = run_under_pty(
+        temp_dir.path(),
+        &format!("{deacon} exec --workspace-folder '{workspace}' sh"),
+        Some("FOO=BAR\necho ${FOO}hi${FOO}\nexit\n"),
+    );
+    assert_eq!(code, Some(0), "interactive shell must exit cleanly");
+    assert!(
+        output.contains("BARhiBAR"),
+        "stdin must reach the shell and its output come back; got: {output}"
+    );
+
     let mut down_cmd = support::deacon_command();
     let _ = down_cmd
         .current_dir(&temp_dir)
@@ -540,4 +613,55 @@ fn test_exec_tty_detection() {
         .arg(temp_dir.path())
         .output()
         .unwrap();
+}
+
+/// Run `command` on a pty via `script(1)`, returning its exit code and output.
+///
+/// `-q` suppresses script's own banner, `-e` makes script return the child's
+/// exit status rather than its own, and the transcript goes to `/dev/null`
+/// because the pty's output is already on script's stdout, which is what the
+/// caller reads.
+#[cfg(target_os = "linux")]
+fn run_under_pty(
+    cwd: &std::path::Path,
+    command: &str,
+    stdin: Option<&str>,
+) -> (Option<i32>, String) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new("script")
+        .current_dir(cwd)
+        // The child inherits the environment, so the workspace-state isolation
+        // `support::deacon_command()` applies has to be set here by hand.
+        .env("TMPDIR", support::isolated_home_for_external_spawn())
+        .env("TMP", support::isolated_home_for_external_spawn())
+        .env("TEMP", support::isolated_home_for_external_spawn())
+        .args(["-qec", command, "/dev/null"])
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn script(1)");
+
+    if let Some(payload) = stdin {
+        child
+            .stdin
+            .take()
+            .expect("stdin was piped")
+            .write_all(payload.as_bytes())
+            .expect("failed to write stdin to the pty");
+    }
+
+    let out = child
+        .wait_with_output()
+        .expect("script(1) did not complete");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
 }
