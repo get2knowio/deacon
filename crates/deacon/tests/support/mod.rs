@@ -40,6 +40,17 @@ pub fn deacon_command() -> Command {
     cmd
 }
 
+/// The isolated temp home every [`deacon_command`] invocation points at.
+///
+/// Exposed for the one shape [`deacon_command`] cannot serve: a test that must
+/// spawn `deacon` through ANOTHER program — `script(1)`, to give it a real
+/// terminal — and still needs the same workspace-state isolation, since the
+/// child inherits the environment rather than being configured through
+/// [`assert_cmd`]. Set it as `TMPDIR`/`TMP`/`TEMP` on the outer process.
+pub fn isolated_home_for_external_spawn() -> &'static std::path::Path {
+    isolated_tmp_home()
+}
+
 /// Helper to skip tests that require network access.
 ///
 /// Tests that make network requests should use this as a guard at the beginning:
