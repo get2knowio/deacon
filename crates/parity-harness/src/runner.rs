@@ -160,17 +160,42 @@ pub(crate) async fn execute_ops(
     // container identity + labels are unique (collision-safe) and an RAII guard reclaims
     // every resource on success AND unwind.
     //
-    // An `fs-heavy` case gets the same isolation for a different reason: its group means
-    // "significant filesystem operations", and those must not land in
-    // `parity/fixtures/`, which is version-controlled input every other case reads.
-    // Its workspace reclaims the temp dir ONLY — the config-only lane is defined to need
-    // no daemon, so its cleanup must not shell out to one.
+    // EVERY other case gets the same isolation, reclaiming the temp dir only — the
+    // config-only lanes are defined to need no daemon, so their cleanup must not shell
+    // out to one.
     //
-    // Everything else runs against the committed fixture directory directly (read-only).
+    // That used to be true of `fs-heavy` alone, on the reasoning that its group means
+    // "significant filesystem operations" and those must not land in `parity/fixtures/`,
+    // which is version-controlled input every other case reads. The rest ran against the
+    // committed fixture directory DIRECTLY, on the assumption that they were read-only —
+    // an assumption nothing enforced and that #680 disproved: a `build` that got past a
+    // policy gate resolved a Feature and wrote a `devcontainer-lock.json` into the
+    // repository. "Significant filesystem operations" was never the property that
+    // mattered; writing at all was, and a case cannot declare in advance that the CLI
+    // will not write. Isolation is now unconditional and `FixtureIntegrity` proves it.
+    //
+    // Behavior-preserving when it landed: no non-Docker case names more than one distinct
+    // fixture across its operations, and none has an operation with no fixture, so
+    // layering every fixture into one workspace merges nothing and orphans nothing.
     let docker_case = is_docker_case(case);
-    let isolated = docker_case || case.resource_group == Some(ResourceGroup::FsHeavy);
-    let mut docker_ws: Option<DockerWorkspace> = None;
-    let isolated_workspace: Option<PathBuf> = if isolated {
+    // An operation naming more than one fixture is still a shape error. The materialize
+    // step below layers `unique_fixture_ids(case)` into one workspace and would silently
+    // accept it, so the rule is checked explicitly rather than falling out of the
+    // per-operation workspace resolution it used to live in.
+    for op in &case.operations {
+        if op.fixtures.len() > 1 {
+            return Err(shape_error(
+                case,
+                &format!(
+                    "operation {:?} references {} fixtures; one operation names one fixture",
+                    op.id,
+                    op.fixtures.len()
+                ),
+            ));
+        }
+    }
+    let docker_ws: DockerWorkspace;
+    let isolated_workspace: PathBuf = {
         // Creating the temp dir and recursively copying every fixture tree into it is
         // BLOCKING filesystem work. Under the bounded-concurrency Docker driver (T018)
         // several cases set up at once, so doing it inline would stall the executor for
@@ -205,22 +230,32 @@ pub(crate) async fn execute_ops(
         .await
         .map_err(blocking_join_err)??;
         let path = ws.path().to_path_buf();
-        docker_ws = Some(ws);
-        Some(path)
-    } else {
-        None
+        docker_ws = ws;
+        path
     };
+
+    // Fingerprint the committed fixture trees so a case that somehow writes into them is
+    // caught here rather than found later as an unexplained modified file (#680). With
+    // isolation unconditional this should never fire — which is the point: the copy is
+    // the fix, and this is the proof the copy is working.
+    let fixture_guard =
+        crate::workspace::FixtureIntegrity::capture(cfg.fixtures_root, &unique_fixture_ids(case))
+            .map_err(|e| HarnessError::FixtureMissing {
+            path: cfg
+                .fixtures_root
+                .join(format!("<could not fingerprint fixtures: {e}>")),
+        })?;
 
     // The tag a `build` operation writes to, when the case asks for one. Registered for
     // reclamation up front so an image survives no longer than its case even if the run
     // panics between the build and the inspect.
-    let image_tag: Option<String> = match (docker_case, docker_ws.as_mut()) {
-        (true, Some(ws)) => {
-            let tag = format!("{}:latest", ws.resource_name("img"));
-            ws.track_image(tag.clone());
-            Some(tag)
-        }
-        _ => None,
+    let mut docker_ws = docker_ws;
+    let image_tag: Option<String> = if docker_case {
+        let tag = format!("{}:latest", docker_ws.resource_name("img"));
+        docker_ws.track_image(tag.clone());
+        Some(tag)
+    } else {
+        None
     };
 
     let mut context_workspace: Option<PathBuf> = None;
@@ -237,11 +272,8 @@ pub(crate) async fn execute_ops(
     let mut image_inspect: Option<serde_json::Value> = None;
 
     for op in &case.operations {
-        // Docker cases: one isolated workspace for every op. Config-only: per-op fixture.
-        let workspace = match &isolated_workspace {
-            Some(ws) => ws.clone(),
-            None => resolve_workspace(case, op, cfg)?,
-        };
+        // Every case runs in its own isolated workspace, shared across operations (#680).
+        let workspace = isolated_workspace.clone();
         if context_workspace.is_none() {
             context_workspace = Some(workspace.clone());
         }
@@ -251,7 +283,7 @@ pub(crate) async fn execute_ops(
             case,
             op,
             &workspace,
-            isolated_workspace.is_some(),
+            true,
             image_tag.as_deref(),
             container_id.as_deref(),
         )?;
@@ -275,7 +307,7 @@ pub(crate) async fn execute_ops(
                 .map_err(blocking_join_err)??;
         }
 
-        let env = substitute_env(case, op, &workspace, isolated_workspace.is_some())?;
+        let env = substitute_env(case, op, &workspace, true)?;
 
         let raw_case = format!("{}__{}", case.id, op.id);
         let inv = run_and_capture(
@@ -411,6 +443,23 @@ pub(crate) async fn execute_ops(
         ));
     }
 
+    // Checked after the operations and before any evidence is assembled, so a case that
+    // mutated version-controlled input fails on THAT rather than on whatever its
+    // assertions happened to see afterwards.
+    if let Some(problem) =
+        fixture_guard
+            .verify()
+            .map_err(|e| HarnessError::NormalizationFailed {
+                channel: format!("fixture-integrity[{}]", case.id),
+                cause: format!("could not re-fingerprint the fixture trees: {e}"),
+            })?
+    {
+        return Err(HarnessError::NormalizationFailed {
+            channel: format!("fixture-integrity[{}]", case.id),
+            cause: problem,
+        });
+    }
+
     let workspace = context_workspace.unwrap_or_else(|| cfg.fixtures_root.to_path_buf());
     let mut ctx = RunContext::for_side(workspace, side);
     // Scope the filesystem observer to the case's declared allowlist (clarify Q1).
@@ -427,7 +476,7 @@ pub(crate) async fn execute_ops(
         ctx.record_op_snapshot(op_id, snapshot);
     }
 
-    Ok((ctx, docker_ws))
+    Ok((ctx, Some(docker_ws)))
 }
 
 /// Whether a case runs Docker-backed (its `resourceGroup` requests a Docker group). Such
@@ -1134,32 +1183,6 @@ fn exec_kind(subcommand: &str) -> ExecKind {
 /// mapping to `<fixtures_root>/<id>/`; zero fixtures runs against `fixtures_root`
 /// itself. Multiple fixtures per op (merged into one isolated workspace) is US5 —
 /// fail-loud until then rather than silently pick one.
-fn resolve_workspace(
-    case: &TestCase,
-    op: &Operation,
-    cfg: &RunConfig<'_>,
-) -> Result<PathBuf, HarnessError> {
-    match op.fixtures.as_slice() {
-        [] => Ok(cfg.fixtures_root.to_path_buf()),
-        [one] => {
-            let dir = cfg.fixtures_root.join(one);
-            if dir.is_dir() {
-                Ok(dir)
-            } else {
-                Err(HarnessError::FixtureMissing { path: dir })
-            }
-        }
-        _ => Err(shape_error(
-            case,
-            &format!(
-                "operation {:?} references {} fixtures; multi-fixture workspaces land in US5",
-                op.id,
-                op.fixtures.len()
-            ),
-        )),
-    }
-}
-
 /// An operation's `env`, with `${WORKSPACE}` resolved, as the pairs the child is
 /// spawned with.
 ///
