@@ -141,30 +141,44 @@ fn an_ignored_additional_feature_is_out_of_the_gates_scope() {
     // would be installed and the run must not be refused for it. This is what
     // gating the MERGED set buys over gating the raw union.
     //
-    // The configuration names a local Feature that does not exist, so the run
-    // still fails — hermetically, at Feature resolution, without reaching a
-    // registry or creating a container. That failure is the evidence the run
-    // got PAST the gate; an assertion that it merely "did not say
-    // disallowedFeatureId" would also pass if nothing ran at all.
+    // The evidence is the PAIR: the same workspace, the same list, the same
+    // overlay, run with and without the flag. The first is blocked, the second
+    // is not — so "the gate was never reached" cannot explain the second.
+    // Asserting the absence alone would pass on a build where the gate never
+    // ran at all, and asserting on a specific later failure would only pin
+    // wherever THIS host happens to stop (a Docker-less runner never reaches
+    // Feature resolution, which is how the first draft of this test failed).
+    //
+    // The configuration names a local Feature that does not exist, so on a host
+    // that does get further, the run still dies at Feature resolution without
+    // reaching a registry or creating a container.
     let ws = workspace_declaring(r#"{ "./tripwire": {} }"#);
 
-    let assert = Command::cargo_bin("deacon")
-        .unwrap()
-        .arg("up")
-        .arg("--workspace-folder")
-        .arg(ws.path())
-        .arg("--additional-features")
-        .arg(r#"{"ghcr.io/devcontainers/features/node:1":{}}"#)
-        .arg("--ignore-additional-features")
-        .env(
-            "DEACON_DISALLOWED_FEATURES",
-            "ghcr.io/devcontainers/features/node",
-        )
-        .assert()
-        .failure()
-        .stdout(predicates::str::contains("disallowedFeatureId").not())
-        .stderr(predicates::str::contains("./tripwire"));
-    drop(assert);
+    let mut run = |ignore: bool| {
+        let mut cmd = Command::cargo_bin("deacon").unwrap();
+        cmd.arg("up")
+            .arg("--workspace-folder")
+            .arg(ws.path())
+            .arg("--additional-features")
+            .arg(r#"{"ghcr.io/devcontainers/features/node:1":{}}"#)
+            .env(
+                "DEACON_DISALLOWED_FEATURES",
+                "ghcr.io/devcontainers/features/node",
+            );
+        if ignore {
+            cmd.arg("--ignore-additional-features");
+        }
+        String::from_utf8_lossy(&cmd.assert().failure().get_output().stdout).into_owned()
+    };
+
+    assert!(
+        run(false).contains("disallowedFeatureId"),
+        "control: without the flag the overlay is in scope and must be blocked"
+    );
+    assert!(
+        !run(true).contains("disallowedFeatureId"),
+        "with the flag the overlay is dropped, so there is nothing to refuse"
+    );
 }
 
 #[test]
