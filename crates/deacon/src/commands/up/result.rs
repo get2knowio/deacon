@@ -342,14 +342,34 @@ impl UpResult {
                     // parsing the JSON never has to scrape the message. deacon
                     // modelled the field from the start and never filled it
                     // (#675).
-                    ConfigError::DisallowedFeature { feature_id, matched } => UpResult::error(
-                        format!("Cannot use the '{}' Feature", feature_id),
-                        format!(
-                            "Feature '{}' is disallowed by DEACON_DISALLOWED_FEATURES (matched '{}'). Remove it from your configuration, or from --additional-features, before continuing.",
-                            feature_id, matched
-                        ),
-                    )
-                    .with_disallowed_feature_id(feature_id.clone()),
+                    ConfigError::DisallowedFeature {
+                        feature_id,
+                        matched,
+                        refused_by,
+                        documentation_url,
+                    } => {
+                        let mut result = UpResult::error(
+                            format!("Cannot use the '{}' Feature", feature_id),
+                            format!(
+                                "Feature '{}' is disallowed by {} (matched '{}'). Remove it from your configuration, or from --additional-features, before continuing.{}",
+                                feature_id,
+                                refused_by,
+                                matched,
+                                documentation_url
+                                    .as_ref()
+                                    .map(|u| format!(" See {u} to learn more."))
+                                    .unwrap_or_default(),
+                            ),
+                        )
+                        .with_disallowed_feature_id(feature_id.clone());
+                        // The reference emits `learnMoreUrl` alongside
+                        // `disallowedFeatureId`; a manifest entry is the only
+                        // source that can carry one.
+                        if let Some(url) = documentation_url {
+                            result = result.with_learn_more_url(url.clone());
+                        }
+                        result
+                    }
                     ConfigError::Parsing { message } => UpResult::error(
                         "Failed to parse configuration file".to_string(),
                         message.clone(),

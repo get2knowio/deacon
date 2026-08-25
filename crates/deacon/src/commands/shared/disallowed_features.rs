@@ -1,75 +1,53 @@
 //! The disallowed-Features policy gate, shared by `up` and `build`.
 //!
 //! An operator names Features they refuse to have installed, and this gate
-//! refuses the run before deacon touches a registry or a daemon. The list is
-//! deacon's own local knob — the comma-separated `DEACON_DISALLOWED_FEATURES`
-//! environment variable, plus a (currently empty) compiled-in list — and NOT
-//! the reference CLI's remote control manifest, which is a separate open
-//! question ([#676]).
+//! refuses the run before deacon touches a registry or a daemon. There are two
+//! sources and they compose:
 //!
-//! What IS taken from the reference is how an entry matches a Feature id and
-//! which Features the gate can see, because deacon's version of both silently
-//! failed open ([#675]):
+//! 1. **`DEACON_DISALLOWED_FEATURES`** — a comma-separated list, deacon's own
+//!    knob, needing no network and no file.
+//! 2. **`--control-manifest`** ([`ControlManifestSource`]) — a URL or file in
+//!    the reference CLI's manifest format ([#676]). Unset by default: deacon
+//!    fetches nothing unless asked. See [`deacon_core::control_manifest`] for
+//!    why the reference's own URL is not a default here.
 //!
-//! - an entry matches by PREFIX terminated at a Feature-id separator, so
-//!   `ghcr.io/devcontainers/features/node` covers `…/node:1` — the form a
-//!   configuration almost always names. Exact-string matching made the natural
-//!   entry block nothing at all.
+//! Both use one matching rule — an entry matches by PREFIX terminated at a
+//! Feature-id separator (`/`, `:`, `@`), so `ghcr.io/devcontainers/features/node`
+//! covers `…/node:1` — which lives in
+//! [`deacon_core::control_manifest::feature_id_covered_by`] so the two lists can
+//! never drift apart.
+//!
+//! Scope and placement, both fixed in [#675]:
 //! - the gate sees the Features a run will actually install, which is the
-//!   configuration's union with `--additional-features` — moving a Feature to
-//!   the command line used to walk straight past it.
-//! - `build` consults it too. It used to be reachable only from `up`.
+//!   configuration's union with `--additional-features`;
+//! - `build` consults it too.
 //!
 //! [#675]: https://github.com/get2knowio/deacon/issues/675
 //! [#676]: https://github.com/get2knowio/deacon/issues/676
 
 use anyhow::Result;
+use deacon_core::control_manifest::{ControlManifestSource, feature_id_covered_by};
 use deacon_core::errors::{ConfigError, DeaconError};
+use std::path::Path;
 use tracing::debug;
 
-/// Features refused regardless of the environment. Deliberately empty: deacon
-/// ships no opinion about which Features are problematic, and #676 is where
-/// adopting someone else's opinion is being decided.
+/// Features refused regardless of configuration. Deliberately empty: deacon
+/// ships no opinion about which Features are problematic, which is the whole
+/// point of making the source an operator's choice.
 const DISALLOWED_FEATURES: &[&str] = &[];
 
-/// Characters that terminate the prefix half of a Feature id.
-///
-/// Mirrors the reference's `findDisallowedFeatureEntry`
-/// (`src/spec-node/disallowedFeatures.ts`): a tag (`:`), a digest (`@`) or a
-/// deeper path segment (`/`) continues the same Feature, so a prefix covers
-/// them; any other character starts a DIFFERENT Feature and must not match.
-/// `example.io/test/node` therefore covers `…/node:1`, `…/node/js` and
-/// `…/node@abc`, but not `…/nodej` and not `…/node.js`.
-const ID_SEPARATORS: [u8; 3] = *b"/:@";
+/// The name reported when the environment variable is what refused a run.
+const ENV_SOURCE: &str = "DEACON_DISALLOWED_FEATURES";
 
-/// Whether `entry` covers `feature_id` under the reference's prefix rule.
-fn entry_covers(entry: &str, feature_id: &str) -> bool {
-    // An empty entry is a prefix of everything. The reference can only get one
-    // from a malformed manifest; deacon gets one from a stray comma
-    // (`DEACON_DISALLOWED_FEATURES=a,,b`) or an empty variable, and blocking
-    // every Feature is never what that meant. Callers filter these out, so this
-    // guard is belt-and-braces for a direct call.
-    if entry.is_empty() {
-        return false;
-    }
-    let Some(rest) = feature_id.strip_prefix(entry) else {
-        return false;
-    };
-    // `strip_prefix` succeeded, so the boundary is a char boundary and the
-    // separators are ASCII — a byte look is exact here.
-    match rest.as_bytes().first() {
-        None => true, // Feature id equal to the entry.
-        Some(byte) => ID_SEPARATORS.contains(byte),
-    }
-}
-
-/// The entries an operator has disallowed, in the order they were written.
-fn disallowed_entries() -> Vec<String> {
+/// The entries `DEACON_DISALLOWED_FEATURES` contributes, in written order.
+fn env_entries() -> Vec<String> {
     let mut entries: Vec<String> = DISALLOWED_FEATURES.iter().map(|e| e.to_string()).collect();
     if let Ok(raw) = std::env::var("DEACON_DISALLOWED_FEATURES") {
         entries.extend(
             raw.split(',')
                 .map(str::trim)
+                // A stray comma yields an empty entry, which is a prefix of
+                // everything. Blocking every Feature is never what that meant.
                 .filter(|entry| !entry.is_empty())
                 .map(str::to_string),
         );
@@ -86,27 +64,61 @@ fn disallowed_entries() -> Vec<String> {
 ///
 /// Callers MUST invoke this before any registry or daemon work and before
 /// `initializeCommand`; the reference refuses without touching either.
-pub(crate) fn check_for_disallowed_features(features: &serde_json::Value) -> Result<()> {
-    let entries = disallowed_entries();
-    if entries.is_empty() {
-        return Ok(());
-    }
-
+///
+/// A named-but-unusable `--control-manifest` is an ERROR, not a shrug: the
+/// operator asked for a policy, and proceeding without one would defeat it.
+pub(crate) async fn check_for_disallowed_features(
+    features: &serde_json::Value,
+    manifest_source: Option<&ControlManifestSource>,
+    cache_dir: &Path,
+) -> Result<()> {
     let Some(features_obj) = features.as_object() else {
         return Ok(());
     };
 
+    // The environment list first: it needs no I/O, so a run refused by it never
+    // pays for a fetch.
+    let env = env_entries();
+    if !env.is_empty() {
+        debug!(entries = ?env, count = features_obj.len(), "checking Features against {ENV_SOURCE}");
+        for feature_id in features_obj.keys() {
+            if let Some(entry) = env
+                .iter()
+                .find(|entry| feature_id_covered_by(entry, feature_id))
+            {
+                return Err(DeaconError::Config(ConfigError::DisallowedFeature {
+                    feature_id: feature_id.clone(),
+                    matched: entry.clone(),
+                    refused_by: ENV_SOURCE.to_string(),
+                    documentation_url: None,
+                })
+                .into());
+            }
+        }
+    }
+
+    let Some(source) = manifest_source else {
+        return Ok(());
+    };
+
+    // Loaded even when the configuration declares no Features: a broken source
+    // should be reported the same way regardless of what it would have matched,
+    // rather than being noticed only once someone adds a Feature.
+    let manifest = deacon_core::control_manifest::load(source, cache_dir).await?;
     debug!(
-        entries = ?entries,
-        count = features_obj.len(),
-        "Checking Features against the disallowed list"
+        %source,
+        disallowed = manifest.disallowed_features.len(),
+        advisories = manifest.feature_advisories.len(),
+        "loaded control manifest"
     );
 
     for feature_id in features_obj.keys() {
-        if let Some(entry) = entries.iter().find(|entry| entry_covers(entry, feature_id)) {
+        if let Some(entry) = manifest.disallowed_entry_for(feature_id) {
             return Err(DeaconError::Config(ConfigError::DisallowedFeature {
                 feature_id: feature_id.clone(),
-                matched: entry.clone(),
+                matched: entry.feature_id_prefix.clone(),
+                refused_by: format!("the control manifest at {source}"),
+                documentation_url: entry.documentation_url.clone(),
             })
             .into());
         }
@@ -119,86 +131,191 @@ pub(crate) fn check_for_disallowed_features(features: &serde_json::Value) -> Res
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
 
-    /// The reference's own vectors, from `src/test/disallowedFeatures.test.ts`
-    /// ("matches equal feature id and prefix").
-    #[test]
-    fn an_entry_covers_a_feature_id_the_way_the_reference_matches_one() {
-        let entry = "example.io/test/node";
-
-        assert!(entry_covers(entry, "example.io/test/node"), "equal");
-        assert!(entry_covers(entry, "example.io/test/node:1"), "tag");
-        assert!(entry_covers(entry, "example.io/test/node/js"), "sub-path");
-        assert!(entry_covers(entry, "example.io/test/node@abc"), "digest");
-
-        assert!(!entry_covers(entry, "example.io/test/nodej"), "longer name");
-        assert!(!entry_covers(entry, "example.io/test/nod"), "shorter name");
-        assert!(
-            !entry_covers(entry, "example.io/test/node.js"),
-            "'.' is not a separator"
-        );
+    fn no_manifest() -> (Option<ControlManifestSource>, PathBuf) {
+        (None, PathBuf::from("/nonexistent-cache"))
     }
 
-    #[test]
-    fn an_empty_entry_covers_nothing() {
-        // A stray comma must not disallow the world.
-        assert!(!entry_covers("", "ghcr.io/devcontainers/features/node:1"));
+    async fn check(features: serde_json::Value) -> Result<()> {
+        let (source, cache) = no_manifest();
+        check_for_disallowed_features(&features, source.as_ref(), &cache).await
     }
 
-    #[test]
-    fn a_versioned_feature_is_blocked_by_its_unversioned_entry() {
+    #[tokio::test]
+    async fn a_versioned_feature_is_blocked_by_its_unversioned_entry() {
         // The regression #675 was filed for: this is the entry an operator writes.
-        temp_env::with_var(
-            "DEACON_DISALLOWED_FEATURES",
-            Some("ghcr.io/devcontainers/features/node"),
-            || {
-                let features = json!({ "ghcr.io/devcontainers/features/node:1": {} });
-                let err = check_for_disallowed_features(&features)
-                    .expect_err("a versioned id must be covered by its unversioned entry");
-                let rendered = err.to_string();
-                assert!(
-                    rendered.contains("ghcr.io/devcontainers/features/node:1"),
-                    "the diagnostic must name the Feature that was blocked: {rendered}"
-                );
+        let rendered = temp_env::async_with_vars(
+            [(
+                "DEACON_DISALLOWED_FEATURES",
+                Some("ghcr.io/devcontainers/features/node"),
+            )],
+            async {
+                check(json!({ "ghcr.io/devcontainers/features/node:1": {} }))
+                    .await
+                    .expect_err("must be blocked")
+                    .to_string()
             },
+        )
+        .await;
+        assert!(
+            rendered.contains("ghcr.io/devcontainers/features/node:1"),
+            "the diagnostic must name the blocked Feature: {rendered}"
+        );
+        assert!(
+            rendered.contains(ENV_SOURCE),
+            "and must name which list refused it: {rendered}"
         );
     }
 
-    #[test]
-    fn a_neighbouring_feature_is_not_blocked() {
-        temp_env::with_var(
-            "DEACON_DISALLOWED_FEATURES",
-            Some("ghcr.io/devcontainers/features/node"),
-            || {
-                let features = json!({ "ghcr.io/devcontainers/features/nodejs:1": {} });
-                assert!(check_for_disallowed_features(&features).is_ok());
+    #[tokio::test]
+    async fn a_neighbouring_feature_is_not_blocked() {
+        let result = temp_env::async_with_vars(
+            [(
+                "DEACON_DISALLOWED_FEATURES",
+                Some("ghcr.io/devcontainers/features/node"),
+            )],
+            async { check(json!({ "ghcr.io/devcontainers/features/nodejs:1": {} })).await },
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn entries_are_trimmed_and_empty_segments_dropped() {
+        let (blocked, allowed) = temp_env::async_with_vars(
+            [("DEACON_DISALLOWED_FEATURES", Some(" , ghcr.io/x/y , "))],
+            async {
+                (
+                    check(json!({ "ghcr.io/x/y:2": {} })).await,
+                    check(json!({ "ghcr.io/a/b:1": {} })).await,
+                )
             },
+        )
+        .await;
+        assert!(blocked.is_err(), "a real entry still blocks");
+        assert!(allowed.is_ok(), "an empty entry must not block the world");
+    }
+
+    #[tokio::test]
+    async fn an_unset_variable_and_no_manifest_block_nothing() {
+        let result =
+            temp_env::async_with_vars([("DEACON_DISALLOWED_FEATURES", None::<&str>)], async {
+                check(json!({ "ghcr.io/a/b:1": {} })).await
+            })
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_non_object_features_value_is_not_a_policy_question() {
+        let result = temp_env::async_with_vars(
+            [("DEACON_DISALLOWED_FEATURES", Some("ghcr.io/x/y"))],
+            async { check(json!(null)).await },
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    /// A manifest on disk, so the whole gate is exercised without a network.
+    fn manifest_file(body: &str) -> (tempfile::TempDir, ControlManifestSource) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control-manifest.json");
+        std::fs::write(&path, body).unwrap();
+        (dir, ControlManifestSource::File(path))
+    }
+
+    #[tokio::test]
+    async fn a_manifest_entry_blocks_by_the_same_prefix_rule() {
+        let (dir, source) = manifest_file(
+            r#"{"disallowedFeatures":[{"featureIdPrefix":"ghcr.io/devcontainers/features/node",
+                 "documentationURL":"https://example.invalid/why"}]}"#,
+        );
+        let err = check_for_disallowed_features(
+            &json!({ "ghcr.io/devcontainers/features/node:1": {} }),
+            Some(&source),
+            dir.path(),
+        )
+        .await
+        .expect_err("the manifest must block it");
+        let rendered = err.to_string();
+        assert!(rendered.contains("ghcr.io/devcontainers/features/node:1"));
+        assert!(
+            rendered.contains("control manifest"),
+            "the diagnostic must say WHICH list refused: {rendered}"
+        );
+        assert!(
+            rendered.contains("https://example.invalid/why"),
+            "and must carry the documentation URL: {rendered}"
         );
     }
 
-    #[test]
-    fn entries_are_trimmed_and_empty_segments_dropped() {
-        temp_env::with_var(
-            "DEACON_DISALLOWED_FEATURES",
-            Some(" , ghcr.io/x/y , "),
-            || {
-                assert!(check_for_disallowed_features(&json!({ "ghcr.io/a/b:1": {} })).is_ok());
-                assert!(check_for_disallowed_features(&json!({ "ghcr.io/x/y:2": {} })).is_err());
-            },
+    #[tokio::test]
+    async fn a_manifest_that_lists_nothing_relevant_allows_the_run() {
+        let (dir, source) =
+            manifest_file(r#"{"disallowedFeatures":[{"featureIdPrefix":"ghcr.io/other/thing"}]}"#);
+        assert!(
+            check_for_disallowed_features(
+                &json!({ "ghcr.io/devcontainers/features/node:1": {} }),
+                Some(&source),
+                dir.path(),
+            )
+            .await
+            .is_ok()
         );
     }
 
-    #[test]
-    fn an_unset_variable_blocks_nothing() {
-        temp_env::with_var_unset("DEACON_DISALLOWED_FEATURES", || {
-            assert!(check_for_disallowed_features(&json!({ "ghcr.io/a/b:1": {} })).is_ok());
-        });
+    #[tokio::test]
+    async fn a_named_but_missing_manifest_fails_rather_than_allowing_everything() {
+        // The failure mode that matters: an operator who asked for a policy must
+        // never silently get no policy.
+        let dir = tempfile::tempdir().unwrap();
+        let source = ControlManifestSource::File(dir.path().join("absent.json"));
+        let err = check_for_disallowed_features(
+            &json!({ "ghcr.io/a/b:1": {} }),
+            Some(&source),
+            dir.path(),
+        )
+        .await
+        .expect_err("an unreadable manifest must fail the run");
+        assert!(err.to_string().contains("could not be read"));
     }
 
-    #[test]
-    fn a_non_object_features_value_is_not_a_policy_question() {
-        temp_env::with_var("DEACON_DISALLOWED_FEATURES", Some("ghcr.io/x/y"), || {
-            assert!(check_for_disallowed_features(&json!(null)).is_ok());
-        });
+    #[tokio::test]
+    async fn a_broken_manifest_is_reported_even_when_no_feature_is_declared() {
+        // Otherwise a typo'd path lies dormant until someone adds a Feature.
+        let dir = tempfile::tempdir().unwrap();
+        let source = ControlManifestSource::File(dir.path().join("absent.json"));
+        assert!(
+            check_for_disallowed_features(&json!({}), Some(&source), dir.path())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_environment_list_is_consulted_before_the_manifest_is_loaded() {
+        // A run the env list already refuses must not pay for — or fail on — a
+        // manifest load.
+        let dir = tempfile::tempdir().unwrap();
+        let source = ControlManifestSource::File(dir.path().join("absent.json"));
+        let rendered = temp_env::async_with_vars(
+            [("DEACON_DISALLOWED_FEATURES", Some("ghcr.io/a/b"))],
+            async {
+                check_for_disallowed_features(
+                    &json!({ "ghcr.io/a/b:1": {} }),
+                    Some(&source),
+                    dir.path(),
+                )
+                .await
+                .expect_err("blocked")
+                .to_string()
+            },
+        )
+        .await;
+        assert!(
+            rendered.contains(ENV_SOURCE),
+            "the env list must be what refused, not the broken manifest: {rendered}"
+        );
     }
 }

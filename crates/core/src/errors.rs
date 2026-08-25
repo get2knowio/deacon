@@ -29,11 +29,24 @@ pub enum ConfigError {
     /// Feature in its error JSON's `disallowedFeatureId`, as the reference
     /// does ([#675]).
     ///
+    /// `refused_by` names WHICH list refused it — `DEACON_DISALLOWED_FEATURES` or
+    /// the `--control-manifest` a caller pointed at ([#676]) — because with two
+    /// possible lists, "it is disallowed" without saying by what leaves the
+    /// operator nowhere to go.
+    ///
     /// [#675]: https://github.com/get2knowio/deacon/issues/675
-    #[error(
-        "Feature '{feature_id}' is disallowed by DEACON_DISALLOWED_FEATURES (matched '{matched}')"
-    )]
-    DisallowedFeature { feature_id: String, matched: String },
+    /// [#676]: https://github.com/get2knowio/deacon/issues/676
+    // NOTE: the field is `refused_by`, not `source` — thiserror treats a field
+    // named `source` as the error's CAUSE and requires it to implement
+    // `std::error::Error`, which a plain `String` does not.
+    #[error("Feature '{feature_id}' is disallowed by {refused_by} (matched '{matched}'){}",
+        documentation_url.as_ref().map(|u| format!(". See {u} to learn more")).unwrap_or_default())]
+    DisallowedFeature {
+        feature_id: String,
+        matched: String,
+        refused_by: String,
+        documentation_url: Option<String>,
+    },
 
     /// Cycle detected in extends chain
     #[error("Cycle detected in extends chain: {chain}")]

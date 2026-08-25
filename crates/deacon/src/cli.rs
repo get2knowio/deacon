@@ -1141,6 +1141,25 @@ pub struct Cli {
     #[arg(long, global = true, conflicts_with = "trust_workspace")]
     pub trust_workspace_persist: bool,
 
+    /// Control manifest listing Features to refuse (`disallowedFeatures`) and
+    /// warn about (`featureAdvisories`). Either an `http(s)://` URL or a local
+    /// file path. Consulted by `up` and `build`.
+    ///
+    /// **Unset by default, and then nothing is fetched or read.** The reference
+    /// CLI hard-codes `https://containers.dev/static/devcontainer-control-manifest.json`
+    /// and consults it on every run; deacon does not, because the capability was
+    /// declined by the spec (devcontainers/spec#226) and that list is a single
+    /// mutable OCI tag with no public source, review or history. Point this at
+    /// that URL to reproduce the reference's behavior, or — more usefully — at
+    /// your own organization's list.
+    #[arg(
+        long,
+        global = true,
+        env = "DEACON_CONTROL_MANIFEST",
+        value_name = "URL|PATH"
+    )]
+    pub control_manifest: Option<String>,
+
     /// Terminal columns for output formatting (requires --terminal-rows)
     #[arg(long, global = true, requires = "terminal_rows")]
     pub terminal_columns: Option<u32>,
@@ -1346,6 +1365,16 @@ impl Cli {
             } else {
                 None
             };
+        // Resolve the control-manifest SOURCE once, at the CLI tier, and thread
+        // the value down — never re-read `DEACON_CONTROL_MANIFEST` further in
+        // (clap owns flag > env > default). `None` is the default and means
+        // deacon consults no manifest at all: see `deacon_core::control_manifest`
+        // for why the reference's own URL is not baked in here.
+        let control_manifest_source = self
+            .control_manifest
+            .as_deref()
+            .map(deacon_core::control_manifest::ControlManifestSource::parse);
+
         // Create redaction configuration from CLI flags so it can be threaded into the
         // logging initializer below. The redaction layer needs to be wired up at init
         // time — otherwise registered secrets can still leak into tracing output.
@@ -1535,6 +1564,7 @@ impl Cli {
                     trust_workspace: self.trust_workspace,
                     trust_workspace_persist: self.trust_workspace_persist,
                     host_ca_activation,
+                    control_manifest: control_manifest_source.clone(),
                 };
 
                 // Execute up and emit JSON output per contract (specs/001-up-gap-spec/contracts/up.md)
@@ -1670,6 +1700,7 @@ impl Cli {
                 );
 
                 let args = BuildArgs {
+                    control_manifest: control_manifest_source.clone(),
                     no_cache,
                     platform,
                     build_arg,
