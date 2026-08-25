@@ -75,6 +75,7 @@ async fn preserves_all_four_raw_files_and_fragment_paths_resolve() {
         &[],
         dir.path(),
         None,
+        &[],
         Duration::from_secs(30),
         &root,
     )
@@ -88,6 +89,7 @@ async fn preserves_all_four_raw_files_and_fragment_paths_resolve() {
         &[],
         dir.path(),
         None,
+        &[],
         Duration::from_secs(30),
         &root,
     )
@@ -190,6 +192,7 @@ async fn nonzero_exit_still_preserves_raw_and_does_not_pass() {
         &[],
         dir.path(),
         None,
+        &[],
         Duration::from_secs(30),
         &root,
     )
@@ -240,6 +243,7 @@ async fn read_only_raw_dir_fails_the_run_not_pass() {
         &[],
         dir.path(),
         None,
+        &[],
         Duration::from_secs(30),
         &root,
     )
@@ -423,6 +427,7 @@ async fn a_stdin_payload_reaches_the_child_with_its_bytes_intact() {
         &[],
         dir.path(),
         Some(payload_path.as_path()),
+        &[],
         Duration::from_secs(30),
         &root,
     )
@@ -456,6 +461,7 @@ async fn without_a_payload_stdin_is_null() {
         &[],
         dir.path(),
         None,
+        &[],
         Duration::from_secs(30),
         &root,
     )
@@ -483,6 +489,7 @@ async fn a_missing_stdin_payload_fails_the_invocation() {
         &[],
         dir.path(),
         Some(&dir.path().join("does-not-exist.bin")),
+        &[],
         Duration::from_secs(30),
         &root,
     )

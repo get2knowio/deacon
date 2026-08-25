@@ -182,6 +182,10 @@ impl Registry {
     ///   tolerance FR-034 already fails on per run. Keeping it is strictly worse than
     ///   deleting it — it reads as characterized coverage that is not being exercised.
     pub fn load(dir: &Path) -> Result<Self, LoadError> {
+        /// Variables only deacon reads. A case may set one, but never on a live
+        /// differential — see the guard in the loop below.
+        const DEACON_ONLY_ENV_PREFIX: &str = "DEACON_";
+
         let cases = load_cases(&dir.join("cases"))?;
         let allowlist = load_allowlist(&dir.join("ALLOWLIST.json"))?;
         let path = dir.join("ALLOWLIST.json");
@@ -191,6 +195,33 @@ impl Registry {
         let mut referenced: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut errors = Vec::new();
         for case in &cases {
+            // A `DEACON_`-prefixed variable on a live differential would run deacon
+            // WITH an input the reference cannot honor and then compare the two — so
+            // every difference reported would be the harness's own doing, and a case
+            // that looked like coverage would be measuring nothing. Refused here
+            // rather than at run time, so the authoring error surfaces on the first
+            // load in every lane instead of only where a daemon and an oracle exist.
+            if case.oracle_type == Some(crate::model::OracleType::LiveDifferential) {
+                for op in &case.operations {
+                    for key in op.env.keys() {
+                        if key.starts_with(DEACON_ONLY_ENV_PREFIX) {
+                            errors.push(SchemaError {
+                                path: path.clone(),
+                                message: format!(
+                                    "case `{}` operation `{}` sets `{key}` on a \
+                                     `live-differential` case. The reference CLI cannot honor a \
+                                     `{DEACON_ONLY_ENV_PREFIX}`-prefixed variable, so the two \
+                                     sides would receive different inputs and any difference \
+                                     reported would be this suite's own doing. Remedy: re-point \
+                                     the case at `spec-expectation`, which pins deacon's side \
+                                     and asks the reference nothing",
+                                    case.id, op.id
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
             for ad in &case.allowed_differences {
                 let id = match ad.resolved_id() {
                     Ok(id) => id,
@@ -295,6 +326,72 @@ mod tests {
         assert!(
             msg.contains("bhv-does-not-exist") && msg.contains("authority of nothing"),
             "the failure must name the unresolved id: {msg}"
+        );
+    }
+
+    /// Writes a minimal parity data root and loads it.
+    fn load_with_case(case_json: &str) -> Result<Registry, LoadError> {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("cases")).unwrap();
+        std::fs::write(
+            dir.path().join("cases/x.json"),
+            format!(r#"{{"schemaVersion":1,"records":[{case_json}]}}"#),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("ALLOWLIST.json"),
+            r#"{"schemaVersion":1,"records":[]}"#,
+        )
+        .unwrap();
+        Registry::load(dir.path())
+    }
+
+    #[test]
+    fn a_deacon_only_variable_is_refused_on_a_live_differential() {
+        // The reference cannot honor `DEACON_*`, so such a case would feed the two
+        // sides different inputs and report the difference as if it were deacon's.
+        let err = load_with_case(
+            r#"{"id":"case-x","oracleType":"live-differential",
+                "operations":[{"id":"op-1","subcommand":"up",
+                  "env":{"DEACON_DISALLOWED_FEATURES":"ghcr.io/x/y"}}]}"#,
+        )
+        .expect_err("a DEACON_ variable on a differential must fail to load");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("DEACON_DISALLOWED_FEATURES"),
+            "the failure must name the variable: {rendered}"
+        );
+        assert!(
+            rendered.contains("spec-expectation"),
+            "and must name the remedy: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_deacon_only_variable_is_allowed_on_a_spec_expectation() {
+        // The oracle type that pins deacon's side and asks the reference nothing.
+        assert!(
+            load_with_case(
+                r#"{"id":"case-x","oracleType":"spec-expectation",
+                    "operations":[{"id":"op-1","subcommand":"up",
+                      "env":{"DEACON_DISALLOWED_FEATURES":"ghcr.io/x/y"}}]}"#,
+            )
+            .is_ok(),
+            "a spec-expectation case may set a deacon-only variable"
+        );
+    }
+
+    #[test]
+    fn a_shared_variable_is_allowed_on_a_live_differential() {
+        // Both CLIs could plausibly honor this one, so the guard must not
+        // over-reach into every variable a case might want to set.
+        assert!(
+            load_with_case(
+                r#"{"id":"case-x","oracleType":"live-differential",
+                    "operations":[{"id":"op-1","subcommand":"up","env":{"TZ":"UTC"}}]}"#,
+            )
+            .is_ok(),
+            "a variable both sides can honor must load on any oracle type"
         );
     }
 

@@ -1,0 +1,4 @@
+{
+	"name": "ConformanceUpDisallowedEnvNoFeatures",
+	"image": "alpine:3.19"
+}

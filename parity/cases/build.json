@@ -2672,6 +2672,55 @@
         "tempdir": true
       },
       "notes": "`build` against a `--workspace-folder` that does not exist, and the LAST straggler of a family the arc has been closing one subcommand at a time. `exec` got this arm in batch 4, `run-user-commands` in batch 9 and `up` in batch 7; `build` had the other two negatives — an explicit workspace that exists with no document (`case-build-upstream-missing-config-rejected`) and the cwd default with no document (`case-build-upstream-no-config-in-cwd-rejected`, batch 10) — and not this one. The three are different code: this fails during workspace RESOLUTION, before a document is looked for at all.\n\nIt lands with [#644](https://github.com/get2knowio/deacon/issues/644) and could not have passed before it. `ConfigLoader::discover_config`'s does-the-workspace-exist guard reused `ConfigError::NotFound`, the variant that means a missing FILE everywhere else, so `build` announced `Configuration file not found: <the directory>` — a directory described as a file, and a path nothing had searched for. Four of deacon's six subcommands did; `up` and `exec` did not, because they validate the workspace first. The guard now has its own `WorkspaceNotFound` carrying the sentence those two already printed, so one condition has one wording everywhere.\n\nIt pins DEACON's answer rather than comparing, on the precedent its three siblings set and for their reason. MEASURED at oracle 0.87.0: both CLIs exit 1 and both print an `outcome: error` document; the reference resolves the path and names a document it never looked for (`Dev container config (<abs>/.devcontainer/devcontainer.json) not found.`), deacon names the directory it could not resolve. `case-up-upstream-missing-workspace-rejected` adjudicated that difference — deacon's is the more accurate of the two, so it is not a divergence to fix — and this case follows it.\n\n`--output-format json` is what makes `chan-structured-output` observable: deacon prints the document only with the flag, the reference always prints one and rejects the flag outright, which is the standing reason no `build` differential declares this channel.\n\nThe `chan-stderr` assertion is `contains` on the sentence and not a regex over the path, because the path inside the quotes uses backslashes on Windows.\n\nHERMETIC — no `resourceGroup`, so it gates every pull request and runs on all three operating systems. Verified rather than assumed: re-run with `docker` off `PATH` and `DOCKER_HOST` pointed at a nonexistent socket, deacon produces the identical document on all three channels. A regression that reached for the daemon before reading the workspace would fail here rather than pass.\n\n[#480](https://github.com/get2knowio/deacon/issues/480) batch 11."
+    },
+    {
+      "id": "case-build-disallowed-env-gate",
+      "behaviors": [
+        "bhv-features-disallowed-gate-on-build"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-up-disallowed-env-feature"
+          ],
+          "env": {
+            "DEACON_DISALLOWED_FEATURES": "ghcr.io/devcontainers/features/node"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error",
+              "message": "Configuration error: Feature 'ghcr.io/devcontainers/features/node:1' is disallowed by DEACON_DISALLOWED_FEATURES (matched 'ghcr.io/devcontainers/features/node')"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "`build` had no disallowed-Features gate at all until [#675](https://github.com/get2knowio/deacon/issues/675), so a Feature refused on `up` was installable by building the same configuration — a bypass needing no flag, just a different subcommand. The reference gates both paths (`configContainer.ts:64` for `up`, `devContainersSpecCLI.ts:680` for `build`).\n\nAsserts `outcome` alone rather than `disallowedFeatureId`: the reference emits that field on `up` and NOT on `build` (measured at oracle 0.87.0), and deacon deliberately matches that asymmetry, so asserting it here would pin the opposite of the intended behavior.\n\nThe `message` is asserted in full, and that is load-bearing rather than fussy. The first draft of this case asserted `outcome: error` alone and PASSED with the `env` channel deliberately disabled — `build` fails in a hermetic lane anyway, for want of a daemon, so the assertion was satisfied by the wrong failure and the case proved nothing. Its three siblings caught the same sabotage immediately because `disallowedFeatureId` can only come from the policy; `build` does not emit that field, so this case needs the sentence instead. Found by disabling `substitute_env` and re-running the lane, which is the only way to tell a case that covers something from a case that merely goes green."
     }
   ]
 }

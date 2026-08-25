@@ -1,0 +1,8 @@
+{
+	"disallowedFeatures": [
+		{
+			"featureIdPrefix": "ghcr.io/devcontainers/features/node",
+			"documentationURL": "https://example.invalid/why-node-is-refused"
+		}
+	]
+}
