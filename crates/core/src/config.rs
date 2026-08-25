@@ -3305,9 +3305,11 @@ impl ConfigLoader {
     /// the caller's `--id-label` pairs when given, otherwise
     /// `{devcontainer.local_folder, devcontainer.config_file}`.
     ///
-    /// Both paths are absolutized so they equal the labels `ContainerIdentity`
-    /// stamps on the container — the id and the labels it is derived from must
-    /// not disagree about the spelling of the same path (#665, #670).
+    /// Both paths go through [`crate::label_path::for_path`] so they equal the labels
+    /// `ContainerIdentity` stamps on the container — the id and the labels it is derived
+    /// from must not disagree about the spelling of the same path (#665, #670, #682).
+    /// `provided` is returned untouched, which is also what the reference does: it returns
+    /// early on `providedIdLabels` and never normalizes them.
     fn id_labels_for(
         config_path: &Path,
         workspace_path: &Path,
@@ -3319,15 +3321,11 @@ impl ConfigLoader {
         vec![
             (
                 crate::container::LABEL_LOCAL_FOLDER.to_string(),
-                crate::workspace::absolutize(workspace_path)
-                    .display()
-                    .to_string(),
+                crate::label_path::for_path(workspace_path),
             ),
             (
                 crate::container::LABEL_CONFIG_FILE.to_string(),
-                crate::workspace::absolutize(config_path)
-                    .display()
-                    .to_string(),
+                crate::label_path::for_path(config_path),
             ),
         ]
     }
