@@ -6,7 +6,6 @@
 //! - Image metadata merge into resolved configuration
 
 use assert_cmd::Command;
-use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
@@ -154,7 +153,7 @@ fn an_ignored_additional_feature_is_out_of_the_gates_scope() {
     // reaching a registry or creating a container.
     let ws = workspace_declaring(r#"{ "./tripwire": {} }"#);
 
-    let mut run = |ignore: bool| {
+    let run = |ignore: bool| {
         let mut cmd = Command::cargo_bin("deacon").unwrap();
         cmd.arg("up")
             .arg("--workspace-folder")
