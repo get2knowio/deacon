@@ -2055,6 +2055,7 @@ async fn execute_compose_build_with_features(
         // is the configuration as authored, because the label travels with the
         // image (#373).
         Some(raw_config),
+        args.control_manifest.as_ref(),
     )
     .await?
     .ok_or_else(|| anyhow!("Compose feature build produced no image (no features declared?)"))?;
@@ -2344,6 +2345,7 @@ async fn execute_single_container_build(
             feature_install_env,
             host_ca_set,
             lockfile_policy,
+            args.control_manifest.as_ref(),
         )
         .await?;
 

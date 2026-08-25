@@ -371,6 +371,7 @@ pub(crate) async fn execute_container_up(
                         // creates, not on this image.
                         None,
                         &extra_build_args,
+                        args.control_manifest.as_ref(),
                     )
                     .await
                     .with_context(|| "Failed to build feature-extended image")?
@@ -385,6 +386,7 @@ pub(crate) async fn execute_container_up(
                     &runtime.cli_docker(),
                     lockfile_policy,
                     None,
+                    args.control_manifest.as_ref(),
                 )
                 .await
                 .with_context(|| "Failed to build feature-extended image")?,
