@@ -101,11 +101,18 @@ pub struct BuildArgs {
     /// Host user-data folder (global `--user-data-folder`); `None` → `~/.deacon`.
     /// Roots the build cache so it never lands inside the project (#280).
     pub user_data_folder: Option<PathBuf>,
+
+    /// Control-manifest source, resolved at the CLI tier from
+    /// `--control-manifest`/`DEACON_CONTROL_MANIFEST`. `None` — the default —
+    /// means deacon consults no manifest and performs no fetch or read
+    /// (see [`deacon_core::control_manifest`] and issue #676).
+    pub control_manifest: Option<deacon_core::control_manifest::ControlManifestSource>,
 }
 
 impl Default for BuildArgs {
     fn default() -> Self {
         Self {
+            control_manifest: None,
             no_cache: false,
             platform: None,
             build_arg: Vec::new(),
@@ -864,7 +871,12 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
     // `--additional-features`) and before `extract_build_config`, which is the
     // first step toward a builder — the reference likewise refuses before any
     // daemon work.
-    check_for_disallowed_features(config.features())?;
+    check_for_disallowed_features(
+        config.features(),
+        args.control_manifest.as_ref(),
+        &deacon_core::progress::get_cache_dir()?,
+    )
+    .await?;
     debug!("Validated features - no disallowed features found");
 
     // Extract build configuration
@@ -2043,6 +2055,7 @@ async fn execute_compose_build_with_features(
         // is the configuration as authored, because the label travels with the
         // image (#373).
         Some(raw_config),
+        args.control_manifest.as_ref(),
     )
     .await?
     .ok_or_else(|| anyhow!("Compose feature build produced no image (no features declared?)"))?;
@@ -2332,6 +2345,7 @@ async fn execute_single_container_build(
             feature_install_env,
             host_ca_set,
             lockfile_policy,
+            args.control_manifest.as_ref(),
         )
         .await?;
 

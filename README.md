@@ -511,7 +511,38 @@ DEACON_DISALLOWED_FEATURES=ghcr.io/devcontainers/features/node deacon up
 
 An entry matches by **prefix terminated at a Feature-id separator** (`/`, `:` or `@`), so `ghcr.io/devcontainers/features/node` covers `…/node`, `…/node:1`, `…/node/js` and `…/node@sha256:…`, and covers neither `…/nodejs` nor `…/node.js`. The gate sees the Features a run would actually install — the configuration's own plus anything added with `--additional-features` — so it cannot be sidestepped from the command line. `up` names the blocked Feature in its error JSON as `disallowedFeatureId`.
 
-This is deacon's own knob and is empty unless you set it. deacon does not consult the reference CLI's remote control manifest; whether it should is [#676](https://github.com/get2knowio/deacon/issues/676).
+This is deacon's own knob and is empty unless you set it.
+
+#### Control manifests
+
+For a shared or organizational list, `--control-manifest` (`DEACON_CONTROL_MANIFEST`) points `up` and `build` at a JSON document in the reference CLI's format — either an `http(s)://` URL or a local file:
+
+```bash
+# Your own list, reviewed in your own repository.
+deacon --control-manifest https://example.com/devcontainer-control-manifest.json up
+deacon --control-manifest ./policy/control-manifest.json build
+```
+
+```json
+{
+  "disallowedFeatures": [
+    { "featureIdPrefix": "ghcr.io/example/features/legacy-tooling",
+      "documentationURL": "https://wiki.example.com/why-legacy-tooling-is-banned" }
+  ],
+  "featureAdvisories": [
+    { "featureId": "ghcr.io/example/features/build-tools",
+      "introducedInVersion": "1.2.0", "fixedInVersion": "1.4.1",
+      "description": "Ships a vulnerable toolchain.",
+      "documentationURL": "https://wiki.example.com/advisories/17" }
+  ]
+}
+```
+
+`disallowedFeatures` entries match by the same prefix rule as `DEACON_DISALLOWED_FEATURES` and refuse the run, naming the entry and its `documentationURL` (which `up` also reports as `learnMoreUrl`). `featureAdvisories` warn about a half-open version range `[introducedInVersion, fixedInVersion)` and never block.
+
+**Unset by default — deacon fetches and reads nothing unless you name a source.** The reference CLI hard-codes `https://containers.dev/static/devcontainer-control-manifest.json` and consults it on every `up` and `build`. deacon does not, because that capability was proposed to the spec as [devcontainers/spec#226](https://github.com/devcontainers/spec/issues/226) and **closed as out of scope**, and because the list behind that URL is a single mutable `latest` tag on `ghcr.io/devcontainers/control-manifest` with no public source, review or history. You can opt into exactly that behavior by naming the URL.
+
+Two failure-mode differences from the reference, both deliberate: when a fetch fails the reference falls back to an *empty* manifest, silently disabling the policy — deacon uses a stale cached copy with a warning, and fails outright if it has none. A manifest source that cannot be read or parsed is likewise an error, not a shrug. A URL response is cached for 5 minutes.
 
 ## Usage
 

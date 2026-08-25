@@ -472,6 +472,7 @@ pub(crate) async fn execute_compose_up(
             host_ca_set,
             &runtime.cli_docker(),
             LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
+            args.control_manifest.as_ref(),
         )
         .await?
     };
@@ -1099,6 +1100,7 @@ async fn install_features_for_compose(
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
     lockfile_policy: LockfilePolicy,
+    control_manifest: Option<&deacon_core::control_manifest::ControlManifestSource>,
 ) -> Result<Option<FeatureBuildOutput>> {
     let output = match resolve_compose_feature_image(
         config,
@@ -1114,6 +1116,7 @@ async fn install_features_for_compose(
         // `up` records `devcontainer.metadata` on the CONTAINER it creates, not on
         // this intermediate image, so it asks for no label here.
         None,
+        control_manifest,
     )
     .await?
     {
@@ -1146,6 +1149,7 @@ pub(crate) async fn resolve_compose_feature_image(
     cli: &deacon_core::docker::CliRuntime,
     lockfile_policy: LockfilePolicy,
     metadata_raw_config: Option<&DevContainerConfig>,
+    control_manifest: Option<&deacon_core::control_manifest::ControlManifestSource>,
 ) -> Result<Option<FeatureBuildOutput>> {
     // Nothing to install when features is missing or an empty object.
     let features_obj = match config.features().as_object() {
@@ -1214,6 +1218,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 cli,
                 lockfile_policy,
                 metadata_raw_config,
+                control_manifest,
             )
             .await
             .with_context(|| {
@@ -1237,6 +1242,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 cli,
                 lockfile_policy,
                 metadata_raw_config,
+                control_manifest,
             )
             .await?
         }
@@ -1295,6 +1301,7 @@ async fn build_compose_service_with_features(
     cli: &deacon_core::docker::CliRuntime,
     lockfile_policy: LockfilePolicy,
     metadata_raw_config: Option<&DevContainerConfig>,
+    control_manifest: Option<&deacon_core::control_manifest::ControlManifestSource>,
 ) -> Result<FeatureBuildOutput> {
     // Compose semantics: `build.context` and `build.dockerfile` are resolved
     // relative to the directory containing the compose file — NOT the workspace
@@ -1372,6 +1379,7 @@ async fn build_compose_service_with_features(
         cli,
         lockfile_policy,
         metadata_raw_config,
+        control_manifest,
     )
     .await
     .with_context(|| {

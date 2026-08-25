@@ -15,6 +15,7 @@ use anyhow::{Context, Result};
 use deacon_core::build::BuildOptions;
 use deacon_core::config::DevContainerConfig;
 use deacon_core::container::ContainerIdentity;
+use deacon_core::control_manifest::ControlManifestSource;
 use deacon_core::docker::Docker;
 use deacon_core::dockerfile_generator::{
     DockerfileConfig, DockerfileGenerator, FeatureInstallEnv, HOST_CA_BUILD_CONTEXT,
@@ -207,8 +208,16 @@ pub(crate) async fn prepare_feature_layer(
     feature_install_env: FeatureInstallEnv,
     host_ca_set: Option<&CorporateCaSet>,
     lockfile_policy: LockfilePolicy,
+    control_manifest: Option<&ControlManifestSource>,
 ) -> Result<PreparedFeatureLayer> {
-    let staged = resolve_and_stage_features(config, identity, config_path, lockfile_policy).await?;
+    let staged = resolve_and_stage_features(
+        config,
+        identity,
+        config_path,
+        lockfile_policy,
+        control_manifest,
+    )
+    .await?;
 
     let host_ca_dir = match host_ca_set {
         Some(set) if !set.is_empty() => Some(stage_host_ca_context(&staged.temp_dir, set).await?),
@@ -290,6 +299,7 @@ pub(crate) async fn build_image_with_features(
     cli: &deacon_core::docker::CliRuntime,
     lockfile_policy: LockfilePolicy,
     metadata_raw_config: Option<&DevContainerConfig>,
+    control_manifest: Option<&ControlManifestSource>,
 ) -> Result<FeatureBuildOutput> {
     info!("Building extended image with features");
 
@@ -317,7 +327,14 @@ pub(crate) async fn build_image_with_features(
         });
     }
 
-    let staged = resolve_and_stage_features(config, identity, config_path, lockfile_policy).await?;
+    let staged = resolve_and_stage_features(
+        config,
+        identity,
+        config_path,
+        lockfile_policy,
+        control_manifest,
+    )
+    .await?;
 
     // Generate Dockerfile.
     //
@@ -462,6 +479,7 @@ pub(crate) async fn prepare_dockerfile_feature_build(
     cli: &deacon_core::docker::CliRuntime,
     lockfile_policy: LockfilePolicy,
     metadata_raw_config: Option<&DevContainerConfig>,
+    control_manifest: Option<&ControlManifestSource>,
 ) -> Result<DockerfileFeatureBuild> {
     info!(
         "Preparing feature layer on top of user-authored Dockerfile (stage={})",
@@ -503,6 +521,7 @@ pub(crate) async fn prepare_dockerfile_feature_build(
         feature_install_env,
         host_ca_set,
         lockfile_policy,
+        control_manifest,
     )
     .await?;
 
@@ -614,6 +633,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     lockfile_policy: LockfilePolicy,
     metadata_raw_config: Option<&DevContainerConfig>,
     extra_build_args: &[String],
+    control_manifest: Option<&ControlManifestSource>,
 ) -> Result<FeatureBuildOutput> {
     let build = prepare_dockerfile_feature_build(
         config,
@@ -630,6 +650,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         cli,
         lockfile_policy,
         metadata_raw_config,
+        control_manifest,
     )
     .await?;
     let DockerfileFeatureBuild {
@@ -870,6 +891,7 @@ async fn resolve_and_stage_features(
     identity: &ContainerIdentity,
     config_path: &Path,
     lockfile_policy: LockfilePolicy,
+    control_manifest: Option<&ControlManifestSource>,
 ) -> Result<StagedFeatures> {
     let features_obj = config
         .features()
@@ -1334,6 +1356,18 @@ async fn resolve_and_stage_features(
     let lockfile =
         build_lockfile_from_features(&requested, &downloaded_features, &user_id_by_canonical);
 
+    // Feature advisories (#676). Emitted HERE, between resolution and the
+    // image build, which is where the reference emits them
+    // (`logFeatureAdvisories` inside `generateFeaturesConfig`) and the last
+    // moment the warning can still precede an install.
+    //
+    // Driven off the lockfile because that is what carries the RESOLVED
+    // version — `node:1` becomes `1.6.3` — and an advisory range is written
+    // against real versions. Matching the authored id instead would parse `1`
+    // as `[1]`, fall outside `[1.0.7, 1.1.10)`, and silently miss every
+    // advisory while looking like it worked.
+    emit_feature_advisories(&lockfile, control_manifest).await;
+
     Ok(StagedFeatures {
         plan: installation_plan,
         combined_env,
@@ -1341,6 +1375,53 @@ async fn resolve_and_stage_features(
         features_source_dir: features_dir,
         lockfile,
     })
+}
+
+/// Warn about advisories affecting the resolved Features, if a manifest names any.
+///
+/// Best-effort by design: an unreachable manifest must not fail a build over a
+/// WARNING surface. The refusal surface (`disallowedFeatures`) already loaded
+/// the same source at the command layer and failed the run there if it could
+/// not, so by the time this runs a broken source has already been reported.
+async fn emit_feature_advisories(
+    lockfile: &Lockfile,
+    control_manifest: Option<&ControlManifestSource>,
+) {
+    let Some(source) = control_manifest else {
+        return;
+    };
+    let Ok(cache_dir) = deacon_core::progress::get_cache_dir() else {
+        return;
+    };
+    let manifest = match deacon_core::control_manifest::load(source, &cache_dir).await {
+        Ok(manifest) => manifest,
+        Err(e) => {
+            debug!(error = %e, "skipping Feature advisories: the control manifest is unavailable");
+            return;
+        }
+    };
+    if manifest.feature_advisories.is_empty() {
+        return;
+    }
+
+    // The advisory key is the registry-qualified id WITHOUT a version, which is
+    // the lockfile's `resolved` ref with its digest removed.
+    let installed: Vec<(String, String)> = lockfile
+        .features
+        .values()
+        .map(|feature| {
+            let id = feature
+                .resolved
+                .split_once('@')
+                .map(|(before, _)| before)
+                .unwrap_or(&feature.resolved);
+            (id.to_string(), feature.version.clone())
+        })
+        .collect();
+
+    if let Some(block) = deacon_core::control_manifest::format_advisories(&manifest, &installed) {
+        warn!("{block}");
+    }
 }
 
 /// Assemble the canonical lockfile from resolved + downloaded features.
@@ -1846,10 +1927,15 @@ mod local_feature_resolution_tests {
 
         let identity = ContainerIdentity::new(temp.path(), &config);
 
-        let staged =
-            resolve_and_stage_features(&config, &identity, &config_path, LockfilePolicy::Write)
-                .await
-                .expect("local feature should resolve successfully");
+        let staged = resolve_and_stage_features(
+            &config,
+            &identity,
+            &config_path,
+            LockfilePolicy::Write,
+            None,
+        )
+        .await
+        .expect("local feature should resolve successfully");
 
         // The installation plan should contain exactly one feature, whose
         // canonical id encodes the resolved absolute path.
@@ -1905,11 +1991,16 @@ mod local_feature_resolution_tests {
         let config: DevContainerConfig = serde_json::from_str(&raw).unwrap();
         let identity = ContainerIdentity::new(temp.path(), &config);
 
-        let err =
-            resolve_and_stage_features(&config, &identity, &config_path, LockfilePolicy::Write)
-                .await
-                .err()
-                .expect("missing local feature path must error");
+        let err = resolve_and_stage_features(
+            &config,
+            &identity,
+            &config_path,
+            LockfilePolicy::Write,
+            None,
+        )
+        .await
+        .err()
+        .expect("missing local feature path must error");
         let msg = err.to_string();
         assert!(
             msg.contains("./missing-feature"),

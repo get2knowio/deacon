@@ -6,6 +6,7 @@
 //! - Image metadata merge into resolved configuration
 
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use std::fs;
 use tempfile::TempDir;
 
@@ -200,6 +201,155 @@ fn build_consults_the_disallowed_gate_too() {
         .stderr(predicates::str::contains(
             "is disallowed by DEACON_DISALLOWED_FEATURES",
         ));
+}
+
+// Control-manifest tests (#676).
+//
+// All hermetic: a FILE source exercises the whole gate — parse, sanitize, match,
+// report — without a fetch, which is one reason the source is configurable at
+// all.
+
+/// A manifest on disk, in the reference CLI's own format.
+fn manifest_file(dir: &TempDir, body: &str) -> std::path::PathBuf {
+    let path = dir.path().join("control-manifest.json");
+    fs::write(&path, body).unwrap();
+    path
+}
+
+#[test]
+fn a_control_manifest_refuses_a_feature_and_reports_where_to_read_why() {
+    let ws = workspace_declaring(r#"{ "ghcr.io/devcontainers/features/node:1": {} }"#);
+    let manifests = tempfile::tempdir().unwrap();
+    let manifest = manifest_file(
+        &manifests,
+        r#"{"disallowedFeatures":[{
+             "featureIdPrefix":"ghcr.io/devcontainers/features/node",
+             "documentationURL":"https://example.invalid/why"}]}"#,
+    );
+
+    let assert = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(ws.path())
+        .arg("--control-manifest")
+        .arg(&manifest)
+        .assert()
+        .failure()
+        .code(1);
+
+    let json = error_json(&assert.get_output().stdout);
+    assert_eq!(
+        json["disallowedFeatureId"], "ghcr.io/devcontainers/features/node:1",
+        "the manifest blocks by the same prefix rule as the env list"
+    );
+    assert_eq!(
+        json["learnMoreUrl"], "https://example.invalid/why",
+        "an entry's documentationURL must reach the result document, as the reference's does"
+    );
+}
+
+#[test]
+fn a_control_manifest_that_lists_nothing_relevant_does_not_refuse() {
+    // The gate must not become a blanket refusal just because a manifest exists.
+    let ws = workspace_declaring(r#"{ "./tripwire": {} }"#);
+    let manifests = tempfile::tempdir().unwrap();
+    let manifest = manifest_file(
+        &manifests,
+        r#"{"disallowedFeatures":[{"featureIdPrefix":"ghcr.io/somebody/else"}]}"#,
+    );
+
+    Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(ws.path())
+        .arg("--control-manifest")
+        .arg(&manifest)
+        .assert()
+        // Fails on the missing local Feature, hermetically — NOT on policy.
+        .failure()
+        .stdout(predicates::str::contains("disallowedFeatureId").not());
+}
+
+#[test]
+fn a_named_but_missing_control_manifest_fails_rather_than_allowing_everything() {
+    // The deliberate divergence from the reference, which falls back to an empty
+    // manifest and so silently disables the policy the operator asked for.
+    let ws = workspace_declaring(r#"{ "ghcr.io/devcontainers/features/node:1": {} }"#);
+    let manifests = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(ws.path())
+        .arg("--control-manifest")
+        .arg(manifests.path().join("absent.json"))
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("could not be read"));
+}
+
+#[test]
+fn the_control_manifest_is_settable_by_environment() {
+    // Flag-backed env var: clap owns precedence and nothing below the CLI layer
+    // re-reads the variable.
+    let ws = workspace_declaring(r#"{ "ghcr.io/devcontainers/features/node:1": {} }"#);
+    let manifests = tempfile::tempdir().unwrap();
+    let manifest = manifest_file(
+        &manifests,
+        r#"{"disallowedFeatures":[{"featureIdPrefix":"ghcr.io/devcontainers/features/node"}]}"#,
+    );
+
+    let assert = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(ws.path())
+        .env("DEACON_CONTROL_MANIFEST", &manifest)
+        .assert()
+        .failure()
+        .code(1);
+
+    assert_eq!(
+        error_json(&assert.get_output().stdout)["disallowedFeatureId"],
+        "ghcr.io/devcontainers/features/node:1"
+    );
+}
+
+#[test]
+fn no_control_manifest_means_no_source_is_consulted_at_all() {
+    // The default: with no source named, deacon must never look at one.
+    //
+    // Proved by CONTRAST, the same way `an_ignored_additional_feature_…` is.
+    // The identical run with an unreadable source pointed at it MUST fail on
+    // that source; with the variable unset it must not mention one at all.
+    // Neither half depends on how far the run gets afterwards — asserting on a
+    // specific later failure only pins wherever THIS host happens to stop, and
+    // a Docker-less runner never reaches Feature resolution.
+    let ws = workspace_declaring(r#"{ "./tripwire": {} }"#);
+    let manifests = tempfile::tempdir().unwrap();
+    let absent = manifests.path().join("absent.json");
+
+    let run = |source: Option<&std::path::Path>| {
+        let mut cmd = Command::cargo_bin("deacon").unwrap();
+        cmd.arg("up").arg("--workspace-folder").arg(ws.path());
+        match source {
+            Some(path) => cmd.env("DEACON_CONTROL_MANIFEST", path),
+            None => cmd.env_remove("DEACON_CONTROL_MANIFEST"),
+        };
+        String::from_utf8_lossy(&cmd.assert().failure().get_output().stderr).into_owned()
+    };
+
+    assert!(
+        run(Some(&absent)).contains("control manifest"),
+        "control: a named source is consulted, and an unreadable one is reported"
+    );
+    assert!(
+        !run(None).contains("control manifest"),
+        "with no source named, nothing may be consulted or reported"
+    );
 }
 
 // Image metadata merge tests

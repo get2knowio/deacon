@@ -11,6 +11,7 @@ pub mod config;
 pub mod container;
 pub mod container_env_probe;
 pub mod container_lifecycle;
+pub mod control_manifest;
 pub mod docker;
 pub mod docker_retry;
 pub mod dockerfile_generator;

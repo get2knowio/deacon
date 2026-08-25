@@ -531,6 +531,12 @@ pub struct UpArgs {
     /// from `--inject-host-ca` > `DEACON_INJECT_HOST_CA` > `settings.json`
     /// (never the workspace — FR-015).
     pub host_ca_activation: deacon_core::host_ca::HostCaActivation,
+
+    /// Control-manifest source, resolved at the CLI tier from
+    /// `--control-manifest`/`DEACON_CONTROL_MANIFEST`. `None` — the default —
+    /// means deacon consults no manifest and performs no fetch or read
+    /// (see [`deacon_core::control_manifest`] and issue #676).
+    pub control_manifest: Option<deacon_core::control_manifest::ControlManifestSource>,
 }
 
 impl UpArgs {
@@ -554,6 +560,7 @@ impl UpArgs {
 impl Default for UpArgs {
     fn default() -> Self {
         Self {
+            control_manifest: None,
             id_label: Vec::new(),
             remove_existing_container: false,
             expect_existing_container: false,

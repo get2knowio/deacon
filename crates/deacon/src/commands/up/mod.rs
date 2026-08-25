@@ -300,7 +300,12 @@ pub(crate) async fn execute_up_with_runtime(
     // the pre-merge configuration let a caller walk past it by moving the
     // Feature to the command line. Still upstream of every registry, daemon and
     // host-hook operation, which is where the reference refuses from.
-    check_for_disallowed_features(config.features())?;
+    check_for_disallowed_features(
+        config.features(),
+        args.control_manifest.as_ref(),
+        &deacon_core::progress::get_cache_dir()?,
+    )
+    .await?;
     debug!("Validated features - no disallowed features found");
 
     // Frozen-lockfile pre-build refusal (graduated in 1.0). Shared with `build`
