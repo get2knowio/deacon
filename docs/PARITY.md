@@ -95,6 +95,27 @@ divergence-to-fix is the most common way this record goes wrong, which is why
 authoring (`features test|info|plan|package|publish`) is not a divergence and not tracked —
 it is a decision about product scope. See the constitution.
 
+### Every case runs against a copy
+
+A case never runs in `parity/fixtures/`. Its fixture is materialized into an isolated temp
+workspace — a Docker-aware one for a Docker-backed case, a filesystem-only one otherwise —
+and `FixtureIntegrity` fingerprints the committed trees before and after the operations,
+failing the case if they changed.
+
+That was true of Docker and `fs-heavy` cases only until [#680]. Everything else ran in the
+committed fixture directory on the assumption that it was read-only, which nothing
+enforced: a `build` that got past a policy gate resolved a Feature and wrote a
+`devcontainer-lock.json` into the repository. **"Significant filesystem operations" was
+never the property that mattered — writing at all was, and a case cannot declare in advance
+that the CLI will not write.**
+
+The guard should therefore never fire. That is the point: the copy is the fix and the guard
+is the proof it is working. A mutation matters beyond a dirty working tree — `fixtureHash`
+feeds `caseHash`, so a case that writes into its own fixture changes its own hash *by
+running*, silently invalidating the freshness that hash exists to protect.
+
+[#680]: https://github.com/get2knowio/deacon/issues/680
+
 ### The operation `env` channel
 
 An operation may set environment variables on its child:

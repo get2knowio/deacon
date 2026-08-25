@@ -195,12 +195,21 @@ mod spec_expectation {
             .normalized_for(CHAN_STRUCTURED_OUTPUT, "op-read")
             .expect("normalized structured evidence");
 
-        // The real workspace path is fixtures/fx-x — raw preserves it verbatim.
-        let ws = fixtures.join("fx-x");
-        assert_eq!(
-            raw.value["root"],
-            serde_json::json!(ws.to_string_lossy()),
-            "raw evidence preserves the temp workspace path"
+        // Raw evidence preserves whatever path the case actually ran in, verbatim and
+        // un-normalized. That path is the case's ISOLATED workspace, not
+        // `fixtures/fx-x`: since #680 every case is materialized into a temp copy rather
+        // than running in the committed fixture tree, so pinning the fixture path here
+        // would be re-asserting the very behavior that change removed. What matters to
+        // this test is the CONTRAST with the normalized value below — raw carries a real,
+        // machine-specific absolute path; normalized carries the token.
+        let raw_root = raw.value["root"].as_str().expect("raw root is a string");
+        assert!(
+            std::path::Path::new(raw_root).is_absolute(),
+            "raw evidence preserves a real absolute workspace path, got {raw_root:?}"
+        );
+        assert!(
+            !raw_root.contains("<WORKSPACE>"),
+            "raw evidence must not be normalized, got {raw_root:?}"
         );
         assert_eq!(
             norm.value["root"],

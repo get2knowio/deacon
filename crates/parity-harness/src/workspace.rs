@@ -25,6 +25,62 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tempfile::TempDir;
 
+/// A before/after fingerprint of the fixture trees a case reads, so a case that writes
+/// into version-controlled input is caught rather than discovered later as an
+/// unexplained modified file.
+///
+/// This exists because it once happened. Until [#680] a non-Docker case ran in the
+/// COMMITTED fixture directory itself — `resolve_workspace` returned
+/// `fixtures_root.join(fixture)` with no copy — and a case whose command wrote to its
+/// workspace wrote into `parity/fixtures/`. It was safe by accident (hermetic cases read
+/// or refuse early) until a `build` reached Feature resolution and left a
+/// `devcontainer-lock.json` behind.
+///
+/// Every case now runs against a copy, so this guard should never fire. That is exactly
+/// why it is here: the copy is the fix and this is the proof the copy is working. A
+/// mutation matters beyond a dirty tree — `fixtureHash` feeds `caseHash`, so a case that
+/// writes into its own fixture changes its own hash BY RUNNING, silently invalidating
+/// the freshness that hash exists to protect.
+///
+/// [#680]: https://github.com/get2knowio/deacon/issues/680
+pub struct FixtureIntegrity {
+    dirs: Vec<(String, PathBuf)>,
+    before: String,
+}
+
+impl FixtureIntegrity {
+    /// Fingerprint `fixture_ids` under `fixtures_root`. A missing directory is left to
+    /// the materialize step, which reports it as [`crate::HarnessError::FixtureMissing`]
+    /// with the path — a better diagnostic than anything this could produce.
+    pub fn capture(fixtures_root: &Path, fixture_ids: &[String]) -> std::io::Result<Self> {
+        let dirs: Vec<(String, PathBuf)> = fixture_ids
+            .iter()
+            .map(|id| (id.clone(), fixtures_root.join(id)))
+            .filter(|(_, dir)| dir.is_dir())
+            .collect();
+        let before = crate::case_hash::combined_fixture_hash(&dirs)?;
+        Ok(Self { dirs, before })
+    }
+
+    /// Re-fingerprint and report a mutation. `Ok(None)` when the trees are untouched.
+    pub fn verify(&self) -> std::io::Result<Option<String>> {
+        let after = crate::case_hash::combined_fixture_hash(&self.dirs)?;
+        if after == self.before {
+            return Ok(None);
+        }
+        let names: Vec<&str> = self.dirs.iter().map(|(id, _)| id.as_str()).collect();
+        Ok(Some(format!(
+            "the fixture tree(s) {} changed while the case ran. A case must never write \
+             into `parity/fixtures/`: that tree is version-controlled input every other \
+             case reads, and `fixtureHash` feeds `caseHash`, so a case that writes into \
+             its own fixture changes its own hash by running. Every case is materialized \
+             into an isolated temp workspace (#680), so this means the copy was bypassed \
+             — check `execute_ops` and `git status parity/fixtures`",
+            names.join(", ")
+        )))
+    }
+}
+
 /// Process-wide monotonic counter → the collision-resistant run-id suffix.
 static RUN_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -403,6 +459,74 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod fixture_integrity_tests {
+    use super::FixtureIntegrity;
+
+    fn fixture_root(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for (rel, body) in files {
+            let path = dir.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn an_untouched_tree_reports_nothing() {
+        let root = fixture_root(&[("fx-a/.devcontainer/devcontainer.json", "{}")]);
+        let guard = FixtureIntegrity::capture(root.path(), &["fx-a".to_string()]).unwrap();
+        assert!(guard.verify().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_new_file_is_caught() {
+        // The exact shape of #680: a `build` that got past a policy gate left a
+        // `devcontainer-lock.json` in the committed fixture.
+        let root = fixture_root(&[("fx-a/.devcontainer/devcontainer.json", "{}")]);
+        let guard = FixtureIntegrity::capture(root.path(), &["fx-a".to_string()]).unwrap();
+        std::fs::write(
+            root.path()
+                .join("fx-a/.devcontainer/devcontainer-lock.json"),
+            "{}",
+        )
+        .unwrap();
+        let problem = guard
+            .verify()
+            .unwrap()
+            .expect("a written file must be reported");
+        assert!(problem.contains("fx-a"), "must name the fixture: {problem}");
+        assert!(
+            problem.contains("caseHash"),
+            "must say why it matters beyond a dirty tree: {problem}"
+        );
+    }
+
+    #[test]
+    fn an_edited_file_is_caught() {
+        // Content, not just presence — a rewritten config changes `fixtureHash` too.
+        let root = fixture_root(&[("fx-a/.devcontainer/devcontainer.json", "{}")]);
+        let guard = FixtureIntegrity::capture(root.path(), &["fx-a".to_string()]).unwrap();
+        std::fs::write(
+            root.path().join("fx-a/.devcontainer/devcontainer.json"),
+            r#"{"image":"alpine"}"#,
+        )
+        .unwrap();
+        assert!(guard.verify().unwrap().is_some());
+    }
+
+    #[test]
+    fn a_fixture_that_does_not_exist_is_left_to_the_materialize_step() {
+        // Capture must not fail here: `materialize` reports a missing fixture as
+        // `FixtureMissing` with the path, which is a better diagnostic than anything
+        // this guard could produce.
+        let root = fixture_root(&[("fx-a/.devcontainer/devcontainer.json", "{}")]);
+        let guard = FixtureIntegrity::capture(root.path(), &["fx-absent".to_string()]).unwrap();
+        assert!(guard.verify().unwrap().is_none());
+    }
 }
 
 #[cfg(test)]

@@ -454,6 +454,13 @@ Docker etiquette, every line of it learned from a leak:
 data edit in `parity/cases/<area>.json` — no new Rust. Periodically mine the reference's own
 e2e fixtures and real-world configs for scenarios the suite does not have yet.
 
+**Every case runs against a COPY of its fixture, never `parity/fixtures/` itself** (#680), and
+`workspace::FixtureIntegrity` fingerprints the committed trees before/after each case and fails
+if they changed. Isolation used to be Docker- and `fs-heavy`-only, on a read-only assumption
+nothing enforced — a `build` past a policy gate wrote a `devcontainer-lock.json` into the repo.
+The guard should never fire; it is the proof the copy works. A fixture write matters beyond a
+dirty tree: `fixtureHash` feeds `caseHash`, so such a case changes its own hash by running.
+
 **An operation can set environment variables** (`"env": {"DEACON_X": "..."}`), which is how a
 knob with no backing flag becomes reachable from a case at all. `${WORKSPACE}` is substituted in
 VALUES as well as argv, so a case can point a source-shaped knob at a file its own fixture
