@@ -500,6 +500,19 @@ DEACON_NO_PROMPT=1 deacon up
 
 The check only fires when host-side hooks are actually configured. Containers without `initializeCommand` or a host-side dotfiles install are unaffected. See [SECURITY.md](./SECURITY.md#workspace-trust-model-host-side-lifecycle-hooks) for the full threat model.
 
+### Refusing Features
+
+`DEACON_DISALLOWED_FEATURES` is a comma-separated list of Features `up` and `build` must refuse to install. The refusal happens before deacon contacts a registry or a daemon, so nothing is fetched and nothing is created:
+
+```bash
+# Refuses any run that would install this Feature at any version.
+DEACON_DISALLOWED_FEATURES=ghcr.io/devcontainers/features/node deacon up
+```
+
+An entry matches by **prefix terminated at a Feature-id separator** (`/`, `:` or `@`), so `ghcr.io/devcontainers/features/node` covers `…/node`, `…/node:1`, `…/node/js` and `…/node@sha256:…`, and covers neither `…/nodejs` nor `…/node.js`. The gate sees the Features a run would actually install — the configuration's own plus anything added with `--additional-features` — so it cannot be sidestepped from the command line. `up` names the blocked Feature in its error JSON as `disallowedFeatureId`.
+
+This is deacon's own knob and is empty unless you set it. deacon does not consult the reference CLI's remote control manifest; whether it should is [#676](https://github.com/get2knowio/deacon/issues/676).
+
 ## Usage
 
 ### Reading DevContainer Configuration

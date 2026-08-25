@@ -7,6 +7,7 @@ pub mod result;
 
 use crate::cli::{BuildKitOption, OutputFormat};
 use crate::commands::shared::build_resolution::resolve_devcontainer_build_config;
+use crate::commands::shared::disallowed_features::check_for_disallowed_features;
 use crate::commands::shared::lockfile::{
     LockfilePolicy, apply_lockfile_policy, ensure_lockfile_usable,
 };
@@ -856,6 +857,15 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
             debug!("Updated feature install order");
         }
     }
+
+    // The disallowed-Features gate. `build` had none at all until #675, so a
+    // Feature an operator refused on `up` was installable by building the same
+    // configuration. Placed after the merge (so it sees the union with
+    // `--additional-features`) and before `extract_build_config`, which is the
+    // first step toward a builder — the reference likewise refuses before any
+    // daemon work.
+    check_for_disallowed_features(config.features())?;
+    debug!("Validated features - no disallowed features found");
 
     // Extract build configuration
     let build_config = extract_build_config(&config, &config_path)?;

@@ -1,7 +1,6 @@
 //! Utility functions for the up command.
 //!
 //! This module contains:
-//! - `check_for_disallowed_features` - Check for disallowed features
 //! - `discover_id_labels_from_config` - Discover id-labels from configuration
 //! - `apply_user_mapping` - Apply user mapping configuration
 //! - `handle_lockfile_post_build` - Write/compare lockfile after a feature build
@@ -12,7 +11,6 @@
 
 use anyhow::Result;
 use deacon_core::config::DevContainerConfig;
-use deacon_core::errors::DeaconError;
 use deacon_core::lockfile::Lockfile;
 use std::path::Path;
 use tracing::{debug, instrument, warn};
@@ -39,64 +37,6 @@ pub(crate) fn default_remote_workspace_folder(
         config_workspace_folder,
         mount_workspace_git_root,
     )
-}
-
-/// Check if any features are disallowed and return an error if found.
-///
-/// Per FR-004: Configuration resolution MUST block disallowed Features.
-///
-/// This function checks features against a policy-defined list of disallowed features.
-/// The disallowed list can be:
-/// - Statically defined (DISALLOWED_FEATURES constant)
-/// - Loaded from environment variable DEACON_DISALLOWED_FEATURES (comma-separated)
-/// - Extended by policy enforcement systems
-///
-/// Returns Ok(()) if no disallowed features are found, or an error with the
-/// disallowed feature ID if one is detected.
-pub(crate) fn check_for_disallowed_features(features: &serde_json::Value) -> Result<()> {
-    // Static list of disallowed features (currently empty - can be extended as needed)
-    const DISALLOWED_FEATURES: &[&str] = &[];
-
-    // Check for environment-based disallowed features
-    let env_disallowed: Vec<String> = std::env::var("DEACON_DISALLOWED_FEATURES")
-        .ok()
-        .map(|s| s.split(',').map(|f| f.trim().to_string()).collect())
-        .unwrap_or_default();
-
-    debug!("Checking features against disallowed list");
-    debug!("Static disallowed features: {:?}", DISALLOWED_FEATURES);
-    debug!("Environment disallowed features: {:?}", env_disallowed);
-
-    if let Some(features_obj) = features.as_object() {
-        for (feature_id, _) in features_obj {
-            // Check against static list
-            if DISALLOWED_FEATURES.contains(&feature_id.as_str()) {
-                return Err(
-                    DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                        message: format!("Feature '{}' is not allowed by policy", feature_id),
-                    })
-                    .into(),
-                );
-            }
-
-            // Check against environment list
-            if env_disallowed.contains(feature_id) {
-                return Err(
-                    DeaconError::Config(deacon_core::errors::ConfigError::Validation {
-                        message: format!(
-                            "Feature '{}' is disallowed by DEACON_DISALLOWED_FEATURES",
-                            feature_id
-                        ),
-                    })
-                    .into(),
-                );
-            }
-
-            debug!("Validated feature: {}", feature_id);
-        }
-    }
-
-    Ok(())
 }
 
 /// Discover id-labels from configuration when not explicitly provided via CLI.
