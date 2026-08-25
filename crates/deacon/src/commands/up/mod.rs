@@ -64,10 +64,11 @@ use tracing::{debug, info, instrument, warn};
 use crate::commands::shared::workspace::resolve_workspace_folder;
 
 // Internal imports from submodules
+use crate::commands::shared::disallowed_features::check_for_disallowed_features;
 use args::{build_options_from_args, normalize_and_validate_args, parse_remote_env_vars};
 use compose::execute_compose_up;
 use container::execute_container_up;
-use helpers::{check_for_disallowed_features, discover_id_labels_from_config};
+use helpers::discover_id_labels_from_config;
 use image_build::{build_image_from_config, extract_build_config_from_devcontainer};
 use merged_config::merge_image_metadata_into_config;
 
@@ -232,10 +233,6 @@ pub(crate) async fn execute_up_with_runtime(
     // keep `${localWorkspaceFolder}` rather than bake in this machine's paths.
     let identity_config = config.clone();
 
-    // T029: Check for disallowed features before any runtime operations
-    check_for_disallowed_features(config.features())?;
-    debug!("Validated features - no disallowed features found");
-
     // Apply feature merging if CLI features are provided.
     //
     // This MUST precede the frozen-lockfile gate below (#569). The reference
@@ -260,8 +257,6 @@ pub(crate) async fn execute_up_with_runtime(
     // zero times (measured at oracle 0.87.0). `build` already ordered these two
     // this way and was already correct; this makes `up` agree.
     //
-    // The merge is placed AFTER `check_for_disallowed_features` deliberately:
-    // that check's scope (configuration-declared Features only) is unchanged.
     // It is also after the `identity_config` snapshot above, so the container
     // identity still hashes the as-loaded configuration.
     if args.additional_features.is_some() || args.feature_install_order.is_some() {
@@ -298,6 +293,15 @@ pub(crate) async fn execute_up_with_runtime(
             debug!("Updated feature install order");
         }
     }
+
+    // The disallowed-Features gate, downstream of the merge so it sees the set a
+    // run would actually install — the configuration's Features UNION
+    // `--additional-features`, which is what the reference gates (#675). Gating
+    // the pre-merge configuration let a caller walk past it by moving the
+    // Feature to the command line. Still upstream of every registry, daemon and
+    // host-hook operation, which is where the reference refuses from.
+    check_for_disallowed_features(config.features())?;
+    debug!("Validated features - no disallowed features found");
 
     // Frozen-lockfile pre-build refusal (graduated in 1.0). Shared with `build`
     // (#556) so both subcommands refuse at the same point, with the same

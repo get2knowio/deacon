@@ -6,6 +6,9 @@
 //! - Image metadata merge into resolved configuration
 
 use assert_cmd::Command;
+use predicates::prelude::*;
+use std::fs;
+use tempfile::TempDir;
 
 // Config filename validation tests
 
@@ -28,21 +31,162 @@ fn test_override_config_can_have_custom_name() {
 
 // Disallowed feature tests
 
+/// A workspace declaring exactly `features`, so the gate has something to see.
+///
+/// Hermetic on purpose: the disallowed-Features gate refuses before deacon
+/// contacts a registry or a daemon, which is the property these tests are here
+/// to hold on to.
+fn workspace_declaring(features: &str) -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let config_dir = dir.path().join(".devcontainer");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("devcontainer.json"),
+        format!(r#"{{ "image": "alpine:3.19", "features": {features} }}"#),
+    )
+    .unwrap();
+    dir
+}
+
+fn error_json(output: &[u8]) -> serde_json::Value {
+    serde_json::from_slice(output).expect("up must emit exactly one JSON document on stdout")
+}
+
 #[test]
 fn test_disallowed_feature_causes_error_before_build() {
-    // Contract: If a feature is in the disallowed list, error before any build/runtime ops
-    // Expected error JSON: { "outcome": "error", "disallowedFeatureId": "feature-id", ... }
+    // Contract: a Feature on the disallowed list errors before any build or
+    // runtime operation, and the error JSON names it structurally.
+    let ws = workspace_declaring(r#"{ "ghcr.io/devcontainers/features/node:1": {} }"#);
 
-    let mut cmd = Command::cargo_bin("deacon").unwrap();
-    cmd.arg("up")
+    let assert = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("up")
         .arg("--workspace-folder")
-        .arg("/tmp/test-workspace")
+        .arg(ws.path())
+        .env(
+            "DEACON_DISALLOWED_FEATURES",
+            "ghcr.io/devcontainers/features/node:1",
+        )
+        .assert()
+        .failure()
+        .code(1);
+
+    let json = error_json(&assert.get_output().stdout);
+    assert_eq!(json["outcome"], "error");
+    assert_eq!(
+        json["disallowedFeatureId"], "ghcr.io/devcontainers/features/node:1",
+        "the blocked Feature must be reported structurally, not only in prose"
+    );
+}
+
+#[test]
+fn a_disallowed_entry_covers_the_versioned_feature_id() {
+    // #675: an entry matches by prefix terminated at a Feature-id separator, so
+    // the unversioned entry an operator actually writes covers `…:1`. Exact
+    // matching made that entry block nothing.
+    let ws = workspace_declaring(r#"{ "ghcr.io/devcontainers/features/node:1": {} }"#);
+
+    let assert = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(ws.path())
+        .env(
+            "DEACON_DISALLOWED_FEATURES",
+            "ghcr.io/devcontainers/features/node",
+        )
+        .assert()
+        .failure()
+        .code(1);
+
+    let json = error_json(&assert.get_output().stdout);
+    assert_eq!(
+        json["disallowedFeatureId"],
+        "ghcr.io/devcontainers/features/node:1"
+    );
+}
+
+#[test]
+fn the_gate_sees_features_arriving_via_additional_features() {
+    // #675: the reference gates the union of the configuration's Features and
+    // `--additional-features`. Gating the configuration alone let a caller walk
+    // past the policy by moving the Feature to the command line.
+    let ws = workspace_declaring("{}");
+
+    let assert = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(ws.path())
         .arg("--additional-features")
-        .arg(r#"{"disallowed-feature":"latest"}"#);
+        .arg(r#"{"ghcr.io/devcontainers/features/node:1":{}}"#)
+        .env(
+            "DEACON_DISALLOWED_FEATURES",
+            "ghcr.io/devcontainers/features/node",
+        )
+        .assert()
+        .failure()
+        .code(1);
 
-    cmd.assert().failure().code(1);
+    let json = error_json(&assert.get_output().stdout);
+    assert_eq!(
+        json["disallowedFeatureId"],
+        "ghcr.io/devcontainers/features/node:1"
+    );
+}
 
-    // TODO: Parse JSON output and verify disallowedFeatureId field is present
+#[test]
+fn an_ignored_additional_feature_is_out_of_the_gates_scope() {
+    // `--ignore-additional-features` drops the overlay, so nothing disallowed
+    // would be installed and the run must not be refused for it. This is what
+    // gating the MERGED set buys over gating the raw union.
+    //
+    // The configuration names a local Feature that does not exist, so the run
+    // still fails — hermetically, at Feature resolution, without reaching a
+    // registry or creating a container. That failure is the evidence the run
+    // got PAST the gate; an assertion that it merely "did not say
+    // disallowedFeatureId" would also pass if nothing ran at all.
+    let ws = workspace_declaring(r#"{ "./tripwire": {} }"#);
+
+    let assert = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("up")
+        .arg("--workspace-folder")
+        .arg(ws.path())
+        .arg("--additional-features")
+        .arg(r#"{"ghcr.io/devcontainers/features/node:1":{}}"#)
+        .arg("--ignore-additional-features")
+        .env(
+            "DEACON_DISALLOWED_FEATURES",
+            "ghcr.io/devcontainers/features/node",
+        )
+        .assert()
+        .failure()
+        .stdout(predicates::str::contains("disallowedFeatureId").not())
+        .stderr(predicates::str::contains("./tripwire"));
+    drop(assert);
+}
+
+#[test]
+fn build_consults_the_disallowed_gate_too() {
+    // #675: `build` had no gate at all, so a Feature refused on `up` was
+    // installable by building the same configuration. The reference gates both.
+    let ws = workspace_declaring(r#"{ "ghcr.io/devcontainers/features/node:1": {} }"#);
+
+    Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("build")
+        .arg("--workspace-folder")
+        .arg(ws.path())
+        .env(
+            "DEACON_DISALLOWED_FEATURES",
+            "ghcr.io/devcontainers/features/node",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "is disallowed by DEACON_DISALLOWED_FEATURES",
+        ));
 }
 
 // Image metadata merge tests

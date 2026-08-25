@@ -248,7 +248,6 @@ impl UpResult {
     }
 
     /// Add disallowed feature ID to an error result
-    #[allow(dead_code)] // TODO: Will be used in T029 for disallowed features
     pub fn with_disallowed_feature_id(mut self, feature_id: String) -> Self {
         if let UpResult::Error(ref mut error) = self {
             error.disallowed_feature_id = Some(feature_id);
@@ -338,6 +337,19 @@ impl UpResult {
                         "Invalid configuration or arguments".to_string(),
                         message.clone(),
                     ),
+                    // The reference names the blocked Feature in a structured
+                    // `disallowedFeatureId` alongside the prose, so a caller
+                    // parsing the JSON never has to scrape the message. deacon
+                    // modelled the field from the start and never filled it
+                    // (#675).
+                    ConfigError::DisallowedFeature { feature_id, matched } => UpResult::error(
+                        format!("Cannot use the '{}' Feature", feature_id),
+                        format!(
+                            "Feature '{}' is disallowed by DEACON_DISALLOWED_FEATURES (matched '{}'). Remove it from your configuration, or from --additional-features, before continuing.",
+                            feature_id, matched
+                        ),
+                    )
+                    .with_disallowed_feature_id(feature_id.clone()),
                     ConfigError::Parsing { message } => UpResult::error(
                         "Failed to parse configuration file".to_string(),
                         message.clone(),

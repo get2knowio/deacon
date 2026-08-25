@@ -19,6 +19,22 @@ pub enum ConfigError {
     #[error("Configuration validation error: {message}")]
     Validation { message: String },
 
+    /// A Feature the run would install is on the operator's disallowed list.
+    ///
+    /// Carries both halves because the entry that matched is usually NOT the
+    /// Feature id — an entry matches by prefix, so `…/features/node` blocks
+    /// `…/features/node:1` and the operator needs to see which of their
+    /// entries did it. A dedicated variant (rather than
+    /// [`ConfigError::Validation`]) is also what lets `up` report the blocked
+    /// Feature in its error JSON's `disallowedFeatureId`, as the reference
+    /// does ([#675]).
+    ///
+    /// [#675]: https://github.com/get2knowio/deacon/issues/675
+    #[error(
+        "Feature '{feature_id}' is disallowed by DEACON_DISALLOWED_FEATURES (matched '{matched}')"
+    )]
+    DisallowedFeature { feature_id: String, matched: String },
+
     /// Cycle detected in extends chain
     #[error("Cycle detected in extends chain: {chain}")]
     ExtendsCycle { chain: String },

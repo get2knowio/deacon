@@ -853,6 +853,11 @@ fn collect_environment_info() -> EnvironmentInfo {
         "DEACON_LOG_FORMAT",
         "DEACON_CONTAINER_RUNTIME",
         "DEACON_NO_REDACT",
+        // A policy knob with no backing flag, so `--help` never mentions it and
+        // its effect (a refused `up`/`build`) reads like a configuration error
+        // to anyone who did not set it. Reporting whether it is set is the only
+        // way a support bundle can explain that refusal (#675).
+        "DEACON_DISALLOWED_FEATURES",
         "DOCKER_HOST",
         "DOCKER_CONFIG",
         "DOCKER_CERT_PATH",
