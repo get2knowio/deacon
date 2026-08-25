@@ -320,21 +320,36 @@ fn the_control_manifest_is_settable_by_environment() {
 
 #[test]
 fn no_control_manifest_means_no_source_is_consulted_at_all() {
-    // The default. Pointing at an unroutable URL would fail loudly if deacon
-    // consulted anything; with the flag unset it must never look, so the run
-    // reaches — and dies on — the missing local Feature instead.
+    // The default: with no source named, deacon must never look at one.
+    //
+    // Proved by CONTRAST, the same way `an_ignored_additional_feature_…` is.
+    // The identical run with an unreadable source pointed at it MUST fail on
+    // that source; with the variable unset it must not mention one at all.
+    // Neither half depends on how far the run gets afterwards — asserting on a
+    // specific later failure only pins wherever THIS host happens to stop, and
+    // a Docker-less runner never reaches Feature resolution.
     let ws = workspace_declaring(r#"{ "./tripwire": {} }"#);
+    let manifests = tempfile::tempdir().unwrap();
+    let absent = manifests.path().join("absent.json");
 
-    Command::cargo_bin("deacon")
-        .unwrap()
-        .arg("up")
-        .arg("--workspace-folder")
-        .arg(ws.path())
-        .env_remove("DEACON_CONTROL_MANIFEST")
-        .assert()
-        .failure()
-        .stderr(predicates::str::contains("./tripwire"))
-        .stderr(predicates::str::contains("control manifest").not());
+    let run = |source: Option<&std::path::Path>| {
+        let mut cmd = Command::cargo_bin("deacon").unwrap();
+        cmd.arg("up").arg("--workspace-folder").arg(ws.path());
+        match source {
+            Some(path) => cmd.env("DEACON_CONTROL_MANIFEST", path),
+            None => cmd.env_remove("DEACON_CONTROL_MANIFEST"),
+        };
+        String::from_utf8_lossy(&cmd.assert().failure().get_output().stderr).into_owned()
+    };
+
+    assert!(
+        run(Some(&absent)).contains("control manifest"),
+        "control: a named source is consulted, and an unreadable one is reported"
+    );
+    assert!(
+        !run(None).contains("control manifest"),
+        "with no source named, nothing may be consulted or reported"
+    );
 }
 
 // Image metadata merge tests
