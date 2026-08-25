@@ -799,6 +799,40 @@ pub struct Operation {
     /// no case used it, so nothing was mis-asserting and nothing would have said so.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stdin_file: Option<String>,
+    /// Environment variables set on this operation's child process.
+    ///
+    /// The channel exists because a whole class of deacon behavior has no other
+    /// ingress: knobs with no backing flag (`DEACON_DISALLOWED_FEATURES`,
+    /// `DEACON_NO_PROMPT`, `DEACON_CACHE_DIR`) were simply unreachable from a
+    /// case, so five ledger rows carried "no scenario" for want of it and two
+    /// consecutive pull requests shipped with hermetic Rust tests standing in
+    /// for scenarios that could not be written.
+    ///
+    /// A `BTreeMap` rather than an `IndexMap`: unlike `argv`, environment is a
+    /// SET and its iteration order changes nothing a child observes, so sorting
+    /// makes `caseHash` stable against a reordered edit that means the same
+    /// thing.
+    ///
+    /// Values carry the same `${WORKSPACE}` token `argv` does, so a case can
+    /// point a knob at a file its own fixture materialized
+    /// (`DEACON_CONTROL_MANIFEST=${WORKSPACE}/manifest.json`) — which is what
+    /// makes the source-shaped knobs reachable and not just the value-shaped
+    /// ones.
+    ///
+    /// **A `DEACON_`-prefixed variable is refused on a `live-differential`
+    /// case** (`Registry::load`). The reference CLI cannot honor one, so the
+    /// comparison would run deacon WITH the input against a reference WITHOUT
+    /// it, and every difference it reported would be the harness's own doing.
+    /// Variables both CLIs could plausibly honor are allowed on every oracle
+    /// type.
+    ///
+    /// The child's environment is INHERITED and then overlaid — not cleared —
+    /// so `PATH`, the Docker socket and the terminal settings survive. That
+    /// makes this channel additive-only by construction: a case cannot unset an
+    /// ambient variable, which is the right default for a suite whose whole
+    /// premise is that both sides see the same world.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub env: std::collections::BTreeMap<String, String>,
     /// Stop this side's RUNNING containers before the operation is invoked (#480).
     ///
     /// The one container-lifecycle primitive in the operation vocabulary, and it exists for

@@ -138,9 +138,10 @@ pub async fn exec_deacon(
         deacon_path,
         args,
         cwd,
-        // The convenience wrappers never pipe stdin: only the case runner has an
-        // Operation to read `stdinFile` from (#586).
+        // The convenience wrappers never pipe stdin and never set env: only the
+        // case runner has an Operation to read `stdinFile`/`env` from (#586).
         None,
+        &[],
         kind.bound(),
         &crate::report_root(),
     )
@@ -163,9 +164,10 @@ pub async fn exec_oracle(
         oracle_path,
         args,
         cwd,
-        // The convenience wrappers never pipe stdin: only the case runner has an
-        // Operation to read `stdinFile` from (#586).
+        // The convenience wrappers never pipe stdin and never set env: only the
+        // case runner has an Operation to read `stdinFile`/`env` from (#586).
         None,
+        &[],
         kind.bound(),
         &crate::report_root(),
     )
@@ -187,6 +189,7 @@ pub async fn run_and_capture(
     args: &[&str],
     cwd: &Path,
     stdin_file: Option<&Path>,
+    env: &[(String, String)],
     bound: Duration,
     report_root: &Path,
 ) -> Result<Invocation, HarnessError> {
@@ -224,6 +227,10 @@ pub async fn run_and_capture(
     };
 
     let mut cmd = tokio::process::Command::new(program);
+    // Overlaid on the inherited environment, never `env_clear`: the child still
+    // needs PATH, the Docker socket and the locale, and a case that could unset
+    // an ambient variable could silently give the two sides different worlds.
+    cmd.envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     cmd.args(args)
         .current_dir(cwd)
         .stdin(stdin)
@@ -340,6 +347,7 @@ mod tests {
             &[],
             dir.path(),
             None,
+            &[],
             Duration::from_secs(30),
             &root,
         )
@@ -363,6 +371,7 @@ mod tests {
             &[],
             dir.path(),
             None,
+            &[],
             Duration::from_secs(30),
             &root,
         )
@@ -404,6 +413,7 @@ mod tests {
             &[],
             dir.path(),
             None,
+            &[],
             Duration::from_secs(30),
             &root,
         )
@@ -443,6 +453,7 @@ mod tests {
             &[],
             dir.path(),
             None,
+            &[],
             Duration::from_secs(30),
             &root,
         )
@@ -481,6 +492,7 @@ mod tests {
             &[],
             dir.path(),
             None,
+            &[],
             Duration::from_millis(200),
             &root,
         )

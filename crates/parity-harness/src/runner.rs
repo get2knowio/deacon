@@ -275,6 +275,8 @@ pub(crate) async fn execute_ops(
                 .map_err(blocking_join_err)??;
         }
 
+        let env = substitute_env(case, op, &workspace, isolated_workspace.is_some())?;
+
         let raw_case = format!("{}__{}", case.id, op.id);
         let inv = run_and_capture(
             side,
@@ -284,6 +286,7 @@ pub(crate) async fn execute_ops(
             &args,
             &workspace,
             stdin_file.as_deref(),
+            &env,
             exec_kind(&op.subcommand).bound(),
             cfg.report_root,
         )
@@ -1157,6 +1160,41 @@ fn resolve_workspace(
     }
 }
 
+/// An operation's `env`, with `${WORKSPACE}` resolved, as the pairs the child is
+/// spawned with.
+///
+/// Only `${WORKSPACE}` is substituted here, and deliberately so. `${IMAGE_TAG}` and
+/// `${CONTAINER_ID}` name resources an earlier operation produced and belong in argv,
+/// where the case reads as "address THIS container"; resolving them into ambient
+/// environment would make the same value reachable by a knob the case never named.
+///
+/// A value that uses the token with no fixture to root it is the same fail-loud
+/// authoring error `argv` reports, for the same reason: the alternative is passing a
+/// literal `${WORKSPACE}` to the CLI and testing something nobody wrote.
+fn substitute_env(
+    case: &TestCase,
+    op: &Operation,
+    workspace: &Path,
+    workspace_is_rooted: bool,
+) -> Result<Vec<(String, String)>, HarnessError> {
+    let ws = workspace.to_string_lossy();
+    let mut out = Vec::with_capacity(op.env.len());
+    for (key, value) in &op.env {
+        if value.contains(WORKSPACE_TOKEN) && op.fixtures.is_empty() && !workspace_is_rooted {
+            return Err(shape_error(
+                case,
+                &format!(
+                    "operation {:?} sets {key} to a value using {WORKSPACE_TOKEN} but declares \
+                     no fixture to root it",
+                    op.id
+                ),
+            ));
+        }
+        out.push((key.clone(), value.replace(WORKSPACE_TOKEN, &ws)));
+    }
+    Ok(out)
+}
+
 /// Substitute `${WORKSPACE}` in an operation's argv with the resolved workspace path. An
 /// argv that references the token with no resolvable fixture is a fail-loud authoring
 /// error.
@@ -1248,6 +1286,71 @@ mod tests {
             }],
             ..TestCase::default()
         }
+    }
+
+    fn case_with_env(env: &[(&str, &str)], fixtures: &[&str]) -> TestCase {
+        let mut case = case_with_op(&["--workspace-folder", "${WORKSPACE}"], fixtures);
+        case.operations[0].env = env
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        case
+    }
+
+    #[test]
+    fn substitute_env_resolves_the_workspace_token_in_a_value() {
+        // The shape that makes SOURCE-shaped knobs reachable: point a variable at a
+        // file the case's own fixture materialized.
+        let case = case_with_env(
+            &[("DEACON_CONTROL_MANIFEST", "${WORKSPACE}/manifest.json")],
+            &["fx-x"],
+        );
+        let out = substitute_env(&case, &case.operations[0], Path::new("/tmp/ws"), false)
+            .expect("a fixture roots the token");
+        assert_eq!(
+            out,
+            vec![(
+                "DEACON_CONTROL_MANIFEST".to_string(),
+                "/tmp/ws/manifest.json".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn substitute_env_requires_a_fixture_for_the_token() {
+        // Same fail-loud rule argv has: passing a literal `${WORKSPACE}` to the CLI
+        // would test something nobody wrote.
+        let case = case_with_env(&[("DEACON_CACHE_DIR", "${WORKSPACE}/cache")], &[]);
+        let err = substitute_env(&case, &case.operations[0], Path::new("/tmp/ws"), false)
+            .expect_err("a token with no fixture must fail loud");
+        assert!(err.to_string().contains("DEACON_CACHE_DIR"), "{err}");
+
+        // A rooted (isolated Docker) workspace resolves it with no fixture declared.
+        let ok = substitute_env(&case, &case.operations[0], Path::new("/tmp/ws"), true)
+            .expect("a rooted workspace roots the token");
+        assert_eq!(ok[0].1, "/tmp/ws/cache");
+    }
+
+    #[test]
+    fn substitute_env_orders_pairs_deterministically() {
+        // `env` is a BTreeMap, so two authorings that differ only in written order
+        // produce the same pairs — and therefore the same `caseHash`.
+        let case = case_with_env(&[("B_VAR", "2"), ("A_VAR", "1")], &["fx-x"]);
+        let out = substitute_env(&case, &case.operations[0], Path::new("/tmp/ws"), false).unwrap();
+        assert_eq!(
+            out,
+            vec![
+                ("A_VAR".to_string(), "1".to_string()),
+                ("B_VAR".to_string(), "2".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn an_operation_without_env_contributes_no_pairs() {
+        let case = case_with_op(&["--workspace-folder", "${WORKSPACE}"], &["fx-x"]);
+        let out = substitute_env(&case, &case.operations[0], Path::new("/tmp/ws"), false).unwrap();
+        assert!(out.is_empty(), "the default must add nothing to the child");
     }
 
     #[test]

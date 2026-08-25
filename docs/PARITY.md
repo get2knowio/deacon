@@ -95,6 +95,42 @@ divergence-to-fix is the most common way this record goes wrong, which is why
 authoring (`features test|info|plan|package|publish`) is not a divergence and not tracked —
 it is a decision about product scope. See the constitution.
 
+### The operation `env` channel
+
+An operation may set environment variables on its child:
+
+```json
+{ "id": "op-up", "subcommand": "up",
+  "argv": ["--workspace-folder", "${WORKSPACE}"],
+  "fixtures": ["fx-up-control-manifest-file"],
+  "env": { "DEACON_CONTROL_MANIFEST": "${WORKSPACE}/control-manifest.json" } }
+```
+
+It exists because a whole class of behavior had no other ingress. Knobs with no backing flag —
+`DEACON_DISALLOWED_FEATURES`, `DEACON_NO_PROMPT`, `DEACON_CACHE_DIR` — were unreachable from a
+case, so five ledger rows carried *"no scenario"* and two consecutive pull requests shipped with
+hermetic Rust tests standing in for scenarios nobody could write.
+
+Four rules travel with it:
+
+- **`${WORKSPACE}` is substituted in values**, exactly as in `argv`, and a value using the token
+  with no fixture to root it is the same fail-loud authoring error. This is what makes
+  *source*-shaped knobs reachable and not merely value-shaped ones: a case can point a variable
+  at a file its own fixture materialized. `${IMAGE_TAG}` and `${CONTAINER_ID}` are deliberately
+  NOT substituted here — they name resources an earlier operation produced and belong in `argv`,
+  where the case reads as "address THIS container".
+- **A `DEACON_`-prefixed variable is refused on a `live-differential` case**, at load time, in
+  every lane. The reference CLI cannot honor one, so the two sides would receive different
+  inputs and every difference reported would be this suite's own doing. Re-point such a case at
+  `spec-expectation`, which pins deacon's side and asks the reference nothing.
+- **The child's environment is inherited and overlaid, never cleared**, so `PATH`, the Docker
+  socket and the locale survive. The channel is additive by construction: a case cannot unset an
+  ambient variable, which is the right default for a suite whose premise is that both sides see
+  the same world.
+- **It is a `BTreeMap`.** Unlike `argv`, environment is a set and its order changes nothing a
+  child observes, so sorting keeps `caseHash` stable against a reordered edit that means the
+  same thing.
+
 ## Where things live
 
 | Path | What it is |
@@ -153,9 +189,19 @@ happened*, never by reading:
 2. `contains` cannot see APPENDED output.
 3. An `assertion` on a `live-differential` was loaded and never evaluated.
 4. A stale tolerance was computed and then discarded by the driver.
+5. **An assertion satisfied by the wrong failure.** `case-build-disallowed-env-gate` asserted
+   `outcome: error` on a policy refusal — and `build` fails in a hermetic lane anyway, for want
+   of a daemon, so the case passed with the policy input deliberately disabled. Its three
+   siblings caught the same sabotage instantly because `disallowedFeatureId` can only come from
+   the policy. The fix was to assert the sentence only the refusal produces.
 
-The first two are guarded by `model.rs::is_vacuous_assertion` and a loader test; the last
-two are now failures. **After writing any assertion, perturb it once and confirm it fails.**
+The first two are guarded by `model.rs::is_vacuous_assertion` and a loader test; the third and
+fourth are now failures. The fifth cannot be guarded mechanically — a case that fails for a
+plausible other reason is indistinguishable from a passing one until you take the input away.
+**After writing any assertion, perturb it once and confirm it fails.** For a case whose subject
+is an *input* rather than an output, perturb the INPUT: disable the channel that carries it and
+confirm the case diverges. A case in a lane where the command fails regardless needs an
+assertion naming something only the behavior under test can produce.
 
 ## The lanes
 

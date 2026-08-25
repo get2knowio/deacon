@@ -454,6 +454,19 @@ Docker etiquette, every line of it learned from a leak:
 data edit in `parity/cases/<area>.json` — no new Rust. Periodically mine the reference's own
 e2e fixtures and real-world configs for scenarios the suite does not have yet.
 
+**An operation can set environment variables** (`"env": {"DEACON_X": "..."}`), which is how a
+knob with no backing flag becomes reachable from a case at all. `${WORKSPACE}` is substituted in
+VALUES as well as argv, so a case can point a source-shaped knob at a file its own fixture
+materialized. A `DEACON_`-prefixed variable is REFUSED on a `live-differential` at load time —
+the reference cannot honor one, so the sides would get different inputs and any difference would
+be the suite's own doing; use `spec-expectation`. See `docs/PARITY.md`.
+
+**A case whose subject is an INPUT must be perturbed at the input, not the assertion.** Disable
+the channel that carries it and confirm the case diverges. `case-build-disallowed-env-gate`
+asserted `outcome: error` on a policy refusal and passed with the policy input disabled, because
+`build` fails in a hermetic lane anyway — a case that covers nothing is indistinguishable from a
+passing one until you take the input away.
+
 **Rules that have cost time:**
 
 - **Measure the divergence before sizing the fix.** A diverging path that names an array

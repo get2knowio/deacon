@@ -5277,6 +5277,194 @@
         "tempdir": true
       },
       "notes": "`${devcontainerId}` is the SPEC's own computation over the container's id-labels — a SHA-256 rendered base-32 and left-padded to 52 digits (`devcontainer-id-variable.md:44-68`) — and `--id-label` REPLACES the default `{local_folder, config_file}` pair as the input to it (`spec-node/utils.ts:682-687`). deacon emitted a 12-character BLAKE3 prefix that ignored `--id-label` entirely ([#670](https://github.com/get2knowio/deacon/issues/670), [#672](https://github.com/get2knowio/deacon/issues/672)).\n\n**`--id-label foo=bar` is what makes this case possible at all, and it is worth understanding why.** The id is a hash of the id-labels, and the DEFAULT labels contain the workspace path — which the runner makes per-side and per-run. So the default shape produces a genuinely different id on each side, and no normalizer token can bridge it: the value is a digest OF the thing the token would rewrite. With `--id-label` the input is two literal strings, the id is a machine-independent CONSTANT, and the case can assert it absolutely. That constant was MEASURED against oracle 0.87.0 — it is the reference's output, not deacon's own computation echoed back — which is what makes this an assertion about parity rather than a tautology.\n\n**Observed through a FILE rather than the result document, deliberately.** The normalizer's `devcontainer_id_token` rule rewrites any id-shaped run to `<ID>` inside `configuration`/`mergedConfiguration`, so a `chan-structured-output` assertion on this variable can pin its PRESENCE but never its VALUE — the trap the `case-set-up-substitution-scope` notes recorded when the id was still 12 hex characters. A `postCreateCommand` writing the substituted value into a bind-mounted file puts it on a channel that compares raw bytes. The fixture pins `workspaceFolder: /work` with a matching `workspaceMount` so the hook writes to an absolute host-visible path, rather than to a per-side `/workspaces/<basename>` the two CLIs need not agree on.\n\nThe hook is also a sharper probe than it looks: the value is substituted HOST-side, so if substitution failed the container shell would receive the literal `${devcontainerId}`, expand the unset name to empty, and write `id=[]` — a visible failure rather than a silent one.\n\nWhat this case CANNOT reach, recorded so the gap is deliberate: the default `{local_folder, config_file}` label set, for the path reason above. That half is carried by unit tests (`the_id_labels_are_the_workspace_and_config_paths_alone`, which also pins the spec's stability MUST by editing the configuration and requiring the id not to move) and by a direct measurement recorded on the issue: on one shared workspace both CLIs produced `157p2d57rcuei8mjomedb8jm89v2nemrk78ve69rrdvu4g892ouf` in `containerEnv` and in a `${devcontainerId}`-named volume.\n\n**There is deliberately NO `live-differential` twin, and the reason is a harness invariant rather than a preference.** A successful Docker `up` must leave a container discoverable by `devcontainer.local_folder=<workspace>` — `runner.rs`'s `require_observed_container`, which exists so a case that observed nothing can never pass vacuously. `--id-label` REPLACES that label, so the very flag that makes this case's expectation machine-independent also makes its container undiscoverable, and a twin was written, run, and removed after it failed on exactly that guard. The guard is right and the case is right; they are simply incompatible, and teaching the harness to discover by a case's own declared id-labels is harness surgery that belongs to its own change.\n\nThe COST of having no twin is worth stating plainly, because it is the one soft spot here: the expected value is a hard-coded digest measured against oracle 0.87.0, and nothing in the nightly lane will notice if upstream changes its id-label set or its computation. It is cheap to re-verify by hand — `devcontainer up --id-label foo=bar` on this fixture prints it — and the derivation is recorded on [#670](https://github.com/get2knowio/deacon/issues/670) in full, including a twelve-line reproduction of the algorithm. Re-measure it at the next oracle bump.\n\nMined from the reference CLI's own unit suite at v0.87.0, `src/test/variableSubstitution.test.ts` ([#480](https://github.com/get2knowio/deacon/issues/480) batch 16)."
+    },
+    {
+      "id": "case-up-disallowed-env-prefix-covers-version",
+      "behaviors": [
+        "bhv-features-disallowed-entry-prefix-rule"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-disallowed-env-feature"
+          ],
+          "env": {
+            "DEACON_DISALLOWED_FEATURES": "ghcr.io/devcontainers/features/node"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error",
+              "disallowedFeatureId": "ghcr.io/devcontainers/features/node:1"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The entry an operator actually writes is UNVERSIONED (`…/features/node`) and the configuration names a version (`…/features/node:1`); the prefix rule is what makes the first cover the second. deacon matched by exact string until [#675](https://github.com/get2knowio/deacon/issues/675), so this entry blocked NOTHING while reading as protection.\n\nThis case is also the first use of the operation `env` channel, and it is self-proving: the gate has no other input, so if `env` failed to reach the child deacon would not block, the exit code would not be 1 and `disallowedFeatureId` would be absent. A channel that silently dropped its payload could not make this case pass.\n\nHERMETIC, and the claim is structural rather than incidental: the gate runs after configuration load and the `--additional-features` merge but before every registry, daemon and host-hook operation, so nothing here can reach a network or a socket. `spec-expectation` because the reference CLI has no `DEACON_DISALLOWED_FEATURES` and could not be asked the question — the `live-differential` form of this case is refused at load time for exactly that reason."
+    },
+    {
+      "id": "case-up-disallowed-env-covers-additional-features",
+      "behaviors": [
+        "bhv-features-disallowed-gate-scope"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--additional-features",
+            "{\"ghcr.io/devcontainers/features/node:1\":{}}"
+          ],
+          "fixtures": [
+            "fx-up-disallowed-env-no-features"
+          ],
+          "env": {
+            "DEACON_DISALLOWED_FEATURES": "ghcr.io/devcontainers/features/node"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error",
+              "disallowedFeatureId": "ghcr.io/devcontainers/features/node:1"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The configuration declares NO Features; the disallowed one arrives entirely through `--additional-features`. The gate must see the set a run would actually INSTALL — the configuration unioned with the overlay — which is what the reference gates. deacon gated the configuration alone until [#675](https://github.com/get2knowio/deacon/issues/675), so moving the Feature to the command line walked straight past the policy.\n\nPairs with `case-up-disallowed-env-prefix-covers-version`: same entry, same Feature, arriving by the other route. Either one alone would leave the bypass unexercised."
+    },
+    {
+      "id": "case-up-control-manifest-file-refuses",
+      "behaviors": [
+        "bhv-features-control-manifest-source"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-control-manifest-file"
+          ],
+          "env": {
+            "DEACON_CONTROL_MANIFEST": "${WORKSPACE}/control-manifest.json"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error",
+              "disallowedFeatureId": "ghcr.io/devcontainers/features/node:1",
+              "learnMoreUrl": "https://example.invalid/why-node-is-refused"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "The second source a run can be refused from ([#676](https://github.com/get2knowio/deacon/issues/676)): a control manifest in the reference CLI's own format, here a FILE the case's own fixture materializes. The `${WORKSPACE}` token in an `env` value is what makes source-shaped knobs reachable from a case at all — without it only value-shaped ones would be.\n\nAsserts `learnMoreUrl` because a manifest entry is the only source that can carry a `documentationURL`, and carrying it into the result document is what the reference does. It is also the half a case can hold that a unit test cannot: the path from an entry's field, through the error, to the JSON a caller parses.\n\nHERMETIC by choice of source. A URL source would need a network; a file needs none, which is one of the reasons the source is configurable rather than the reference's hard-coded containers.dev URL. deacon consults NOTHING unless a source is named, so the absence of this variable is the default and is what every other case in this suite exercises."
+    },
+    {
+      "id": "case-up-control-manifest-unreadable-refuses",
+      "behaviors": [
+        "bhv-features-control-manifest-fails-closed"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-disallowed-env-feature"
+          ],
+          "env": {
+            "DEACON_CONTROL_MANIFEST": "${WORKSPACE}/no-such-manifest.json"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-up",
+          "assertion": {
+            "contains": "could not be read"
+          }
+        }
+      ],
+      "cleanup": {
+        "tempdir": true
+      },
+      "notes": "A named control-manifest source that cannot be read FAILS the run. The reference CLI does the opposite — `updateControlManifest` falls back to an empty manifest — which silently disables the very policy the operator asked for, so a network blip or a typo'd path turns the gate off and nothing says so. deacon refuses instead ([#676](https://github.com/get2knowio/deacon/issues/676)), which is also constitution IV (no silent fallbacks) reached independently.\n\nThe fixture declares a Feature that IS on no list, so nothing here could be refused on policy grounds: the only thing that can produce this exit is the unreadable source itself. Asserted on `chan-stderr` rather than the result document because the sentence naming the unreadable path is the actionable half, and it is what distinguishes this refusal from every other way `up` exits 1.\n\n`spec-expectation`, necessarily: the reference has no `--control-manifest` to point anywhere, so there is no comparable side to run."
     }
   ]
 }
