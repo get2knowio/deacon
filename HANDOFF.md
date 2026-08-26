@@ -15,10 +15,10 @@ points at it.
 
 ## Where things stand
 
-_Last updated: 2026-08-26, at `6e76822` on `main`._
+_Last updated: 2026-08-26, at `d540c7e` on `main`._
 
-- **Ledger: 223 recorded behaviors — 0 open nonconformance**, 10 deacon-follows-spec,
-  15 documented choice, 23 deacon extension, 175 conformant. Zero `UNADJUDICATED` records.
+- **Ledger: 225 recorded behaviors — 0 open nonconformance**, 10 deacon-follows-spec,
+  15 documented choice, 24 deacon extension, 176 conformant. Zero `UNADJUDICATED` records.
 - **The verdict of record is the latest nightly**, never this file:
   `gh run list --workflow=parity.yml --branch=main`.
 - Nothing in flight. No open work assigned.
@@ -30,6 +30,7 @@ _Last updated: 2026-08-26, at `6e76822` on `main`._
 
 | PR | What |
 |---|---|
+| #689 `d540c7e` | a concurrent container removal is waited out rather than guessed at (closes #688) — batch 20 |
 | #687 `6e76822` | Feature installs run as root; real Dockerfile `FROM`/`USER` variable resolution (closes #685, #686) — batch 19 |
 | #683 `d989b36` | Windows identity-label normalization (closes #682) — batch 18 |
 | #681 `d41f3f9` | every parity case runs against a *copy* of its fixture, with a guard proving it (closes #680) |
@@ -42,7 +43,7 @@ _Last updated: 2026-08-26, at `6e76822` on `main`._
 ## The arc: [#480](https://github.com/get2knowio/deacon/issues/480), parity mining
 
 The long-running task is mining the reference CLI's own test suite and real-world configs for
-behaviors deacon has never been compared against, one upstream file at a time. Nineteen
+behaviors deacon has never been compared against, one upstream file at a time. Twenty
 batches so far.
 
 **The method has held for every batch and should not be shortcut:**
@@ -99,6 +100,23 @@ batches so far.
   ships one minified bundle, so internal modules cannot be required from it; check the upstream repo
   out at the pinned tag and `tsc` the single file. Self-check the compiled oracle against upstream's
   own test expectations *before* trusting it to judge deacon.
+- **A watch-to-fail that PASSES is telling you the test does not cover the thing — not that the
+  thing is fine.** Batch 20's end-to-end test was written to cover two failure shapes and covered
+  one; reinstating the second bug left it green 4/4, because that race is timing-dependent. The
+  fix was a deterministic unit test over the predicate, plus a doc comment on the E2E saying what
+  it does *not* cover. Never let a green sabotage run stand as evidence.
+- **Before claiming a command is broken, check what it is contracted to do.** Batch 20's issue was
+  filed claiming plain `deacon down` reported success while the container survived. `down` *stops*
+  without removing (default `shutdownAction: stopContainer`) — a surviving container there is
+  correct, and a racing `docker rm -f` in the measurement had removed it. The issue was corrected
+  in place rather than quietly narrowed.
+- **A fix that narrows a shared predicate must be re-measured on every shape that used it.**
+  Narrowing `is_already_gone` fixed the remove step and regressed `--all` to exit 2, because the
+  stop step asks a different question of the same error string.
+- **Don't invent a match pattern for an error string you have not observed.** The concurrent-removal
+  retry matches docker's exact phrase; podman's wording is unmeasured, so it is recorded as a known
+  gap in the code, the ledger row and the test's skip — not guessed at. A matcher for an unobserved
+  string is a matcher that silently matches nothing.
 - **Sabotage distinguishes coverage from green.** Disabling an input and re-running is the only
   way to tell a case that covers something from a case that merely passes. It has found a
   passing-for-the-wrong-reason case, a fixture write into the repo, and a broken port.
@@ -111,10 +129,17 @@ batches so far.
 
 Do not start any of it without being asked.
 
-1. **Upstream files still uncited by anything in `parity/`:** `dockerUtils` (5),
-   `dockerComposeUtils` (5), `cli.podman` (2), `getHomeFolder` (1), `getEntPasswd` (1).
-   `cli.up` (21) and `cli.test` (11) are partly mined. `dockerfileUtils` (48) was mined in
-   batch 19 — **with one part deliberately left**: `supportsBuildContexts` is NOT ported.
+1. **Upstream files still uncited by anything in `parity/`:** `dockerComposeUtils` (5),
+   `cli.podman` (2), `getHomeFolder` (1), `getEntPasswd` (1). `cli.up` (21) and `cli.test` (11)
+   are partly mined. Two files were mined with a part deliberately left in each:
+   `dockerUtils` (batch 20) left **`inspectImageInRegistry`**, which has no deacon equivalent at
+   all — deacon pulls and inspects locally, where the reference reads an image's metadata WITHOUT
+   pulling it. A real behavioral difference that surfaced on no observable channel; the place it
+   would show is a config whose image can be inspected but not pulled. (`qualifyImageName` is NOT
+   a lead: it only builds a registry API path for that function, and deacon's same-sounding
+   `qualify_short_remote` is an unrelated podman short-name helper. Do not "align" them.)
+   `dockerfileUtils` (48) was mined in batch 19 — **with one part deliberately left**:
+   `supportsBuildContexts` is NOT ported.
    Upstream uses it to decide whether to prepend `# syntax=docker/dockerfile:1.4` to the
    generated Dockerfile; deacon emits no syntax directive at all while always passing
    `--build-context`. Every batch-19 build passed because modern BuildKit needs no directive,
@@ -202,4 +227,7 @@ lints and fmt drift in new test files.
   after its `FROM` and restores the IMAGE's user — not the config's `containerUser` — on BOTH
   generator entry points), **#686** (`dockerfile_utils` is a FULL port of the reference's
   `dockerfileUtils.ts`; keep `crates/core/tests/dockerfile_utils_parity.rs` at zero divergences,
-  and **regenerate its fixture by re-measuring, never by hand-editing an expectation**).
+  and **regenerate its fixture by re-measuring, never by hand-editing an expectation**), **#688**
+  (a removal that races another removal is waited out, never reported as done — `is_already_gone`
+  governs the REMOVE step and `stopping_is_moot` the STOP step, and they are deliberately not one
+  function).
