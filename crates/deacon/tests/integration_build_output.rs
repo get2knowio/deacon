@@ -659,3 +659,105 @@ fn feature_install_becomes_root_and_restores_an_arg_named_dockerfile_user() {
         std::panic::resume_unwind(panic);
     }
 }
+
+/// `_REMOTE_USER_HOME` is the user's REAL home, read from the image's passwd
+/// database — not `/home/<name>`.
+///
+/// deacon used to compute it on the host by string formatting, so a user whose
+/// home is anywhere else was handed a path that does not exist, and every Feature
+/// writing under `$_REMOTE_USER_HOME` wrote to the wrong place ([#695]).
+///
+/// MEASURED against the reference at oracle 0.87.0 on this exact fixture before
+/// the fix: reference `/opt/custom-home`, deacon `/home/devuser`. **Both exited 0
+/// and both reported `outcome: success`** — which is why this asserts on image
+/// CONTENTS. Nothing in either result document distinguishes the two.
+///
+/// The `useradd -d` is the whole point: with a conventional home the guess and
+/// the lookup agree, and the test would pass against the defect.
+///
+/// [#695]: https://github.com/get2knowio/deacon/issues/695
+#[test]
+fn feature_install_receives_the_users_real_home_not_a_guess() {
+    let temp_dir = TempDir::new().unwrap();
+    let feature_dir = temp_dir.path().join(".devcontainer/marker");
+    fs::create_dir_all(&feature_dir).unwrap();
+
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        "FROM debian:bookworm-slim\n\
+         RUN useradd -m -d /opt/custom-home devuser\n",
+    )
+    .unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        r#"{
+    "name": "Real Home",
+    "build": { "dockerfile": "Dockerfile" },
+    "remoteUser": "devuser",
+    "features": { "./marker": {} }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        feature_dir.join("devcontainer-feature.json"),
+        r#"{ "id": "marker", "version": "1.0.0", "name": "marker" }"#,
+    )
+    .unwrap();
+    fs::write(
+        feature_dir.join("install.sh"),
+        "#!/usr/bin/env bash\nset -e\n\
+         echo \"_REMOTE_USER_HOME=${_REMOTE_USER_HOME}\" > /marker.txt\n",
+    )
+    .unwrap();
+
+    let suffix: String = temp_dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let tag = format!("deacon-test-realhome:{suffix}");
+
+    let output = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("build")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .arg("--image-name")
+        .arg(&tag)
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() && is_docker_unavailable(&stderr) {
+        eprintln!("skipping: docker unavailable ({})", stderr.trim());
+        return;
+    }
+
+    let result = std::panic::catch_unwind(|| {
+        assert!(output.status.success(), "build failed; stderr:\n{stderr}");
+        let out = std::process::Command::new("docker")
+            .args(["run", "--rm", "--entrypoint", "cat"])
+            .arg(&tag)
+            .arg("/marker.txt")
+            .output()
+            .unwrap();
+        let marker = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert_eq!(
+            marker, "_REMOTE_USER_HOME=/opt/custom-home",
+            "the Feature must receive the home from the image's passwd DB"
+        );
+    });
+
+    let _ = std::process::Command::new("docker")
+        .args(["rmi", "-f", &tag])
+        .output();
+
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}
