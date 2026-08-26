@@ -634,13 +634,16 @@ async fn validate_buildkit_requirement(
 /// #[tokio::main]
 /// async fn main() {
 ///     let args = BuildArgs::default();
-///     let _ = execute_build(args).await;
+///     let _ = execute_build(args, None).await;
 /// }
 /// ```
 #[instrument(skip(args))]
-pub async fn execute_build(args: BuildArgs) -> Result<()> {
+pub async fn execute_build(
+    args: BuildArgs,
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
+) -> Result<()> {
     let output_format = args.output_format.clone();
-    let outcome = execute_build_inner(args).await;
+    let outcome = execute_build_inner(args, runtime).await;
     if let Err(err) = &outcome {
         // #594: a failure gets a result document too. Before this, `build
         // --output-format json` printed one on success and NOTHING on failure,
@@ -676,7 +679,10 @@ fn error_document(err: &anyhow::Error) -> result::BuildError {
     }
 }
 
-async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
+async fn execute_build_inner(
+    mut args: BuildArgs,
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
+) -> Result<()> {
     info!("Starting build command execution");
     debug!("Build args: {:?}", args);
 
@@ -887,6 +893,20 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
     let config_hash = calculate_config_hash(&build_config, &workspace_folder)?;
     debug!("Configuration hash: {}", config_hash);
 
+    // The container runtime for this build: BOTH the flavor and the binary.
+    //
+    // `build` used to hardcode `CliDocker::new()` at four sites, so it ignored
+    // `--runtime` entirely and `--docker-path` with it (#692/#694). Passing only
+    // the path would still be wrong: podman needs its FLAVOR too, because the
+    // `localhost/` image-ref qualification and the SELinux/userns handling hang
+    // off `CliRuntime::is_podman()`. The reference does the same thing — it never
+    // branches its build command on podman (it pushes `buildx build`
+    // unconditionally, and podman aliases `buildx` to `build`), only its
+    // arguments.
+    let cli = crate::commands::shared::resolve_runtime(runtime, &args.docker_path)
+        .await
+        .cli_docker();
+
     // Feature installation during build.
     //
     // Feature installation is supported for all configuration shapes:
@@ -995,6 +1015,7 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
             // Compose + features: build the feature-extended image for the target
             // service directly (shape-aware), tag it, and write the lockfile.
             execute_compose_build_with_features(
+                &cli,
                 &config,
                 &load_result.raw_config,
                 &args,
@@ -1007,6 +1028,7 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
             .await
         } else {
             execute_compose_build(
+                &cli,
                 &config,
                 &load_result.raw_config,
                 &args,
@@ -1019,6 +1041,7 @@ async fn execute_build_inner(mut args: BuildArgs) -> Result<()> {
         }
     } else {
         match execute_single_container_build(
+            &cli,
             &config,
             &load_result.raw_config,
             &args,
@@ -1698,6 +1721,7 @@ fn should_use_buildkit(buildkit_option: Option<&BuildKitOption>) -> bool {
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip(config, raw_config, args, workspace_folder, labels))]
 async fn execute_compose_build(
+    cli: &deacon_core::docker::CliDocker,
     config: &DevContainerConfig,
     raw_config: &DevContainerConfig,
     args: &BuildArgs,
@@ -1764,9 +1788,9 @@ async fn execute_compose_build(
     // what lets it ride this invocation instead of a second one (#595). No
     // Features are declared on this path, so the entries are the base image's own
     // plus the config pick.
-    let docker = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
+    let docker = cli;
     let base_image = resolve_compose_base_image(&plan, &project, config_path).await;
-    let metadata_label = compose_metadata_label(&docker, base_image.as_deref(), raw_config).await;
+    let metadata_label = compose_metadata_label(docker, base_image.as_deref(), raw_config).await;
 
     // A service with no `build:` builds nothing, so there is nothing for the label
     // to ride and nothing but the pulled base to report. Supply both halves, as
@@ -1987,6 +2011,7 @@ async fn compose_metadata_label(
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip(config, raw_config, args, workspace_folder, config_path, labels))]
 async fn execute_compose_build_with_features(
+    cli: &deacon_core::docker::CliDocker,
     config: &DevContainerConfig,
     raw_config: &DevContainerConfig,
     args: &BuildArgs,
@@ -2048,7 +2073,7 @@ async fn execute_compose_build_with_features(
         // command is tracked separately (issue #30 deferred items). The BINARY
         // is still the user's to choose, which is what #692 restored — `build`
         // hardcoded `docker` here and ignored `--docker-path` entirely.
-        &deacon_core::docker::CliDocker::with_path(args.docker_path.clone()),
+        cli,
         LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
         // #436: record `devcontainer.metadata` on the image this build produces.
         // The label rides the Feature build itself rather than a second build that
@@ -2190,6 +2215,7 @@ struct BuildOverlay {
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip(config, raw_config, args, build_config, labels, host_ca_set))]
 async fn execute_single_container_build(
+    cli: &deacon_core::docker::CliDocker,
     config: &DevContainerConfig,
     raw_config: &DevContainerConfig,
     args: &BuildArgs,
@@ -2209,8 +2235,6 @@ async fn execute_single_container_build(
     use deacon_core::container::ContainerIdentity;
     use deacon_core::docker::Docker;
     use deacon_core::dockerfile_utils::{find_user_statement, resolve_base_image};
-
-    let cli = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
 
     // The base Dockerfile this build starts from, plus the hash that names its
     // deterministic tag. An image-reference configuration has no Dockerfile of its
@@ -2432,6 +2456,7 @@ async fn execute_single_container_build(
     }
 
     let mut result = execute_docker_build(
+        cli,
         &effective,
         args,
         &inner_hash,
@@ -2633,6 +2658,7 @@ async fn push_built_image(targets: &[String]) -> Result<()> {
 /// Execute Docker build
 #[instrument(skip(build_config, args, workspace_folder, labels))]
 async fn execute_docker_build(
+    cli: &deacon_core::docker::CliDocker,
     build_config: &BuildConfig,
     args: &BuildArgs,
     config_hash: &str,
@@ -2641,9 +2667,9 @@ async fn execute_docker_build(
     overlay: &BuildOverlay,
 ) -> Result<BuildResult> {
     {
-        use deacon_core::docker::{CliDocker, Docker};
+        use deacon_core::docker::Docker;
 
-        let docker = CliDocker::with_path(args.docker_path.clone());
+        let docker = cli;
 
         // Check Docker availability
         docker.check_docker_installed()?;

@@ -448,8 +448,19 @@ jobs:
     #
     # The filterset INTERSECTS with the profile's `default-filter`, so this removes exactly
     # the two `parity_docker` tests and leaves the rest — the same set that already passes
-    # here. `parity_hermetic` and `parity_registry` are unaffected: both are
-    # runtime-agnostic, and this job acquires the GHCR token the latter needs.
+    # here. `parity_registry` is unaffected (runtime-agnostic), and this job acquires the
+    # GHCR token it needs.
+    #
+    # `parity_hermetic` and `parity_registry` are runtime-agnostic.
+    #
+    # NOTE (#694): this job now exercises `deacon build` on podman for the FIRST time.
+    # It always ran the `build` tests and cases, but `build` hardcoded `CliDocker::new()`
+    # at four sites, so every one of them silently used docker no matter what this job
+    # selected — a green lane reporting coverage it did not have. `build` now takes the
+    # resolved runtime (flavor AND binary), so whatever these report is real. If they
+    # fail, that is genuine podman work for #30, not a regression in the fix that made
+    # them honest.
+
     - name: Run integration suite against Podman (full failure set)
       run: cargo nextest run --profile mvp-integration --no-fail-fast -E 'not binary(=parity_docker)'
 
