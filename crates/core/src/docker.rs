@@ -2550,19 +2550,8 @@ impl ContainerOps for CliRuntime {
     #[instrument(skip(self))]
     async fn remove_container(&self, container_id: &str) -> Result<()> {
         debug!("Removing container: {}", container_id);
-
-        let output = Command::new(&self.runtime_path)
-            .args(["rm", "-f", container_id])
-            .output()
+        self.run_removal(&["rm", "-f", container_id], container_id)
             .await
-            .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(DockerError::CLIError(format!("Remove command failed: {}", stderr)).into());
-        }
-
-        Ok(())
     }
 
     #[instrument(skip(self))]
@@ -2695,19 +2684,83 @@ impl CliRuntime {
     #[instrument(skip(self))]
     pub async fn remove_container_with_volumes(&self, container_id: &str) -> Result<()> {
         debug!("Removing container with volumes: {}", container_id);
-
-        let output = Command::new(&self.runtime_path)
-            .args(["rm", "-f", "-v", container_id])
-            .output()
+        self.run_removal(&["rm", "-f", "-v", container_id], container_id)
             .await
-            .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
+    }
 
-        if !output.status.success() {
+    /// Run a `rm -f` invocation, waiting out a removal another process started.
+    ///
+    /// The daemon answers a second concurrent removal with `removal of container
+    /// <id> is already in progress`, and the container is **still present** when
+    /// it does — so returning at that point reports a teardown that has not
+    /// happened (#688). Retry until the removal actually completes, which is
+    /// what the reference does (`removeContainer`,
+    /// `src/spec-shutdown/dockerUtils.ts` at v0.87.0, citing
+    /// microsoft/vscode-remote-release#6509).
+    ///
+    /// Termination rests on `rm -f` being idempotent: once the other removal
+    /// finishes, a `rm -f` naming the now-absent container exits 0 (measured —
+    /// unlike `rm` without `-f`, which fails with `No such container`). So the
+    /// loop ends as soon as the container is genuinely gone, whichever process
+    /// removed it.
+    ///
+    /// The reference additionally tails `docker events --filter event=destroy`
+    /// to wake early instead of sleeping out the interval. That is a latency
+    /// optimization over the same guarantee, and it costs a second long-lived
+    /// child process per removal; deacon polls instead. The observable contract
+    /// — the call returns only once the container is absent — is identical.
+    ///
+    /// **Docker-only, and only because podman's wording is unmeasured.** The
+    /// match is on docker's exact phrase; whatever podman says for the same race
+    /// falls through as a hard error, i.e. the pre-#688 behavior. Podman was not
+    /// available to measure when this landed and inventing a second pattern for
+    /// an error string nobody has seen is how you get a matcher that silently
+    /// matches nothing. Measure it, then widen this.
+    async fn run_removal(&self, args: &[&str], container_id: &str) -> Result<()> {
+        // Matches the reference's attempt count.
+        const ATTEMPTS: usize = 7;
+        const INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+        for attempt in 1..=ATTEMPTS {
+            let output = Command::new(&self.runtime_path)
+                .args(args)
+                .output()
+                .await
+                .map_err(|e| DockerError::CLIError(format!("Failed to remove container: {}", e)))?;
+
+            if output.status.success() {
+                return Ok(());
+            }
+
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(DockerError::CLIError(format!("Remove command failed: {}", stderr)).into());
+            // Only this one message means "wait"; every other failure is real,
+            // and `no such container` is a SUCCESS the callers already treat as
+            // one rather than something to retry.
+            if !stderr.to_ascii_lowercase().contains("already in progress") {
+                return Err(
+                    DockerError::CLIError(format!("Remove command failed: {}", stderr)).into(),
+                );
+            }
+
+            if attempt == ATTEMPTS {
+                return Err(DockerError::CLIError(format!(
+                    "Remove command failed after {} attempts waiting for a concurrent removal \
+                     of container {} to finish: {}",
+                    ATTEMPTS, container_id, stderr
+                ))
+                .into());
+            }
+
+            debug!(
+                container_id = %container_id,
+                attempt,
+                "Another removal is in progress; waiting for it to finish"
+            );
+            tokio::time::sleep(INTERVAL).await;
         }
 
-        Ok(())
+        // The loop either returns or sleeps; `ATTEMPTS` is a non-zero constant.
+        unreachable!("removal loop always returns on its final attempt")
     }
 
     /// Build an image using docker buildx (BuildKit)

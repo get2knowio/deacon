@@ -274,3 +274,147 @@ fn test_down_all_sweeps_stale_by_local_folder() {
         "down --all --remove must sweep ALL containers labeled for this workspace (including the stale, non-deacon one); {remaining} remained"
     );
 }
+
+/// A teardown that races another removal of the same container must still leave
+/// the container gone — and must say so truthfully.
+///
+/// Docker answers a second concurrent `rm -f` with `removal of container <id> is
+/// already in progress`, and the container is **still present** when it does
+/// (measured 6/6). Before [#688] deacon issued a single `rm -f` and took that
+/// answer at face value, which broke in two opposite directions:
+///
+/// * `down --remove` propagated it and exited **1** with the container present;
+/// * `down --all --remove` classified it as "already gone" and exited **0** with
+///   the container present — a teardown that reported success over a container
+///   that was still there.
+///
+/// The reference retries until the removal actually completes (`removeContainer`,
+/// `src/spec-shutdown/dockerUtils.ts` at v0.87.0).
+///
+/// **The assertion is the container's ABSENCE, not the exit code.** The `--all`
+/// shape already exited 0 while failing, so an exit-code assertion could not have
+/// caught it — and that is the half most likely to be written by reflex.
+///
+/// Both shapes run because they failed in opposite directions and a fix for one
+/// is not a fix for the other.
+///
+/// What this test does NOT cover: the STOP step's half of the race. Narrowing the
+/// shared predicate fixed the removal and regressed `--all` to exit 2, because a
+/// container already being removed cannot be stopped either — but reinstating that
+/// bug and re-running this test passes more often than not, since whether the stop
+/// loses the race is timing. That distinction is pinned deterministically by
+/// `commands::down::tests::already_in_progress_is_not_already_gone` instead. Do not
+/// read a green run here as covering it.
+///
+/// [#688]: https://github.com/get2knowio/deacon/issues/688
+#[test]
+fn down_wins_a_race_with_a_concurrent_removal() {
+    if !support::is_runtime_available() {
+        eprintln!("skipping: container runtime unavailable");
+        return;
+    }
+    // The race needs `docker rm -f`'s exact "already in progress" wording.
+    if !support::runtime_is_docker() {
+        eprintln!("skipping: concurrent-removal wording is docker-specific");
+        return;
+    }
+
+    for flags in [vec!["--remove"], vec!["--all", "--remove"]] {
+        let temp_dir = TempDir::new().unwrap();
+        fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+        fs::write(
+            temp_dir.path().join(".devcontainer/devcontainer.json"),
+            r#"{"name":"Down Race","image":"debian:bookworm-slim","overrideCommand":true}"#,
+        )
+        .unwrap();
+
+        let up = support::deacon_command()
+            .args(["up", "--workspace-folder"])
+            .arg(temp_dir.path())
+            .args(["--mount-workspace-git-root", "false"])
+            .output()
+            .unwrap();
+        if !up.status.success() {
+            eprintln!(
+                "skipping {flags:?}: up failed: {}",
+                String::from_utf8_lossy(&up.stderr)
+            );
+            return;
+        }
+
+        // Take the id from `up`'s own result document rather than rebuilding the
+        // identity label here: the label's spelling is normalized (#682) and a
+        // test that reconstructs it is testing its own arithmetic.
+        let up_stdout = String::from_utf8_lossy(&up.stdout).to_string();
+        let container_id = support::extract_json_from_output(&up_stdout)
+            .ok()
+            .and_then(|v| v.get("containerId")?.as_str().map(str::to_string))
+            .unwrap_or_default();
+        assert!(
+            !container_id.is_empty(),
+            "up reported no containerId; stdout:\n{up_stdout}"
+        );
+
+        // Widen the removal window so the race is reliable rather than lucky:
+        // a container with real bytes in its writable layer takes measurably
+        // longer to delete than an empty one.
+        let _ = std::process::Command::new(support::runtime_bin())
+            .args([
+                "exec",
+                &container_id,
+                "sh",
+                "-c",
+                "dd if=/dev/zero of=/big bs=1M count=800 2>/dev/null",
+            ])
+            .output();
+
+        let racer_id = container_id.clone();
+        let racer = std::thread::spawn(move || {
+            let _ = std::process::Command::new(support::runtime_bin())
+                .args(["rm", "-f", &racer_id])
+                .output();
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let down = support::deacon_command()
+            .args(["down", "--workspace-folder"])
+            .arg(temp_dir.path())
+            .args(&flags)
+            .output()
+            .unwrap();
+
+        let still_there = std::process::Command::new(support::runtime_bin())
+            .args([
+                "ps",
+                "-a",
+                "--filter",
+                &format!("id={container_id}"),
+                "--format",
+                "{{.ID}}",
+            ])
+            .output()
+            .unwrap();
+        let remaining = String::from_utf8_lossy(&still_there.stdout)
+            .trim()
+            .to_string();
+
+        let _ = racer.join();
+        let _ = std::process::Command::new(support::runtime_bin())
+            .args(["rm", "-f", &container_id])
+            .output();
+
+        assert!(
+            remaining.is_empty(),
+            "down {flags:?} returned while container {container_id} was still present \
+             (exit {:?}); a teardown must not report completion before the container is gone.\n\
+             stderr:\n{}",
+            down.status.code(),
+            String::from_utf8_lossy(&down.stderr)
+        );
+        assert!(
+            down.status.success(),
+            "down {flags:?} failed on a benign removal race; stderr:\n{}",
+            String::from_utf8_lossy(&down.stderr)
+        );
+    }
+}
