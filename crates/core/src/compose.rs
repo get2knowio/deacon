@@ -4640,6 +4640,82 @@ mod tests {
         assert_eq!(plan.built_image_name("proj", "dev"), "proj-dev");
     }
 
+    /// The defaults the reference hand-codes are supplied by Compose itself, so
+    /// this parser must NOT re-implement them — and this test exists to stop
+    /// anyone adding them back as "missing".
+    ///
+    /// The reference parses RAW compose YAML (`getBuildInfoForService`,
+    /// `src/spec-node/dockerCompose.ts` at v0.87.0) and therefore has to default
+    /// `dockerfile` to `Dockerfile` and `context` to the compose file's directory
+    /// itself. deacon parses the output of `docker compose config`, which has
+    /// already done both. The JSON below was MEASURED from Compose v2 on the five
+    /// shapes upstream's `dockerComposeUtils.test.ts` asserts — it is what Compose
+    /// really emits, not a hand-written approximation of it (which is what the
+    /// sibling tests above use, and why they can show a `"build": "."` string that
+    /// a resolved config never actually contains).
+    ///
+    /// Measured facts this pins, each of which would otherwise look like a gap:
+    /// - `context` always arrives ABSOLUTE, resolved against the project directory
+    ///   (the FIRST `-f` file's directory — the same answer the reference computes
+    ///   as `dirname(localComposeFiles[0])`, verified on a two-file project).
+    /// - `dockerfile` is always present, defaulted to `Dockerfile`.
+    /// - `args` values are always strings: Compose stringifies numbers and bools,
+    ///   resolves a null-valued arg from the environment, and OMITS it entirely
+    ///   when that variable is unset. So the `as_str()` filter in the parser drops
+    ///   nothing Compose can actually produce.
+    #[test]
+    fn compose_supplies_the_build_defaults_the_reference_hand_codes() {
+        // `build: ./a-path` (string shorthand) — Compose expands it and fills in
+        // the Dockerfile default.
+        let shorthand = r#"{ "services": { "dev": { "image": "my-image", "build": {
+            "context": "/proj/sub/a-path", "dockerfile": "Dockerfile"
+        } } } }"#;
+        let plan = parse_service_build_plan(shorthand, "dev").unwrap().unwrap();
+        assert_eq!(plan.image.as_deref(), Some("my-image"));
+        let build = plan.build.expect("shorthand build must survive");
+        assert_eq!(build.context.as_deref(), Some("/proj/sub/a-path"));
+        assert_eq!(
+            build.dockerfile.as_deref(),
+            Some("Dockerfile"),
+            "Compose supplies this default; deacon must not need to"
+        );
+
+        // `build: { dockerfile: my-dockerfile }` with NO context — Compose fills
+        // the context in as the project directory.
+        let no_context = r#"{ "services": { "dev": { "build": {
+            "context": "/proj/sub", "dockerfile": "my-dockerfile"
+        } } } }"#;
+        let build = parse_service_build_plan(no_context, "dev")
+            .unwrap()
+            .unwrap()
+            .build
+            .expect("build section must survive");
+        assert_eq!(build.context.as_deref(), Some("/proj/sub"));
+        assert_eq!(build.dockerfile.as_deref(), Some("my-dockerfile"));
+
+        // Mixed-type args are already strings by the time we see them.
+        let typed_args = r#"{ "services": { "dev": { "build": {
+            "context": "/proj", "dockerfile": "Dockerfile",
+            "args": { "STR": "hello", "NUM": "8080", "BOOL": "true" }
+        } } } }"#;
+        let build = parse_service_build_plan(typed_args, "dev")
+            .unwrap()
+            .unwrap()
+            .build
+            .unwrap();
+        assert_eq!(build.args.get("NUM").map(String::as_str), Some("8080"));
+        assert_eq!(build.args.get("BOOL").map(String::as_str), Some("true"));
+        assert_eq!(build.args.len(), 3, "no arg is dropped: {:?}", build.args);
+
+        // An `image:`-only service carries no build section at all.
+        let image_only = r#"{ "services": { "dev": { "image": "my-image" } } }"#;
+        let plan = parse_service_build_plan(image_only, "dev")
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.image.as_deref(), Some("my-image"));
+        assert!(plan.build.is_none());
+    }
+
     /// A missing service and empty output are both "not in the document", not
     /// errors — matching every other parser over `docker compose config`.
     #[test]
