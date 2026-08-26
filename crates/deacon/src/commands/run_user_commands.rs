@@ -217,7 +217,9 @@ async fn execute_run_user_commands_inner(
     // Select the runtime (docker/podman) honoring --runtime/DEACON_CONTAINER_RUNTIME.
     // Hardcoding CliDocker::new() here would talk to docker while the container
     // lives in podman → "Dev container not found" (mirrors the up/exec/down fix).
-    let cli = resolve_runtime(runtime, &args.docker_path).cli_docker();
+    let cli = resolve_runtime(runtime, &args.docker_path)
+        .await
+        .cli_docker();
 
     // Container-only mode: a selector named the target and nothing named a
     // configuration, so there is no document to discover — the container's own

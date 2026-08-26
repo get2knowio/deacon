@@ -258,7 +258,9 @@ pub async fn execute_set_up(args: SetUpArgs, runtime: Option<RuntimeKind>) -> Re
     // Select the runtime (docker/podman) honoring --runtime/DEACON_CONTAINER_RUNTIME.
     // Hardcoding CliDocker::new() here would inspect/exec via docker while the
     // container lives in podman → "Dev container not found" (mirrors up/exec/down).
-    let docker = resolve_runtime(runtime, &args.docker_path).cli_docker();
+    let docker = resolve_runtime(runtime, &args.docker_path)
+        .await
+        .cli_docker();
 
     // Phase 2: Inspect the target container. Per spec §9, a missing container
     // produces the upstream-aligned summary "Dev container not found."

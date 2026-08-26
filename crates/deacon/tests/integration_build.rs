@@ -1504,3 +1504,36 @@ fn test_cache_to_requires_buildkit() {
         );
     }
 }
+
+/// A `--docker-path` that cannot be executed must fail the build, not be ignored.
+///
+/// Before [#692] every `CliDocker::new()` in this command hardcoded `docker`, so
+/// a build pointed at a nonexistent binary exited **0** and produced an image
+/// through the real daemon. An assertion expecting success could never have
+/// caught that — only one expecting failure can.
+///
+/// [#692]: https://github.com/get2knowio/deacon/issues/692
+#[test]
+fn build_honors_docker_path_and_fails_when_it_cannot_run() {
+    let temp_dir = TempDir::new().unwrap();
+    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        "FROM alpine:3.19\n",
+    )
+    .unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        r#"{"name":"Docker Path","build":{"dockerfile":"Dockerfile"}}"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("build")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .args(["--docker-path", "/nonexistent/definitely-not-a-runtime"])
+        .assert()
+        .failure();
+}

@@ -1764,7 +1764,7 @@ async fn execute_compose_build(
     // what lets it ride this invocation instead of a second one (#595). No
     // Features are declared on this path, so the entries are the base image's own
     // plus the config pick.
-    let docker = deacon_core::docker::CliDocker::new();
+    let docker = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
     let base_image = resolve_compose_base_image(&plan, &project, config_path).await;
     let metadata_label = compose_metadata_label(&docker, base_image.as_deref(), raw_config).await;
 
@@ -2045,8 +2045,10 @@ async fn execute_compose_build_with_features(
         Some(&build_options),
         host_ca_set,
         // `deacon build` is docker-only today; podman parity for the build
-        // command is tracked separately (issue #30 deferred items).
-        &deacon_core::docker::CliDocker::new(),
+        // command is tracked separately (issue #30 deferred items). The BINARY
+        // is still the user's to choose, which is what #692 restored — `build`
+        // hardcoded `docker` here and ignored `--docker-path` entirely.
+        &deacon_core::docker::CliDocker::with_path(args.docker_path.clone()),
         LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
         // #436: record `devcontainer.metadata` on the image this build produces.
         // The label rides the Feature build itself rather than a second build that
@@ -2208,7 +2210,7 @@ async fn execute_single_container_build(
     use deacon_core::docker::Docker;
     use deacon_core::dockerfile_utils::{find_user_statement, resolve_base_image};
 
-    let cli = deacon_core::docker::CliDocker::new();
+    let cli = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
 
     // The base Dockerfile this build starts from, plus the hash that names its
     // deterministic tag. An image-reference configuration has no Dockerfile of its
@@ -2641,7 +2643,7 @@ async fn execute_docker_build(
     {
         use deacon_core::docker::{CliDocker, Docker};
 
-        let docker = CliDocker::new();
+        let docker = CliDocker::with_path(args.docker_path.clone());
 
         // Check Docker availability
         docker.check_docker_installed()?;

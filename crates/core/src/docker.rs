@@ -1518,7 +1518,15 @@ impl Docker for CliRuntime {
                     Ok(())
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    Err(DockerError::CLIError(format!("Runtime ping failed: {}", stderr)).into())
+                    // Name the runtime actually being run. Saying "Runtime" (or
+                    // worse, "Docker") while executing podman sends the reader to
+                    // the wrong daemon — the same class of confusion #692 fixed
+                    // in selection, here in reporting.
+                    Err(DockerError::CLIError(format!(
+                        "{} ping failed: {}",
+                        self.runtime_path, stderr
+                    ))
+                    .into())
                 }
             }
             Err(e) => {

@@ -467,7 +467,7 @@ pub async fn execute_exec(
     args: ExecArgs,
     runtime: Option<deacon_core::runtime::RuntimeKind>,
 ) -> Result<()> {
-    let docker = crate::commands::shared::resolve_runtime(runtime, &args.docker_path);
+    let docker = crate::commands::shared::resolve_runtime(runtime, &args.docker_path).await;
     execute_exec_with_docker(args, &docker).await
 }
 
