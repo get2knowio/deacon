@@ -15,10 +15,10 @@ points at it.
 
 ## Where things stand
 
-_Last updated: 2026-08-26, at `d989b36` on `main`._
+_Last updated: 2026-08-26, at `6e76822` on `main`._
 
-- **Ledger: 220 recorded behaviors — 0 open nonconformance**, 10 deacon-follows-spec,
-  14 documented choice, 23 deacon extension, 173 conformant. Zero `UNADJUDICATED` records.
+- **Ledger: 223 recorded behaviors — 0 open nonconformance**, 10 deacon-follows-spec,
+  15 documented choice, 23 deacon extension, 175 conformant. Zero `UNADJUDICATED` records.
 - **The verdict of record is the latest nightly**, never this file:
   `gh run list --workflow=parity.yml --branch=main`.
 - Nothing in flight. No open work assigned.
@@ -30,6 +30,7 @@ _Last updated: 2026-08-26, at `d989b36` on `main`._
 
 | PR | What |
 |---|---|
+| #687 `6e76822` | Feature installs run as root; real Dockerfile `FROM`/`USER` variable resolution (closes #685, #686) — batch 19 |
 | #683 `d989b36` | Windows identity-label normalization (closes #682) — batch 18 |
 | #681 `d41f3f9` | every parity case runs against a *copy* of its fixture, with a guard proving it (closes #680) |
 | #679 `bcea065` | `env` channel for the parity operation model |
@@ -41,7 +42,7 @@ _Last updated: 2026-08-26, at `d989b36` on `main`._
 ## The arc: [#480](https://github.com/get2knowio/deacon/issues/480), parity mining
 
 The long-running task is mining the reference CLI's own test suite and real-world configs for
-behaviors deacon has never been compared against, one upstream file at a time. Eighteen
+behaviors deacon has never been compared against, one upstream file at a time. Nineteen
 batches so far.
 
 **The method has held for every batch and should not be shortcut:**
@@ -81,6 +82,23 @@ batches so far.
   comparison a named helper taking the **platform as a parameter**, so its regression test runs
   on every host. Generalize: when behavior is platform-conditional, parameterize the platform
   rather than reading `cfg!` — that is also how upstream tests its own version.
+- **A module that describes itself as a partial port is making a claim, not stating a policy.**
+  `dockerfile_utils` called itself "the small subset ... we need today" and put variable
+  substitution "out of scope for bead 14b". It was neither current nor authorized — deacon's ONLY
+  out-of-scope area is Feature *authoring* and *publishing*. Batch 19 found two defects behind that
+  sentence, one of which broke `build` outright for a very common Dockerfile shape. Grep for
+  "subset", "for now", "out of scope" in module docs; each is a lead.
+- **A partially-correct module reads as a correct one.** `ensureDockerfileHasFinalStageName` was
+  byte-exact right on every one of its cases while everything around it was wrong, which is exactly
+  why nobody looked. Coverage of *part* of a file is not evidence about the rest of it.
+- **Run the control that removes your hypothesis.** Batch 19's first end-to-end run showed deacon
+  failing where the reference succeeded, and the obvious story explained all of it. The same fixture
+  with the variable removed still failed — which is what turned one bug into two, filed and fixed
+  separately.
+- **The oracle for a library-level port is the reference's own source, compiled.** The npm package
+  ships one minified bundle, so internal modules cannot be required from it; check the upstream repo
+  out at the pinned tag and `tsc` the single file. Self-check the compiled oracle against upstream's
+  own test expectations *before* trusting it to judge deacon.
 - **Sabotage distinguishes coverage from green.** Disabling an input and re-running is the only
   way to tell a case that covers something from a case that merely passes. It has found a
   passing-for-the-wrong-reason case, a fixture write into the repo, and a broken port.
@@ -93,11 +111,15 @@ batches so far.
 
 Do not start any of it without being asked.
 
-1. **Upstream files still uncited by anything in `parity/`:** `dockerfileUtils` (48 `it`s),
-   `dockerUtils` (5), `dockerComposeUtils` (5), `cli.podman` (2), `getHomeFolder` (1),
-   `getEntPasswd` (1). `cli.up` (21) and `cli.test` (11) are partly mined.
-   **`dockerfileUtils` is now the largest by a wide margin** and touches `resolve_base_image`
-   and the merged-Dockerfile splice, which #595 and #628/#629 already made load-bearing.
+1. **Upstream files still uncited by anything in `parity/`:** `dockerUtils` (5),
+   `dockerComposeUtils` (5), `cli.podman` (2), `getHomeFolder` (1), `getEntPasswd` (1).
+   `cli.up` (21) and `cli.test` (11) are partly mined. `dockerfileUtils` (48) was mined in
+   batch 19 — **with one part deliberately left**: `supportsBuildContexts` is NOT ported.
+   Upstream uses it to decide whether to prepend `# syntax=docker/dockerfile:1.4` to the
+   generated Dockerfile; deacon emits no syntax directive at all while always passing
+   `--build-context`. Every batch-19 build passed because modern BuildKit needs no directive,
+   but on an older Docker the reference would succeed where deacon fails. **UNMEASURED** —
+   demonstrating it needs an old BuildKit this dev container does not have.
 2. The four consciously-dropped coverage areas named in `parity/SPEC_STATUS.md` under
    "Coverage this document does *not* claim".
 3. `up_dotfiles.rs`'s 12 ignored, network-dependent tests.
@@ -157,6 +179,13 @@ lints and fmt drift in new test files.
 - **`Test (MVP fast) (windows)` is the lane that catches platform-conditional work**, and it
   only starts after `Lint` passes — roughly ten minutes into a run. Do not read an early green
   as a verdict.
+- **Adding a NEW docker-gated test binary means editing ~10 `.config/nextest.toml` filter lines**
+  across profiles, and conflicts with any sibling PR touching the same lines. Prefer adding to a
+  binary already present in every profile — `integration_build_output` is one.
+- **`live-certification` is not a required check and fails on oracle-side network flakes.** Batch
+  19 saw it go red on `read ECONNRESET` fetching a Feature from ghcr.io — the REFERENCE exited 1,
+  deacon did not, so the exit codes diverged. Read the reference's own stderr in the failure before
+  suspecting the change; re-running cleared it.
 - **The ledger-coverage check reads issue TITLES as conventional commits.** A `fix(<scope>)`
   outside `NON_BEHAVIORAL_SCOPES` owes a `SPEC_STATUS.md` row. If an issue genuinely owes none,
   retitle it `chore(<scope>)` and say why on the issue — that is the remedy the check's own
@@ -169,4 +198,8 @@ lints and fmt drift in new test files.
   `workspace::absolutize`, never `canonicalize`, at every site that reports, mounts or hashes;
   `trust.rs::canonicalize_workspace` is the deliberate exception and must not be unified with
   it), **#682** (identity-label values go through `label_path::for_path`, never `absolutize`,
-  and comparisons normalize **both** sides).
+  and comparisons normalize **both** sides), **#685** (the Feature-install stage becomes `root`
+  after its `FROM` and restores the IMAGE's user — not the config's `containerUser` — on BOTH
+  generator entry points), **#686** (`dockerfile_utils` is a FULL port of the reference's
+  `dockerfileUtils.ts`; keep `crates/core/tests/dockerfile_utils_parity.rs` at zero divergences,
+  and **regenerate its fixture by re-measuring, never by hand-editing an expectation**).
