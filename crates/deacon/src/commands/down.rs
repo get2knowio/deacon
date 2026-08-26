@@ -234,7 +234,7 @@ async fn execute_down_all(
                 container.id, stop_timeout
             );
             if let Err(e) = docker.stop_container(&container.id, stop_timeout).await {
-                if is_already_gone(&e) {
+                if stopping_is_moot(&e) {
                     debug!("Container {} already gone while stopping", container.id);
                 } else {
                     warn!("Failed to stop container {}: {}", container.id, e);
@@ -284,9 +284,54 @@ async fn execute_down_all(
 /// Returns true if a Docker error simply means the container is already gone
 /// (concurrently removed, auto-removed via `--rm` on stop, or never existed).
 /// Such errors are benign for a teardown whose goal is the container's absence.
+///
+/// `removal ... is already in progress` is deliberately NOT here, though it reads
+/// like a sibling. The two mean opposite things: one says the container is gone,
+/// the other says removing it has *started* — and the container is still present
+/// when the daemon says so. Conflating them let a `--all` teardown report success
+/// over a container that was still there (#688). Waiting for a concurrent removal
+/// belongs to `CliDocker::run_removal`, one layer down, so by the time a removal
+/// error reaches a caller it has already been waited out and is real.
 fn is_already_gone(err: &impl std::fmt::Display) -> bool {
     let msg = err.to_string().to_ascii_lowercase();
-    msg.contains("no such container") || msg.contains("already in progress")
+    msg.contains("no such container")
+}
+
+/// Returns true if there is no point stopping this container.
+///
+/// Broader than [`is_already_gone`] by exactly one case, and only the STOP step
+/// may use it: a container whose removal is already in progress is on its way
+/// out, so failing to stop it is moot rather than a failure — the removal that
+/// is already running will take it. Applying this to the REMOVE step instead is
+/// what produced the silent success in #688, and applying `is_already_gone` to
+/// the stop step turns a benign race into a non-zero exit.
+fn stopping_is_moot(err: &impl std::fmt::Display) -> bool {
+    let msg = err.to_string().to_ascii_lowercase();
+    is_already_gone(err) || msg.contains("already in progress")
+}
+
+/// Stop a container, treating "it is already gone or on its way out" as done.
+///
+/// Every teardown path needs this, not just `--all`: the single-container path
+/// propagated the stop error with `?`, so a `down` that raced a removal failed on
+/// the STOP step before it ever reached the removal it was asked to perform
+/// (#688). Real stop failures still propagate.
+async fn stop_tolerating_teardown_race(
+    docker: &CliDocker,
+    container_id: &str,
+    stop_timeout: Option<u32>,
+) -> Result<()> {
+    match docker.stop_container(container_id, stop_timeout).await {
+        Ok(()) => Ok(()),
+        Err(e) if stopping_is_moot(&e) => {
+            debug!(
+                "Container {} is already gone or being removed; nothing to stop",
+                container_id
+            );
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Execute down for single container configurations
@@ -368,8 +413,7 @@ async fn execute_container_down(
         }
         "stopContainer" => {
             debug!("Stopping container with timeout: {:?}", stop_timeout);
-            docker
-                .stop_container(&container_state.container_id, stop_timeout)
+            stop_tolerating_teardown_race(&docker, &container_state.container_id, stop_timeout)
                 .await?;
 
             if should_remove || should_remove_container(config, container_state) {
@@ -386,8 +430,7 @@ async fn execute_container_down(
                 "Invalid shutdown action '{}' for container, defaulting to stopContainer",
                 shutdown_action
             );
-            docker
-                .stop_container(&container_state.container_id, stop_timeout)
+            stop_tolerating_teardown_race(&docker, &container_state.container_id, stop_timeout)
                 .await?;
 
             if should_remove {
@@ -581,6 +624,45 @@ fn should_remove_container(
 mod tests {
     use super::*;
     use deacon_core::state::ContainerState;
+
+    /// #688. These two predicates differ by exactly one message, and the whole
+    /// defect was that one function answered both questions.
+    ///
+    /// `removal ... is already in progress` means the container is STILL THERE
+    /// and going away. For the REMOVE step that is something to wait out, never
+    /// to accept — accepting it is what let a `--all` teardown exit 0 over a
+    /// container that was still present. For the STOP step it is moot: something
+    /// else is already removing it, so there is nothing left to stop.
+    ///
+    /// This is a unit test rather than another arm of the Docker-gated race
+    /// because the stop-step race is timing-dependent — reinstating the bug and
+    /// re-running the end-to-end test passes more often than not, so only this
+    /// pins the distinction.
+    #[test]
+    fn already_in_progress_is_not_already_gone() {
+        let in_progress = anyhow::anyhow!(
+            "Remove command failed: Error response from daemon: removal of \
+             container abc123 is already in progress"
+        );
+        let no_such = anyhow::anyhow!("Error response from daemon: No such container: abc123");
+        let real_failure = anyhow::anyhow!("Error response from daemon: driver failed to remove");
+
+        // The container is not gone just because its removal started.
+        assert!(!is_already_gone(&in_progress));
+        assert!(is_already_gone(&no_such));
+        assert!(!is_already_gone(&real_failure));
+
+        // ...but there is no point stopping one that is on its way out.
+        assert!(stopping_is_moot(&in_progress));
+        assert!(stopping_is_moot(&no_such));
+        assert!(!stopping_is_moot(&real_failure));
+
+        // Case-insensitive: the daemon's capitalization is not a contract.
+        assert!(is_already_gone(&anyhow::anyhow!("NO SUCH CONTAINER: x")));
+        assert!(stopping_is_moot(&anyhow::anyhow!(
+            "Removal Of Container x Is ALREADY IN PROGRESS"
+        )));
+    }
 
     #[test]
     fn test_down_args_creation() {
