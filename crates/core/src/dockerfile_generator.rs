@@ -150,6 +150,43 @@ impl Default for DockerfileConfig {
     }
 }
 
+/// A shell expression that resolves `user`'s home directory from the image's own
+/// passwd database, for embedding in a `RUN`.
+///
+/// This is the reference's own construction (`containerFeatures.ts` at v0.87.0),
+/// and its shape is load-bearing in two ways. It prefers `getent` but falls back
+/// to reading `/etc/passwd`, because busybox images have no `getent` at all — the
+/// case upstream's `getEntPasswd` tests pin first. And it matches a passwd line by
+/// NAME or by UID, so a numeric `remoteUser` resolves too.
+///
+/// An unknown user yields the empty string, which is what the reference yields;
+/// callers already emit empty values for the other spec variables rather than
+/// omitting them, so `${_REMOTE_USER_HOME:-}` behaves consistently.
+///
+/// The user name is single-quoted with embedded quotes escaped: it comes from
+/// configuration and reaches a shell.
+fn passwd_home_lookup(user: Option<&str>) -> String {
+    let Some(user) = user.filter(|u| !u.is_empty()) else {
+        return String::new();
+    };
+    // Both halves are single-quoted with embedded quotes escaped: the name comes
+    // from configuration and reaches a shell. The regex metacharacters a name
+    // could still contain are NOT escaped, matching the reference exactly — the
+    // pattern is its `^<user>|^[^:]*:[^:]*:<user>:` verbatim, and diverging here
+    // would change which passwd lines match.
+    let name = shell_single_quote(user);
+    let pattern = shell_single_quote(&format!("^{user}|^[^:]*:[^:]*:{user}:"));
+    format!(
+        "$( (command -v getent >/dev/null 2>&1 && getent passwd {name} || grep -E {pattern} /etc/passwd || true) | cut -d: -f6)"
+    )
+}
+
+/// Wrap `value` in single quotes, escaping any it contains, so it survives as one
+/// shell word.
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 /// Generates a Dockerfile for installing features using BuildKit
 #[derive(Debug)]
 pub struct DockerfileGenerator {
@@ -414,16 +451,28 @@ impl DockerfileGenerator {
         let install_env = &self.config.feature_install_env;
         for (key, value) in [
             ("_REMOTE_USER", install_env.remote_user.as_deref()),
-            ("_REMOTE_USER_HOME", install_env.remote_user_home.as_deref()),
             ("_CONTAINER_USER", install_env.container_user.as_deref()),
-            (
-                "_CONTAINER_USER_HOME",
-                install_env.container_user_home.as_deref(),
-            ),
         ] {
             command.push_str(&format!(
                 "    export {} && \\\n",
                 Self::format_env_var(key, value.unwrap_or(""))
+            ));
+        }
+        // The two HOME variables are LOOKED UP in the image rather than derived
+        // from the user's name. Only the image knows where a user's home is, and
+        // guessing `/home/<name>` hands every Feature a path that does not exist
+        // whenever it is wrong — silently, since the build still succeeds (#695).
+        for (key, user) in [
+            ("_REMOTE_USER_HOME", install_env.remote_user.as_deref()),
+            (
+                "_CONTAINER_USER_HOME",
+                install_env.container_user.as_deref(),
+            ),
+        ] {
+            command.push_str(&format!(
+                "    export {}=\"{}\" && \\\n",
+                key,
+                passwd_home_lookup(user)
             ));
         }
 
@@ -1105,9 +1154,32 @@ mod tests {
             "resolved _REMOTE_USER must be exported, got:\n{}",
             dockerfile
         );
-        assert!(dockerfile.contains(r#"export _REMOTE_USER_HOME="/home/vscode""#));
         assert!(dockerfile.contains(r#"export _CONTAINER_USER="root""#));
-        assert!(dockerfile.contains(r#"export _CONTAINER_USER_HOME="/root""#));
+
+        // The two HOME variables are LOOKED UP in the image, not derived from the
+        // name. This assertion used to read `export _REMOTE_USER_HOME="/home/vscode"`
+        // — it was pinning the defect #695 fixed, where a user whose home is not
+        // `/home/<name>` was handed a path that does not exist. MEASURED against the
+        // reference on a `useradd -m -d /opt/custom-home devuser` image: the
+        // reference reports `/opt/custom-home`, deacon reported `/home/devuser`.
+        for (var, user) in [
+            ("_REMOTE_USER_HOME", "vscode"),
+            ("_CONTAINER_USER_HOME", "root"),
+        ] {
+            let expected = format!(
+                "export {var}=\"$( (command -v getent >/dev/null 2>&1 && getent passwd '{user}'"
+            );
+            assert!(
+                dockerfile.contains(&expected),
+                "{var} must be resolved from the image's passwd DB, got:\n{dockerfile}"
+            );
+        }
+        // The getent-less fallback is not optional: busybox images have no getent.
+        assert!(dockerfile.contains("/etc/passwd"));
+        assert!(
+            !dockerfile.contains(r#"export _REMOTE_USER_HOME="/home/vscode""#),
+            "the home must not be guessed from the user name"
+        );
         assert!(
             !dockerfile.contains(r#"export _REMOTE_USER="""#),
             "an empty _REMOTE_USER breaks `su - \"$_REMOTE_USER\"` in feature install scripts"
@@ -1186,6 +1258,50 @@ mod tests {
         };
         let dockerfile = DockerfileGenerator::new(config).generate(&plan).unwrap();
         assert!(dockerfile.contains("ARG _DEV_CONTAINERS_IMAGE_USER=root"));
+    }
+
+    /// The home lookup's SHAPE is the behavior: each half exists for a case
+    /// upstream's `getEntPasswd` tests pin, and all three were verified against
+    /// real images (#695).
+    ///
+    /// - `getent` first, `/etc/passwd` second — busybox has NO `getent` at all
+    ///   (measured: `command -v getent` is empty there), and the fallback still
+    ///   resolves `/home/foo` for a user created with `adduser -D -h /home/foo`.
+    /// - The pattern matches by NAME or by UID, so a numeric user resolves too
+    ///   (measured in busybox: uid 1000 → `/home/foo`).
+    /// - `|| true` so a missing user yields empty rather than failing the build.
+    #[test]
+    fn home_is_looked_up_in_the_image_not_derived_from_the_name() {
+        let expr = passwd_home_lookup(Some("devuser"));
+        assert!(expr.contains("command -v getent"), "{expr}");
+        assert!(expr.contains("getent passwd 'devuser'"), "{expr}");
+        assert!(
+            expr.contains("grep -E '^devuser|^[^:]*:[^:]*:devuser:' /etc/passwd"),
+            "must match by name OR uid, and fall back for getent-less images: {expr}"
+        );
+        assert!(expr.contains("|| true"), "{expr}");
+        assert!(expr.contains("cut -d: -f6"), "{expr}");
+        // Never the guess.
+        assert!(!expr.contains("/home/devuser"), "{expr}");
+
+        // No user, no expression — the caller emits an empty value.
+        assert_eq!(passwd_home_lookup(None), "");
+        assert_eq!(passwd_home_lookup(Some("")), "");
+    }
+
+    /// The user name reaches a shell, so it is single-quoted with embedded
+    /// quotes escaped — in BOTH halves, the `getent` argument and the grep
+    /// pattern.
+    #[test]
+    fn a_user_name_containing_a_quote_cannot_break_out_of_the_lookup() {
+        let expr = passwd_home_lookup(Some("ev'il"));
+        assert!(
+            !expr.contains("'ev'il'"),
+            "an unescaped quote would end the quoted word: {expr}"
+        );
+        assert!(expr.contains(r"'ev'\''il'"), "{expr}");
+        assert_eq!(shell_single_quote("plain"), "'plain'");
+        assert_eq!(shell_single_quote("a'b"), r"'a'\''b'");
     }
 
     /// Unresolvable users still emit the variables (as empty strings) so that
