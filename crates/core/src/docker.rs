@@ -2709,6 +2709,13 @@ impl CliRuntime {
     /// optimization over the same guarantee, and it costs a second long-lived
     /// child process per removal; deacon polls instead. The observable contract
     /// — the call returns only once the container is absent — is identical.
+    ///
+    /// **Docker-only, and only because podman's wording is unmeasured.** The
+    /// match is on docker's exact phrase; whatever podman says for the same race
+    /// falls through as a hard error, i.e. the pre-#688 behavior. Podman was not
+    /// available to measure when this landed and inventing a second pattern for
+    /// an error string nobody has seen is how you get a matcher that silently
+    /// matches nothing. Measure it, then widen this.
     async fn run_removal(&self, args: &[&str], container_id: &str) -> Result<()> {
         // Matches the reference's attempt count.
         const ATTEMPTS: usize = 7;
