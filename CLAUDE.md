@@ -579,6 +579,27 @@ must accept BOTH (see `extract_build_config` in `commands/build/mod.rs` and `up`
 **Build feature installation (`deacon build`):** all four config shapes install features
 and the user `--image-name` must resolve to the FEATURE-EXTENDED image, not the base.
 
+**The Feature-install stage becomes `root` and restores the image's user** (#685). Emit
+`USER root` right after the stage's `FROM`, and `ARG _DEV_CONTAINERS_IMAGE_USER=<image user>`
++ `USER $_DEV_CONTAINERS_IMAGE_USER` after the install layers and `containerEnv` — on BOTH
+generator entry points (`generate` and `generate_install_stage_from`). Unconditionally, never
+gated on knowing who the base runs as. Without the switch, every Dockerfile ending in a
+non-root `USER` — what the `mcr.microsoft.com/devcontainers/*` images and most hand-written
+devcontainer Dockerfiles do — fails its first `install.sh` write. The restored user follows
+the IMAGE (the Dockerfile's own `USER`, else the base image's), NOT the configuration's
+`containerUser`; that is `FeatureInstallEnv::image_user`, and it is what the reference
+restores.
+
+**`dockerfile_utils` is a full port of the reference's `dockerfileUtils.ts`, not a subset**
+(#686 — it used to say otherwise in its own module doc, and the gap that claim excused made
+`${cloud:+mcr.microsoft.com/}azure-cli:latest` resolve to `trueazure-cli:latest`). Anything
+touching `FROM`/`USER` resolution must keep `crates/core/tests/dockerfile_utils_parity.rs`
+at zero divergences. **Every expectation in its fixture was MEASURED against the reference's
+own compiled source at the pinned oracle version — never hand-edit one to make a test pass**;
+regenerating it means re-measuring. `Dockerfile::base_image` is the faithful answer;
+`resolve_base_image` is that plus deacon's inspectable-image guard, and the two are asserted
+separately so the guard cannot be mistaken for reference behavior.
+
 **Never chain a build through a daemon-local tag** (#595). A `docker-container` driver
 builder runs in an isolated BuildKit container that cannot read the daemon's image store,
 so a second build whose `FROM` names a tag deacon just created can only run on the docker

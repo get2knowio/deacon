@@ -1,0 +1,1385 @@
+[
+ {
+  "id": "fbi-simple",
+  "src": "upstream",
+  "dockerfile": "FROM image1\nUSER user1\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "image1",
+   "user": "user1",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM image1 AS placeholder\nUSER user1\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-arg",
+  "src": "upstream",
+  "dockerfile": "ARG BASE_IMAGE=\"image2\"\nFROM ${BASE_IMAGE}\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "image2",
+   "user": "user2",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "ARG BASE_IMAGE=\"image2\"\nFROM ${BASE_IMAGE} AS placeholder\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-arg-overwritten",
+  "src": "upstream",
+  "dockerfile": "ARG BASE_IMAGE=\"image2\"\nFROM ${BASE_IMAGE}\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
+  "buildArgs": {
+   "BASE_IMAGE": "image3"
+  },
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "image3",
+   "user": "user2",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "ARG BASE_IMAGE=\"image2\"\nFROM ${BASE_IMAGE} AS placeholder\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-multistage",
+  "src": "upstream",
+  "dockerfile": "\nFROM image1 as stage1\nFROM stage3 as stage2\nFROM image3 as stage3\nFROM image4 as stage4\n",
+  "buildArgs": {},
+  "target": "stage2",
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "image3",
+   "user": null,
+   "lastStageName": "stage4",
+   "modifiedDockerfile": "\nFROM image1 as stage1\nFROM stage3 as stage2\nFROM image3 as stage3\nFROM image4 as stage4\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-quoted",
+  "src": "upstream",
+  "dockerfile": "\nARG BASE_IMAGE=\"ubuntu:latest\"\n\nFROM \"${BASE_IMAGE}\"\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "ubuntu:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nARG BASE_IMAGE=\"ubuntu:latest\"\n\nFROM \"${BASE_IMAGE}\" AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-varexp-pos-set",
+  "src": "upstream",
+  "dockerfile": "\nARG cloud\nFROM ${cloud:+mcr.microsoft.com/}azure-cli:latest\n",
+  "buildArgs": {
+   "cloud": "true"
+  },
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "mcr.microsoft.com/azure-cli:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:+mcr.microsoft.com/}azure-cli:latest AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-varexp-pos-unset",
+  "src": "upstream",
+  "dockerfile": "\nARG cloud\nFROM ${cloud:+mcr.microsoft.com/}azure-cli:latest\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "azure-cli:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:+mcr.microsoft.com/}azure-cli:latest AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-varexp-neg-set",
+  "src": "upstream",
+  "dockerfile": "\nARG cloud\nFROM ${cloud:-mcr.microsoft.com/}azure-cli:latest\n",
+  "buildArgs": {
+   "cloud": "ghcr.io/"
+  },
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "ghcr.io/azure-cli:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:-mcr.microsoft.com/}azure-cli:latest AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-varexp-neg-unset",
+  "src": "upstream",
+  "dockerfile": "\nARG cloud\nFROM ${cloud:-mcr.microsoft.com/}azure-cli:latest\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "mcr.microsoft.com/azure-cli:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:-mcr.microsoft.com/}azure-cli:latest AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-varexp-q-pos-set",
+  "src": "upstream",
+  "dockerfile": "\nARG cloud\nFROM ${cloud:+\"mcr.microsoft.com/\"}azure-cli:latest\"\n",
+  "buildArgs": {
+   "cloud": "true"
+  },
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "mcr.microsoft.com/azure-cli:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:+\"mcr.microsoft.com/\"}azure-cli:latest\" AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-varexp-q-pos-unset",
+  "src": "upstream",
+  "dockerfile": "\nARG cloud\nFROM \"${cloud:+\"mcr.microsoft.com/\"}azure-cli:latest\"\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "azure-cli:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nARG cloud\nFROM \"${cloud:+\"mcr.microsoft.com/\"}azure-cli:latest\" AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-varexp-q-neg-set",
+  "src": "upstream",
+  "dockerfile": "\nARG cloud\nFROM \"${cloud:-\"mcr.microsoft.com/\"}azure-cli:latest\"\n",
+  "buildArgs": {
+   "cloud": "ghcr.io/"
+  },
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "ghcr.io/azure-cli:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nARG cloud\nFROM \"${cloud:-\"mcr.microsoft.com/\"}azure-cli:latest\" AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fbi-varexp-q-neg-unset",
+  "src": "upstream",
+  "dockerfile": "\nARG cloud\nFROM ${cloud:-\"mcr.microsoft.com/\"}azure-cli:latest as label\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "mcr.microsoft.com/azure-cli:latest",
+   "user": null,
+   "lastStageName": "label",
+   "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:-\"mcr.microsoft.com/\"}azure-cli:latest as label\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-simple",
+  "src": "upstream",
+  "dockerfile": "FROM debian\nUSER user1\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "user1",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nUSER user1\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-arg",
+  "src": "upstream",
+  "dockerfile": "FROM debian\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "user2",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-arg-overwritten",
+  "src": "upstream",
+  "dockerfile": "FROM debian\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
+  "buildArgs": {
+   "IMAGE_USER": "user3"
+  },
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "user3",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-multistage",
+  "src": "upstream",
+  "dockerfile": "\nFROM image1 as stage1\nUSER user1\nFROM stage3 as stage2\nFROM image3 as stage3\nUSER user3_1\nUSER user3_2\nFROM image4 as stage4\nUSER user4\n",
+  "buildArgs": {},
+  "target": "stage2",
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "image3",
+   "user": "user3_2",
+   "lastStageName": "stage4",
+   "modifiedDockerfile": "\nFROM image1 as stage1\nUSER user1\nFROM stage3 as stage2\nFROM image3 as stage3\nUSER user3_1\nUSER user3_2\nFROM image4 as stage4\nUSER user4\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-arg-after-env",
+  "src": "upstream",
+  "dockerfile": "\nFROM debian\nENV USERNAME=user1\nARG USERNAME=user2\nUSER ${USERNAME}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "user2",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM debian AS placeholder\nENV USERNAME=user1\nARG USERNAME=user2\nUSER ${USERNAME}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-arg-after-env-prev-stage",
+  "src": "upstream",
+  "dockerfile": "\nFROM debian as one\nENV USERNAME=user1\nARG USERNAME=user2\n\nFROM one as two\nUSER ${USERNAME}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "user1",
+   "lastStageName": "two",
+   "modifiedDockerfile": "\nFROM debian as one\nENV USERNAME=user1\nARG USERNAME=user2\n\nFROM one as two\nUSER ${USERNAME}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-arg-in-preamble",
+  "src": "upstream",
+  "dockerfile": "\nARG USERNAME=user1\nFROM debian\nUSER ${USERNAME}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "user1",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nARG USERNAME=user1\nFROM debian AS placeholder\nUSER ${USERNAME}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-unbound-arg-after-env",
+  "src": "upstream",
+  "dockerfile": "\nFROM debian\nENV USERNAME=user1\nARG USERNAME\nUSER ${USERNAME}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "user1",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM debian AS placeholder\nENV USERNAME=user1\nARG USERNAME\nUSER ${USERNAME}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-unbound",
+  "src": "upstream",
+  "dockerfile": "\nFROM debian\nUSER ${USERNAME}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM debian AS placeholder\nUSER ${USERNAME}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-env-after-arg",
+  "src": "upstream",
+  "dockerfile": "\nFROM debian\nARG USERNAME=user1\nENV USERNAME=user2\nUSER ${USERNAME}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "user2",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM debian AS placeholder\nARG USERNAME=user1\nENV USERNAME=user2\nUSER ${USERNAME}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-env-set-from-arg",
+  "src": "upstream",
+  "dockerfile": "\nFROM debian\nARG USERNAME1=user1\nENV USERNAME2=${USERNAME1}\nUSER ${USERNAME2}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "user1",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM debian AS placeholder\nARG USERNAME1=user1\nENV USERNAME2=${USERNAME1}\nUSER ${USERNAME2}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-multiple-vars",
+  "src": "upstream",
+  "dockerfile": "\nFROM debian\nARG USERNAME1=user1\nENV USERNAME2=user2\nUSER A${USERNAME1}A${USERNAME2}A\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "Auser1Auser2A",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM debian AS placeholder\nARG USERNAME1=user1\nENV USERNAME2=user2\nUSER A${USERNAME1}A${USERNAME2}A\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "fus-env-in-base-image",
+  "src": "upstream",
+  "dockerfile": "\nFROM mybase\nUSER ${USERNAME}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {
+   "USERNAME": "user1"
+  },
+  "expected": {
+   "baseImage": "mybase",
+   "user": "user1",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM mybase AS placeholder\nUSER ${USERNAME}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ens-named-simple",
+  "src": "upstream",
+  "dockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\nFROM base as final\n\nCOPY src dest\nRUN another command\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "ubuntu:latest",
+   "user": null,
+   "lastStageName": "final",
+   "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\nFROM base as final\n\nCOPY src dest\nRUN another command\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ens-named-indented-comment",
+  "src": "upstream",
+  "dockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\n \tFROM base  as\t  final  #<- deliberately mixing with whitespace and including: as something here\n\nCOPY src dest\nRUN another command\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "ubuntu:latest",
+   "user": null,
+   "lastStageName": "final",
+   "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\n \tFROM base  as\t  final  #<- deliberately mixing with whitespace and including: as something here\n\nCOPY src dest\nRUN another command\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ens-named-platform-comment",
+  "src": "upstream",
+  "dockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\n \tFROM  --platform=my-platform \tbase  as\t  final  #<- deliberately mixing with whitespace and including: as something here\n\nCOPY src dest\nRUN another command\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "ubuntu:latest",
+   "user": null,
+   "lastStageName": "final",
+   "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\n \tFROM  --platform=my-platform \tbase  as\t  final  #<- deliberately mixing with whitespace and including: as something here\n\nCOPY src dest\nRUN another command\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ens-unnamed-simple",
+  "src": "upstream",
+  "dockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\nFROM base\n\nCOPY src dest\nRUN another command\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "ubuntu:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\nFROM base AS placeholder\n\nCOPY src dest\nRUN another command\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ens-unnamed-trailing",
+  "src": "upstream",
+  "dockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\nFROM base",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "ubuntu:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\nFROM base AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ens-unnamed-platform-comment",
+  "src": "upstream",
+  "dockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\n \tFROM  --platform=my-platform \tbase   #<- deliberately mixing with whitespace and including: as something here\n\nCOPY src dest\nRUN another command\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "ubuntu:latest",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\n \tFROM  --platform=my-platform \tbase AS placeholder   #<- deliberately mixing with whitespace and including: as something here\n\nCOPY src dest\nRUN another command\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ens-no-from",
+  "src": "upstream",
+  "dockerfile": "\nRUN some command\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": null,
+   "user": null,
+   "lastStageName": null,
+   "modifiedDockerfile": null,
+   "ensureError": true
+  }
+ },
+ {
+  "id": "sbc-none",
+  "src": "upstream",
+  "dockerfile": "FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-1.4",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker/dockerfile:1.4\nFROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker/dockerfile:1.4\nFROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-docker.io-1.4",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.4\nFROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.4\nFROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-unknown",
+  "src": "upstream",
+  "dockerfile": "# syntax=mycompany/myimage:1.4\nFROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=mycompany/myimage:1.4\nFROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-0",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:0\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:0\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.2",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.2\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.2\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.2.3",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.2.3\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.2.3\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.4",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.4\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.4\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.4.5",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.4.5\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.4.5\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.5",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.5\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.5\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.5.0",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.5.0\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.5.0\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-2",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:2\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:2\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-empty",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-latest",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:latest\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:latest\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-0-labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:0-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:0-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1-labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.2-labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.2-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.2-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.2.3-labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.2.3-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.2.3-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.4-labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.4-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.4-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.4.5-labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.4.5-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.4.5-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.5-labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.5-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.5-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-1.5.0-labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:1.5.0-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.5.0-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-2-labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:2-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:2-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag--labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "sbc-tag-latest-labs",
+  "src": "upstream",
+  "dockerfile": "# syntax=docker.io/docker/dockerfile:latest-labs\n        FROM debian",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:latest-labs\n        FROM debian AS placeholder",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ext-env-equals",
+  "src": "upstream",
+  "dockerfile": "FROM debian\nENV A=B",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nENV A=B",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ext-env-equals-spaces",
+  "src": "upstream",
+  "dockerfile": "FROM debian\nENV A = B",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nENV A = B",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ext-env-no-equals",
+  "src": "upstream",
+  "dockerfile": "FROM debian\nENV A B",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nENV A B",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "ext-lowercase",
+  "src": "upstream",
+  "dockerfile": "from E\nenv A=B\narg C\nuser D\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "E",
+   "user": "D",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "from E AS placeholder\nenv A=B\narg C\nuser D\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-scratch",
+  "src": "extra",
+  "dockerfile": "FROM scratch\nCOPY hello /\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "scratch",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM scratch AS placeholder\nCOPY hello /\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-unset-arg-from",
+  "src": "extra",
+  "dockerfile": "FROM $UNSET\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM $UNSET AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-forward-ref-no-target",
+  "src": "extra",
+  "dockerfile": "FROM later as early\nFROM alpine as later\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "alpine",
+   "user": null,
+   "lastStageName": "later",
+   "modifiedDockerfile": "FROM later as early\nFROM alpine as later\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-cycle",
+  "src": "extra",
+  "dockerfile": "FROM b as a\nFROM a as b\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": null,
+   "user": null,
+   "lastStageName": "b",
+   "modifiedDockerfile": "FROM b as a\nFROM a as b\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-self-cycle",
+  "src": "extra",
+  "dockerfile": "FROM a as a\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": null,
+   "user": null,
+   "lastStageName": "a",
+   "modifiedDockerfile": "FROM a as a\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-cycle-with-user",
+  "src": "extra",
+  "dockerfile": "FROM b as a\nUSER x\nFROM a as b\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": null,
+   "user": "x",
+   "lastStageName": "b",
+   "modifiedDockerfile": "FROM b as a\nUSER x\nFROM a as b\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-self-cycle-with-user",
+  "src": "extra",
+  "dockerfile": "FROM a as a\nUSER x\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": null,
+   "user": "x",
+   "lastStageName": "a",
+   "modifiedDockerfile": "FROM a as a\nUSER x\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-target-missing",
+  "src": "extra",
+  "dockerfile": "FROM alpine AS a\n",
+  "buildArgs": {},
+  "target": "nope",
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": null,
+   "user": null,
+   "lastStageName": "a",
+   "modifiedDockerfile": "FROM alpine AS a\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-target-case",
+  "src": "extra",
+  "dockerfile": "FROM alpine AS Base\n",
+  "buildArgs": {},
+  "target": "base",
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": null,
+   "user": null,
+   "lastStageName": "Base",
+   "modifiedDockerfile": "FROM alpine AS Base\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-stage-ref-case",
+  "src": "extra",
+  "dockerfile": "FROM alpine AS Base\nFROM base\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "base",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM alpine AS Base\nFROM base AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-user-group",
+  "src": "extra",
+  "dockerfile": "FROM debian\nUSER user1:group1\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "user1:group1",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nUSER user1:group1\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-user-numeric",
+  "src": "extra",
+  "dockerfile": "FROM debian\nUSER 1000\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "1000",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nUSER 1000\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-env-multi-kv",
+  "src": "extra",
+  "dockerfile": "FROM debian\nENV A=1 B=2\nUSER ${B}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nENV A=1 B=2\nUSER ${B}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-arg-no-default-buildarg",
+  "src": "extra",
+  "dockerfile": "FROM debian\nARG U\nUSER ${U}\n",
+  "buildArgs": {
+   "U": "fromcli"
+  },
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "fromcli",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nARG U\nUSER ${U}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-preamble-arg-overridden",
+  "src": "extra",
+  "dockerfile": "ARG U=preamble\nFROM debian\nUSER ${U}\n",
+  "buildArgs": {
+   "U": "cli"
+  },
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "cli",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "ARG U=preamble\nFROM debian AS placeholder\nUSER ${U}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-from-platform-var",
+  "src": "extra",
+  "dockerfile": "FROM --platform=$BUILDPLATFORM alpine\nUSER root\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "alpine",
+   "user": "root",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM --platform=$BUILDPLATFORM alpine AS placeholder\nUSER root\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-multiarch-targetarch",
+  "src": "extra",
+  "dockerfile": "\nFROM ubuntu:latest as base-amd64\nUSER amd64_user\n\nFROM ubuntu:latest as base-arm64\nUSER arm64_user\n\nFROM base-${TARGETARCH}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "base-",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "\nFROM ubuntu:latest as base-amd64\nUSER amd64_user\n\nFROM ubuntu:latest as base-arm64\nUSER arm64_user\n\nFROM base-${TARGETARCH} AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-lowercase-from-user",
+  "src": "extra",
+  "dockerfile": "from debian\nuser lower\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "lower",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "from debian AS placeholder\nuser lower\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-user-with-comment",
+  "src": "extra",
+  "dockerfile": "FROM debian\nUSER bob # trailing comment\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "bob",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nUSER bob # trailing comment\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-nested-varexp",
+  "src": "extra",
+  "dockerfile": "ARG a\nARG b=B\nFROM ${a:-${b}}img\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "${b}img",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "ARG a\nARG b=B\nFROM ${a:-${b}}img AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-dollar-noBrace-varexp",
+  "src": "extra",
+  "dockerfile": "ARG cloud=x\nFROM $cloud/img:1\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "x/img:1",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "ARG cloud=x\nFROM $cloud/img:1 AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-env-quoted-value",
+  "src": "extra",
+  "dockerfile": "FROM debian\nENV U=\"quoted\"\nUSER ${U}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "quoted",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nENV U=\"quoted\"\nUSER ${U}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-arg-quoted-value",
+  "src": "extra",
+  "dockerfile": "FROM debian\nARG U=\"quoted\"\nUSER ${U}\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "quoted",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\nARG U=\"quoted\"\nUSER ${U}\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-crlf",
+  "src": "extra",
+  "dockerfile": "FROM debian\r\nARG U=crlfuser\r\nUSER ${U}\r\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "debian",
+   "user": "crlfuser",
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "FROM debian AS placeholder\r\nARG U=crlfuser\r\nUSER ${U}\r\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-user-then-stage-chain",
+  "src": "extra",
+  "dockerfile": "FROM alpine AS a\nUSER ua\nFROM a AS b\nFROM b AS c\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "alpine",
+   "user": "ua",
+   "lastStageName": "c",
+   "modifiedDockerfile": "FROM alpine AS a\nUSER ua\nFROM a AS b\nFROM b AS c\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-basearg-chain",
+  "src": "extra",
+  "dockerfile": "ARG TAG=3.19\nFROM alpine:${TAG} AS a\nFROM a\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": "alpine:3.19",
+   "user": null,
+   "lastStageName": "placeholder",
+   "modifiedDockerfile": "ARG TAG=3.19\nFROM alpine:${TAG} AS a\nFROM a AS placeholder\n",
+   "ensureError": false
+  }
+ },
+ {
+  "id": "x-empty",
+  "src": "extra",
+  "dockerfile": "",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": null,
+   "user": null,
+   "lastStageName": null,
+   "modifiedDockerfile": null,
+   "ensureError": true
+  }
+ },
+ {
+  "id": "x-only-comments",
+  "src": "extra",
+  "dockerfile": "# nothing here\n",
+  "buildArgs": {},
+  "target": null,
+  "baseImageEnv": {},
+  "expected": {
+   "baseImage": null,
+   "user": null,
+   "lastStageName": null,
+   "modifiedDockerfile": null,
+   "ensureError": true
+  }
+ }
+]

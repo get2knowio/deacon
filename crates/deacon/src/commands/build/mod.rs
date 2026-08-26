@@ -2304,6 +2304,21 @@ async fn execute_single_container_build(
                 },
             )?;
 
+        // Make the base image available once, up front: its environment
+        // participates in resolving a `USER ${NAME}` the Dockerfile never sets
+        // itself (#686), and `resolve_feature_install_env` below reads the same
+        // image for its metadata and baked-in user.
+        let base_image_env = match &base_image_ref {
+            Some(image) => cli
+                .ensure_image_available(image)
+                .await
+                .ok()
+                .flatten()
+                .map(|info| info.env)
+                .unwrap_or_default(),
+            None => std::collections::HashMap::new(),
+        };
+
         // Spec parity (#89): the four env vars every `install.sh` is guaranteed.
         // `remoteUser` is commonly declared by the base image's metadata rather
         // than the config, and the Dockerfile may `USER` its way somewhere else
@@ -2311,6 +2326,7 @@ async fn execute_single_container_build(
         let dockerfile_user = find_user_statement(
             &base_content,
             &effective.build_args,
+            &base_image_env,
             effective.target.as_deref(),
         );
         let feature_install_env = match &base_image_ref {

@@ -84,3 +84,11 @@ conformance/discovery/** -text
 # (#441). `-text` (not `eol=lf`) matches every other byte-exact pin in this file and keeps
 # a future binary fixture safe from translation in both directions.
 parity/fixtures/** -text
+
+# The `dockerfile_utils` oracle table holds MEASURED expectations, including a
+# `modifiedDockerfile` compared byte for byte and a case whose whole subject is
+# CRLF handling. The escapes inside the JSON survive translation, but the pin
+# keeps the file's own bytes identical on every platform for the same reason as
+# every other entry here — and makes the "regenerate, never hand-edit" rule in
+# the test's own module doc mean something on a Windows checkout too (#686).
+crates/core/tests/fixtures/dockerfile_utils_oracle.json -text

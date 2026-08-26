@@ -312,6 +312,11 @@ pub struct ImageInfo {
     /// features spec means the effective user is `root`. Callers resolving
     /// `_CONTAINER_USER` use this as the lowest-precedence fallback (#89).
     pub user: Option<String>,
+    /// The image's baked-in environment (from `Config.Env`, `KEY=VALUE` pairs).
+    /// A Dockerfile may write `USER ${NAME}` where `NAME` is set only by the
+    /// base image, and the reference resolves that through this map
+    /// (`findUserStatement`'s `baseImageEnv`) — see #686.
+    pub env: HashMap<String, String>,
 }
 
 /// Represents an exposed port from a container
@@ -1867,7 +1872,28 @@ impl Docker for CliRuntime {
             .filter(|u| !u.is_empty())
             .map(|u| u.to_string());
 
-        Ok(Some(ImageInfo { id, labels, user }))
+        // `Config.Env` is a `["KEY=VALUE", ...]` array. A value may itself
+        // contain `=`, so split on the FIRST one only.
+        let env = image
+            .get("Config")
+            .and_then(|c| c.get("Env"))
+            .and_then(|e| e.as_array())
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.as_str())
+                    .filter_map(|entry| entry.split_once('='))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(Some(ImageInfo {
+            id,
+            labels,
+            user,
+            env,
+        }))
     }
 
     #[instrument(skip(self))]
@@ -3097,6 +3123,7 @@ pub mod mock {
                 id: format!("sha256:mock_{}", image_ref.replace(':', "_")),
                 labels: HashMap::new(),
                 user: None,
+                env: HashMap::new(),
             }))
         }
 

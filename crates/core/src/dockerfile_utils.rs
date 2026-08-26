@@ -1,34 +1,48 @@
-//! Dockerfile parsing utilities for the compose-features pipeline.
+//! Dockerfile parsing for the Feature-install pipeline.
 //!
-//! This module ports the small subset of the reference DevContainer CLI's
-//! `dockerfileUtils.ts` that we need today:
+//! This is a port of the reference DevContainer CLI's `dockerfileUtils.ts`. The
+//! reference reads the user's Dockerfile *before* building it to answer two
+//! questions whose answers become inputs to that same build:
 //!
-//! - [`ensure_dockerfile_has_final_stage_name`] inspects the final `FROM`
-//!   instruction in a user-authored Dockerfile and either returns the existing
-//!   stage alias or rewrites the Dockerfile to append a generated alias so the
-//!   feature-install layers added later have a deterministic target to
-//!   `--target` against.
-//! - [`resolve_base_image`] walks the stage graph back from the build's target
-//!   stage to the EXTERNAL image it ultimately derives from — the reference's
-//!   `findBaseImage`. A caller inspects that image for the
-//!   `devcontainer.metadata` it contributes and the `USER` it bakes in, both of
-//!   which have to be known BEFORE the build runs because they are written into
-//!   the build's own inputs.
-//! - [`find_user_statement`] reports the `USER` the target stage ends up running
-//!   as when the Dockerfile itself declares one — the reference's
-//!   `findUserStatement`. `None` means "ask the base image".
+//! - [`Dockerfile::base_image`] — the reference's `findBaseImage`. Which EXTERNAL
+//!   image does the target stage ultimately derive from? Its
+//!   `devcontainer.metadata` is inherited and its baked-in `USER` is what
+//!   `_CONTAINER_USER` falls back to.
+//! - [`Dockerfile::user_statement`] — the reference's `findUserStatement`. Which
+//!   user does the target stage end up running as? That value is exported to every
+//!   Feature's `install.sh` as `_REMOTE_USER`/`_CONTAINER_USER`, and is the user
+//!   restored after the install layers (`_DEV_CONTAINERS_IMAGE_USER`).
+//! - [`ensure_dockerfile_has_final_stage_name`] — the reference's
+//!   `ensureDockerfileHasFinalStageName`. Gives the final stage a deterministic
+//!   alias so the Feature layers have something to build on.
 //!
-//! The parser is intentionally line-oriented (not a full Dockerfile AST). It
-//! mirrors the reference TypeScript regex behavior so we stay in lock-step with
-//! upstream parity. Anything more sophisticated (variable substitution, USER
-//! resolution, multi-arch arg expansion) is out of scope for bead 14b and
-//! belongs in a future expansion of this module.
+//! Both of the first two require real variable resolution: `FROM $BASE`,
+//! `USER ${USERNAME}`, `ARG`/`ENV` precedence within and across stages, and
+//! `${var:+word}` / `${var:-word}` expressions. [`find_value`] and
+//! [`replace_variables`] below are statement-for-statement ports of the
+//! reference's `findValue` / `replaceVariables` / `getExpressionValue`, because a
+//! Dockerfile is an input we do not control and approximating this arithmetic
+//! produces confidently wrong answers rather than obviously missing ones — an
+//! earlier line-oriented approximation resolved
+//! `${cloud:+mcr.microsoft.com/}azure-cli:latest` to `trueazure-cli:latest` (#686).
 //!
-//! Reference (commit `113500f4`, October 2025):
-//! <https://github.com/devcontainers/cli/blob/main/src/spec-node/dockerfileUtils.ts>
+//! Verified differentially against the reference's own compiled source at the
+//! pinned oracle version — see `dockerfile_utils_parity.rs`, whose table is
+//! upstream's own test suite plus adversarial cases.
+//!
+//! Two deliberate departures, both to satisfy the panic-free constitution rather
+//! than to change an answer:
+//! - A valueless `ENV NAME` resolves to the empty string. The reference asserts
+//!   non-null here (`instruction.value!`) and throws a `TypeError` on this input.
+//! - `globalBuildxPlatformArgs` (the `TARGETARCH` family) is accepted internally
+//!   but no caller supplies it yet; it is the wiring point for multi-arch
+//!   `FROM base-${TARGETARCH}` resolution.
+//!
+//! Reference: <https://github.com/devcontainers/cli/blob/v0.87.0/src/spec-node/dockerfileUtils.ts>
 
 use once_cell::sync::Lazy;
 use regex::{Regex, RegexBuilder};
+use std::collections::{HashMap, HashSet};
 use tracing::{debug, instrument};
 
 /// Matches a complete line that contains a `FROM` instruction, capturing the
@@ -57,6 +71,571 @@ static PARSE_FROM_LINE: Lazy<Regex> = Lazy::new(|| {
     .build()
     .expect("parseFromLine regex must compile")
 });
+
+/// The reference's `fromStatement`: anchored per line, used to read the `FROM`
+/// that opens a stage.
+static FROM_STATEMENT: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new(
+        r#"^\s*FROM\s+(?P<platform>--platform=\S+\s+)?(?P<image>"?[^\s]+"?)(\s+AS\s+(?P<label>[^\s]+))?"#,
+    )
+    .case_insensitive(true)
+    .multi_line(true)
+    .build()
+    .expect("fromStatement regex must compile")
+});
+
+/// The reference's `argEnvUserStatements`.
+static ARG_ENV_USER: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new(
+        r#"^\s*(?P<instruction>ARG|ENV|USER)\s+(?P<name>[^\s=]+)([ =]+("(?P<value1>\S+)"|(?P<value2>\S+)))?"#,
+    )
+    .case_insensitive(true)
+    .multi_line(true)
+    .build()
+    .expect("argEnvUserStatements regex must compile")
+});
+
+/// The reference's `directives`: `# name=value` at the head of the document.
+static DIRECTIVE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^\s*#\s*(?P<name>\S+)\s*=\s*(?P<value>.+)").expect("directives regex must compile")
+});
+
+/// The reference's `argumentExpression`: `$NAME`, `${NAME}`, `${NAME:-word}`,
+/// `${NAME:+word}`.
+static ARGUMENT_EXPRESSION: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"\$\{?(?P<variable>[a-zA-Z0-9_]+)(?P<isVarExp>:(?P<option>-|\+)(?P<word>[^\}]+))?\}?",
+    )
+    .expect("argumentExpression regex must compile")
+});
+
+/// Positions at which the reference splits the document into stages
+/// (`fromStatementsAhead`, a zero-width lookahead the `regex` crate cannot
+/// express directly — we take match starts and slice instead).
+static FROM_AHEAD: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new(r"^[\t ]*FROM")
+        .case_insensitive(true)
+        .multi_line(true)
+        .build()
+        .expect("fromStatementsAhead regex must compile")
+});
+
+/// Reads the `syntax=` directive's version, e.g. `docker/dockerfile:1.4`.
+static SYNTAX_VERSION: Lazy<Regex> = Lazy::new(|| {
+    RegexBuilder::new(r"^(?:docker.io/)?docker/dockerfile(?::(?P<version>\S+))?")
+        .case_insensitive(true)
+        .build()
+        .expect("syntax version regex must compile")
+});
+
+/// One `ARG` / `ENV` / `USER` instruction, in document order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Instruction {
+    /// The instruction keyword, upper-cased (`ARG`, `ENV`, `USER`).
+    pub instruction: String,
+    /// The variable name, or for `USER` the user token itself.
+    pub name: String,
+    /// The value, when the instruction declares one.
+    pub value: Option<String>,
+}
+
+/// A parsed `FROM` instruction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct From {
+    /// The `--platform=` flag, when present.
+    pub platform: Option<String>,
+    /// The image token, quotes stripped, variables NOT yet expanded.
+    pub image: String,
+    /// The `AS <alias>` name, when the stage declares one.
+    pub label: Option<String>,
+}
+
+/// One build stage: its `FROM` plus the instructions in its body.
+#[derive(Debug, Clone)]
+pub struct Stage {
+    /// The `FROM` that opens this stage.
+    pub from: From,
+    /// The `ARG`/`ENV`/`USER` instructions in this stage, in document order.
+    pub instructions: Vec<Instruction>,
+}
+
+/// Everything before the first `FROM`: parser directives and global `ARG`s.
+#[derive(Debug, Clone, Default)]
+pub struct Preamble {
+    /// The `docker/dockerfile` syntax version, when a `syntax=` directive names one.
+    pub version: Option<String>,
+    /// All `# name=value` parser directives at the head of the document.
+    pub directives: HashMap<String, String>,
+    /// The global `ARG`s declared before the first `FROM`.
+    pub instructions: Vec<Instruction>,
+}
+
+/// A parsed Dockerfile — the reference's `Dockerfile` interface.
+#[derive(Debug, Clone, Default)]
+pub struct Dockerfile {
+    /// Everything before the first `FROM`.
+    pub preamble: Preamble,
+    /// Every stage, in document order.
+    pub stages: Vec<Stage>,
+    /// Alias → stage index. Built over ALL stages, so a `FROM` may name a stage
+    /// declared later in the document, exactly as the reference's
+    /// `stagesByLabel` does. Lookup is case-SENSITIVE, matching the reference.
+    stages_by_label: HashMap<String, usize>,
+}
+
+/// Which instruction list a lookup is currently walking. The reference
+/// distinguishes these by object identity; `parent_from` returning `None` for the
+/// preamble is what terminates `find_value`'s walk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Scope {
+    Preamble,
+    Stage(usize),
+}
+
+/// Strip at most ONE leading and ONE trailing quote, matching the reference's
+/// `replace(/^['"]|['"]$/g, '')`. `trim_matches` would strip a run and diverge.
+fn strip_one_quote_each_end(token: &str) -> &str {
+    let is_quote = |c: char| c == '\'' || c == '"';
+    let token = match token.chars().next() {
+        Some(c) if is_quote(c) => &token[c.len_utf8()..],
+        _ => token,
+    };
+    match token.chars().next_back() {
+        Some(c) if is_quote(c) => &token[..token.len() - c.len_utf8()],
+        _ => token,
+    }
+}
+
+/// The reference's `findLastIndex`: scan backwards from `from`, inclusive.
+fn find_last_index<T>(items: &[T], from: i64, pred: impl Fn(&T) -> bool) -> Option<usize> {
+    let mut i = from.min(items.len() as i64 - 1);
+    while i >= 0 {
+        if pred(&items[i as usize]) {
+            return Some(i as usize);
+        }
+        i -= 1;
+    }
+    None
+}
+
+fn parse_from_statement(stage_str: &str) -> From {
+    match FROM_STATEMENT.captures(stage_str) {
+        None => From {
+            platform: None,
+            image: "unknown".to_string(),
+            label: None,
+        },
+        Some(caps) => From {
+            platform: caps.name("platform").map(|m| m.as_str().to_string()),
+            image: strip_one_quote_each_end(
+                caps.name("image").map(|m| m.as_str()).unwrap_or_default(),
+            )
+            .to_string(),
+            label: caps.name("label").map(|m| m.as_str().to_string()),
+        },
+    }
+}
+
+fn extract_instructions(stage_str: &str) -> Vec<Instruction> {
+    ARG_ENV_USER
+        .captures_iter(stage_str)
+        .map(|caps| Instruction {
+            instruction: caps["instruction"].to_uppercase(),
+            name: caps["name"].to_string(),
+            value: caps
+                .name("value1")
+                .or_else(|| caps.name("value2"))
+                .map(|m| m.as_str().to_string()),
+        })
+        .collect()
+}
+
+/// Parser directives run from the top of the document and stop at the first line
+/// that is not one — the reference `break`s rather than continuing to scan.
+fn extract_directives(preamble_str: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for line in preamble_str.split('\n') {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        match DIRECTIVE.captures(line) {
+            Some(caps) => {
+                map.entry(caps["name"].to_string())
+                    .or_insert_with(|| caps["value"].to_string());
+            }
+            None => break,
+        }
+    }
+    map
+}
+
+/// Parse a Dockerfile — the reference's `extractDockerfile`.
+pub fn extract_dockerfile(content: &str) -> Dockerfile {
+    let starts: Vec<usize> = FROM_AHEAD.find_iter(content).map(|m| m.start()).collect();
+
+    // The reference splits on a zero-width lookahead, which yields no empty
+    // leading element when the document itself starts with a `FROM`.
+    let (preamble_str, stage_strs): (&str, Vec<&str>) = if starts.is_empty() {
+        (content, Vec::new())
+    } else {
+        let preamble = if starts[0] == 0 {
+            ""
+        } else {
+            &content[..starts[0]]
+        };
+        let mut parts = Vec::with_capacity(starts.len());
+        for (i, &s) in starts.iter().enumerate() {
+            let end = starts.get(i + 1).copied().unwrap_or(content.len());
+            parts.push(&content[s..end]);
+        }
+        (preamble, parts)
+    };
+
+    let stages: Vec<Stage> = stage_strs
+        .iter()
+        .map(|s| Stage {
+            from: parse_from_statement(s),
+            instructions: extract_instructions(s),
+        })
+        .collect();
+
+    let directives = extract_directives(preamble_str);
+    let version = directives.get("syntax").and_then(|syntax| {
+        SYNTAX_VERSION.captures(syntax).map(|caps| {
+            caps.name("version")
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_else(|| "latest".to_string())
+        })
+    });
+
+    let mut stages_by_label = HashMap::new();
+    for (idx, stage) in stages.iter().enumerate() {
+        if let Some(label) = &stage.from.label {
+            // Later stages overwrite earlier ones, as the reference's reduce does.
+            stages_by_label.insert(label.clone(), idx);
+        }
+    }
+
+    Dockerfile {
+        preamble: Preamble {
+            version,
+            directives,
+            instructions: extract_instructions(preamble_str),
+        },
+        stages,
+        stages_by_label,
+    }
+}
+
+/// The reference's `getExpressionValue`.
+fn expression_value(option: &str, is_set: bool, word: &str, value: &str) -> String {
+    let picked = match option {
+        "-" => {
+            if is_set {
+                value
+            } else {
+                word
+            }
+        }
+        "+" => {
+            if is_set {
+                word
+            } else {
+                value
+            }
+        }
+        _ => value,
+    };
+    strip_one_quote_each_end(picked).to_string()
+}
+
+impl Dockerfile {
+    fn instructions(&self, scope: Scope) -> &[Instruction] {
+        match scope {
+            Scope::Preamble => &self.preamble.instructions,
+            Scope::Stage(i) => &self.stages[i].instructions,
+        }
+    }
+
+    /// `None` for the preamble — which is what ends `find_value`'s walk.
+    fn parent_from(&self, scope: Scope) -> Option<&From> {
+        match scope {
+            Scope::Preamble => None,
+            Scope::Stage(i) => Some(&self.stages[i].from),
+        }
+    }
+
+    fn stage_named(&self, label: &str) -> Option<Scope> {
+        self.stages_by_label.get(label).map(|&i| Scope::Stage(i))
+    }
+
+    fn entry_scope(&self, target: Option<&str>) -> Option<Scope> {
+        match target {
+            Some(t) => self.stage_named(t),
+            None => self.stages.len().checked_sub(1).map(Scope::Stage),
+        }
+    }
+
+    /// The reference's `replaceVariables`: expand every `$VAR` / `${VAR...}` in
+    /// `s`, resolving each against `scope` as it stood before instruction
+    /// `before`. Rewrites right-to-left so earlier match offsets stay valid.
+    fn replace_variables(
+        &self,
+        build_args: &HashMap<String, String>,
+        base_image_env: &HashMap<String, String>,
+        global_buildx_args: &HashMap<String, String>,
+        s: &str,
+        scope: Scope,
+        before: i64,
+    ) -> String {
+        let mut result = s.to_string();
+        for caps in ARGUMENT_EXPRESSION
+            .captures_iter(s)
+            .collect::<Vec<_>>()
+            .iter()
+            .rev()
+        {
+            let whole = match caps.get(0) {
+                Some(m) => m,
+                None => continue,
+            };
+            let variable = match caps.name("variable") {
+                Some(m) => m.as_str(),
+                None => continue,
+            };
+            let mut value = self
+                .find_value(
+                    build_args,
+                    base_image_env,
+                    global_buildx_args,
+                    variable,
+                    scope,
+                    before,
+                )
+                .unwrap_or_default();
+            if caps.name("isVarExp").is_some() {
+                let option = caps.name("option").map(|m| m.as_str()).unwrap_or("");
+                let word = caps.name("word").map(|m| m.as_str()).unwrap_or("");
+                let is_set = !value.is_empty();
+                value = expression_value(option, is_set, word, &value);
+            }
+            result.replace_range(whole.start()..whole.end(), &value);
+        }
+        result
+    }
+
+    /// The reference's `findValue`: walk backwards through the current scope's
+    /// instructions for the last `ENV`, or `ARG` that actually has a value, then
+    /// follow the stage's `FROM` and continue. `ARG`s only count in the scope the
+    /// lookup started in and in the preamble — an inherited stage contributes its
+    /// `ENV`s but not its `ARG`s, which is why `ARG` after `ENV` in a *preceding*
+    /// stage still resolves to the `ENV`.
+    #[allow(clippy::too_many_arguments)]
+    fn find_value(
+        &self,
+        build_args: &HashMap<String, String>,
+        base_image_env: &HashMap<String, String>,
+        global_buildx_args: &HashMap<String, String>,
+        variable: &str,
+        scope: Scope,
+        before: i64,
+    ) -> Option<String> {
+        let mut scope = scope;
+        let mut before = before;
+        let mut consider_arg = true;
+        let mut seen: HashSet<Scope> = HashSet::new();
+
+        loop {
+            if !seen.insert(scope) {
+                return None;
+            }
+
+            let instructions = self.instructions(scope);
+            let found = find_last_index(instructions, before - 1, |i| {
+                i.name == variable
+                    && (i.instruction == "ENV"
+                        || (consider_arg
+                            && (build_args.contains_key(&i.name) || i.value.is_some())))
+            });
+
+            if let Some(idx) = found {
+                let instruction = &instructions[idx];
+                if instruction.instruction == "ENV" {
+                    // A valueless `ENV NAME` resolves to empty rather than
+                    // throwing, per the module note.
+                    let value = instruction.value.clone().unwrap_or_default();
+                    return Some(self.replace_variables(
+                        build_args,
+                        base_image_env,
+                        global_buildx_args,
+                        &value,
+                        scope,
+                        idx as i64,
+                    ));
+                }
+                if instruction.instruction == "ARG" {
+                    let value = build_args
+                        .get(&instruction.name)
+                        .cloned()
+                        .or_else(|| instruction.value.clone())
+                        .unwrap_or_default();
+                    return Some(self.replace_variables(
+                        build_args,
+                        base_image_env,
+                        global_buildx_args,
+                        &value,
+                        scope,
+                        idx as i64,
+                    ));
+                }
+            }
+
+            let from = match self.parent_from(scope) {
+                // The preamble is the end of the chain: fall back to the base
+                // image's environment, then to the buildx platform args.
+                None => {
+                    return base_image_env
+                        .get(variable)
+                        .or_else(|| global_buildx_args.get(variable))
+                        .cloned();
+                }
+                Some(from) => from,
+            };
+
+            let image = self.replace_variables(
+                build_args,
+                base_image_env,
+                global_buildx_args,
+                &from.image,
+                Scope::Preamble,
+                self.preamble.instructions.len() as i64,
+            );
+            scope = self.stage_named(&image).unwrap_or(Scope::Preamble);
+            before = self.instructions(scope).len() as i64;
+            consider_arg = scope == Scope::Preamble;
+        }
+    }
+
+    /// The reference's `findBaseImage`: the EXTERNAL image the target stage
+    /// ultimately derives from.
+    ///
+    /// Returns exactly what the reference returns, including `"scratch"` and the
+    /// empty string for an unresolvable `ARG`. Callers that need an *inspectable*
+    /// image should use [`resolve_base_image`], which applies that guard.
+    ///
+    /// `None` when the document has no stages, when `target` names no stage, or
+    /// when the stage chain is cyclic.
+    pub fn base_image(
+        &self,
+        build_args: &HashMap<String, String>,
+        target: Option<&str>,
+    ) -> Option<String> {
+        // The reference passes an empty baseImageEnv here: ENV is not available
+        // to a FROM instruction.
+        let empty = HashMap::new();
+        let mut scope = self.entry_scope(target)?;
+        let mut seen: HashSet<Scope> = HashSet::new();
+
+        loop {
+            if !seen.insert(scope) {
+                return None;
+            }
+            let from = self.parent_from(scope)?;
+            let image = self.replace_variables(
+                build_args,
+                &empty,
+                &empty,
+                &from.image,
+                Scope::Preamble,
+                self.preamble.instructions.len() as i64,
+            );
+            match self.stage_named(&image) {
+                None => return Some(image),
+                Some(next) => scope = next,
+            }
+        }
+    }
+
+    /// The reference's `findUserStatement`: the user the target stage ends up
+    /// running as, or `None` when no stage in the chain declares one and the
+    /// answer belongs to the base image.
+    pub fn user_statement(
+        &self,
+        build_args: &HashMap<String, String>,
+        base_image_env: &HashMap<String, String>,
+        target: Option<&str>,
+    ) -> Option<String> {
+        let empty = HashMap::new();
+        let mut scope = self.entry_scope(target)?;
+        let mut seen: HashSet<Scope> = HashSet::new();
+
+        loop {
+            if !seen.insert(scope) {
+                return None;
+            }
+            let instructions = self.instructions(scope);
+            if let Some(idx) = find_last_index(instructions, instructions.len() as i64 - 1, |i| {
+                i.instruction == "USER"
+            }) {
+                let resolved = self.replace_variables(
+                    build_args,
+                    base_image_env,
+                    &empty,
+                    &instructions[idx].name,
+                    scope,
+                    idx as i64,
+                );
+                // The reference's `|| undefined`: an empty expansion is no answer.
+                return if resolved.is_empty() {
+                    None
+                } else {
+                    Some(resolved)
+                };
+            }
+            let from = self.parent_from(scope)?;
+            let image = self.replace_variables(
+                build_args,
+                base_image_env,
+                &empty,
+                &from.image,
+                Scope::Preamble,
+                self.preamble.instructions.len() as i64,
+            );
+            scope = self.stage_named(&image)?;
+        }
+    }
+}
+
+/// Resolve the EXTERNAL image the build's target stage derives from, restricted
+/// to images that can actually be inspected.
+///
+/// This is [`Dockerfile::base_image`] plus the guard our callers need: the
+/// reference reports `scratch` and the empty string (an `ARG` that resolved to
+/// nothing) as base images, but neither can be pulled or inspected, and every
+/// consumer here uses the result to read `devcontainer.metadata` and the baked-in
+/// `USER` off a real image. `None` means "nothing to inherit", not an error.
+pub fn resolve_base_image(
+    dockerfile_content: &str,
+    build_args: &HashMap<String, String>,
+    target: Option<&str>,
+) -> Option<String> {
+    extract_dockerfile(dockerfile_content)
+        .base_image(build_args, target)
+        .filter(|image| !image.is_empty() && !image.eq_ignore_ascii_case("scratch"))
+}
+
+/// Report the user the build's target stage runs as, when the Dockerfile itself
+/// says so.
+///
+/// `base_image_env` is the environment of the image the Dockerfile derives from;
+/// a `USER ${NAME}` whose `NAME` is set only in the base image resolves through
+/// it. Pass an empty map when the base image has not been inspected.
+pub fn find_user_statement(
+    dockerfile_content: &str,
+    build_args: &HashMap<String, String>,
+    base_image_env: &HashMap<String, String>,
+    target: Option<&str>,
+) -> Option<String> {
+    extract_dockerfile(dockerfile_content).user_statement(build_args, base_image_env, target)
+}
 
 /// Inspect the final `FROM` instruction in `dockerfile_content` and ensure it
 /// has a named stage alias.
@@ -144,218 +723,6 @@ pub fn ensure_dockerfile_has_final_stage_name(
         "Final FROM had no stage alias; appended generated alias"
     );
     Ok((modified, default_last_stage_name.to_string()))
-}
-
-/// Matches a global `ARG` declaration (`ARG NAME` or `ARG NAME=default`).
-static PARSE_ARG_LINE: Lazy<Regex> = Lazy::new(|| {
-    RegexBuilder::new(r#"^\s*ARG\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)(=(?P<default>.*))?\s*$"#)
-        .case_insensitive(true)
-        .build()
-        .expect("parseArgLine regex must compile")
-});
-
-/// Matches a `USER` instruction, capturing the user (and optional `:group`).
-static PARSE_USER_LINE: Lazy<Regex> = Lazy::new(|| {
-    RegexBuilder::new(r#"^\s*USER\s+(?P<user>[^\s#]+)"#)
-        .case_insensitive(true)
-        .build()
-        .expect("parseUserLine regex must compile")
-});
-
-/// One `FROM` instruction, in document order.
-#[derive(Debug, Clone)]
-struct Stage {
-    /// The image token exactly as written (`alpine:3.19`, `$BASE`, `builder`).
-    image: String,
-    /// The `AS <alias>` name, when the stage declares one.
-    alias: Option<String>,
-    /// Byte offset just past this stage's `FROM` line — where its body starts.
-    body_start: usize,
-    /// Byte offset of this stage's `FROM` line — where the previous body ends.
-    from_start: usize,
-}
-
-/// Parse every `FROM` instruction in document order.
-fn parse_stages(dockerfile_content: &str) -> Vec<Stage> {
-    FIND_FROM_LINES
-        .captures_iter(dockerfile_content)
-        .filter_map(|caps| {
-            let full = caps.get(0)?;
-            let line = caps.name("line")?.as_str();
-            let from = PARSE_FROM_LINE.captures(line)?;
-            Some(Stage {
-                image: strip_quotes(from.name("image")?.as_str()).to_string(),
-                alias: from.name("label").map(|m| m.as_str().to_string()),
-                body_start: full.start() + line.len(),
-                from_start: full.start(),
-            })
-        })
-        .collect()
-}
-
-fn strip_quotes(token: &str) -> &str {
-    token.trim_matches('"')
-}
-
-/// Collect the ARG declarations that precede the first `FROM` — the only ones
-/// BuildKit expands inside a `FROM` — folded with the caller's `--build-arg`
-/// overrides, which win.
-fn global_args(
-    dockerfile_content: &str,
-    build_args: &std::collections::HashMap<String, String>,
-    first_from: usize,
-) -> std::collections::HashMap<String, String> {
-    let mut args = std::collections::HashMap::new();
-    for line in dockerfile_content[..first_from].lines() {
-        if let Some(caps) = PARSE_ARG_LINE.captures(line) {
-            let name = caps["name"].to_string();
-            let default = caps
-                .name("default")
-                .map(|m| strip_quotes(m.as_str().trim()).to_string())
-                .unwrap_or_default();
-            args.insert(name, default);
-        }
-    }
-    for (k, v) in build_args {
-        args.insert(k.clone(), v.clone());
-    }
-    args
-}
-
-/// Expand `$NAME` / `${NAME}` occurrences from `args`. Unknown names expand to
-/// the empty string, exactly as BuildKit does.
-fn expand_args(token: &str, args: &std::collections::HashMap<String, String>) -> String {
-    let mut out = String::with_capacity(token.len());
-    let bytes: Vec<char> = token.chars().collect();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != '$' {
-            out.push(bytes[i]);
-            i += 1;
-            continue;
-        }
-        i += 1;
-        if i < bytes.len() && bytes[i] == '{' {
-            i += 1;
-            let mut name = String::new();
-            while i < bytes.len() && bytes[i] != '}' {
-                name.push(bytes[i]);
-                i += 1;
-            }
-            i += 1; // consume '}'
-            // `${NAME:-default}` / `${NAME:+alt}` are not expanded here; take the
-            // name half and let the lookup decide.
-            let name = name.split([':', '-']).next().unwrap_or("").to_string();
-            out.push_str(args.get(&name).map(String::as_str).unwrap_or(""));
-        } else {
-            let mut name = String::new();
-            while i < bytes.len() && (bytes[i].is_alphanumeric() || bytes[i] == '_') {
-                name.push(bytes[i]);
-                i += 1;
-            }
-            out.push_str(args.get(&name).map(String::as_str).unwrap_or(""));
-        }
-    }
-    out
-}
-
-/// Index of the stage a build targets: `target` by alias when given, otherwise
-/// the last `FROM` in the document.
-fn target_stage_index(stages: &[Stage], target: Option<&str>) -> Option<usize> {
-    match target {
-        Some(t) => stages.iter().rposition(|s| {
-            s.alias
-                .as_deref()
-                .is_some_and(|a| a.eq_ignore_ascii_case(t))
-        }),
-        None => stages.len().checked_sub(1),
-    }
-}
-
-/// Follow one stage's `FROM` to the stage it names, if it names one declared
-/// EARLIER in the same document. `None` means the token is an external image.
-fn parent_stage_index(stages: &[Stage], idx: usize, image: &str) -> Option<usize> {
-    stages[..idx].iter().rposition(|s| {
-        s.alias
-            .as_deref()
-            .is_some_and(|a| a.eq_ignore_ascii_case(image))
-    })
-}
-
-/// Resolve the EXTERNAL image the build's target stage ultimately derives from.
-///
-/// Mirrors the reference CLI's `findBaseImage`: start at `target` (or the final
-/// `FROM` when no target is given), follow `FROM <earlier-stage>` links back
-/// through the document, and report the first image token that names something
-/// outside it. Global `ARG`s — the only ones BuildKit expands in a `FROM` — are
-/// substituted, with the caller's `build_args` overriding their defaults.
-///
-/// Returns `None` when the Dockerfile has no `FROM`, when `target` names no
-/// stage, when the chain is cyclic, or when the resolved token still cannot be
-/// resolved to a concrete name (an unset `ARG`, `scratch`). A caller treats
-/// `None` as "nothing to inherit" rather than as an error: everything this
-/// powers is additive metadata.
-pub fn resolve_base_image(
-    dockerfile_content: &str,
-    build_args: &std::collections::HashMap<String, String>,
-    target: Option<&str>,
-) -> Option<String> {
-    let stages = parse_stages(dockerfile_content);
-    let mut idx = target_stage_index(&stages, target)?;
-    let args = global_args(dockerfile_content, build_args, stages[0].from_start);
-
-    // Bounded by the stage count: each hop moves strictly earlier in the document.
-    for _ in 0..=stages.len() {
-        let image = expand_args(&stages[idx].image, &args);
-        match parent_stage_index(&stages, idx, &image) {
-            Some(prev) => idx = prev,
-            None => {
-                if image.is_empty() || image.eq_ignore_ascii_case("scratch") {
-                    return None;
-                }
-                return Some(image);
-            }
-        }
-    }
-    None
-}
-
-/// Report the user the build's target stage runs as, when the Dockerfile itself
-/// says so.
-///
-/// Mirrors the reference CLI's `findUserStatement`: scan the target stage's body
-/// for its last `USER` instruction and, failing that, follow the stage's `FROM`
-/// back through earlier stages in the same document. `None` means no stage in
-/// the chain declares one, so the answer belongs to the base image and the
-/// caller should inspect it.
-pub fn find_user_statement(
-    dockerfile_content: &str,
-    build_args: &std::collections::HashMap<String, String>,
-    target: Option<&str>,
-) -> Option<String> {
-    let stages = parse_stages(dockerfile_content);
-    let mut idx = target_stage_index(&stages, target)?;
-    let args = global_args(dockerfile_content, build_args, stages[0].from_start);
-
-    for _ in 0..=stages.len() {
-        let body_end = stages
-            .get(idx + 1)
-            .map(|s| s.from_start)
-            .unwrap_or(dockerfile_content.len());
-        let body = &dockerfile_content[stages[idx].body_start..body_end];
-        // Last USER wins: it is the one in effect when the stage ends.
-        let declared = body
-            .lines()
-            .filter_map(|l| PARSE_USER_LINE.captures(l))
-            .map(|c| expand_args(strip_quotes(&c["user"]), &args))
-            .rfind(|u| !u.is_empty());
-        if declared.is_some() {
-            return declared;
-        }
-        let image = expand_args(&stages[idx].image, &args);
-        idx = parent_stage_index(&stages, idx, &image)?;
-    }
-    None
 }
 
 /// Errors returned by the Dockerfile parser.
@@ -541,8 +908,41 @@ mod tests {
         assert!(modified.contains(&format!("FROM $BASE AS {}\n", STAGE)));
     }
 
-    fn no_args() -> std::collections::HashMap<String, String> {
-        std::collections::HashMap::new()
+    #[test]
+    fn multi_stage_with_three_stages_only_modifies_last() {
+        let input = "FROM alpine AS s1\nRUN echo 1\nFROM debian AS s2\nRUN echo 2\nFROM ubuntu\nRUN echo 3\n";
+        let (modified, stage) = ensure(input);
+        assert_eq!(stage, STAGE);
+        assert!(modified.contains("FROM alpine AS s1\n"));
+        assert!(modified.contains("FROM debian AS s2\n"));
+        assert!(modified.contains(&format!("FROM ubuntu AS {}\n", STAGE)));
+    }
+
+    fn no_args() -> HashMap<String, String> {
+        HashMap::new()
+    }
+
+    fn args(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    fn base_image_of(
+        content: &str,
+        build_args: &HashMap<String, String>,
+        target: Option<&str>,
+    ) -> Option<String> {
+        extract_dockerfile(content).base_image(build_args, target)
+    }
+
+    fn user_of(
+        content: &str,
+        build_args: &HashMap<String, String>,
+        target: Option<&str>,
+    ) -> Option<String> {
+        extract_dockerfile(content).user_statement(build_args, &no_args(), target)
     }
 
     #[test]
@@ -584,15 +984,13 @@ mod tests {
             Some("alpine:3.19")
         );
 
-        let mut overrides = std::collections::HashMap::new();
-        overrides.insert("BASE".to_string(), "debian:bookworm".to_string());
         assert_eq!(
-            resolve_base_image(df, &overrides, None).as_deref(),
+            resolve_base_image(df, &args(&[("BASE", "debian:bookworm")]), None).as_deref(),
             Some("debian:bookworm")
         );
 
-        // `${BRACED}` form, and an unset ARG resolves to nothing rather than to
-        // a literal `$NAME` that would 404 against a registry.
+        // `${BRACED}` form, and an unset ARG resolves to nothing rather than
+        // to a literal `$NAME` that would 404 against a registry.
         assert_eq!(
             resolve_base_image("ARG B=alpine\nFROM ${B}:3.19\n", &no_args(), None).as_deref(),
             Some("alpine:3.19")
@@ -615,47 +1013,257 @@ mod tests {
         );
     }
 
+    /// The guard `resolve_base_image` applies is OURS, not the reference's: the
+    /// reference reports these verbatim and its callers cope. Keeping both
+    /// visible is what stops the guard from being mistaken for parity.
+    #[test]
+    fn base_image_reports_what_the_reference_reports_before_our_guard() {
+        assert_eq!(
+            base_image_of("FROM scratch\n", &no_args(), None).as_deref(),
+            Some("scratch")
+        );
+        assert_eq!(
+            base_image_of("FROM $UNSET\n", &no_args(), None).as_deref(),
+            Some("")
+        );
+        assert_eq!(resolve_base_image("FROM scratch\n", &no_args(), None), None);
+        assert_eq!(resolve_base_image("FROM $UNSET\n", &no_args(), None), None);
+    }
+
     #[test]
     fn find_user_statement_reads_the_last_user_in_the_target_stage() {
         let df = "FROM alpine\nUSER first\nRUN true\nUSER second\n";
-        assert_eq!(
-            find_user_statement(df, &no_args(), None).as_deref(),
-            Some("second")
-        );
+        assert_eq!(user_of(df, &no_args(), None).as_deref(), Some("second"));
     }
 
     #[test]
     fn find_user_statement_follows_the_stage_chain() {
         let df = "FROM alpine AS base\nUSER vscode\nFROM base\nRUN true\n";
-        assert_eq!(
-            find_user_statement(df, &no_args(), None).as_deref(),
-            Some("vscode")
-        );
+        assert_eq!(user_of(df, &no_args(), None).as_deref(), Some("vscode"));
     }
 
     #[test]
     fn find_user_statement_ignores_users_in_unrelated_stages() {
         // `builder` is not on the final stage's chain, so its USER is not ours.
         let df = "FROM golang AS builder\nUSER nobody\nFROM alpine\nRUN true\n";
-        assert_eq!(find_user_statement(df, &no_args(), None), None);
+        assert_eq!(user_of(df, &no_args(), None), None);
     }
 
     #[test]
     fn find_user_statement_expands_args() {
         let df = "ARG U=vscode\nFROM alpine\nUSER $U\n";
+        assert_eq!(user_of(df, &no_args(), None).as_deref(), Some("vscode"));
+    }
+
+    /// #686: the defect that made `deacon build` hand every Feature
+    /// `_REMOTE_USER=root` on a Dockerfile whose USER came from an in-stage ARG.
+    #[test]
+    fn find_user_statement_resolves_in_stage_args_and_envs() {
         assert_eq!(
-            find_user_statement(df, &no_args(), None).as_deref(),
-            Some("vscode")
+            user_of(
+                "FROM debian\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
+                &no_args(),
+                None
+            )
+            .as_deref(),
+            Some("user2")
+        );
+        assert_eq!(
+            user_of(
+                "FROM debian\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
+                &args(&[("IMAGE_USER", "user3")]),
+                None
+            )
+            .as_deref(),
+            Some("user3")
+        );
+        // ENV wins over an ARG declared after it; an unbound ARG does not shadow.
+        assert_eq!(
+            user_of(
+                "\nFROM debian\nENV USERNAME=user1\nARG USERNAME=user2\nUSER ${USERNAME}\n",
+                &no_args(),
+                None
+            )
+            .as_deref(),
+            Some("user2")
+        );
+        assert_eq!(
+            user_of(
+                "\nFROM debian\nENV USERNAME=user1\nARG USERNAME\nUSER ${USERNAME}\n",
+                &no_args(),
+                None
+            )
+            .as_deref(),
+            Some("user1")
+        );
+        // An ENV can be set from an ARG, and several variables can share a token.
+        assert_eq!(
+            user_of(
+                "\nFROM debian\nARG USERNAME1=user1\nENV USERNAME2=${USERNAME1}\nUSER ${USERNAME2}\n",
+                &no_args(),
+                None
+            )
+            .as_deref(),
+            Some("user1")
+        );
+        assert_eq!(
+            user_of(
+                "\nFROM debian\nARG USERNAME1=user1\nENV USERNAME2=user2\nUSER A${USERNAME1}A${USERNAME2}A\n",
+                &no_args(),
+                None
+            )
+            .as_deref(),
+            Some("Auser1Auser2A")
+        );
+    }
+
+    /// An inherited stage contributes its ENVs but NOT its ARGs — which is why
+    /// this resolves to `user1` and not `user2`.
+    #[test]
+    fn args_do_not_cross_a_stage_boundary_but_envs_do() {
+        let df = "\nFROM debian as one\nENV USERNAME=user1\nARG USERNAME=user2\n\nFROM one as two\nUSER ${USERNAME}\n";
+        assert_eq!(user_of(df, &no_args(), None).as_deref(), Some("user1"));
+    }
+
+    #[test]
+    fn find_user_statement_falls_back_to_the_base_image_env() {
+        let df = "\nFROM mybase\nUSER ${USERNAME}\n";
+        assert_eq!(
+            extract_dockerfile(df)
+                .user_statement(&no_args(), &args(&[("USERNAME", "user1")]), None)
+                .as_deref(),
+            Some("user1")
+        );
+        // Without the base image's env there is no answer at all.
+        assert_eq!(user_of(df, &no_args(), None), None);
+    }
+
+    /// A `FROM` may name a stage declared LATER in the document. Resolving only
+    /// backwards returned the stage name itself, which we would then have tried
+    /// to pull as if it were an image (#686).
+    #[test]
+    fn stage_references_resolve_in_both_directions() {
+        let df = "\nFROM image1 as stage1\nFROM stage3 as stage2\nFROM image3 as stage3\nFROM image4 as stage4\n";
+        assert_eq!(
+            base_image_of(df, &no_args(), Some("stage2")).as_deref(),
+            Some("image3")
         );
     }
 
     #[test]
-    fn multi_stage_with_three_stages_only_modifies_last() {
-        let input = "FROM alpine AS s1\nRUN echo 1\nFROM debian AS s2\nRUN echo 2\nFROM ubuntu\nRUN echo 3\n";
-        let (modified, stage) = ensure(input);
-        assert_eq!(stage, STAGE);
-        assert!(modified.contains("FROM alpine AS s1\n"));
-        assert!(modified.contains("FROM debian AS s2\n"));
-        assert!(modified.contains(&format!("FROM ubuntu AS {}\n", STAGE)));
+    fn variable_expressions_choose_between_word_and_value() {
+        let pos = "\nARG cloud\nFROM ${cloud:+mcr.microsoft.com/}azure-cli:latest\n";
+        assert_eq!(
+            base_image_of(pos, &args(&[("cloud", "true")]), None).as_deref(),
+            Some("mcr.microsoft.com/azure-cli:latest")
+        );
+        assert_eq!(
+            base_image_of(pos, &no_args(), None).as_deref(),
+            Some("azure-cli:latest")
+        );
+
+        let neg = "\nARG cloud\nFROM ${cloud:-mcr.microsoft.com/}azure-cli:latest\n";
+        assert_eq!(
+            base_image_of(neg, &args(&[("cloud", "ghcr.io/")]), None).as_deref(),
+            Some("ghcr.io/azure-cli:latest")
+        );
+        assert_eq!(
+            base_image_of(neg, &no_args(), None).as_deref(),
+            Some("mcr.microsoft.com/azure-cli:latest")
+        );
+
+        // The chosen word has one layer of quotes stripped.
+        let quoted =
+            "\nARG cloud\nFROM ${cloud:-\"mcr.microsoft.com/\"}azure-cli:latest as label\n";
+        assert_eq!(
+            base_image_of(quoted, &no_args(), None).as_deref(),
+            Some("mcr.microsoft.com/azure-cli:latest")
+        );
+    }
+
+    #[test]
+    fn cyclic_stage_chains_terminate_with_no_answer() {
+        assert_eq!(
+            base_image_of("FROM b as a\nFROM a as b\n", &no_args(), None),
+            None
+        );
+        assert_eq!(base_image_of("FROM a as a\n", &no_args(), None), None);
+        // A cycle is not the same as no answer: the walk stops at the first
+        // stage that declares a USER, and only runs out of stages when none
+        // does. MEASURED — the reference returns "x" here too, and the
+        // hand-written `None` this once asserted was simply wrong.
+        assert_eq!(
+            user_of("FROM b as a\nUSER x\nFROM a as b\n", &no_args(), None).as_deref(),
+            Some("x")
+        );
+    }
+
+    /// Stage labels are matched case-SENSITIVELY, as the reference's plain-object
+    /// `stagesByLabel` does. BuildKit itself is case-insensitive here, so this is
+    /// a deliberate follow-the-reference choice, not an oversight: the value only
+    /// feeds metadata inspection, and the real build is resolved by BuildKit.
+    #[test]
+    fn stage_labels_match_case_sensitively_like_the_reference() {
+        assert_eq!(
+            base_image_of("FROM alpine AS Base\n", &no_args(), Some("base")),
+            None
+        );
+        assert_eq!(
+            base_image_of("FROM alpine AS Base\nFROM base\n", &no_args(), None).as_deref(),
+            Some("base"),
+            "`base` names no stage, so it is reported as an external image"
+        );
+    }
+
+    #[test]
+    fn quotes_are_stripped_one_layer_at_each_end() {
+        assert_eq!(strip_one_quote_each_end("\"abc\""), "abc");
+        assert_eq!(strip_one_quote_each_end("\"\"abc\"\""), "\"abc\"");
+        assert_eq!(strip_one_quote_each_end("\""), "");
+        assert_eq!(strip_one_quote_each_end("\"\""), "");
+        assert_eq!(strip_one_quote_each_end("abc"), "abc");
+    }
+
+    #[test]
+    fn extract_dockerfile_reads_instructions_and_directives() {
+        let df = extract_dockerfile("from E\nenv A=B\narg C\nuser D\n");
+        assert_eq!(df.stages.len(), 1);
+        assert_eq!(df.stages[0].from.image, "E");
+        let instrs = &df.stages[0].instructions;
+        assert_eq!(instrs.len(), 3);
+        assert_eq!(instrs[0].instruction, "ENV");
+        assert_eq!(instrs[0].name, "A");
+        assert_eq!(instrs[0].value.as_deref(), Some("B"));
+        assert_eq!(instrs[1].instruction, "ARG");
+        assert_eq!(instrs[1].name, "C");
+        assert_eq!(instrs[1].value, None);
+        assert_eq!(instrs[2].instruction, "USER");
+        assert_eq!(instrs[2].name, "D");
+
+        // `ENV A B` and `ENV A = B` are the same instruction as `ENV A=B`.
+        for src in [
+            "FROM debian\nENV A=B",
+            "FROM debian\nENV A = B",
+            "FROM debian\nENV A B",
+        ] {
+            let env = &extract_dockerfile(src).stages[0].instructions[0];
+            assert_eq!(
+                (
+                    env.instruction.as_str(),
+                    env.name.as_str(),
+                    env.value.as_deref()
+                ),
+                ("ENV", "A", Some("B")),
+                "for {src:?}"
+            );
+        }
+
+        let syntax = extract_dockerfile("# syntax=docker.io/docker/dockerfile:1.4\nFROM debian");
+        assert_eq!(syntax.preamble.version.as_deref(), Some("1.4"));
+        let untagged = extract_dockerfile("# syntax=docker/dockerfile\nFROM debian");
+        assert_eq!(untagged.preamble.version.as_deref(), Some("latest"));
+        let foreign = extract_dockerfile("# syntax=mycompany/myimage:1.4\nFROM debian");
+        assert_eq!(foreign.preamble.version, None);
+        assert!(foreign.preamble.directives.contains_key("syntax"));
     }
 }

@@ -521,3 +521,141 @@ fn build_honors_a_container_driver_builder_and_can_export_a_local_cache() {
         }
     }
 }
+
+/// A base Dockerfile that ends on a **non-root `USER`, named by an `ARG`** must
+/// still install Features, and the produced image must run as that user.
+///
+/// This is the one shape that failed both halves of the pipeline at once, and
+/// each half was measured against the pinned reference (`@devcontainers/cli@0.87.0`)
+/// on this exact fixture before the fix landed:
+///
+/// * [#685] — the generated install stage never switched to `root`, so
+///   `install.sh` ran as `user2` and died on its first write outside `$HOME`.
+///   The reference emits `USER root` before the Feature layers and restores the
+///   image's user after. Measured: reference exit 0, deacon exit 1.
+/// * [#686] — `find_user_statement` did no variable resolution, so a `USER $ARG`
+///   resolved to nothing and every Feature was handed `_REMOTE_USER=root`.
+///   Measured: reference `user2`, deacon `root`.
+///
+/// The assertion is on **image contents**, not the JSON outcome. That is
+/// deliberate and is the lesson of #595 and #628: with the root switch missing the
+/// build failed loudly, but with only the *user resolution* wrong it succeeded and
+/// reported `outcome: success` while handing every Feature the wrong identity — a
+/// result-document assertion cannot see that at all.
+///
+/// The user is named by an `ARG` rather than written literally so the test covers
+/// both defects; a literal `USER user2` would exercise #685 alone.
+///
+/// [#685]: https://github.com/get2knowio/deacon/issues/685
+/// [#686]: https://github.com/get2knowio/deacon/issues/686
+#[test]
+fn feature_install_becomes_root_and_restores_an_arg_named_dockerfile_user() {
+    let temp_dir = TempDir::new().unwrap();
+    let feature_dir = temp_dir.path().join(".devcontainer/marker");
+    fs::create_dir_all(&feature_dir).unwrap();
+
+    fs::write(
+        temp_dir.path().join(".devcontainer/Dockerfile"),
+        "FROM debian:bookworm-slim\n\
+         RUN useradd -m user2\n\
+         ARG IMAGE_USER=user2\n\
+         USER $IMAGE_USER\n",
+    )
+    .unwrap();
+    fs::write(
+        temp_dir.path().join(".devcontainer/devcontainer.json"),
+        r#"{
+    "name": "Feature Install User",
+    "build": { "dockerfile": "Dockerfile" },
+    "features": { "./marker": {} }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        feature_dir.join("devcontainer-feature.json"),
+        r#"{ "id": "marker", "version": "1.0.0", "name": "marker" }"#,
+    )
+    .unwrap();
+    // Writing to `/` is the point: it is what an unprivileged install cannot do.
+    fs::write(
+        feature_dir.join("install.sh"),
+        "#!/usr/bin/env bash\nset -e\n\
+         echo \"_REMOTE_USER=${_REMOTE_USER}\" > /marker.txt\n\
+         echo \"_CONTAINER_USER=${_CONTAINER_USER}\" >> /marker.txt\n",
+    )
+    .unwrap();
+
+    // A tempdir basename starts with `.`, which Docker rejects as a tag; keep
+    // only the alphanumerics so the tag stays unique per run and legal.
+    let suffix: String = temp_dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let tag = format!("deacon-test-featureuser:{suffix}");
+
+    let output = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("build")
+        .arg("--workspace-folder")
+        .arg(temp_dir.path())
+        .arg("--image-name")
+        .arg(&tag)
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() && is_docker_unavailable(&stderr) {
+        eprintln!("skipping: docker unavailable ({})", stderr.trim());
+        return;
+    }
+
+    // `docker run --entrypoint <bin> <image> [args...]` — the image comes before
+    // the command's own arguments.
+    let read_image = |entrypoint: &str, args: &[&str]| -> String {
+        let out = std::process::Command::new("docker")
+            .args(["run", "--rm", "--entrypoint", entrypoint])
+            .arg(&tag)
+            .args(args)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+
+    let result = std::panic::catch_unwind(|| {
+        assert!(
+            output.status.success(),
+            "a non-root USER in the base Dockerfile must not fail the Feature install (#685); \
+             stderr:\n{stderr}"
+        );
+
+        let marker = read_image("cat", &["/marker.txt"]);
+        assert!(
+            marker.contains("_REMOTE_USER=user2"),
+            "Features must be told the ARG-resolved user, not root (#686); got:\n{marker}"
+        );
+        assert!(
+            marker.contains("_CONTAINER_USER=user2"),
+            "_CONTAINER_USER must resolve the same way (#686); got:\n{marker}"
+        );
+
+        let whoami = read_image("whoami", &[]);
+        assert_eq!(
+            whoami, "user2",
+            "the image must be handed back to its own user after the install (#685)"
+        );
+    });
+
+    let _ = std::process::Command::new("docker")
+        .args(["rmi", "-f", &tag])
+        .output();
+
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}
