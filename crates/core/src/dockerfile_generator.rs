@@ -88,6 +88,13 @@ pub struct FeatureInstallEnv {
     pub container_user: Option<String>,
     /// `_CONTAINER_USER_HOME` — that user's home directory.
     pub container_user_home: Option<String>,
+    /// The user the IMAGE itself runs as — the Dockerfile's own `USER`, else the
+    /// base image's baked-in one. Distinct from [`Self::container_user`], which
+    /// the configuration's `containerUser` can override: this is the user the
+    /// Feature-install stage must RESTORE after doing its work as root, and the
+    /// reference restores the image's user rather than the configured one
+    /// (`_DEV_CONTAINERS_IMAGE_USER`, #685).
+    pub image_user: Option<String>,
 }
 
 impl FeatureInstallEnv {
@@ -125,6 +132,7 @@ impl FeatureInstallEnv {
             remote_user_home: home_for(remote),
             container_user: container.map(String::from),
             container_user_home: home_for(container),
+            image_user: image_user.map(String::from),
         }
     }
 }
@@ -177,6 +185,8 @@ impl DockerfileGenerator {
             self.config.target_stage
         ));
 
+        dockerfile.push_str(&self.become_root_line());
+
         // Create temporary directory for features
         dockerfile.push_str("RUN mkdir -p /tmp/dev-container-features\n\n");
 
@@ -212,6 +222,7 @@ impl DockerfileGenerator {
         }
 
         dockerfile.push_str(&self.config_container_env_lines());
+        dockerfile.push_str(&self.restore_image_user_lines());
 
         Ok(dockerfile)
     }
@@ -248,6 +259,8 @@ impl DockerfileGenerator {
             base_stage_name, self.config.target_stage
         ));
 
+        dockerfile.push_str(&self.become_root_line());
+
         dockerfile.push_str("RUN mkdir -p /tmp/dev-container-features\n\n");
 
         // Host-CA injection (016, T037): install the corporate CA into the
@@ -281,8 +294,41 @@ impl DockerfileGenerator {
         }
 
         dockerfile.push_str(&self.config_container_env_lines());
+        dockerfile.push_str(&self.restore_image_user_lines());
 
         Ok(dockerfile)
+    }
+
+    /// Switch to `root` for the duration of the Feature installs.
+    ///
+    /// Not optional and not conditional on knowing who the base runs as: a
+    /// Dockerfile ending in `USER vscode` — the shape almost every devcontainer
+    /// base image and hand-written Dockerfile uses — otherwise runs every
+    /// `install.sh` unprivileged, and they fail on the first write outside
+    /// `$HOME`. Emitted unconditionally, exactly as the reference does (#685).
+    fn become_root_line(&self) -> String {
+        "USER root\n\n".to_string()
+    }
+
+    /// Restore the user the image ran as before we became root.
+    ///
+    /// The reference declares `ARG _DEV_CONTAINERS_IMAGE_USER=root` and passes
+    /// the real value as a build arg. We bake the resolved value in as the ARG's
+    /// default instead: this stage is also SPLICED into a user-authored
+    /// Dockerfile (`generate_install_stage_from`), whose build is assembled by a
+    /// different code path that would otherwise have to thread the same build arg
+    /// twice. The emitted shape and the resulting `USER` are identical.
+    fn restore_image_user_lines(&self) -> String {
+        let image_user = self
+            .config
+            .feature_install_env
+            .image_user
+            .as_deref()
+            .unwrap_or("root");
+        format!(
+            "\nARG _DEV_CONTAINERS_IMAGE_USER={}\nUSER $_DEV_CONTAINERS_IMAGE_USER\n",
+            image_user
+        )
     }
 
     /// The configuration's own `containerEnv` as `ENV` lines, emitted at the very
@@ -1066,6 +1112,80 @@ mod tests {
             !dockerfile.contains(r#"export _REMOTE_USER="""#),
             "an empty _REMOTE_USER breaks `su - \"$_REMOTE_USER\"` in feature install scripts"
         );
+    }
+
+    /// #685: the install stage MUST become root and MUST hand the image back to
+    /// the user it was running as. Without the first, a base Dockerfile ending in
+    /// `USER vscode` fails every `install.sh` on its first privileged write;
+    /// without the second, the produced image silently runs as root.
+    ///
+    /// Both entry points are asserted: `generate` (ARG-driven base) and
+    /// `generate_install_stage_from` (spliced into a user-authored Dockerfile).
+    #[test]
+    fn feature_stage_installs_as_root_and_restores_the_image_user() {
+        let plan = InstallationPlan::new(vec![create_test_feature("node", HashMap::new())]);
+        let config = DockerfileConfig {
+            base_image: "debian:bookworm-slim".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            // containerUser is deliberately different from the image's user: the
+            // restore follows the IMAGE, as the reference does.
+            feature_install_env: FeatureInstallEnv::resolve(None, Some("someone"), Some("user2")),
+            ..Default::default()
+        };
+
+        for (label, dockerfile) in [
+            (
+                "generate",
+                DockerfileGenerator::new(config.clone())
+                    .generate(&plan)
+                    .unwrap(),
+            ),
+            (
+                "generate_install_stage_from",
+                DockerfileGenerator::new(config.clone())
+                    .generate_install_stage_from(&plan, "user_stage")
+                    .unwrap(),
+            ),
+        ] {
+            let become_root = dockerfile
+                .find("USER root")
+                .unwrap_or_else(|| panic!("[{label}] must switch to root:\n{dockerfile}"));
+            let install = dockerfile
+                .find("RUN --mount=type=bind")
+                .unwrap_or_else(|| panic!("[{label}] expected a feature install RUN"));
+            let restore = dockerfile
+                .find("USER $_DEV_CONTAINERS_IMAGE_USER")
+                .unwrap_or_else(|| panic!("[{label}] must restore the image user:\n{dockerfile}"));
+
+            assert!(
+                become_root < install,
+                "[{label}] must become root BEFORE installing:\n{dockerfile}"
+            );
+            assert!(
+                install < restore,
+                "[{label}] must restore the user AFTER installing:\n{dockerfile}"
+            );
+            assert!(
+                dockerfile.contains("ARG _DEV_CONTAINERS_IMAGE_USER=user2"),
+                "[{label}] restore must name the IMAGE's user, not containerUser:\n{dockerfile}"
+            );
+        }
+    }
+
+    /// With nothing known about the image, the restore defaults to `root` —
+    /// the same default the reference's `ARG _DEV_CONTAINERS_IMAGE_USER=root`
+    /// carries.
+    #[test]
+    fn image_user_restore_defaults_to_root_when_unknown() {
+        let plan = InstallationPlan::new(vec![create_test_feature("node", HashMap::new())]);
+        let config = DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            feature_install_env: FeatureInstallEnv::resolve(None, None, None),
+            ..Default::default()
+        };
+        let dockerfile = DockerfileGenerator::new(config).generate(&plan).unwrap();
+        assert!(dockerfile.contains("ARG _DEV_CONTAINERS_IMAGE_USER=root"));
     }
 
     /// Unresolvable users still emit the variables (as empty strings) so that

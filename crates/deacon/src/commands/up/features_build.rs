@@ -497,6 +497,31 @@ pub(crate) async fn prepare_dockerfile_feature_build(
         .into());
     }
 
+    // The entries the base contributes come from the EXTERNAL image this
+    // Dockerfile derives from, resolved from the document itself — the
+    // reference's `findBaseImage`. Resolved up front because its environment
+    // also participates in `USER ${NAME}` resolution just below (#686).
+    let base_image_ref = deacon_core::dockerfile_utils::resolve_base_image(
+        base_dockerfile_content,
+        declared_build_args,
+        target,
+    );
+    let base_image_env = match &base_image_ref {
+        Some(image) => match cli.ensure_image_available(image).await {
+            Ok(info) => info.map(|info| info.env).unwrap_or_default(),
+            Err(e) => {
+                debug!(
+                    image = %image,
+                    error = %e,
+                    "Could not make the base image available for metadata inspection; \
+                     proceeding with no inherited devcontainer.metadata entries"
+                );
+                HashMap::new()
+            }
+        },
+        None => HashMap::new(),
+    };
+
     // `_REMOTE_USER` / `_CONTAINER_USER` for this shape. The "base" is a *stage
     // name* inside the user's Dockerfile, so there is no image to inspect until
     // that stage has been built — but the Dockerfile itself may say who it runs
@@ -505,6 +530,7 @@ pub(crate) async fn prepare_dockerfile_feature_build(
     let dockerfile_user = deacon_core::dockerfile_utils::find_user_statement(
         base_dockerfile_content,
         declared_build_args,
+        &base_image_env,
         target,
     );
     let feature_install_env = FeatureInstallEnv::resolve(
@@ -544,24 +570,6 @@ pub(crate) async fn prepare_dockerfile_feature_build(
         dockerfile_path.display()
     );
 
-    // The entries the base contributes come from the EXTERNAL image this
-    // Dockerfile derives from, resolved from the document itself — the
-    // reference's `findBaseImage`.
-    let base_image_ref = deacon_core::dockerfile_utils::resolve_base_image(
-        base_dockerfile_content,
-        declared_build_args,
-        target,
-    );
-    if let Some(image) = &base_image_ref {
-        if let Err(e) = cli.ensure_image_available(image).await {
-            debug!(
-                image = %image,
-                error = %e,
-                "Could not make the base image available for metadata inspection; \
-                 proceeding with no inherited devcontainer.metadata entries"
-            );
-        }
-    }
     let metadata_label = compute_metadata_label(
         cli,
         base_image_ref.as_deref(),
