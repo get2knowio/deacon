@@ -1505,49 +1505,6 @@ fn test_cache_to_requires_buildkit() {
     }
 }
 
-/// `build` refuses a podman selection instead of quietly building with docker.
-///
-/// Podman parity for `build` is a tracked deferral ([#30]), which is fine. What
-/// was not fine is that `--runtime podman` was ACCEPTED and silently ignored:
-/// `deacon build --runtime podman` exited **0** having built with docker, on a
-/// machine with no podman installed at all ([#692]). A capability we do not have
-/// has to be a clear error, never a quiet substitution (constitution IV).
-///
-/// Asserting on the MESSAGE, not just a non-zero exit: a build can fail for a
-/// hundred reasons, and "it failed" would keep passing if the refusal were
-/// replaced by an unrelated error. The message is the behavior under test.
-///
-/// [#30]: https://github.com/get2knowio/deacon/issues/30
-/// [#692]: https://github.com/get2knowio/deacon/issues/692
-#[test]
-fn build_refuses_a_podman_selection_rather_than_using_docker() {
-    let temp_dir = TempDir::new().unwrap();
-    fs::create_dir_all(temp_dir.path().join(".devcontainer")).unwrap();
-    fs::write(
-        temp_dir.path().join(".devcontainer/Dockerfile"),
-        "FROM alpine:3.19\n",
-    )
-    .unwrap();
-    fs::write(
-        temp_dir.path().join(".devcontainer/devcontainer.json"),
-        r#"{"name":"Podman Refusal","build":{"dockerfile":"Dockerfile"}}"#,
-    )
-    .unwrap();
-
-    Command::cargo_bin("deacon")
-        .unwrap()
-        .arg("build")
-        .arg("--workspace-folder")
-        .arg(temp_dir.path())
-        .args(["--runtime", "podman"])
-        .assert()
-        .failure()
-        .stderr(
-            predicate::str::contains("does not support podman")
-                .and(predicate::str::contains("issues/30")),
-        );
-}
-
 /// A `--docker-path` that cannot be executed must fail the build, not be ignored.
 ///
 /// Before [#692] every `CliDocker::new()` in this command hardcoded `docker`, so

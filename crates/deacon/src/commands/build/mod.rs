@@ -610,35 +610,6 @@ async fn validate_buildkit_requirement(
     }
 }
 
-/// `build` is docker-only. Refuse a podman selection instead of serving it with
-/// docker.
-///
-/// Podman parity for `build` is a tracked deferral (#30), and that is fine — what
-/// was not fine is that `--runtime podman` was ACCEPTED and silently ignored, so
-/// `deacon build --runtime podman` exited 0 having built with docker on a machine
-/// with no podman installed at all (#692). A capability we do not have must be a
-/// clear error, never a quiet substitution (constitution IV).
-///
-/// The selection is resolved the same way every other command resolves it, so a
-/// podman chosen by `--docker-path podman` — the reference's own way of choosing
-/// it — is refused here too, not just an explicit `--runtime podman`.
-async fn refuse_unsupported_runtime(
-    runtime: Option<deacon_core::runtime::RuntimeKind>,
-    docker_path: &str,
-) -> Result<()> {
-    use deacon_core::runtime::{RuntimeFactory, RuntimeKind};
-
-    if RuntimeFactory::detect_runtime_for_path(runtime, docker_path).await == RuntimeKind::Podman {
-        return Err(anyhow!(
-            "`deacon build` does not support podman yet, and will not silently \
-             build with docker instead. Podman parity for `build` is tracked in \
-             https://github.com/get2knowio/deacon/issues/30. Use `deacon up`, which \
-             does support podman, or select docker explicitly with `--runtime docker`."
-        ));
-    }
-    Ok(())
-}
-
 /// Execute the build command.
 ///
 /// Loads the DevContainer configuration (from the provided path or by discovery),
@@ -663,19 +634,13 @@ async fn refuse_unsupported_runtime(
 /// #[tokio::main]
 /// async fn main() {
 ///     let args = BuildArgs::default();
-///     let _ = execute_build(args, None).await;
+///     let _ = execute_build(args).await;
 /// }
 /// ```
 #[instrument(skip(args))]
-pub async fn execute_build(
-    args: BuildArgs,
-    runtime: Option<deacon_core::runtime::RuntimeKind>,
-) -> Result<()> {
+pub async fn execute_build(args: BuildArgs) -> Result<()> {
     let output_format = args.output_format.clone();
-    let outcome = match refuse_unsupported_runtime(runtime, &args.docker_path).await {
-        Ok(()) => execute_build_inner(args).await,
-        Err(e) => Err(e),
-    };
+    let outcome = execute_build_inner(args).await;
     if let Err(err) = &outcome {
         // #594: a failure gets a result document too. Before this, `build
         // --output-format json` printed one on success and NOTHING on failure,
@@ -2080,10 +2045,9 @@ async fn execute_compose_build_with_features(
         Some(&build_options),
         host_ca_set,
         // `deacon build` is docker-only today; podman parity for the build
-        // command is tracked separately (issue #30 deferred items). A podman
-        // SELECTION is now refused up front rather than silently served by
-        // docker (#692), so reaching here means the flavor really is docker —
-        // but the BINARY is still the user's to choose.
+        // command is tracked separately (issue #30 deferred items). The BINARY
+        // is still the user's to choose, which is what #692 restored — `build`
+        // hardcoded `docker` here and ignored `--docker-path` entirely.
         &deacon_core::docker::CliDocker::with_path(args.docker_path.clone()),
         LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
         // #436: record `devcontainer.metadata` on the image this build produces.

@@ -1742,7 +1742,7 @@ impl Cli {
                     user_data_folder: self.user_data_folder.clone(),
                 };
 
-                execute_build(args, self.runtime.map(|r| r.into())).await?;
+                execute_build(args).await?;
                 Ok(())
             }
             Some(Commands::Exec {
