@@ -479,6 +479,28 @@ impl ComposeCommand {
         self.execute(&["stop"]).await
     }
 
+    /// Start the project's EXISTING containers without recreating them.
+    ///
+    /// `docker compose start`, not `up`: `up` reconciles the project against the
+    /// current service definitions and replaces a container whose image has moved
+    /// — which is what silently discarded a stopped devcontainer's filesystem
+    /// (#700). `start` only transitions what is already there.
+    #[instrument(skip(self))]
+    pub async fn start(&self) -> Result<String> {
+        self.execute(&["start"]).await
+    }
+
+    /// List the project's services INCLUDING stopped ones.
+    ///
+    /// `docker compose ps` hides stopped containers, which is why a stopped
+    /// project looked absent and was rebuilt from scratch (#700). Measured:
+    /// against a stopped project, `ps` reports 0 services and `ps --all` reports 1.
+    #[instrument(skip(self))]
+    pub async fn ps_all(&self) -> Result<Vec<ComposeService>> {
+        let output = self.execute(&["ps", "--all", "--format", "json"]).await?;
+        self.parse_ps_output(&output)
+    }
+
     /// Stop and remove containers with additional flags
     #[instrument(skip(self))]
     pub async fn down_with_flags(&self, flags: &[&str]) -> Result<String> {
@@ -1444,6 +1466,43 @@ impl ComposeManager {
         command.stop().await?;
 
         debug!("Compose project {} stopped successfully", project.name);
+        Ok(())
+    }
+
+    /// Whether every service this project needs already EXISTS, in any state.
+    ///
+    /// Distinct from [`Self::is_project_running`], which answers "are they up".
+    /// A project whose containers are merely stopped is still the workspace's
+    /// container — `stop_project`'s own contract calls it "stopped-but-present,
+    /// resumable on next `up`" — and recreating it discards everything written
+    /// into its filesystem (#700).
+    ///
+    /// Safe to reuse on identity grounds rather than by inspection: the project
+    /// NAME embeds the configuration hash, so a changed configuration produces a
+    /// different project and never reaches this.
+    #[instrument(skip(self))]
+    pub async fn project_containers_exist(&self, project: &ComposeProject) -> Result<bool> {
+        let command = self.get_command(project);
+        let services = command.ps_all().await?;
+        let present: Vec<String> = services.iter().map(|s| s.name.clone()).collect();
+        let all_present = project
+            .get_all_services()
+            .iter()
+            .all(|service| present.contains(service));
+        debug!(
+            "Project {} services present (any state): {} (present: {:?})",
+            project.name, all_present, present
+        );
+        Ok(all_present)
+    }
+
+    /// Start a project whose containers already exist, without recreating them.
+    #[instrument(skip(self))]
+    pub async fn start_existing_project(&self, project: &ComposeProject) -> Result<()> {
+        let command = self.get_command(project);
+        debug!("Starting existing compose project {}", project.name);
+        command.start().await?;
+        debug!("Compose project {} started", project.name);
         Ok(())
     }
 

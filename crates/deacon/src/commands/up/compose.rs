@@ -274,6 +274,47 @@ pub(crate) async fn execute_compose_up(
         }
     }
 
+    // Resume a project whose containers exist but are STOPPED, before asking
+    // whether it is running — the branch below then reuses it exactly as it
+    // reuses an already-running one.
+    //
+    // Without this, a stopped project looked absent (`docker compose ps` hides
+    // stopped containers) and `up` went on to create a new one. Same project name,
+    // same Compose config-hash, but a freshly built Feature-extended image, so
+    // Compose replaced the container — and everything written into the old
+    // container's filesystem went with it (#700). MEASURED against the reference,
+    // which reuses: a file written into the container survived its stop/up cycle
+    // and was gone from deacon's.
+    //
+    // `docker compose start`, never `up`: `up` reconciles against current service
+    // definitions and is precisely what replaced the container. Reuse is safe on
+    // identity grounds — the project NAME embeds the configuration hash, so a
+    // changed configuration is a different project and never arrives here.
+    //
+    // Best-effort: if the probe or the start fails, fall through to the normal
+    // create path rather than failing an `up` that would otherwise work.
+    if !args.remove_existing_container
+        && !compose_manager
+            .is_project_running(&project)
+            .await
+            .unwrap_or(false)
+        && compose_manager
+            .project_containers_exist(&project)
+            .await
+            .unwrap_or(false)
+    {
+        info!(
+            "Compose project {} exists but is stopped; resuming it",
+            project.name
+        );
+        if let Err(e) = compose_manager.start_existing_project(&project).await {
+            warn!(
+                "Could not resume stopped compose project {} ({}); recreating instead",
+                project.name, e
+            );
+        }
+    }
+
     // Check if project is already running
     if !args.remove_existing_container {
         match compose_manager.is_project_running(&project).await {
