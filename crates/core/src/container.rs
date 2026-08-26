@@ -1855,6 +1855,32 @@ pub struct CurrentContainer<'a> {
 /// None. This is post-provisioning hygiene: a container that could not be
 /// listed or stopped is logged and skipped, never surfaced as an `up` failure.
 /// Returns the ids actually stopped, so callers and tests can observe the sweep.
+/// Does a candidate container's `devcontainer.config_file` label name the same document the
+/// current `up` resolved?
+///
+/// **Both sides are normalized, not just the candidate's** (#682). The candidate's label is a
+/// foreign string — written by whatever tool created that container, possibly an older deacon
+/// that did not normalize — and the reference compares normalized values for exactly that
+/// reason (`findDevContainerByNormalizedLabels`). But `current` is not reliably normalized
+/// either: it comes from `ContainerIdentity::config_file`, which `with_config_file` normalizes
+/// and a field-by-field construction does not. Normalizing one side only makes this sweep
+/// spare a container it should stop — invisibly off Windows, where the normalization is the
+/// identity and the asymmetry cannot show. [`crate::label_path::normalize`] is idempotent, so
+/// re-normalizing an already-normalized value costs nothing.
+///
+/// A missing label is NOT a match: a candidate predating the label is spared, the sweep's
+/// standing safe direction.
+fn names_the_same_config_document(
+    platform: crate::label_path::Platform,
+    current: &str,
+    candidate: Option<&str>,
+) -> bool {
+    candidate.is_some_and(|candidate| {
+        crate::label_path::normalize(platform, candidate)
+            == crate::label_path::normalize(platform, current)
+    })
+}
+
 #[instrument(skip(docker))]
 pub async fn stop_superseded_containers<D>(
     docker: &D,
@@ -1966,18 +1992,12 @@ where
         // expansion rather than filtering `to_stop` afterwards. A candidate
         // predating the label (older deacon) also lands here and is spared, the
         // same safe direction as the inspect failure above.
-        //
-        // The candidate's own label is re-normalized before the comparison (#682). It is a
-        // foreign string — written by whatever tool created that container, possibly an
-        // older deacon that did not normalize — and the reference compares normalized values
-        // for the same reason (`findDevContainerByNormalizedLabels`). Off Windows this is the
-        // identity.
         if let Some(current_config_file) = current_config_file.as_ref()
-            && labels
-                .get(LABEL_CONFIG_FILE)
-                .map(|value| crate::label_path::normalize(crate::label_path::Platform::HOST, value))
-                .as_ref()
-                != Some(current_config_file)
+            && !names_the_same_config_document(
+                crate::label_path::Platform::HOST,
+                current_config_file,
+                labels.get(LABEL_CONFIG_FILE).map(String::as_str),
+            )
         {
             debug!(
                 container_id = %container.id,
@@ -2169,6 +2189,55 @@ mod supersede_tests {
             id_labels: None,
             metadata_label: None,
         }
+    }
+
+    /// The document test is symmetric under normalization, on a platform where
+    /// normalization does something (#682).
+    ///
+    /// This runs everywhere by passing the platform explicitly, which is the point: the
+    /// Windows lane caught a version of this comparison that normalized only the candidate's
+    /// side, and no Linux test could have — off Windows both calls are the identity, so an
+    /// asymmetric comparison and a symmetric one are indistinguishable.
+    #[test]
+    fn the_config_document_test_normalizes_both_sides() {
+        use crate::label_path::Platform;
+
+        // The identity's side un-normalized (a field-by-field construction), the candidate's
+        // side spelled differently again. Same document.
+        assert!(names_the_same_config_document(
+            Platform::Windows,
+            r"C:\ws\.devcontainer\devcontainer.json",
+            Some("c:/ws/.devcontainer/devcontainer.json"),
+        ));
+        // Both already normalized — re-normalizing must not break the match.
+        assert!(names_the_same_config_document(
+            Platform::Windows,
+            r"c:\ws\.devcontainer\devcontainer.json",
+            Some(r"c:\ws\.devcontainer\devcontainer.json"),
+        ));
+        // A genuinely different document is still different.
+        assert!(!names_the_same_config_document(
+            Platform::Windows,
+            r"C:\ws\.devcontainer\devcontainer.json",
+            Some(r"C:\ws\.devcontainer\sub\devcontainer.json"),
+        ));
+        // A candidate predating the label is spared, not swept.
+        assert!(!names_the_same_config_document(
+            Platform::Windows,
+            r"C:\ws\.devcontainer\devcontainer.json",
+            None,
+        ));
+        // And the posix side is unaffected, including the shapes these tests use.
+        assert!(names_the_same_config_document(
+            Platform::Other,
+            CONFIG,
+            Some(CONFIG)
+        ));
+        assert!(!names_the_same_config_document(
+            Platform::Other,
+            CONFIG,
+            Some(SIBLING_CONFIG)
+        ));
     }
 
     fn workspace_selector() -> String {
