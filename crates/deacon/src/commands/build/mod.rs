@@ -610,6 +610,35 @@ async fn validate_buildkit_requirement(
     }
 }
 
+/// `build` is docker-only. Refuse a podman selection instead of serving it with
+/// docker.
+///
+/// Podman parity for `build` is a tracked deferral (#30), and that is fine — what
+/// was not fine is that `--runtime podman` was ACCEPTED and silently ignored, so
+/// `deacon build --runtime podman` exited 0 having built with docker on a machine
+/// with no podman installed at all (#692). A capability we do not have must be a
+/// clear error, never a quiet substitution (constitution IV).
+///
+/// The selection is resolved the same way every other command resolves it, so a
+/// podman chosen by `--docker-path podman` — the reference's own way of choosing
+/// it — is refused here too, not just an explicit `--runtime podman`.
+async fn refuse_unsupported_runtime(
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
+    docker_path: &str,
+) -> Result<()> {
+    use deacon_core::runtime::{RuntimeFactory, RuntimeKind};
+
+    if RuntimeFactory::detect_runtime_for_path(runtime, docker_path).await == RuntimeKind::Podman {
+        return Err(anyhow!(
+            "`deacon build` does not support podman yet, and will not silently \
+             build with docker instead. Podman parity for `build` is tracked in \
+             https://github.com/get2knowio/deacon/issues/30. Use `deacon up`, which \
+             does support podman, or select docker explicitly with `--runtime docker`."
+        ));
+    }
+    Ok(())
+}
+
 /// Execute the build command.
 ///
 /// Loads the DevContainer configuration (from the provided path or by discovery),
@@ -634,13 +663,19 @@ async fn validate_buildkit_requirement(
 /// #[tokio::main]
 /// async fn main() {
 ///     let args = BuildArgs::default();
-///     let _ = execute_build(args).await;
+///     let _ = execute_build(args, None).await;
 /// }
 /// ```
 #[instrument(skip(args))]
-pub async fn execute_build(args: BuildArgs) -> Result<()> {
+pub async fn execute_build(
+    args: BuildArgs,
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
+) -> Result<()> {
     let output_format = args.output_format.clone();
-    let outcome = execute_build_inner(args).await;
+    let outcome = match refuse_unsupported_runtime(runtime, &args.docker_path).await {
+        Ok(()) => execute_build_inner(args).await,
+        Err(e) => Err(e),
+    };
     if let Err(err) = &outcome {
         // #594: a failure gets a result document too. Before this, `build
         // --output-format json` printed one on success and NOTHING on failure,
@@ -1764,7 +1799,7 @@ async fn execute_compose_build(
     // what lets it ride this invocation instead of a second one (#595). No
     // Features are declared on this path, so the entries are the base image's own
     // plus the config pick.
-    let docker = deacon_core::docker::CliDocker::new();
+    let docker = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
     let base_image = resolve_compose_base_image(&plan, &project, config_path).await;
     let metadata_label = compose_metadata_label(&docker, base_image.as_deref(), raw_config).await;
 
@@ -2045,8 +2080,11 @@ async fn execute_compose_build_with_features(
         Some(&build_options),
         host_ca_set,
         // `deacon build` is docker-only today; podman parity for the build
-        // command is tracked separately (issue #30 deferred items).
-        &deacon_core::docker::CliDocker::new(),
+        // command is tracked separately (issue #30 deferred items). A podman
+        // SELECTION is now refused up front rather than silently served by
+        // docker (#692), so reaching here means the flavor really is docker —
+        // but the BINARY is still the user's to choose.
+        &deacon_core::docker::CliDocker::with_path(args.docker_path.clone()),
         LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
         // #436: record `devcontainer.metadata` on the image this build produces.
         // The label rides the Feature build itself rather than a second build that
@@ -2208,7 +2246,7 @@ async fn execute_single_container_build(
     use deacon_core::docker::Docker;
     use deacon_core::dockerfile_utils::{find_user_statement, resolve_base_image};
 
-    let cli = deacon_core::docker::CliDocker::new();
+    let cli = deacon_core::docker::CliDocker::with_path(args.docker_path.clone());
 
     // The base Dockerfile this build starts from, plus the hash that names its
     // deterministic tag. An image-reference configuration has no Dockerfile of its
@@ -2641,7 +2679,7 @@ async fn execute_docker_build(
     {
         use deacon_core::docker::{CliDocker, Docker};
 
-        let docker = CliDocker::new();
+        let docker = CliDocker::with_path(args.docker_path.clone());
 
         // Check Docker availability
         docker.check_docker_installed()?;

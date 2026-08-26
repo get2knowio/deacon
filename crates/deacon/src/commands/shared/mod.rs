@@ -1,28 +1,28 @@
 //! Shared helpers for command implementations.
 
-use deacon_core::runtime::{
-    ContainerRuntimeImpl, DockerRuntime, PodmanRuntime, RuntimeFactory, RuntimeKind,
-};
+use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory, RuntimeKind};
 
-/// Select the container runtime for a consumer command, honoring
-/// `--runtime`/`DEACON_CONTAINER_RUNTIME` (via [`RuntimeFactory::detect_runtime`])
-/// and the `--docker-path` override for the docker runtime.
+/// Select the container runtime for a consumer command.
 ///
-/// Every command that talks to a container (`up`, `exec`, `down`,
-/// `run-user-commands`, `set-up`) MUST select its runtime this way. Hardcoding
-/// `CliDocker::new()` silently ignores a podman selection, so the command talks
-/// to docker while the container lives in podman → "No such container" /
-/// "No running container found".
-pub(crate) fn resolve_runtime(
+/// This is the ONE place a runtime is chosen. It honors both knobs, which used to
+/// be honored by different subsets of the commands (#692): `--runtime` /
+/// `DEACON_CONTAINER_RUNTIME` picks the flavor, `--docker-path` /
+/// `DEACON_DOCKER_PATH` picks the binary, and with no explicit flavor the BINARY
+/// decides — the reference has no runtime flag and detects podman exactly that
+/// way.
+///
+/// Every command that talks to a container MUST select its runtime here.
+/// Hardcoding `CliDocker::new()` ignores BOTH knobs, so the command talks to
+/// docker while the container lives in podman → "No such container" / "No
+/// running container found"; `RuntimeFactory::create_runtime` honors the flavor
+/// but drops the path, so `--docker-path` silently does nothing. `build` did the
+/// first and `up` the second.
+pub(crate) async fn resolve_runtime(
     cli_runtime: Option<RuntimeKind>,
     docker_path: &str,
 ) -> ContainerRuntimeImpl {
-    match RuntimeFactory::detect_runtime(cli_runtime) {
-        RuntimeKind::Podman => ContainerRuntimeImpl::Podman(PodmanRuntime::new()),
-        RuntimeKind::Docker => {
-            ContainerRuntimeImpl::Docker(DockerRuntime::with_path(docker_path.to_string()))
-        }
-    }
+    let kind = RuntimeFactory::detect_runtime_for_path(cli_runtime, docker_path).await;
+    RuntimeFactory::create_runtime_with_path(kind, docker_path)
 }
 
 pub(crate) mod build_resolution;

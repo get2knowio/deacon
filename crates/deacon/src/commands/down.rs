@@ -172,7 +172,9 @@ async fn execute_down_all(
 ) -> Result<()> {
     debug!("Finding all containers with matching labels");
 
-    let docker = crate::commands::shared::resolve_runtime(runtime, &args.docker_path).cli_docker();
+    let docker = crate::commands::shared::resolve_runtime(runtime, &args.docker_path)
+        .await
+        .cli_docker();
 
     // `--all` sweeps *every* container for this workspace, including stale
     // ones created under an older/different config. Match on the durable,
@@ -360,7 +362,9 @@ async fn execute_container_down(
         );
     }
 
-    let docker = crate::commands::shared::resolve_runtime(runtime, &args.docker_path).cli_docker();
+    let docker = crate::commands::shared::resolve_runtime(runtime, &args.docker_path)
+        .await
+        .cli_docker();
 
     // Determine if we should remove based on flags
     let should_remove = args.remove || args.force;

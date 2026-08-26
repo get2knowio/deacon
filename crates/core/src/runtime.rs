@@ -72,6 +72,63 @@ impl RuntimeFactory {
         cli_runtime.unwrap_or(RuntimeKind::Docker)
     }
 
+    /// Resolve the runtime for a specific CLI binary.
+    ///
+    /// Precedence, and clap owns the first two: explicit `--runtime` (or
+    /// `DEACON_CONTAINER_RUNTIME`) wins outright; otherwise the BINARY decides.
+    ///
+    /// Asking the binary is what the reference does — it has no runtime flag at
+    /// all and detects podman by running `<dockerPath> -v` and looking for
+    /// `podman` in the output (`isPodman`, `src/spec-shutdown/dockerUtils.ts` at
+    /// v0.87.0). Two shapes need it and neither is exotic: `--docker-path podman`,
+    /// which is how the reference's own podman suite selects podman; and the
+    /// `podman-docker` package, which installs a `docker` shim, so even the
+    /// DEFAULT path can be podman (#692).
+    ///
+    /// A probe that fails — missing binary, non-zero exit, unreadable output —
+    /// yields `Docker`. That is the reference's behavior too (`isPodman` catches
+    /// and returns false), and it is the right fallback here: an absent binary
+    /// must surface as the command's own clear error when it runs the thing, not
+    /// as a confusing misdetection at selection time.
+    pub async fn detect_runtime_for_path(
+        cli_runtime: Option<RuntimeKind>,
+        runtime_path: &str,
+    ) -> RuntimeKind {
+        if let Some(kind) = cli_runtime {
+            return kind;
+        }
+        if Self::binary_reports_podman(runtime_path).await {
+            RuntimeKind::Podman
+        } else {
+            RuntimeKind::Docker
+        }
+    }
+
+    async fn binary_reports_podman(runtime_path: &str) -> bool {
+        match tokio::process::Command::new(runtime_path)
+            .arg("-v")
+            .output()
+            .await
+        {
+            Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+                .to_ascii_lowercase()
+                .contains("podman"),
+            _ => false,
+        }
+    }
+
+    /// Create a runtime instance for `kind`, running `runtime_path` as its CLI.
+    pub fn create_runtime_with_path(kind: RuntimeKind, runtime_path: &str) -> ContainerRuntimeImpl {
+        match kind {
+            RuntimeKind::Docker => {
+                ContainerRuntimeImpl::Docker(DockerRuntime::with_path(runtime_path.to_string()))
+            }
+            RuntimeKind::Podman => {
+                ContainerRuntimeImpl::Podman(PodmanRuntime::with_path(runtime_path.to_string()))
+            }
+        }
+    }
+
     /// Create runtime instance based on RuntimeKind
     pub fn create_runtime(kind: RuntimeKind) -> Result<ContainerRuntimeImpl> {
         match kind {
@@ -775,5 +832,83 @@ mod tests {
         let runtime = DockerRuntime::new();
         let wrapped = ContainerRuntimeImpl::Docker(runtime);
         assert_eq!(wrapped.runtime_name(), "docker");
+    }
+
+    /// #692: with no explicit `--runtime`, the BINARY decides — which is how the
+    /// reference selects podman (it has no runtime flag at all) and how the
+    /// `podman-docker` shim gets noticed even at the default `docker` path.
+    ///
+    /// Unix-only because it needs an executable shim; the logic it covers is
+    /// platform-agnostic.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runtime_flavor_is_detected_from_the_binary_when_not_given() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("deacon-rt-detect-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let make = |name: &str, body: &str| {
+            let path = dir.join(name);
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "#!/bin/sh\n{body}").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path.to_string_lossy().to_string()
+        };
+
+        let podmanish = make("podmanish", "echo 'podman version 4.9.3'");
+        let dockerish = make("dockerish", "echo 'Docker version 27.0.0, build abc'");
+        let failing = make("failing", "exit 1");
+
+        // The binary is asked, and its answer is taken.
+        assert_eq!(
+            RuntimeFactory::detect_runtime_for_path(None, &podmanish).await,
+            RuntimeKind::Podman
+        );
+        assert_eq!(
+            RuntimeFactory::detect_runtime_for_path(None, &dockerish).await,
+            RuntimeKind::Docker
+        );
+
+        // An explicit selection wins over whatever the binary says — clap owns
+        // flag > env, and neither may be overridden by a probe.
+        assert_eq!(
+            RuntimeFactory::detect_runtime_for_path(Some(RuntimeKind::Docker), &podmanish).await,
+            RuntimeKind::Docker
+        );
+        assert_eq!(
+            RuntimeFactory::detect_runtime_for_path(Some(RuntimeKind::Podman), &dockerish).await,
+            RuntimeKind::Podman
+        );
+
+        // A probe that cannot answer falls back to docker rather than guessing:
+        // a missing or broken binary must surface as the command's own error when
+        // it runs the thing, not as a misdetection here.
+        assert_eq!(
+            RuntimeFactory::detect_runtime_for_path(None, &failing).await,
+            RuntimeKind::Docker
+        );
+        assert_eq!(
+            RuntimeFactory::detect_runtime_for_path(None, "/nonexistent/definitely-not-a-runtime")
+                .await,
+            RuntimeKind::Docker
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The path reaches the constructed runtime — dropping it is what made
+    /// `--docker-path` a no-op on `up` (#692).
+    #[test]
+    fn create_runtime_with_path_carries_the_binary() {
+        let docker = RuntimeFactory::create_runtime_with_path(RuntimeKind::Docker, "/opt/mydocker");
+        assert_eq!(docker.cli_docker().runtime_path(), "/opt/mydocker");
+        assert_eq!(docker.runtime_name(), "docker");
+
+        let podman = RuntimeFactory::create_runtime_with_path(RuntimeKind::Podman, "/opt/mypodman");
+        assert_eq!(podman.cli_docker().runtime_path(), "/opt/mypodman");
+        assert_eq!(podman.runtime_name(), "podman");
+        assert!(podman.cli_docker().is_podman());
     }
 }

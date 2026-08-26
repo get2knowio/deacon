@@ -54,7 +54,7 @@ use deacon_core::container::ContainerSelector;
 use deacon_core::errors::DeaconError;
 use deacon_core::features::{FeatureMergeConfig, FeatureMerger};
 use deacon_core::host_ca::{CorporateCaSet, HOST_CA_BUNDLE_PATH, discover_corporate_set};
-use deacon_core::runtime::{ContainerRuntimeImpl, RuntimeFactory};
+use deacon_core::runtime::ContainerRuntimeImpl;
 use deacon_core::secrets::SecretsCollection;
 use deacon_core::state::StateManager;
 use tracing::{debug, info, instrument, warn};
@@ -127,9 +127,10 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
     let _normalized = normalize_and_validate_args(&args)?;
     debug!("Args validated and normalized successfully");
 
-    // Create runtime based on args
-    let runtime_kind = RuntimeFactory::detect_runtime(args.runtime);
-    let runtime = RuntimeFactory::create_runtime(runtime_kind)?;
+    // Create runtime based on args. Goes through the shared resolver so BOTH
+    // knobs reach it: `RuntimeFactory::create_runtime` takes no path, so `up`
+    // used to honor `--runtime` and silently drop `--docker-path` (#692).
+    let runtime = crate::commands::shared::resolve_runtime(args.runtime, &args.docker_path).await;
     debug!("Using container runtime: {}", runtime.runtime_name());
 
     // Step 2: Resolve effective GPU mode if detect mode is requested
