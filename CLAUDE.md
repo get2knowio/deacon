@@ -158,6 +158,17 @@ Pattern axes worth re-running periodically:
   `FeatureMetadata` should be checked against `apply_variable_substitution`).
 - Workspace-folder resolution (any subcommand reading `--workspace-folder` should match
   `up`'s pattern: keep user path for config + identity, walk git-root only for mount source).
+- Identity-label spelling (any site that BUILDS a `devcontainer.local_folder` /
+  `devcontainer.config_file` value from a path must call `label_path::for_path`, never
+  `workspace::absolutize` directly; any site that COMPARES two of them must call
+  `label_path::normalize(Platform::HOST, …)` on **both** sides — the candidate's is a
+  foreign string, and the local one is only normalized if it was set through
+  `with_config_file` rather than field-by-field). Off Windows every one of these is the
+  identity, so a missed site — or a comparison normalized on one side only — is invisible
+  on Linux CI and shows up as a container the reference or the VS Code extension cannot find
+  (#682; the one-sided compare was caught by the Windows lane, and the regression test for it
+  takes the platform as a parameter so it runs everywhere). `--id-label` values are exempt —
+  the reference never normalizes those either.
 - State markers (any container reset / replace operation should clear markers).
 - Stdio contract (any `silent: false` `ExecConfig` on the `up` flow should set
   `stdout_to_stderr: true`).

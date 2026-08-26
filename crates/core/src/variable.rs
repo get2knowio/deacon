@@ -171,8 +171,13 @@ impl SubstitutionContext {
         // Capture environment variables
         let local_env: HashMap<String, String> = env::vars().collect();
 
-        // Generate deterministic devcontainer ID
-        let devcontainer_id = Self::generate_devcontainer_id(&local_workspace_folder);
+        // Generate deterministic devcontainer ID. From the LABEL form of the workspace path,
+        // not from `local_workspace_folder` — `${localWorkspaceFolder}` must stay the path
+        // the user opened (spec `devcontainerjson-reference.md:157`), while the id is a hash
+        // of label values and those are normalized (#682). Off Windows the two strings are
+        // identical.
+        let devcontainer_id =
+            Self::generate_devcontainer_id(&crate::label_path::for_path(workspace_path));
 
         debug!(
             "Created substitution context - workspace: {}, devcontainer_id: {}",

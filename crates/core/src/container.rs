@@ -61,9 +61,14 @@ pub struct ContainerIdentity {
     /// `devcontainer.local_folder` label so VS Code's Dev Containers
     /// extension and `docker ps --filter` queries can match this
     /// container by workspace (#68).
+    ///
+    /// Holds the **label form** of the path — [`crate::label_path::for_path`] — not a path
+    /// to open. Off Windows the two are the same string; on Windows the drive letter is
+    /// folded to lowercase so this matches what the reference writes (#682).
     pub local_folder: Option<PathBuf>,
     /// Absolute host path to the resolved `devcontainer.json`. Emitted as
-    /// the `devcontainer.config_file` label (#68).
+    /// the `devcontainer.config_file` label (#68). In the label form, like
+    /// [`Self::local_folder`].
     pub config_file: Option<PathBuf>,
     /// In-container path of the injected corporate-CA bundle, when host-CA
     /// injection was enabled for this `up` (016). Emitted as the
@@ -159,7 +164,11 @@ impl ContainerIdentity {
         // canonicalized: the label is the identity, and the reference records the path the
         // user named — resolving a symlink here would make two spellings of the same
         // invocation disagree with the reference and with the reported workspace (#665).
-        let local_folder = Some(crate::workspace::absolutize(workspace_path));
+        //
+        // Then normalized into the reference's LABEL form (#682) — on Windows that folds the
+        // drive letter to lowercase, which is what the reference and the VS Code extension
+        // write. Off Windows it is the identity, so nothing here changes.
+        let local_folder = Some(PathBuf::from(crate::label_path::for_path(workspace_path)));
 
         debug!(
             workspace_hash = %workspace_hash,
@@ -188,9 +197,11 @@ impl ContainerIdentity {
     /// the `devcontainer.config_file` label can be emitted (#68).
     pub fn with_config_file(mut self, config_file: impl Into<PathBuf>) -> Self {
         let p = config_file.into();
-        // Absolutized, not canonicalized, for the same reason as `local_folder` (#665):
-        // the label records the path the caller named.
-        self.config_file = Some(crate::workspace::absolutize(&p));
+        // Absolutized, not canonicalized, for the same reason as `local_folder` (#665): the
+        // label records the path the caller named. Normalized into the label form for the
+        // same reason as `local_folder` too (#682) — the reference normalizes BOTH labels,
+        // and a pair that agreed on only one of them would still be a different identity.
+        self.config_file = Some(PathBuf::from(crate::label_path::for_path(&p)));
         self
     }
 
@@ -544,9 +555,13 @@ mod tests {
         // would pass on Linux and fail on macOS, where a temp dir lives under the `/var` →
         // `/private/var` symlink. devcontainer.config_file is only emitted once
         // `with_config_file` has been called (see test below).
-        let expected_local_folder = crate::workspace::absolutize(workspace_path)
-            .display()
-            .to_string();
+        //
+        // Built with `label_path::for_path`, not `absolutize`, because the label is the
+        // NORMALIZED form (#682). Off Windows the two agree; on Windows they do not, and
+        // spelling this expectation with `absolutize` is precisely how the old behavior went
+        // unnoticed — a temp dir there is `C:\Users\RUNNER~1\…`, so this assertion was
+        // pinning the un-normalized drive letter on the one platform where it mattered.
+        let expected_local_folder = crate::label_path::for_path(workspace_path);
         assert_eq!(
             labels.get(LABEL_LOCAL_FOLDER),
             Some(&expected_local_folder),
@@ -580,15 +595,54 @@ mod tests {
             ContainerIdentity::new(workspace_path, &config).with_config_file(config_file.clone());
         let labels = identity.labels();
 
-        let expected_config_file = crate::workspace::absolutize(&config_file)
-            .display()
-            .to_string();
+        let expected_config_file = crate::label_path::for_path(&config_file);
         assert_eq!(
             labels.get(LABEL_CONFIG_FILE),
             Some(&expected_config_file),
             "devcontainer.config_file must be the absolute path to the resolved devcontainer.json"
         );
         assert!(labels.contains_key(LABEL_LOCAL_FOLDER));
+    }
+
+    /// One folder, two spellings of its drive letter, one dev container (#682).
+    ///
+    /// This is the whole of the Windows divergence in one assertion: the reference
+    /// lowercases the drive before writing either identity label, so `C:\ws` and `c:\ws`
+    /// name the same container and hash to the same `${devcontainerId}`. Windows-only
+    /// because the normalization is the identity everywhere else — there is no way to write
+    /// two spellings of one path on Linux for it to disagree about. It runs on the
+    /// `dev-fast` Windows lane.
+    #[cfg(windows)]
+    #[test]
+    fn drive_letter_case_does_not_split_one_identity_on_windows() {
+        let config = DevContainerConfig {
+            image: Some("alpine:3.18".to_string()),
+            ..Default::default()
+        };
+
+        let upper = ContainerIdentity::new(Path::new(r"C:\ws\proj"), &config)
+            .with_config_file(Path::new(r"C:\ws\proj\.devcontainer\devcontainer.json"));
+        let lower = ContainerIdentity::new(Path::new(r"c:\ws\proj"), &config)
+            .with_config_file(Path::new(r"c:\ws\proj\.devcontainer\devcontainer.json"));
+
+        assert_eq!(
+            upper.labels().get(LABEL_LOCAL_FOLDER),
+            Some(&r"c:\ws\proj".to_string()),
+            "the drive letter must be folded to lowercase, as the reference writes it"
+        );
+        assert_eq!(
+            upper.labels().get(LABEL_LOCAL_FOLDER),
+            lower.labels().get(LABEL_LOCAL_FOLDER)
+        );
+        assert_eq!(
+            upper.labels().get(LABEL_CONFIG_FILE),
+            lower.labels().get(LABEL_CONFIG_FILE)
+        );
+        assert_eq!(
+            compute_dev_container_id(&upper.id_hash_labels()),
+            compute_dev_container_id(&lower.id_hash_labels()),
+            "${{devcontainerId}} is a hash of those labels, so it must not split either"
+        );
     }
 
     #[test]
@@ -653,9 +707,7 @@ mod tests {
             .workspace_label_selector()
             .expect("local_folder should be set for an existing temp dir");
 
-        let expected_local_folder = crate::workspace::absolutize(workspace_path)
-            .display()
-            .to_string();
+        let expected_local_folder = crate::label_path::for_path(workspace_path);
         assert_eq!(
             selector,
             format!("{}={}", LABEL_LOCAL_FOLDER, expected_local_folder),
@@ -1803,6 +1855,32 @@ pub struct CurrentContainer<'a> {
 /// None. This is post-provisioning hygiene: a container that could not be
 /// listed or stopped is logged and skipped, never surfaced as an `up` failure.
 /// Returns the ids actually stopped, so callers and tests can observe the sweep.
+/// Does a candidate container's `devcontainer.config_file` label name the same document the
+/// current `up` resolved?
+///
+/// **Both sides are normalized, not just the candidate's** (#682). The candidate's label is a
+/// foreign string — written by whatever tool created that container, possibly an older deacon
+/// that did not normalize — and the reference compares normalized values for exactly that
+/// reason (`findDevContainerByNormalizedLabels`). But `current` is not reliably normalized
+/// either: it comes from `ContainerIdentity::config_file`, which `with_config_file` normalizes
+/// and a field-by-field construction does not. Normalizing one side only makes this sweep
+/// spare a container it should stop — invisibly off Windows, where the normalization is the
+/// identity and the asymmetry cannot show. [`crate::label_path::normalize`] is idempotent, so
+/// re-normalizing an already-normalized value costs nothing.
+///
+/// A missing label is NOT a match: a candidate predating the label is spared, the sweep's
+/// standing safe direction.
+fn names_the_same_config_document(
+    platform: crate::label_path::Platform,
+    current: &str,
+    candidate: Option<&str>,
+) -> bool {
+    candidate.is_some_and(|candidate| {
+        crate::label_path::normalize(platform, candidate)
+            == crate::label_path::normalize(platform, current)
+    })
+}
+
 #[instrument(skip(docker))]
 pub async fn stop_superseded_containers<D>(
     docker: &D,
@@ -1915,7 +1993,11 @@ where
         // predating the label (older deacon) also lands here and is spared, the
         // same safe direction as the inspect failure above.
         if let Some(current_config_file) = current_config_file.as_ref()
-            && labels.get(LABEL_CONFIG_FILE) != Some(current_config_file)
+            && !names_the_same_config_document(
+                crate::label_path::Platform::HOST,
+                current_config_file,
+                labels.get(LABEL_CONFIG_FILE).map(String::as_str),
+            )
         {
             debug!(
                 container_id = %container.id,
@@ -2107,6 +2189,55 @@ mod supersede_tests {
             id_labels: None,
             metadata_label: None,
         }
+    }
+
+    /// The document test is symmetric under normalization, on a platform where
+    /// normalization does something (#682).
+    ///
+    /// This runs everywhere by passing the platform explicitly, which is the point: the
+    /// Windows lane caught a version of this comparison that normalized only the candidate's
+    /// side, and no Linux test could have — off Windows both calls are the identity, so an
+    /// asymmetric comparison and a symmetric one are indistinguishable.
+    #[test]
+    fn the_config_document_test_normalizes_both_sides() {
+        use crate::label_path::Platform;
+
+        // The identity's side un-normalized (a field-by-field construction), the candidate's
+        // side spelled differently again. Same document.
+        assert!(names_the_same_config_document(
+            Platform::Windows,
+            r"C:\ws\.devcontainer\devcontainer.json",
+            Some("c:/ws/.devcontainer/devcontainer.json"),
+        ));
+        // Both already normalized — re-normalizing must not break the match.
+        assert!(names_the_same_config_document(
+            Platform::Windows,
+            r"c:\ws\.devcontainer\devcontainer.json",
+            Some(r"c:\ws\.devcontainer\devcontainer.json"),
+        ));
+        // A genuinely different document is still different.
+        assert!(!names_the_same_config_document(
+            Platform::Windows,
+            r"C:\ws\.devcontainer\devcontainer.json",
+            Some(r"C:\ws\.devcontainer\sub\devcontainer.json"),
+        ));
+        // A candidate predating the label is spared, not swept.
+        assert!(!names_the_same_config_document(
+            Platform::Windows,
+            r"C:\ws\.devcontainer\devcontainer.json",
+            None,
+        ));
+        // And the posix side is unaffected, including the shapes these tests use.
+        assert!(names_the_same_config_document(
+            Platform::Other,
+            CONFIG,
+            Some(CONFIG)
+        ));
+        assert!(!names_the_same_config_document(
+            Platform::Other,
+            CONFIG,
+            Some(SIBLING_CONFIG)
+        ));
     }
 
     fn workspace_selector() -> String {
