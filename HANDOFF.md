@@ -15,10 +15,10 @@ points at it.
 
 ## Where things stand
 
-_Last updated: 2026-08-26, at `d540c7e` on `main`._
+_Last updated: 2026-08-26, at `dad1550` on `main`._
 
-- **Ledger: 225 recorded behaviors — 0 open nonconformance**, 10 deacon-follows-spec,
-  15 documented choice, 24 deacon extension, 176 conformant. Zero `UNADJUDICATED` records.
+- **Ledger: 228 recorded behaviors — 0 open nonconformance**, 10 deacon-follows-spec,
+  15 documented choice, 24 deacon extension, 179 conformant. Zero `UNADJUDICATED` records.
 - **The verdict of record is the latest nightly**, never this file:
   `gh run list --workflow=parity.yml --branch=main`.
 - Nothing in flight. No open work assigned.
@@ -30,6 +30,11 @@ _Last updated: 2026-08-26, at `d540c7e` on `main`._
 
 | PR | What |
 |---|---|
+| #698 `dad1550` | records that podman `build` works, and bounds that claim |
+| #697 `5e674f6` | `build` uses the runtime it was told to use — flavor and binary (closes #694) |
+| #696 `7bee127` | `_REMOTE_USER_HOME` read from the image's passwd DB (closes #695) — batch 23 |
+| #693 `1097d40` | `--docker-path` honored on every subcommand; flavor detected from the binary (closes #692) — batch 22 |
+| #691 `9af1867` | Compose supplies the build defaults the reference hand-codes — pinned (no defect) — batch 21 |
 | #689 `d540c7e` | a concurrent container removal is waited out rather than guessed at (closes #688) — batch 20 |
 | #687 `6e76822` | Feature installs run as root; real Dockerfile `FROM`/`USER` variable resolution (closes #685, #686) — batch 19 |
 | #683 `d989b36` | Windows identity-label normalization (closes #682) — batch 18 |
@@ -43,7 +48,7 @@ _Last updated: 2026-08-26, at `d540c7e` on `main`._
 ## The arc: [#480](https://github.com/get2knowio/deacon/issues/480), parity mining
 
 The long-running task is mining the reference CLI's own test suite and real-world configs for
-behaviors deacon has never been compared against, one upstream file at a time. Twenty
+behaviors deacon has never been compared against, one upstream file at a time. Twenty-three
 batches so far.
 
 **The method has held for every batch and should not be shortcut:**
@@ -117,6 +122,28 @@ batches so far.
   retry matches docker's exact phrase; podman's wording is unmeasured, so it is recorded as a known
   gap in the code, the ledger row and the test's skip — not guessed at. A matcher for an unobserved
   string is a matcher that silently matches nothing.
+- **When a fix would entrench a limitation, first measure whether the limitation is real.** #694
+  was going to make `build` REFUSE podman. Measuring instead showed the reference does not branch
+  its build command on podman, `podman buildx` is an alias for `podman build`, `podman build`
+  supports `--build-context`, and deacon already had both podman behaviors — so the refusal would
+  have permanently rejected a configuration that demonstrably works (proven in CI:
+  `smoke_build_json_then_text` passes under `DEACON_CONTAINER_RUNTIME=podman`). The asymmetry is
+  the point: entrenching a false limitation is permanent, testing costs one CI run.
+- **A comment excusing a gap is a lead, not a boundary.** Three in one stretch, each hiding real
+  work: `dockerfile_utils`' "small subset … out of scope" (#686), `shared/mod.rs`'s warning that
+  `CliDocker::new()` ignores a podman selection — which `build` then did at four sites (#692) —
+  and `// deacon build is docker-only today` (#694). Grep for "for now", "out of scope", "today".
+- **A warning comment is not a guard.** If a rule matters, something must enforce it.
+- **When only the container can know an answer, emit a lookup — do not compute a guess on the
+  host.** `_REMOTE_USER_HOME` was `/home/<name>` by string formatting; the reference resolves it
+  in-image from the passwd DB (#695). Worth grepping for other host-side guesses about container
+  state.
+- **Exit 0 means "did not fail", never "did the thing".** Cost three separate wrong conclusions:
+  `build --runtime podman` exiting 0 with no podman installed; `doctor`/`down` "ignoring"
+  `--runtime` when they had simply not failed; an image-reference `build` "ignoring"
+  `--docker-path` when that shape never invokes a binary.
+- **A watch-to-fail that PASSES means the test does not cover the thing.** Not that the thing is
+  fine. Sabotage every assertion you rely on.
 - **Sabotage distinguishes coverage from green.** Disabling an input and re-running is the only
   way to tell a case that covers something from a case that merely passes. It has found a
   passing-for-the-wrong-reason case, a fixture write into the repo, and a broken port.
@@ -129,22 +156,23 @@ batches so far.
 
 Do not start any of it without being asked.
 
-1. **Upstream files still uncited by anything in `parity/`:** `dockerComposeUtils` (5),
-   `cli.podman` (2), `getHomeFolder` (1), `getEntPasswd` (1). `cli.up` (21) and `cli.test` (11)
-   are partly mined. Two files were mined with a part deliberately left in each:
-   `dockerUtils` (batch 20) left **`inspectImageInRegistry`**, which has no deacon equivalent at
-   all — deacon pulls and inspects locally, where the reference reads an image's metadata WITHOUT
-   pulling it. A real behavioral difference that surfaced on no observable channel; the place it
-   would show is a config whose image can be inspected but not pulled. (`qualifyImageName` is NOT
-   a lead: it only builds a registry API path for that function, and deacon's same-sounding
-   `qualify_short_remote` is an unrelated podman short-name helper. Do not "align" them.)
-   `dockerfileUtils` (48) was mined in batch 19 — **with one part deliberately left**:
-   `supportsBuildContexts` is NOT ported.
-   Upstream uses it to decide whether to prepend `# syntax=docker/dockerfile:1.4` to the
-   generated Dockerfile; deacon emits no syntax directive at all while always passing
-   `--build-context`. Every batch-19 build passed because modern BuildKit needs no directive,
-   but on an older Docker the reference would succeed where deacon fails. **UNMEASURED** —
-   demonstrating it needs an old BuildKit this dev container does not have.
+1. **Upstream files still uncited by anything in `parity/`:** `cli.up` (21) and `cli.test` (11)
+   are partly mined; nothing else of size remains. Batches 19–23 closed `dockerfileUtils` (48),
+   `dockerUtils` (5), `dockerComposeUtils` (5), `cli.podman` (2), `getHomeFolder` (1) and
+   `getEntPasswd` (1). Three parts were deliberately left, each with the place it would surface:
+   - **`supportsBuildContexts`** (`dockerfileUtils`). Upstream uses it to decide whether to
+     prepend `# syntax=docker/dockerfile:1.4`; deacon emits no syntax directive while always
+     passing `--build-context`. Fine on modern BuildKit; on an OLDER Docker the reference would
+     succeed where deacon fails. **UNMEASURED** — needs an old BuildKit this container lacks.
+   - **`inspectImageInRegistry`** (`dockerUtils`). No deacon equivalent: deacon pulls and inspects
+     locally where the reference reads image metadata WITHOUT pulling. Would surface on a config
+     whose image can be inspected but not pulled. (`qualifyImageName` is NOT a lead — it only
+     builds a registry API path for that function, and deacon's same-sounding
+     `qualify_short_remote` is an unrelated podman short-name helper. Do not "align" them.)
+   - **The Podman lane's `build` coverage** (#30). `integration_build` is NOT in the
+     `mvp-integration` profile that job runs, so "podman build works" rests on `smoke_basic`'s
+     build tests and `parity_hermetic`'s build cases — not the full surface, and not
+     Feature-installing builds. Widening that selection is the next concrete step.
 2. The four consciously-dropped coverage areas named in `parity/SPEC_STATUS.md` under
    "Coverage this document does *not* claim".
 3. `up_dotfiles.rs`'s 12 ignored, network-dependent tests.
@@ -211,6 +239,28 @@ lints and fmt drift in new test files.
   19 saw it go red on `read ECONNRESET` fetching a Feature from ghcr.io — the REFERENCE exited 1,
   deacon did not, so the exit codes diverged. Read the reference's own stderr in the failure before
   suspecting the change; re-running cleared it.
+- **`gh pr checks` lists check-runs that EXIST — a MISSING check reads exactly like a green one.**
+  Re-running a workflow deletes its check-run and creates the replacement only when the job
+  starts, so a `startup_failure` leaves the check absent and
+  `gh pr checks | select(.bucket != "pass")` returns nothing. Verify by COUNT and PRESENCE:
+  `gh api repos/<o>/<r>/commits/<sha>/check-runs`. It can also return the PREVIOUS run's results
+  before a new run registers — key a watch on the RUN ID for a specific head SHA.
+- **Before citing a lane as evidence, list the binaries it actually ran**
+  (`gh run view <id> --log | grep -oE 'deacon::[a-z_0-9]+' | sort -u`). The Podman job does not
+  run `integration_build`; a local `--profile default` does, which is how the same command gave
+  different answers in the two places.
+- **`live-certification` flakes on PR runs** (three in one day: oracle-side `ECONNRESET` twice, and
+  the resource-reclamation guard reporting a false leaked Compose network). It does not gate, and
+  `main`'s nightlies are green. **Read the failure before re-running** — "no case diverged, the
+  guard fired" is a different fact from "a case diverged".
+- **Podman is installed here (4.9.3) but cannot run containers** — rootless fails on `newuidmap`,
+  rootful on fuse. It DOES answer `-v`, which is enough to measure runtime-flavor detection.
+  Container-level podman behavior belongs to the CI lane. Useful inversion: `deacon <cmd>
+  --docker-path podman` failing with podman's OWN rootless error is positive evidence that deacon
+  selected and executed podman.
+- **The upstream checkout does not persist across sessions.** Re-clone into the CURRENT scratchpad:
+  `git clone --depth 1 --branch v0.87.0 https://github.com/devcontainers/cli.git upstream-cli`,
+  and verify with `git describe --tags` before trusting it as the oracle.
 - **The ledger-coverage check reads issue TITLES as conventional commits.** A `fix(<scope>)`
   outside `NON_BEHAVIORAL_SCOPES` owes a `SPEC_STATUS.md` row. If an issue genuinely owes none,
   retitle it `chore(<scope>)` and say why on the issue — that is the remedy the check's own
@@ -223,11 +273,15 @@ lints and fmt drift in new test files.
   `workspace::absolutize`, never `canonicalize`, at every site that reports, mounts or hashes;
   `trust.rs::canonicalize_workspace` is the deliberate exception and must not be unified with
   it), **#682** (identity-label values go through `label_path::for_path`, never `absolutize`,
-  and comparisons normalize **both** sides), **#685** (the Feature-install stage becomes `root`
-  after its `FROM` and restores the IMAGE's user — not the config's `containerUser` — on BOTH
-  generator entry points), **#686** (`dockerfile_utils` is a FULL port of the reference's
-  `dockerfileUtils.ts`; keep `crates/core/tests/dockerfile_utils_parity.rs` at zero divergences,
-  and **regenerate its fixture by re-measuring, never by hand-editing an expectation**), **#688**
-  (a removal that races another removal is waited out, never reported as done — `is_already_gone`
-  governs the REMOVE step and `stopping_is_moot` the STOP step, and they are deliberately not one
-  function).
+  and comparisons normalize **both** sides), **#684**/**#690**/**#698** (this file and the
+  ledger are refreshed in the same batch that changes them), **#685** (the Feature-install
+  stage becomes `root` after its `FROM` and restores the IMAGE's user — not the config's
+  `containerUser` — on BOTH generator entry points), **#686** (`dockerfile_utils` is a FULL
+  port of the reference's `dockerfileUtils.ts`; keep
+  `crates/core/tests/dockerfile_utils_parity.rs` at zero divergences, and **regenerate its
+  fixture by re-measuring, never by hand-editing an expectation**), **#692**/**#694** (runtime
+  selection goes through `shared::resolve_runtime` — flavor AND binary — never
+  `CliDocker::new()`), **#695** (a user's home is READ from the image's passwd DB, never
+  derived from the name), **#688** (a removal that races another removal is waited out, never
+  reported as done — `is_already_gone` governs the REMOVE step and `stopping_is_moot` the STOP
+  step, and they are deliberately not one function).
