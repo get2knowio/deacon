@@ -508,37 +508,37 @@ jobs:
     #     podman parses the whole value as a repo: "must contain registry and
     #     repository: invalid reference format"
     #
-    # (2) `integration_compose_features_build` — the WHOLE binary. Every one of its
-    # tests fails under podman, so a binary-level exclusion is both cleaner and
-    # more honest than naming seven. Tracked as #710, with #706 as the first
-    # symptom found.
+    # `integration_compose_features_build` USED to be excluded here in full — every
+    # one of its seven tests failed under podman — and it is back in because #710
+    # fixed the cause. That cause was NOT the one this comment used to assert, so
+    # the correction is worth keeping: the hypothesis on record was that podman
+    # delegates compose to an external `docker-compose` which then talks to the
+    # DOCKER daemon. Measured directly, podman does the opposite — it points the
+    # provider at its own socket, exporting `DOCKER_HOST=unix:///run/podman/podman.sock`
+    # (and `DOCKER_BUILDKIT=0`) into the provider's environment.
     #
-    # The measured shape: podman delegates compose to an EXTERNAL provider, and
-    # the lane's own log names it —
-    #   >>>> Executing external compose provider
-    #        "/usr/libexec/docker/cli-plugins/docker-compose" <<<<
-    # After that build, `podman tag <service-image> <target>` cannot find the image
-    # under ANY spelling: bare, `localhost/…`, or `docker.io/library/…` all return
-    # "image not known". So the compose build's result is not in podman's store,
-    # which makes every downstream step (tag, run, exec) miss.
+    # deacon never reached that delegation. `deacon build`'s compose path built its
+    # `ComposeManager` with `ComposeManager::new()`, whose `docker_path` defaults to
+    # the literal "docker", and `up`/`down`/`exec`/`read-configuration` passed the
+    # raw `--docker-path` flag — which `binary_for` maps to the flavor's own name
+    # only INSIDE `resolve_runtime`, so under `--runtime podman` it still read
+    # "docker". So deacon ran `docker compose` itself: the service image landed in
+    # DOCKER's store and every podman-side step after it missed.
     #
-    # TWO `localhost/` fixes were tried here and BOTH were measured wrong; this
-    # comment exists so nobody spends the afternoon rediscovering them:
-    #   - qualifying the compose service-image OVERRIDE broke two passing siblings.
-    #     A compose `image:` is parsed by the compose CLIENT, and docker-compose
-    #     reads `localhost/foo` as registry host `localhost`:
-    #       app Error Get "http://localhost/v2/": dial tcp [::1]:80: refused
-    #   - qualifying the `podman tag` SOURCE only moved the error from
-    #     `X: image not known` to `docker.io/library/X: image not known`, because
-    #     the probe found nothing under `localhost/` either.
-    # Neither is the fix, because the image is not in podman's store to begin with.
-    # The reference sidesteps the whole class: its override carries `build:`
-    # alongside `image:`, so Compose builds the image rather than resolving one.
+    # Measured with a shim on `--docker-path`, before: the named runtime received
+    # `-v`, `image inspect` and `tag`, and ZERO `compose` invocations. After: three,
+    # the service build among them. `build_runtime_routing` guards both axes
+    # hermetically and needs no daemon.
+    #
+    # Two `localhost/` fixes were tried against the old diagnosis and both were
+    # measured wrong. Neither could have worked, because the image was in another
+    # daemon entirely — a naming fix for a routing bug.
     - name: Run build tests against Podman (#30)
       run: |
         cargo nextest run --profile mvp-integration --no-fail-fast \
           --ignore-default-filter \
-          -E '(binary(=integration_build) | binary(=integration_build_output))
+          -E '(binary(=integration_build) | binary(=integration_build_output)
+               | binary(=integration_compose_features_build))
               - test(=concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag)
               - test(=build_honors_a_container_driver_builder_and_can_oci_export)
               - test(=build_honors_a_container_driver_builder_and_can_export_a_local_cache)'

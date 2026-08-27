@@ -1854,7 +1854,7 @@ impl Cli {
                     secret_registry: secret_registry.clone(),
                 };
 
-                execute_read_configuration(args).await?;
+                execute_read_configuration(args, self.runtime.map(|r| r.into())).await?;
                 Ok(())
             }
             Some(Commands::Config { command }) => {

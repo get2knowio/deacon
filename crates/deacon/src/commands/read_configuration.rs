@@ -1649,7 +1649,22 @@ async fn compute_merged_configuration<C: deacon_core::oci::HttpClient>(
 
 /// Execute the read-configuration command
 #[instrument(skip(args))]
-pub async fn execute_read_configuration(args: ReadConfigurationArgs) -> Result<()> {
+pub async fn execute_read_configuration(
+    mut args: ReadConfigurationArgs,
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
+) -> Result<()> {
+    // Every container-touching path below builds its client from `args.docker_path`
+    // — three `CliDocker::with_path` sites and the compose `ComposeManager`. The raw
+    // flag is the wrong input for that: `binary_for` maps an untouched default to the
+    // flavor's own name, so under `--runtime podman` it still reads "docker" and the
+    // command inspected the wrong daemon (#710, same class as #708). Resolve once,
+    // here, so every consumer below agrees on the binary.
+    args.docker_path = crate::commands::shared::resolve_runtime(runtime, &args.docker_path)
+        .await
+        .cli_docker()
+        .runtime_path()
+        .to_string();
+
     // Keep startup message at debug to avoid noisy INFO output for simple queries
     debug!("Starting read-configuration command execution");
     debug!(
@@ -2611,7 +2626,7 @@ mod tests {
             vec![],            // secrets_files
         );
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -2636,7 +2651,7 @@ mod tests {
             vec![],            // secrets_files
         );
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -2674,7 +2689,7 @@ mod tests {
             vec![],                     // secrets_files
         );
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -2709,7 +2724,7 @@ API_KEY=another-secret
             vec![secrets_path], // secrets_files
         );
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -2725,7 +2740,7 @@ API_KEY=another-secret
             vec![], // secrets_files
         );
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         // Error format changed to use shared config loader which returns DeaconError::Config
@@ -2765,7 +2780,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert_eq!(
@@ -2813,7 +2828,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -2854,7 +2869,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         // Should fail with a clear error (Docker unavailable or container not found)
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -2906,7 +2921,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
 
         // Test with mount_workspace_git_root = true (default)
@@ -2934,7 +2949,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -2976,7 +2991,7 @@ API_KEY=another-secret
         };
 
         // Capture output to verify workspace section
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
 
         // Note: In a real test we would capture stdout and parse the JSON
@@ -3027,7 +3042,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
         // The config_folder_path should be the .devcontainer directory
     }
@@ -3069,7 +3084,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -3111,7 +3126,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
 
         // With no container and no features, merged configuration equals the base config.
@@ -3172,7 +3187,7 @@ API_KEY=another-secret
         // Pre-fix: this errored with a Connection failed for URL
         // `https://./v2/devcontainers/local-feature/manifests/latest`. Post-fix:
         // succeeds with the on-disk metadata.
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(
             result.is_ok(),
             "expected local feature to resolve from disk; got {result:?}"
@@ -3217,7 +3232,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
 
         // Should fail because container doesn't exist
         // This is expected behavior - container discovery fails before we get to merge
@@ -3275,7 +3290,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
         // The workspace field should be None/omitted in the output
     }
@@ -4165,7 +4180,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -4248,7 +4263,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -4289,7 +4304,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -4330,7 +4345,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -4375,7 +4390,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         // This may fail if registry is not accessible, but should at least parse correctly
         // We're mainly testing that the string value is accepted and parsed
         let _ = result;
@@ -4418,7 +4433,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_ok());
     }
 
@@ -4459,7 +4474,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_err());
         assert!(
             result
@@ -4506,7 +4521,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_err());
         assert!(
             result
@@ -4625,7 +4640,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(
             result.is_ok(),
             "Should succeed with both dimensions provided"
@@ -4670,7 +4685,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_err(), "Should fail when only columns provided");
         let err_msg = result.unwrap_err().to_string();
         // Error now comes from shared TerminalDimensions::new() which returns DeaconError::Config
@@ -4719,7 +4734,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(result.is_err(), "Should fail when only rows provided");
         let err_msg = result.unwrap_err().to_string();
         // Error now comes from shared TerminalDimensions::new() which returns DeaconError::Config
@@ -4768,7 +4783,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(
             result.is_ok(),
             "Should succeed when no terminal dimensions provided"
@@ -4950,7 +4965,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(
             result.is_ok(),
             "Expected arbitrary --config filename to be accepted, got: {:?}",
@@ -4997,7 +5012,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(
             result.is_ok(),
             "Expected arbitrary --override-config filename to be accepted, got: {:?}",
@@ -5042,7 +5057,7 @@ API_KEY=another-secret
             secret_registry: SecretRegistry::new(),
         };
 
-        let result = execute_read_configuration(args).await;
+        let result = execute_read_configuration(args, None).await;
         assert!(
             result.is_ok(),
             "Expected success with .devcontainer.json filename"

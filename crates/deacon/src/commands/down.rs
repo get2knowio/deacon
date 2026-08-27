@@ -153,6 +153,7 @@ pub async fn execute_down(
                 &args,
                 &mut state_manager,
                 workspace_hash,
+                runtime,
             )
             .await
         }
@@ -472,13 +473,24 @@ async fn execute_compose_down(
     args: &DownArgs,
     state_manager: &mut StateManager,
     workspace_hash: &str,
+    runtime: Option<deacon_core::runtime::RuntimeKind>,
 ) -> Result<()> {
     debug!(
         "Shutting down compose project: {}",
         compose_state.project_name
     );
 
-    let compose_manager = ComposeManager::with_docker_path(args.docker_path.clone());
+    // The compose CLIENT follows the RESOLVED runtime, not the raw `--docker-path`
+    // (#710) — `binary_for` maps an untouched default to the flavor's own name, so
+    // under `--runtime podman` the flag still reads "docker". Tearing a project down
+    // with a different client than `up` created it with finds nothing to remove.
+    let compose_manager = ComposeManager::with_docker_path(
+        crate::commands::shared::resolve_runtime(runtime, &args.docker_path)
+            .await
+            .cli_docker()
+            .runtime_path()
+            .to_string(),
+    );
 
     // Create project from saved state
     let project = ComposeProject {
@@ -604,6 +616,7 @@ async fn execute_down_with_auto_discovery(
                 args,
                 &mut state_manager,
                 workspace_hash,
+                runtime,
             )
             .await
         }

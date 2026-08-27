@@ -464,10 +464,17 @@ fn apply_container_substitution(
 /// Execute the exec command
 #[instrument]
 pub async fn execute_exec(
-    args: ExecArgs,
+    mut args: ExecArgs,
     runtime: Option<deacon_core::runtime::RuntimeKind>,
 ) -> Result<()> {
     let docker = crate::commands::shared::resolve_runtime(runtime, &args.docker_path).await;
+    // Downstream, `args.docker_path` names the container CLI to RUN — the compose
+    // client is built from it (`resolve_target_container` → `ComposeManager`). The
+    // raw flag is not that: `binary_for` maps an untouched default to the flavor's
+    // own name, so under `--runtime podman` the flag still reads "docker" and the
+    // compose client talked to the wrong daemon (#710). Overwrite it here, at the
+    // one point where the runtime is resolved, so every consumer below agrees.
+    args.docker_path = docker.cli_docker().runtime_path().to_string();
     execute_exec_with_docker(args, &docker).await
 }
 
