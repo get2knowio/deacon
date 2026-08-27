@@ -109,6 +109,13 @@ pub struct ComposeCommand {
     profiles: Vec<String>,
 }
 
+/// Buildx knob that suppresses the default provenance/SBOM attestations.
+///
+/// Deacon needs a cached rebuild to be identity-preserving; the attestation is a
+/// fresh manifest per build and defeats that. See the note in
+/// `build_command_maybe_stdin` for the measurement (#700).
+const NO_DEFAULT_ATTESTATIONS: &str = "BUILDX_NO_DEFAULT_ATTESTATIONS";
+
 impl ComposeCommand {
     /// Create a new compose command builder
     pub fn new(base_path: PathBuf, compose_files: Vec<PathBuf>) -> Self {
@@ -171,6 +178,25 @@ impl ComposeCommand {
     ) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(&self.docker_path);
         command.arg("compose");
+
+        // A cached rebuild must produce the SAME image, or Compose replaces the
+        // container it is running (#700).
+        //
+        // BuildKit attaches a fresh provenance attestation to every build, and
+        // that changes the image ID even when nothing else does. MEASURED on two
+        // consecutive fully-cached builds of one Dockerfile: layers identical,
+        // config identical, `created` identical — and the IDs still differed,
+        // `99483d1aab35` then `519839eb5424`. With attestations off both builds
+        // produced `c0b6b3e6d519`. Compose keys container recreation on the
+        // service's image, so the churn silently discarded a stopped
+        // devcontainer's filesystem on the next `up`.
+        //
+        // Scoped to `build`: it is the only subcommand this affects, and the
+        // narrow scope keeps it away from anything that publishes an image, where
+        // provenance is worth having. An explicit user setting always wins.
+        if args.first() == Some(&"build") && std::env::var_os(NO_DEFAULT_ATTESTATIONS).is_none() {
+            command.env(NO_DEFAULT_ATTESTATIONS, "1");
+        }
 
         // Add compose files
         for file in &self.compose_files {
