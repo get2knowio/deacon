@@ -1126,7 +1126,24 @@ async fn install_features_for_compose(
 
     // `up` rewrites the target service's `image:` line to the extended tag so
     // the container runs with features installed.
-    project.service_image_override = Some(output.image_tag.clone());
+    //
+    // Qualified for the runtime first (#706). The tag names an image deacon just
+    // built on this host, and Compose resolves an `image:`-only service against
+    // the local store or PULLS. Docker resolves a bare tag locally; podman files
+    // locally built images under `localhost/` and reads a bare name as a remote
+    // reference, so an unqualified override sends Compose to a registry for an
+    // image that was never pushed anywhere:
+    //
+    // ```text
+    // app Error pull access denied for deacon-devcontainer-features,
+    //     repository does not exist or may require 'docker login'
+    // ```
+    //
+    // This covers BOTH service shapes: the `image:` and `build:` arms of
+    // `resolve_compose_feature_image` above converge on one `image_tag`, and it
+    // is written into the override the same way for each, so qualifying here
+    // rather than inside either arm is what keeps them symmetric.
+    project.service_image_override = Some(cli.qualify_local_image_ref(&output.image_tag));
     Ok(Some(output))
 }
 

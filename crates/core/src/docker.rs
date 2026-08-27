@@ -952,6 +952,33 @@ impl CliRuntime {
         false
     }
 
+    /// Whether an `image inspect` failure means only that the image is absent
+    /// from the local store, as opposed to a real error.
+    ///
+    /// The two runtimes word this differently and BOTH must be recognized, or
+    /// "not present" is misreported as a failure:
+    ///
+    /// ```text
+    /// docker: Error response from daemon: No such image: alpine:3.19
+    /// podman: Error: docker.io/library/debian:bookworm-slim: image not known
+    /// ```
+    ///
+    /// Only docker's wording was matched before (#706). The cost lands one layer
+    /// up in [`ContainerRuntime::ensure_image_available`], which calls
+    /// `inspect_image(...)?` — so on podman an absent image propagated as `Err`
+    /// and the pull that was supposed to follow never ran. The caller then
+    /// resolved `_REMOTE_USER` / `_CONTAINER_USER` from devcontainer.json alone,
+    /// warning `docker image inspect failed: … image not known` about an image
+    /// that was simply not pulled yet.
+    ///
+    /// Matched case-insensitively and by substring: the runtimes wrap these in
+    /// differing prefixes (`Error response from daemon:` vs `Error:`) and embed
+    /// the reference at different positions.
+    fn is_image_not_found(stderr: &str) -> bool {
+        let msg = stderr.to_ascii_lowercase();
+        msg.contains("no such image") || msg.contains("image not known")
+    }
+
     /// Qualify a short remote image name to its Docker Hub canonical form
     /// (`docker.io/library/<name>` for single-segment names, `docker.io/<ns>/<name>`
     /// otherwise) so podman resolves it without short-name ambiguity.
@@ -1006,6 +1033,41 @@ impl CliRuntime {
         } else {
             Self::qualify_short_remote(image_ref)
         }
+    }
+
+    /// Qualify a reference to an image this process **just built locally**, so
+    /// podman resolves it without attempting a registry pull.
+    ///
+    /// Docker is a no-op. Under podman a bare tag is rewritten to
+    /// `localhost/<ref>` — the repository podman files locally built images
+    /// under — and an already-qualified ref passes through.
+    ///
+    /// This is [`CliRuntime::qualify_image_ref`] minus the existence probe, and
+    /// the difference is the point: that probe exists to decide whether a bare
+    /// name means a local build or a registry image, and falls back to
+    /// `docker.io/library/<ref>` when it cannot tell. Here the caller already
+    /// knows — it produced the tag — so probing can only introduce a wrong
+    /// answer (a transient probe failure would emit a `docker.io` reference for
+    /// an image that exists only on this host, turning a resolvable name into a
+    /// doomed pull).
+    ///
+    /// Mirrors the reference CLI's own podman handling, which likewise prefixes
+    /// unconditionally rather than probing:
+    ///
+    /// ```text
+    /// `BASE_IMAGE=${params.isPodman && !hasRegistryHostname(imageName) ? 'localhost/' : ''}${imageName}`
+    /// ```
+    ///
+    /// (`src/spec-node/containerFeatures.ts:470`, citing
+    /// microsoft/vscode-remote-release#9748). Our [`CliRuntime::is_already_qualified`]
+    /// is a superset of its `hasRegistryHostname`: it additionally recognizes
+    /// `host:port/…` and bare `sha256:` digests, neither of which should ever
+    /// acquire a `localhost/` prefix.
+    pub fn qualify_local_image_ref(&self, image_ref: &str) -> String {
+        if self.flavor != RuntimeFlavor::Podman || Self::is_already_qualified(image_ref) {
+            return image_ref.to_string();
+        }
+        format!("localhost/{image_ref}")
     }
 
     /// Extract the user named by a `--user`/`-u` flag in `run_args`, if any.
@@ -1818,7 +1880,7 @@ impl Docker for CliRuntime {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("No such image") {
+            if Self::is_image_not_found(&stderr) {
                 return Ok(None);
             }
             return Err(
@@ -3589,6 +3651,38 @@ mod tests {
         }
     }
 
+    /// #706: podman's wording was not recognized, so an absent image surfaced as
+    /// an `Err` that `ensure_image_available` propagated instead of pulling.
+    /// Both stderr strings below are verbatim runtime output.
+    #[test]
+    fn test_is_image_not_found() {
+        for stderr in [
+            "Error response from daemon: No such image: alpine:3.19",
+            "Error: docker.io/library/debian:bookworm-slim: image not known",
+            // Case-insensitive: podman lowercases its own variant elsewhere.
+            "error: no such image: foo",
+        ] {
+            assert!(
+                CliRuntime::is_image_not_found(stderr),
+                "must read as absent: {stderr}"
+            );
+        }
+
+        // Real failures must stay failures — misreading one of these as "absent"
+        // would turn a broken daemon or an auth problem into a silent empty result.
+        for stderr in [
+            "Cannot connect to the Docker daemon at unix:///var/run/docker.sock",
+            "Error response from daemon: unauthorized: authentication required",
+            "Error: unable to connect to Podman socket",
+            "permission denied while trying to connect to the Docker daemon socket",
+        ] {
+            assert!(
+                !CliRuntime::is_image_not_found(stderr),
+                "must stay an error: {stderr}"
+            );
+        }
+    }
+
     #[test]
     fn test_qualify_short_remote() {
         assert_eq!(
@@ -3628,6 +3722,51 @@ mod tests {
             "docker.io/library/alpine:3.19",
         ] {
             assert_eq!(podman.qualify_image_ref(r).await, r);
+        }
+    }
+
+    /// #706: the compose service-image override is qualified with this, and the
+    /// whole point is that it does NOT probe — a just-built tag must become
+    /// `localhost/<ref>` on the strength of the caller knowing it built it.
+    #[test]
+    fn test_qualify_local_image_ref() {
+        let podman = CliRuntime::podman();
+        let docker = CliRuntime::docker();
+
+        // A bare locally built tag — the #706 case. Compose reads an
+        // `image:`-only service as a pull target without this prefix.
+        for r in [
+            "deacon-devcontainer-features",
+            "deacon-devcontainer-features:abc123",
+            "deacon-build:0f1e2d",
+        ] {
+            assert_eq!(
+                podman.qualify_local_image_ref(r),
+                format!("localhost/{r}"),
+                "podman must file locally built {r} under localhost/"
+            );
+            assert_eq!(
+                docker.qualify_local_image_ref(r),
+                r,
+                "docker must not rewrite {r}"
+            );
+        }
+
+        // Already qualified: registry hostname, host:port, an existing
+        // `localhost/` prefix (no double-prefixing), and a bare digest.
+        for r in [
+            "ghcr.io/owner/name:tag",
+            "mcr.microsoft.com/devcontainers/base:bookworm",
+            "localhost:5000/name:tag",
+            "localhost/deacon-build:abc",
+            "sha256:0123456789abcdef",
+        ] {
+            assert_eq!(
+                podman.qualify_local_image_ref(r),
+                r,
+                "already-qualified {r} must pass through"
+            );
+            assert_eq!(docker.qualify_local_image_ref(r), r);
         }
     }
 
