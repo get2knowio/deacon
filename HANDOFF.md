@@ -288,12 +288,21 @@ lints and fmt drift in new test files.
 
 ## Traps that have cost time
 
-- **A squash merge concatenates COMMIT messages, so a stale `Closes #NNN` survives a rewritten
-  PR body.** #707 opened expecting to fix #706; the measurement said otherwise and the PR body
-  was rewritten to "Refs #706, which stays open" — but the branch's first commit still said
-  `Closes #706`, and merging closed an unfixed issue. Rewriting the body is NOT enough: amend
-  or rebase the offending commit, and check `gh issue view <n> --json state` after any merge
-  whose scope changed mid-flight.
+- **Closing keywords fire from COMMIT MESSAGES, and they cost this repo the same issue twice
+  in one afternoon.** Both halves are worth knowing:
+  1. *A squash merge concatenates commit messages, so a stale keyword survives a rewritten PR
+     body.* PR #707 opened expecting to fix issue 706; the measurement said otherwise and the
+     body was rewritten to "Refs …, stays open" — but the branch's first commit still carried
+     the keyword, and merging shut an unfixed issue. Rewriting the body is NOT enough: amend or
+     rebase the offending commit.
+  2. *You cannot DESCRIBE a closing keyword in a commit message without triggering it.* The
+     commit documenting trap 1 contained the sentence "This closed #706 while it was unfixed"
+     — and closed it again. GitHub parses `closed #NNN` anywhere in the message, prose context
+     included.
+  In commit messages and PR bodies, refer to such an issue as `issue 706`, or keep the verb and
+  the number in different clauses. And **check `gh issue view <n> --json state` after any merge
+  whose scope changed mid-flight** — nothing warns you, and a ledger row can quietly end up
+  pointing at a closed issue.
 - **Podman delegates `compose` to an EXTERNAL provider — on the CI runner, docker's own
   `docker-compose` plugin.** The lane log says so (`>>>> Executing external compose provider
   "/usr/libexec/docker/cli-plugins/docker-compose"`), and `podman version` reports it as
