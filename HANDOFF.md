@@ -295,14 +295,19 @@ lints and fmt drift in new test files.
      body was rewritten to "Refs …, stays open" — but the branch's first commit still carried
      the keyword, and merging shut an unfixed issue. Rewriting the body is NOT enough: amend or
      rebase the offending commit.
-  2. *You cannot DESCRIBE a closing keyword in a commit message without triggering it.* The
-     commit documenting trap 1 contained the sentence "This closed #706 while it was unfixed"
-     — and closed it again. GitHub parses `closed #NNN` anywhere in the message, prose context
-     included.
-  In commit messages and PR bodies, refer to such an issue as `issue 706`, or keep the verb and
-  the number in different clauses. And **check `gh issue view <n> --json state` after any merge
-  whose scope changed mid-flight** — nothing warns you, and a ledger row can quietly end up
-  pointing at a closed issue.
+  2. *You cannot DESCRIBE a closing keyword without triggering it, and that applies to the PR
+     body as well as the commit.* The commit documenting trap 1 quoted the offending sentence
+     as evidence — verb adjacent to the issue number — and shut the same issue a second time.
+     The PR documenting THAT quoted it once more in its description, and shut it a third time,
+     because a squash merge consumes the PR body too. Same issue, three times in one afternoon.
+     There is no escaping syntax and no prose context that disarms it: quoted, negated or
+     merely described, the pattern fires.
+  **The remedy is to never put such a verb adjacent to a `#`-number in a commit message or PR
+  body at all** — write `issue 706`, or split the verb and the number across clauses. This file
+  now follows its own advice, so the example above is described rather than quoted.
+  And **check `gh issue view <n> --json state` after any merge whose scope changed
+  mid-flight** — nothing warns you, and a ledger row can quietly end up pointing at a shut
+  issue. That check is what caught all three.
 - **Podman delegates `compose` to an EXTERNAL provider — on the CI runner, docker's own
   `docker-compose` plugin.** The lane log says so (`>>>> Executing external compose provider
   "/usr/libexec/docker/cli-plugins/docker-compose"`), and `podman version` reports it as
