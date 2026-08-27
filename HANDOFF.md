@@ -15,10 +15,10 @@ points at it.
 
 ## Where things stand
 
-_Last updated: 2026-08-26, at `dad1550` on `main`._
+_Last updated: 2026-08-27, at `4f0e8d6` on `main`._
 
-- **Ledger: 228 recorded behaviors — 0 open nonconformance**, 10 deacon-follows-spec,
-  15 documented choice, 24 deacon extension, 179 conformant. Zero `UNADJUDICATED` records.
+- **Ledger: 229 recorded behaviors — 0 open nonconformance**, 10 deacon-follows-spec,
+  15 documented choice, 24 deacon extension, 180 conformant. Zero `UNADJUDICATED` records.
 - **The verdict of record is the latest nightly**, never this file:
   `gh run list --workflow=parity.yml --branch=main`.
 - Nothing in flight. No open work assigned.
@@ -30,6 +30,8 @@ _Last updated: 2026-08-26, at `dad1550` on `main`._
 
 | PR | What |
 |---|---|
+| #702 `4f0e8d6` | the compose Feature build is deterministic, so a stopped container is reused (closes #700) — batch 24 |
+| #699 `a5526f0` | HANDOFF refresh through batch 23 |
 | #698 `dad1550` | records that podman `build` works, and bounds that claim |
 | #697 `5e674f6` | `build` uses the runtime it was told to use — flavor and binary (closes #694) |
 | #696 `7bee127` | `_REMOTE_USER_HOME` read from the image's passwd DB (closes #695) — batch 23 |
@@ -48,7 +50,7 @@ _Last updated: 2026-08-26, at `dad1550` on `main`._
 ## The arc: [#480](https://github.com/get2knowio/deacon/issues/480), parity mining
 
 The long-running task is mining the reference CLI's own test suite and real-world configs for
-behaviors deacon has never been compared against, one upstream file at a time. Twenty-three
+behaviors deacon has never been compared against, one upstream file at a time. Twenty-four
 batches so far.
 
 **The method has held for every batch and should not be shortcut:**
@@ -122,6 +124,20 @@ batches so far.
   retry matches docker's exact phrase; podman's wording is unmeasured, so it is recorded as a known
   gap in the code, the ledger row and the test's skip — not guessed at. A matcher for an unobserved
   string is a matcher that silently matches nothing.
+- **If your fix needs a SECOND fix to keep something else working, you are treating a symptom.**
+  Batch 24's first attempt resumed the stopped compose container; reuse worked and the lifecycle
+  broke, because the resumed project took the reconnect branch that deliberately runs no phases.
+  Closing that PR and fixing image identity instead needed no control-flow change at all. Go back
+  and find the layer where ONE change suffices.
+- **Rule candidates out one at a time, and say which are eliminated.** That is what found batch
+  24's cause: project name (stable), `--force-recreate` (absent), compose config-hash (identical),
+  Feature staging mtimes (identical), layers, `Config`, `created` — all eliminated, leaving the
+  BuildKit provenance attestation.
+- **"Identical inputs produced a different image" means attestations.** BuildKit attaches a fresh
+  provenance manifest to every build, so a fully CACHED rebuild still yields a new image ID
+  (measured: `99483d1aab35` then `519839eb5424`; with `BUILDX_NO_DEFAULT_ATTESTATIONS=1` both
+  `c0b6b3e6d519`). It is also what causes the concurrent-build deterministic-tag race already
+  documented in `CLAUDE.md`.
 - **When a fix would entrench a limitation, first measure whether the limitation is real.** #694
   was going to make `build` REFUSE podman. Measuring instead showed the reference does not branch
   its build command on podman, `podman buildx` is an alias for `podman build`, `podman build`
@@ -156,10 +172,11 @@ batches so far.
 
 Do not start any of it without being asked.
 
-1. **Upstream files still uncited by anything in `parity/`:** `cli.up` (21) and `cli.test` (11)
-   are partly mined; nothing else of size remains. Batches 19–23 closed `dockerfileUtils` (48),
-   `dockerUtils` (5), `dockerComposeUtils` (5), `cli.podman` (2), `getHomeFolder` (1) and
-   `getEntPasswd` (1). Three parts were deliberately left, each with the place it would surface:
+1. **Upstream files still uncited by anything in `parity/`:** `cli.test` (11) is the only one
+   left with material in it; `cli.up` (21) was finished in batch 24. Batches 19–24 closed
+   `dockerfileUtils` (48), `dockerUtils` (5), `dockerComposeUtils` (5), `cli.podman` (2),
+   `getHomeFolder` (1), `getEntPasswd` (1) and `cli.up`. Three parts were deliberately left, each
+   with the place it would surface:
    - **`supportsBuildContexts`** (`dockerfileUtils`). Upstream uses it to decide whether to
      prepend `# syntax=docker/dockerfile:1.4`; deacon emits no syntax directive while always
      passing `--build-context`. Fine on modern BuildKit; on an OLDER Docker the reference would
@@ -239,6 +256,13 @@ lints and fmt drift in new test files.
   19 saw it go red on `read ECONNRESET` fetching a Feature from ghcr.io — the REFERENCE exited 1,
   deacon did not, so the exit codes diverged. Read the reference's own stderr in the failure before
   suspecting the change; re-running cleared it.
+- **A fixture that does not declare a Feature cannot cover a Feature-build defect.**
+  `fx-up-compose-restart-phases` declares none, which is why the compose-restart parity case never
+  caught #700 — a Feature-less compose image is already stable. Two of the regression tests written
+  for it made the same mistake and PASSED against the defect; sabotage caught both. Upstream's case
+  is named "docker-compose with Dockerfile WITH features" and that word is load-bearing.
+- **Assert container state on a path that a recreate would destroy.** A marker written into a mount
+  survives being replaced and passes either way; write it to `/`.
 - **`gh pr checks` lists check-runs that EXIST — a MISSING check reads exactly like a green one.**
   Re-running a workflow deletes its check-run and creates the replacement only when the job
   starts, so a `startup_failure` leaves the check absent and
@@ -282,6 +306,8 @@ lints and fmt drift in new test files.
   fixture by re-measuring, never by hand-editing an expectation**), **#692**/**#694** (runtime
   selection goes through `shared::resolve_runtime` — flavor AND binary — never
   `CliDocker::new()`), **#695** (a user's home is READ from the image's passwd DB, never
-  derived from the name), **#688** (a removal that races another removal is waited out, never
+  derived from the name), **#700** (a cached compose Feature build must produce the SAME image
+  — `BUILDX_NO_DEFAULT_ATTESTATIONS` on the compose `build` invocation only, never on a
+  publishing path), **#688** (a removal that races another removal is waited out, never
   reported as done — `is_already_gone` governs the REMOVE step and `stopping_is_moot` the STOP
   step, and they are deliberately not one function).
