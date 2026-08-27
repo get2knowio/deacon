@@ -464,6 +464,44 @@ jobs:
     - name: Run integration suite against Podman (full failure set)
       run: cargo nextest run --profile mvp-integration --no-fail-fast -E 'not binary(=parity_docker)'
 
+    # `deacon build` on podman, which nothing exercised until now (#30).
+    #
+    # The step above cannot cover it: `mvp-integration`'s `default-filter` excludes
+    # every `integration_build*` binary, and a `-E` filterset INTERSECTS with that
+    # filter rather than widening it. So this is a separate invocation with
+    # `--ignore-default-filter`, naming exactly the build binaries.
+    #
+    # Until #697 there was nothing to gain by running them here — `build`
+    # hardcoded `CliDocker::new()` and used docker no matter what this job
+    # selected, so they would have reported on docker while sitting in a lane
+    # labelled podman. Now the selection reaches the build, so what they report is
+    # real, and #698 measured a Dockerfile build completing through podman
+    # (`smoke_build_json_then_text`). This widens that from one smoke test to
+    # deacon's actual build surface.
+    #
+    # BLOCKING on purpose. A non-blocking step here would recreate exactly the
+    # thing #694 fixed: a green lane reporting coverage it does not have.
+    # Two tests are excluded BY NAME, each for a measured reason rather than to
+    # get the lane green:
+    #
+    # `concurrent_identical_builds_…` uses `--output type=docker,dest=…`, and
+    # podman's buildx shim does not support the docker exporter at all
+    # ("Docker exporter is not supported for the docker driver"). A runtime
+    # capability gap, so the test is docker-only by nature.
+    #
+    # `compose_features_image_shape_installs_feature` fails on a real deacon
+    # defect, tracked as #706: the compose path never applies podman's
+    # `localhost/` image qualification, so Compose tries to PULL the
+    # Feature-extended image deacon just built. Remove this exclusion when #706
+    # lands — it is the coverage that issue exists to restore.
+    - name: Run build tests against Podman (#30)
+      run: |
+        cargo nextest run --profile mvp-integration --no-fail-fast \
+          --ignore-default-filter \
+          -E '(binary(=integration_build) | binary(=integration_build_output) | binary(=integration_compose_features_build))
+              - test(=concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag)
+              - test(=compose_features_image_shape_installs_feature)'
+
     # `parity_hermetic` runs in this job (it is runtime-agnostic and NOT excluded above), so
     # this job owes the same evidence as the Docker one (#474). Same conditions, same reasons;
     # a distinct artifact name because two jobs of one run cannot share one.
