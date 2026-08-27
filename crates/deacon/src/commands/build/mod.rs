@@ -2554,27 +2554,8 @@ async fn retag_image(
     source: &str,
     target: &str,
 ) -> Result<()> {
-    // The SOURCE is qualified for the runtime; the target is not (#708).
-    //
-    // A compose service image podman built is filed under `localhost/`, so
-    // `podman tag deacon_tmp…-app <target>` cannot resolve the bare name it was
-    // just handed and fails `image not known`. This surfaced the moment the build
-    // actually ran on podman — while docker did the building, the bare name always
-    // resolved and four compose tests passed over the top of it.
-    //
-    // This is `qualify_image_ref`, the PROBE-BASED helper, and that is the right
-    // one here: unlike a tag deacon itself just produced, the source may be either
-    // a locally built image or a registry image, and the probe is what tells them
-    // apart. Note the contrast with the compose service-image override (#706),
-    // where prefixing `localhost/` is WRONG — there the consumer is the Compose
-    // client, which reads `localhost` as a registry host. Here the consumer is the
-    // runtime's own `tag` argument, which is exactly where the prefix belongs.
-    //
-    // The TARGET is left alone: it is a name the user asked for, and podman files
-    // a new tag under `localhost/` on its own.
-    let qualified_source = cli.qualify_image_ref(source).await;
     let output = tokio::process::Command::new(cli.runtime_path())
-        .args(["tag", &qualified_source, target])
+        .args(["tag", source, target])
         .output()
         .await
         .map_err(|e| {
