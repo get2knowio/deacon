@@ -1023,7 +1023,7 @@ impl CliRuntime {
     /// also satisfies `podman image exists alpine:3.19` via short-name
     /// resolution, but must NOT be rewritten to `localhost/` (which has no
     /// registry and would force a doomed pull from `localhost`).
-    async fn qualify_image_ref(&self, image_ref: &str) -> String {
+    pub async fn qualify_image_ref(&self, image_ref: &str) -> String {
         if self.flavor != RuntimeFlavor::Podman || Self::is_already_qualified(image_ref) {
             return image_ref.to_string();
         }

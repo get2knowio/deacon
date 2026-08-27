@@ -487,13 +487,25 @@ jobs:
     #
     # BLOCKING on purpose. A non-blocking step here would recreate exactly the
     # thing #694 fixed: a green lane reporting coverage it does not have.
-    # Two tests are excluded BY NAME, each for a measured reason rather than to
-    # get the lane green:
+    # Four tests are excluded BY NAME, each for a measured reason rather than to
+    # get the lane green. The count grew when #708 made the builds actually run on
+    # podman: the lane went from a false 34/34 to a true 24 passed / 10 failed, and
+    # what follows is the classification of those ten. Six were deacon or test
+    # defects and are FIXED (compose retag now qualifies its source for podman;
+    # the build tests verify through the runtime under test instead of a hardcoded
+    # `docker`); four remain, listed here.
     #
-    # `concurrent_identical_builds_…` uses `--output type=docker,dest=…`, and
-    # podman's buildx shim does not support the docker exporter at all
-    # ("Docker exporter is not supported for the docker driver"). A runtime
-    # capability gap, so the test is docker-only by nature.
+    # THREE buildx EXPORTER capability gaps. `podman buildx` is an alias for
+    # `podman build`, which supports neither BuildKit's exporter grammar nor its
+    # cache-export grammar, so each of these fails in podman's own parser before
+    # deacon is involved. Docker-only by nature, not deacon defects:
+    #   concurrent_identical_builds_…                        --output type=docker
+    #     "Docker exporter is not supported for the docker driver"
+    #   build_honors_a_container_driver_builder_and_can_oci_export   --output type=oci
+    #     "invalid type \"oci\" selected for build output options"
+    #   …_and_can_export_a_local_cache                     --cache-to type=local
+    #     podman parses the whole value as a repo: "must contain registry and
+    #     repository: invalid reference format"
     #
     # `compose_features_image_shape_installs_feature` fails on a real deacon
     # defect, tracked as #706: under podman, Compose cannot resolve the
@@ -516,6 +528,8 @@ jobs:
           --ignore-default-filter \
           -E '(binary(=integration_build) | binary(=integration_build_output) | binary(=integration_compose_features_build))
               - test(=concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag)
+              - test(=build_honors_a_container_driver_builder_and_can_oci_export)
+              - test(=build_honors_a_container_driver_builder_and_can_export_a_local_cache)
               - test(=compose_features_image_shape_installs_feature)'
 
     # `parity_hermetic` runs in this job (it is runtime-agnostic and NOT excluded above), so

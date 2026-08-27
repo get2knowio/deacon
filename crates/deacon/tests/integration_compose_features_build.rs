@@ -21,11 +21,23 @@ use std::fs;
 use std::process::Command as StdCommand;
 use tempfile::TempDir;
 
+/// The container runtime binary under test (honors `DEACON_CONTAINER_RUNTIME`,
+/// the same env var deacon reads).
+///
+/// Verification and setup that BYPASSES deacon must go through this, or it reads
+/// a different image store than the deacon under test wrote to. Every GitHub
+/// runner has docker installed, so a hardcoded `docker` here does not fail loudly
+/// on the podman lane — it quietly inspects the wrong daemon, which is how these
+/// assertions kept passing while #708 had the build running on docker anyway.
+fn runtime_bin() -> String {
+    std::env::var("DEACON_CONTAINER_RUNTIME").unwrap_or_else(|_| "docker".to_string())
+}
+
 /// Check that the local Docker daemon is reachable. Tests that need Docker
 /// skip themselves when this returns false, matching the convention used by
 /// other Docker-backed integration tests in this crate.
 fn is_docker_available() -> bool {
-    StdCommand::new("docker")
+    StdCommand::new(runtime_bin())
         .arg("info")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -44,7 +56,7 @@ fn is_docker_available() -> bool {
 /// project name does not necessarily match the directory-basename default
 /// `docker compose` would infer here (see [`compose_down_by_project`]).
 fn compose_cleanup(project_dir: &std::path::Path) {
-    let _ = StdCommand::new("docker")
+    let _ = StdCommand::new(runtime_bin())
         .current_dir(project_dir)
         .args([
             "compose",
@@ -67,7 +79,7 @@ fn compose_cleanup(project_dir: &std::path::Path) {
 /// container is alive. `docker compose -p <name> down` works purely from the
 /// project label, no compose file needed. Always best-effort.
 fn compose_down_by_project(project_name: &str) {
-    let _ = StdCommand::new("docker")
+    let _ = StdCommand::new(runtime_bin())
         .args([
             "compose",
             "-p",
@@ -177,7 +189,7 @@ fn compose_features_image_shape_installs_feature() {
     let project_name = up_project_name(&up).expect("deacon up should report a composeProjectName");
 
     // The common-utils feature drops a marker file at this canonical path.
-    let exec = StdCommand::new("docker")
+    let exec = StdCommand::new(runtime_bin())
         .args([
             "compose",
             "-p",
@@ -301,7 +313,7 @@ fn compose_features_build_shape_installs_feature() {
     // `--project-directory` (neither reproduces deacon's naming).
     let project_name = up_project_name(&up).expect("deacon up should report a composeProjectName");
     let docker_compose = |cmd: &str| -> std::process::Output {
-        StdCommand::new("docker")
+        StdCommand::new(runtime_bin())
             .args([
                 "compose",
                 "-p",
@@ -430,7 +442,7 @@ fn build_compose_with_features_tags_final_image() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let run = StdCommand::new("docker")
+    let run = StdCommand::new(runtime_bin())
         .args([
             "run",
             "--rm",
@@ -440,7 +452,7 @@ fn build_compose_with_features_tags_final_image() {
         ])
         .output()
         .expect("docker run");
-    let _ = StdCommand::new("docker")
+    let _ = StdCommand::new(runtime_bin())
         .args(["rmi", "-f", image_tag])
         .output();
 
@@ -508,7 +520,7 @@ fn build_compose_without_features_tags_every_image_name() {
     // Unique tags so the test never collides with a sibling on the shared daemon.
     let first = "deacon-test/compose-multitag-first:v1";
     let second = "deacon-test/compose-multitag-second:v1";
-    let _ = StdCommand::new("docker")
+    let _ = StdCommand::new(runtime_bin())
         .args(["rmi", "-f", first, second])
         .output();
 
@@ -545,7 +557,7 @@ fn build_compose_without_features_tags_every_image_name() {
     let ids: Vec<String> = [first, second]
         .iter()
         .map(|tag| {
-            let inspect = StdCommand::new("docker")
+            let inspect = StdCommand::new(runtime_bin())
                 .args(["image", "inspect", "--format", "{{.Id}}", tag])
                 .output()
                 .expect("docker image inspect");
@@ -559,7 +571,7 @@ fn build_compose_without_features_tags_every_image_name() {
 
     // The marker proves the tag points at the service's own build, not at some
     // unrelated image that happened to answer to the name.
-    let run = StdCommand::new("docker")
+    let run = StdCommand::new(runtime_bin())
         .args(["run", "--rm", first, "cat", "/base-marker.txt"])
         .output()
         .expect("docker run");
@@ -567,7 +579,7 @@ fn build_compose_without_features_tags_every_image_name() {
 
     // `RepoTags` names the compose-produced image too, so the project image is
     // reclaimed alongside the two tags rather than left on the daemon.
-    let repo_tags = StdCommand::new("docker")
+    let repo_tags = StdCommand::new(runtime_bin())
         .args(["image", "inspect", "--format", "{{json .RepoTags}}", first])
         .output()
         .ok()
@@ -576,7 +588,7 @@ fn build_compose_without_features_tags_every_image_name() {
         .unwrap_or_else(|| vec![first.to_string(), second.to_string()]);
     let mut rmi = vec!["rmi".to_string(), "-f".to_string()];
     rmi.extend(repo_tags);
-    let _ = StdCommand::new("docker").args(&rmi).output();
+    let _ = StdCommand::new(runtime_bin()).args(&rmi).output();
 
     assert_eq!(
         result["imageName"],
@@ -678,7 +690,9 @@ fn build_compose_without_features_labels_the_image_and_keeps_build_args() {
     .expect("write devcontainer.json");
 
     let tag = "deacon-test/compose-metadata-label:v1";
-    let _ = StdCommand::new("docker").args(["rmi", "-f", tag]).output();
+    let _ = StdCommand::new(runtime_bin())
+        .args(["rmi", "-f", tag])
+        .output();
 
     let out = support::deacon_command()
         .current_dir(workspace)
@@ -704,7 +718,7 @@ fn build_compose_without_features_labels_the_image_and_keeps_build_args() {
     );
 
     // Collect everything to assert BEFORE tearing down, so cleanup always runs.
-    let label = StdCommand::new("docker")
+    let label = StdCommand::new(runtime_bin())
         .args([
             "image",
             "inspect",
@@ -716,7 +730,7 @@ fn build_compose_without_features_labels_the_image_and_keeps_build_args() {
         .expect("docker image inspect");
     let label = String::from_utf8_lossy(&label.stdout).trim().to_string();
 
-    let run = StdCommand::new("docker")
+    let run = StdCommand::new(runtime_bin())
         .args(["run", "--rm", tag, "cat", "/arg-marker.txt"])
         .output()
         .expect("docker run");
@@ -724,7 +738,7 @@ fn build_compose_without_features_labels_the_image_and_keeps_build_args() {
 
     // `RepoTags` names the compose-produced image too, so the project image is
     // reclaimed alongside the tag rather than left on the daemon.
-    let repo_tags = StdCommand::new("docker")
+    let repo_tags = StdCommand::new(runtime_bin())
         .args(["image", "inspect", "--format", "{{json .RepoTags}}", tag])
         .output()
         .ok()
@@ -733,7 +747,7 @@ fn build_compose_without_features_labels_the_image_and_keeps_build_args() {
         .unwrap_or_else(|| vec![tag.to_string()]);
     let mut rmi = vec!["rmi".to_string(), "-f".to_string()];
     rmi.extend(repo_tags);
-    let _ = StdCommand::new("docker").args(&rmi).output();
+    let _ = StdCommand::new(runtime_bin()).args(&rmi).output();
 
     // Pinned WHOLE and by value, not by presence: the entries are ordered and a
     // presence check would pass on a label recording the wrong configuration.
@@ -847,7 +861,9 @@ fn build_compose_with_features_keeps_the_services_own_build_keys() {
     .expect("write devcontainer.json");
 
     let tag = "deacon-test/compose-features-build-keys:v1";
-    let _ = StdCommand::new("docker").args(["rmi", "-f", tag]).output();
+    let _ = StdCommand::new(runtime_bin())
+        .args(["rmi", "-f", tag])
+        .output();
 
     let out = support::deacon_command()
         .current_dir(workspace)
@@ -872,7 +888,7 @@ fn build_compose_with_features_keeps_the_services_own_build_keys() {
     );
 
     // Collect everything to assert BEFORE tearing down, so cleanup always runs.
-    let run = StdCommand::new("docker")
+    let run = StdCommand::new(runtime_bin())
         .args([
             "run",
             "--rm",
@@ -886,7 +902,7 @@ fn build_compose_with_features_keeps_the_services_own_build_keys() {
         .expect("docker run");
     let produced = String::from_utf8_lossy(&run.stdout).to_string();
 
-    let author_label = StdCommand::new("docker")
+    let author_label = StdCommand::new(runtime_bin())
         .args([
             "image",
             "inspect",
@@ -902,7 +918,7 @@ fn build_compose_with_features_keeps_the_services_own_build_keys() {
 
     // The Compose-produced image is named by `RepoTags` too, so reclaim it
     // alongside the user's tag rather than leaving it on the daemon.
-    let repo_tags = StdCommand::new("docker")
+    let repo_tags = StdCommand::new(runtime_bin())
         .args(["image", "inspect", "--format", "{{json .RepoTags}}", tag])
         .output()
         .ok()
@@ -911,7 +927,7 @@ fn build_compose_with_features_keeps_the_services_own_build_keys() {
         .unwrap_or_else(|| vec![tag.to_string()]);
     let mut rmi = vec!["rmi".to_string(), "-f".to_string()];
     rmi.extend(repo_tags);
-    let _ = StdCommand::new("docker").args(&rmi).output();
+    let _ = StdCommand::new(runtime_bin()).args(&rmi).output();
 
     assert!(
         produced.contains("arg-reached-the-build"),
@@ -1028,7 +1044,7 @@ fn compose_up_reuses_a_stopped_container_because_the_image_is_deterministic() {
         return;
     };
     let project = String::from_utf8_lossy(
-        &StdCommand::new("docker")
+        &StdCommand::new(runtime_bin())
             .args([
                 "inspect",
                 &id1,
@@ -1043,7 +1059,7 @@ fn compose_up_reuses_a_stopped_container_because_the_image_is_deterministic() {
     .to_string();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let wrote = StdCommand::new("docker")
+        let wrote = StdCommand::new(runtime_bin())
             .args([
                 "exec",
                 &id1,
@@ -1055,7 +1071,7 @@ fn compose_up_reuses_a_stopped_container_because_the_image_is_deterministic() {
             .unwrap();
         assert!(wrote.status.success(), "could not write the marker");
 
-        StdCommand::new("docker")
+        StdCommand::new(runtime_bin())
             .args(["compose", "--project-name", &project, "stop"])
             .output()
             .unwrap();
@@ -1071,7 +1087,7 @@ fn compose_up_reuses_a_stopped_container_because_the_image_is_deterministic() {
             id1, id2,
             "a second up on a stopped compose project must reuse the container"
         );
-        let marker = StdCommand::new("docker")
+        let marker = StdCommand::new(runtime_bin())
             .args(["exec", &id2, "cat", "/deacon-reuse-marker"])
             .output()
             .unwrap();
