@@ -474,10 +474,16 @@ jobs:
     # Until #697 there was nothing to gain by running them here — `build`
     # hardcoded `CliDocker::new()` and used docker no matter what this job
     # selected, so they would have reported on docker while sitting in a lane
-    # labelled podman. Now the selection reaches the build, so what they report is
-    # real, and #698 measured a Dockerfile build completing through podman
-    # (`smoke_build_json_then_text`). This widens that from one smoke test to
-    # deacon's actual build surface.
+    # labelled podman.
+    #
+    # #697 fixed the SELECTION but not the EXECUTION, and this comment used to say
+    # otherwise. `execute_docker_build` took the resolved runtime, spent it on
+    # `check_docker_installed()`/`ping()`, then ran `Command::new("docker")` — so
+    # the builds here still landed on docker, in a step labelled Podman, exactly
+    # the failure this file warns about two paragraphs down. #708 fixed that; a
+    # shim test (`build_runtime_routing`) now holds the line hermetically. Reports
+    # from this step are trustworthy from #708 onward, and earlier ones — including
+    # the `smoke_build_json_then_text` evidence once cited here — are not.
     #
     # BLOCKING on purpose. A non-blocking step here would recreate exactly the
     # thing #694 fixed: a green lane reporting coverage it does not have.
