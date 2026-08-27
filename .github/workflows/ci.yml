@@ -481,27 +481,36 @@ jobs:
     #
     # BLOCKING on purpose. A non-blocking step here would recreate exactly the
     # thing #694 fixed: a green lane reporting coverage it does not have.
-    # One test is excluded BY NAME, for a measured reason rather than to get the
-    # lane green:
+    # Two tests are excluded BY NAME, each for a measured reason rather than to
+    # get the lane green:
     #
     # `concurrent_identical_builds_…` uses `--output type=docker,dest=…`, and
     # podman's buildx shim does not support the docker exporter at all
     # ("Docker exporter is not supported for the docker driver"). A runtime
     # capability gap, so the test is docker-only by nature.
     #
-    # `compose_features_image_shape_installs_feature` was excluded here for #706
-    # (the compose path never applied podman's `localhost/` qualification, so
-    # Compose tried to PULL the Feature-extended image deacon had just built).
-    # That is fixed, and the test runs again — it is the ONLY guard on the wiring:
-    # `qualify_local_image_ref`'s own unit test covers the pure logic, but nothing
-    # hermetic proves the compose override actually calls it. If a change drops
-    # that call, this test in this step is what says so.
+    # `compose_features_image_shape_installs_feature` fails on a real deacon
+    # defect, tracked as #706: under podman, Compose cannot resolve the
+    # Feature-extended image deacon built out-of-band and tries to PULL it.
+    #
+    # The obvious fix is NOT the fix, and this comment exists so nobody spends the
+    # afternoon rediscovering that. Prefixing `localhost/` — podman's repository
+    # for locally built images, and what the reference does to its `BASE_IMAGE`
+    # build-arg — was tried and MEASURED to make things worse: it broke the two
+    # sibling tests that were passing. A compose `image:` field is resolved by the
+    # COMPOSE CLIENT, and podman delegates compose to `docker-compose` (its own
+    # `podman version` reports `containers-storage docker-compose`), which reads
+    # `localhost/foo` as registry host `localhost` and dials it:
+    #   app Error Get "http://localhost/v2/": dial tcp [::1]:80: connection refused
+    # The reference does not have this problem because its override carries
+    # `build:` alongside `image:`, so Compose BUILDS rather than resolves.
     - name: Run build tests against Podman (#30)
       run: |
         cargo nextest run --profile mvp-integration --no-fail-fast \
           --ignore-default-filter \
           -E '(binary(=integration_build) | binary(=integration_build_output) | binary(=integration_compose_features_build))
-              - test(=concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag)'
+              - test(=concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag)
+              - test(=compose_features_image_shape_installs_feature)'
 
     # `parity_hermetic` runs in this job (it is runtime-agnostic and NOT excluded above), so
     # this job owes the same evidence as the Docker one (#474). Same conditions, same reasons;

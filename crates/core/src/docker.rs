@@ -1035,41 +1035,6 @@ impl CliRuntime {
         }
     }
 
-    /// Qualify a reference to an image this process **just built locally**, so
-    /// podman resolves it without attempting a registry pull.
-    ///
-    /// Docker is a no-op. Under podman a bare tag is rewritten to
-    /// `localhost/<ref>` — the repository podman files locally built images
-    /// under — and an already-qualified ref passes through.
-    ///
-    /// This is [`CliRuntime::qualify_image_ref`] minus the existence probe, and
-    /// the difference is the point: that probe exists to decide whether a bare
-    /// name means a local build or a registry image, and falls back to
-    /// `docker.io/library/<ref>` when it cannot tell. Here the caller already
-    /// knows — it produced the tag — so probing can only introduce a wrong
-    /// answer (a transient probe failure would emit a `docker.io` reference for
-    /// an image that exists only on this host, turning a resolvable name into a
-    /// doomed pull).
-    ///
-    /// Mirrors the reference CLI's own podman handling, which likewise prefixes
-    /// unconditionally rather than probing:
-    ///
-    /// ```text
-    /// `BASE_IMAGE=${params.isPodman && !hasRegistryHostname(imageName) ? 'localhost/' : ''}${imageName}`
-    /// ```
-    ///
-    /// (`src/spec-node/containerFeatures.ts:470`, citing
-    /// microsoft/vscode-remote-release#9748). Our [`CliRuntime::is_already_qualified`]
-    /// is a superset of its `hasRegistryHostname`: it additionally recognizes
-    /// `host:port/…` and bare `sha256:` digests, neither of which should ever
-    /// acquire a `localhost/` prefix.
-    pub fn qualify_local_image_ref(&self, image_ref: &str) -> String {
-        if self.flavor != RuntimeFlavor::Podman || Self::is_already_qualified(image_ref) {
-            return image_ref.to_string();
-        }
-        format!("localhost/{image_ref}")
-    }
-
     /// Extract the user named by a `--user`/`-u` flag in `run_args`, if any.
     ///
     /// Accepts both the split form (`--user`, `<value>`) and the joined form
@@ -3722,51 +3687,6 @@ mod tests {
             "docker.io/library/alpine:3.19",
         ] {
             assert_eq!(podman.qualify_image_ref(r).await, r);
-        }
-    }
-
-    /// #706: the compose service-image override is qualified with this, and the
-    /// whole point is that it does NOT probe — a just-built tag must become
-    /// `localhost/<ref>` on the strength of the caller knowing it built it.
-    #[test]
-    fn test_qualify_local_image_ref() {
-        let podman = CliRuntime::podman();
-        let docker = CliRuntime::docker();
-
-        // A bare locally built tag — the #706 case. Compose reads an
-        // `image:`-only service as a pull target without this prefix.
-        for r in [
-            "deacon-devcontainer-features",
-            "deacon-devcontainer-features:abc123",
-            "deacon-build:0f1e2d",
-        ] {
-            assert_eq!(
-                podman.qualify_local_image_ref(r),
-                format!("localhost/{r}"),
-                "podman must file locally built {r} under localhost/"
-            );
-            assert_eq!(
-                docker.qualify_local_image_ref(r),
-                r,
-                "docker must not rewrite {r}"
-            );
-        }
-
-        // Already qualified: registry hostname, host:port, an existing
-        // `localhost/` prefix (no double-prefixing), and a bare digest.
-        for r in [
-            "ghcr.io/owner/name:tag",
-            "mcr.microsoft.com/devcontainers/base:bookworm",
-            "localhost:5000/name:tag",
-            "localhost/deacon-build:abc",
-            "sha256:0123456789abcdef",
-        ] {
-            assert_eq!(
-                podman.qualify_local_image_ref(r),
-                r,
-                "already-qualified {r} must pass through"
-            );
-            assert_eq!(docker.qualify_local_image_ref(r), r);
         }
     }
 
