@@ -952,6 +952,33 @@ impl CliRuntime {
         false
     }
 
+    /// Whether an `image inspect` failure means only that the image is absent
+    /// from the local store, as opposed to a real error.
+    ///
+    /// The two runtimes word this differently and BOTH must be recognized, or
+    /// "not present" is misreported as a failure:
+    ///
+    /// ```text
+    /// docker: Error response from daemon: No such image: alpine:3.19
+    /// podman: Error: docker.io/library/debian:bookworm-slim: image not known
+    /// ```
+    ///
+    /// Only docker's wording was matched before (#706). The cost lands one layer
+    /// up in [`ContainerRuntime::ensure_image_available`], which calls
+    /// `inspect_image(...)?` — so on podman an absent image propagated as `Err`
+    /// and the pull that was supposed to follow never ran. The caller then
+    /// resolved `_REMOTE_USER` / `_CONTAINER_USER` from devcontainer.json alone,
+    /// warning `docker image inspect failed: … image not known` about an image
+    /// that was simply not pulled yet.
+    ///
+    /// Matched case-insensitively and by substring: the runtimes wrap these in
+    /// differing prefixes (`Error response from daemon:` vs `Error:`) and embed
+    /// the reference at different positions.
+    fn is_image_not_found(stderr: &str) -> bool {
+        let msg = stderr.to_ascii_lowercase();
+        msg.contains("no such image") || msg.contains("image not known")
+    }
+
     /// Qualify a short remote image name to its Docker Hub canonical form
     /// (`docker.io/library/<name>` for single-segment names, `docker.io/<ns>/<name>`
     /// otherwise) so podman resolves it without short-name ambiguity.
@@ -1818,7 +1845,7 @@ impl Docker for CliRuntime {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("No such image") {
+            if Self::is_image_not_found(&stderr) {
                 return Ok(None);
             }
             return Err(
@@ -3585,6 +3612,38 @@ mod tests {
             assert!(
                 !CliRuntime::is_already_qualified(r),
                 "expected NOT qualified: {r}"
+            );
+        }
+    }
+
+    /// #706: podman's wording was not recognized, so an absent image surfaced as
+    /// an `Err` that `ensure_image_available` propagated instead of pulling.
+    /// Both stderr strings below are verbatim runtime output.
+    #[test]
+    fn test_is_image_not_found() {
+        for stderr in [
+            "Error response from daemon: No such image: alpine:3.19",
+            "Error: docker.io/library/debian:bookworm-slim: image not known",
+            // Case-insensitive: podman lowercases its own variant elsewhere.
+            "error: no such image: foo",
+        ] {
+            assert!(
+                CliRuntime::is_image_not_found(stderr),
+                "must read as absent: {stderr}"
+            );
+        }
+
+        // Real failures must stay failures — misreading one of these as "absent"
+        // would turn a broken daemon or an auth problem into a silent empty result.
+        for stderr in [
+            "Cannot connect to the Docker daemon at unix:///var/run/docker.sock",
+            "Error response from daemon: unauthorized: authentication required",
+            "Error: unable to connect to Podman socket",
+            "permission denied while trying to connect to the Docker daemon socket",
+        ] {
+            assert!(
+                !CliRuntime::is_image_not_found(stderr),
+                "must stay an error: {stderr}"
             );
         }
     }

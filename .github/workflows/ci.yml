@@ -490,10 +490,20 @@ jobs:
     # capability gap, so the test is docker-only by nature.
     #
     # `compose_features_image_shape_installs_feature` fails on a real deacon
-    # defect, tracked as #706: the compose path never applies podman's
-    # `localhost/` image qualification, so Compose tries to PULL the
-    # Feature-extended image deacon just built. Remove this exclusion when #706
-    # lands — it is the coverage that issue exists to restore.
+    # defect, tracked as #706: under podman, Compose cannot resolve the
+    # Feature-extended image deacon built out-of-band and tries to PULL it.
+    #
+    # The obvious fix is NOT the fix, and this comment exists so nobody spends the
+    # afternoon rediscovering that. Prefixing `localhost/` — podman's repository
+    # for locally built images, and what the reference does to its `BASE_IMAGE`
+    # build-arg — was tried and MEASURED to make things worse: it broke the two
+    # sibling tests that were passing. A compose `image:` field is resolved by the
+    # COMPOSE CLIENT, and podman delegates compose to `docker-compose` (its own
+    # `podman version` reports `containers-storage docker-compose`), which reads
+    # `localhost/foo` as registry host `localhost` and dials it:
+    #   app Error Get "http://localhost/v2/": dial tcp [::1]:80: connection refused
+    # The reference does not have this problem because its override carries
+    # `build:` alongside `image:`, so Compose BUILDS rather than resolves.
     - name: Run build tests against Podman (#30)
       run: |
         cargo nextest run --profile mvp-integration --no-fail-fast \

@@ -1126,6 +1126,23 @@ async fn install_features_for_compose(
 
     // `up` rewrites the target service's `image:` line to the extended tag so
     // the container runs with features installed.
+    //
+    // NOT qualified for the runtime, and #706 is the reason it must not be.
+    // Prefixing `localhost/` here — podman's repository for locally built images,
+    // and what the reference does for its `BASE_IMAGE` build-arg — was MEASURED to
+    // break this path rather than fix it. A compose `image:` field is resolved by
+    // the COMPOSE CLIENT, not by podman's short-name logic, and podman delegates
+    // compose to `docker-compose` (its own `podman version` reports the provider:
+    // `containers-storage docker-compose`). docker-compose parses `localhost/foo`
+    // as registry host `localhost` and dials it:
+    //
+    // ```text
+    // app Error Get "http://localhost/v2/": dial tcp [::1]:80: connect: connection refused
+    // ```
+    //
+    // The reference's idiom does not transfer because its target is different: a
+    // build-arg consumed by `podman build`, not a document key consumed by Compose.
+    // See the `up`/compose row in parity/SPEC_STATUS.md for the open diagnosis.
     project.service_image_override = Some(output.image_tag.clone());
     Ok(Some(output))
 }
