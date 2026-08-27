@@ -944,6 +944,7 @@ async fn execute_build_inner(
     // feature digests into the hash for proper caching.
     if !args.force && !args.push && args.output.is_none() && !features_present {
         if let Some(cached) = check_build_cache(
+            &cli,
             &config_hash,
             args.user_data_folder.as_deref(),
             &workspace_hash,
@@ -956,7 +957,7 @@ async fn execute_build_inner(
             // document reports. Caching the build is right; caching the tagging is
             // not — the reference CLI tags a cached image with whatever
             // `--image-name` the current invocation passed.
-            let reconciled = reconcile_cached_tags(cached, &args.image_names).await?;
+            let reconciled = reconcile_cached_tags(&cli, cached, &args.image_names).await?;
             output_result(
                 &reconciled,
                 &args.output_format,
@@ -1104,7 +1105,7 @@ async fn execute_build_inner(
             } else {
                 &args.image_names
             };
-            push_built_image(targets).await?;
+            push_built_image(&cli, targets).await?;
         }
         Ok::<_, anyhow::Error>(())
     }
@@ -1112,7 +1113,7 @@ async fn execute_build_inner(
 
     // Unconditional: the tag has done its job whether that push succeeded or not.
     if let Some(private) = &result.private_ref {
-        drop_run_private_tag(private).await;
+        drop_run_private_tag(&cli, private).await;
     }
     post_build?;
 
@@ -1419,6 +1420,7 @@ struct CachedBuild {
 
 /// Check for cached build result
 async fn check_build_cache(
+    cli: &deacon_core::docker::CliDocker,
     config_hash: &str,
     user_data_folder: Option<&Path>,
     workspace_hash: &str,
@@ -1448,7 +1450,7 @@ async fn check_build_cache(
     match serde_json::from_str::<BuildMetadata>(&contents) {
         Ok(metadata) => {
             // Validate that the image still exists
-            if is_image_available(&metadata.result.image_id).await? {
+            if is_image_available(cli, &metadata.result.image_id).await? {
                 debug!("Cache hit for config hash {}", config_hash);
                 Ok(Some(CachedBuild {
                     result: metadata.result,
@@ -1487,7 +1489,11 @@ async fn check_build_cache(
 /// `<project>-<service>` — and replaces the names that were merely *requested* by
 /// the earlier run with the ones requested now. Previously requested tags are left
 /// on the daemon rather than removed; the reference leaves them too.
-async fn reconcile_cached_tags(cached: CachedBuild, requested: &[String]) -> Result<BuildResult> {
+async fn reconcile_cached_tags(
+    cli: &deacon_core::docker::CliDocker,
+    cached: CachedBuild,
+    requested: &[String],
+) -> Result<BuildResult> {
     let CachedBuild {
         mut result,
         requested_image_names: previously_requested,
@@ -1498,7 +1504,7 @@ async fn reconcile_cached_tags(cached: CachedBuild, requested: &[String]) -> Res
     // been removed from the daemon since. `is_image_available` has just confirmed
     // `image_id` resolves.
     for name in requested {
-        retag_image(&result.image_id, name).await?;
+        retag_image(cli, &result.image_id, name).await?;
     }
 
     result.tags = reconciled_tags(&result.tags, &previously_requested, requested);
@@ -1635,9 +1641,10 @@ fn create_build_inputs(result: &BuildResult) -> Result<BuildInputs> {
 }
 
 /// Check if a Docker image is available locally
-async fn is_image_available(image_id: &str) -> Result<bool> {
-    // Use docker inspect to check if image exists
-    let output = tokio::process::Command::new("docker")
+async fn is_image_available(cli: &deacon_core::docker::CliDocker, image_id: &str) -> Result<bool> {
+    // The RESOLVED runtime, never a literal (#708): a cache hit is only a hit if
+    // the image is in the store the build will actually run against.
+    let output = tokio::process::Command::new(cli.runtime_path())
         .args(["inspect", "--type=image", image_id])
         .output()
         .await;
@@ -1879,7 +1886,7 @@ async fn execute_compose_build(
         plan.built_image_name(&project.name, service)
     };
     for image_name in &args.image_names {
-        retag_image(&built_image, image_name).await?;
+        retag_image(cli, &built_image, image_name).await?;
     }
     let mut all_tags = vec![built_image.clone()];
     all_tags.extend(args.image_names.clone());
@@ -2093,7 +2100,7 @@ async fn execute_compose_build_with_features(
     let mut all_tags = vec![deterministic_tag];
     all_tags.extend(args.image_names.clone());
     for tag in &all_tags {
-        retag_image(&feature_build.image_tag, tag).await?;
+        retag_image(cli, &feature_build.image_tag, tag).await?;
     }
 
     // Apply the lockfile policy the flags selected (#556): skip under
@@ -2519,8 +2526,8 @@ fn run_private_tag() -> String {
 /// Best-effort by design: the tag is bookkeeping, and failing a build that has
 /// already produced (and possibly exported or pushed) its image because an
 /// untag failed would be a worse outcome than leaving one dangling tag behind.
-async fn drop_run_private_tag(tag: &str) {
-    let removed = tokio::process::Command::new("docker")
+async fn drop_run_private_tag(cli: &deacon_core::docker::CliDocker, tag: &str) {
+    let removed = tokio::process::Command::new(cli.runtime_path())
         .args(["image", "rm", tag])
         .output()
         .await;
@@ -2542,8 +2549,12 @@ async fn drop_run_private_tag(tag: &str) {
 /// the feature-extended image, so `--image-name` resolves to the image that
 /// actually contains the installed features — and by [`reconcile_cached_tags`],
 /// to apply a changed `--image-name` to an image served from the build cache (#620).
-async fn retag_image(source: &str, target: &str) -> Result<()> {
-    let output = tokio::process::Command::new("docker")
+async fn retag_image(
+    cli: &deacon_core::docker::CliDocker,
+    source: &str,
+    target: &str,
+) -> Result<()> {
+    let output = tokio::process::Command::new(cli.runtime_path())
         .args(["tag", source, target])
         .output()
         .await
@@ -2613,12 +2624,12 @@ fn exports_to_daemon(spec: &str) -> bool {
 /// image carries its `devcontainer.metadata` label. Progress streams as it
 /// arrives, with `docker push`'s own stdout relayed to stderr so the
 /// `--output-format json` contract (a single JSON document on stdout) holds.
-async fn push_built_image(targets: &[String]) -> Result<()> {
+async fn push_built_image(cli: &deacon_core::docker::CliDocker, targets: &[String]) -> Result<()> {
     use tokio::io::AsyncBufReadExt;
 
     for target in targets {
         info!("Pushing '{}'", target);
-        let mut child = tokio::process::Command::new("docker")
+        let mut child = tokio::process::Command::new(cli.runtime_path())
             .args(["push", target])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
@@ -2920,7 +2931,7 @@ async fn execute_docker_build(
         }
 
         // Set DOCKER_BUILDKIT environment variable if needed
-        let mut cmd = tokio::process::Command::new("docker");
+        let mut cmd = tokio::process::Command::new(docker.runtime_path());
         if use_buildkit {
             cmd.env("DOCKER_BUILDKIT", "1");
         } else if args.buildkit == Some(BuildKitOption::Never) {
@@ -3109,7 +3120,7 @@ async fn execute_docker_build(
         // orphans it the moment it re-points the shared `deacon-build:<hash>`
         // tag, and the store then drops it (#470).
         let metadata = match &private_ref {
-            Some(private) => extract_image_metadata(private).await?,
+            Some(private) => extract_image_metadata(docker, private).await?,
             None => HashMap::new(),
         };
 
@@ -3136,10 +3147,13 @@ async fn execute_docker_build(
 
 /// Extract image metadata using docker inspect
 #[allow(dead_code)]
-async fn extract_image_metadata(image_id: &str) -> Result<HashMap<String, String>> {
+async fn extract_image_metadata(
+    cli: &deacon_core::docker::CliDocker,
+    image_id: &str,
+) -> Result<HashMap<String, String>> {
     debug!("Extracting metadata for image: {}", image_id);
 
-    let output = tokio::process::Command::new("docker")
+    let output = tokio::process::Command::new(cli.runtime_path())
         .args(["inspect", "--format={{json .Config.Labels}}", image_id])
         .output()
         .await

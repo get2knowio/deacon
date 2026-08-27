@@ -7,6 +7,18 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
+/// The container runtime binary under test (honors `DEACON_CONTAINER_RUNTIME`,
+/// the same env var deacon reads).
+///
+/// Verification and setup that BYPASSES deacon must go through this, or it reads
+/// a different image store than the deacon under test wrote to. Every GitHub
+/// runner has docker installed, so a hardcoded `docker` here does not fail loudly
+/// on the podman lane — it quietly inspects the wrong daemon, which is how these
+/// assertions kept passing while #708 had the build running on docker anyway.
+fn runtime_bin() -> String {
+    std::env::var("DEACON_CONTAINER_RUNTIME").unwrap_or_else(|_| "docker".to_string())
+}
+
 #[test]
 fn test_build_with_dockerfile() {
     // Create a temporary directory with a simple Dockerfile
@@ -219,11 +231,11 @@ fn test_build_image_reference_with_features_tags_final_image() {
     );
 
     // The named tag must contain the feature's marker file.
-    let run = std::process::Command::new("docker")
+    let run = std::process::Command::new(runtime_bin())
         .args(["run", "--rm", image_tag, "cat", "/feature-marker.txt"])
         .output()
         .expect("docker run");
-    let _ = std::process::Command::new("docker")
+    let _ = std::process::Command::new(runtime_bin())
         .args(["rmi", "-f", image_tag])
         .output();
     assert!(
@@ -652,7 +664,7 @@ struct ImageTags(Vec<String>);
 impl Drop for ImageTags {
     fn drop(&mut self) {
         for tag in &self.0 {
-            let _ = std::process::Command::new("docker")
+            let _ = std::process::Command::new(runtime_bin())
                 .args(["image", "rm", "-f", tag])
                 .output();
         }
@@ -660,7 +672,7 @@ impl Drop for ImageTags {
 }
 
 fn docker_available() -> bool {
-    std::process::Command::new("docker")
+    std::process::Command::new(runtime_bin())
         .args(["info"])
         .output()
         .map(|o| o.status.success())
@@ -668,7 +680,7 @@ fn docker_available() -> bool {
 }
 
 fn image_exists(tag: &str) -> bool {
-    std::process::Command::new("docker")
+    std::process::Command::new(runtime_bin())
         .args(["inspect", "--type=image", tag])
         .output()
         .map(|o| o.status.success())
@@ -676,7 +688,7 @@ fn image_exists(tag: &str) -> bool {
 }
 
 fn image_id(tag: &str) -> String {
-    let output = std::process::Command::new("docker")
+    let output = std::process::Command::new(runtime_bin())
         .args(["inspect", "--type=image", "--format={{.Id}}", tag])
         .output()
         .expect("docker inspect should run");
@@ -692,7 +704,7 @@ fn image_id(tag: &str) -> String {
 fn run_and_capture(tag: &str, cmd: &[&str]) -> String {
     let mut args = vec!["run", "--rm", tag];
     args.extend_from_slice(cmd);
-    let output = std::process::Command::new("docker")
+    let output = std::process::Command::new(runtime_bin())
         .args(&args)
         .output()
         .expect("docker run should run");

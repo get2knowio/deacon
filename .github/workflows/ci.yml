@@ -474,43 +474,74 @@ jobs:
     # Until #697 there was nothing to gain by running them here — `build`
     # hardcoded `CliDocker::new()` and used docker no matter what this job
     # selected, so they would have reported on docker while sitting in a lane
-    # labelled podman. Now the selection reaches the build, so what they report is
-    # real, and #698 measured a Dockerfile build completing through podman
-    # (`smoke_build_json_then_text`). This widens that from one smoke test to
-    # deacon's actual build surface.
+    # labelled podman.
+    #
+    # #697 fixed the SELECTION but not the EXECUTION, and this comment used to say
+    # otherwise. `execute_docker_build` took the resolved runtime, spent it on
+    # `check_docker_installed()`/`ping()`, then ran `Command::new("docker")` — so
+    # the builds here still landed on docker, in a step labelled Podman, exactly
+    # the failure this file warns about two paragraphs down. #708 fixed that; a
+    # shim test (`build_runtime_routing`) now holds the line hermetically. Reports
+    # from this step are trustworthy from #708 onward, and earlier ones — including
+    # the `smoke_build_json_then_text` evidence once cited here — are not.
     #
     # BLOCKING on purpose. A non-blocking step here would recreate exactly the
     # thing #694 fixed: a green lane reporting coverage it does not have.
-    # Two tests are excluded BY NAME, each for a measured reason rather than to
-    # get the lane green:
+    # WHAT THIS STEP EXCLUDES, and why the list grew. #708 made the builds actually
+    # run on podman, which turned a false 34/34 into a true 24 passed / 10 failed.
+    # Four of those ten were TEST defects and are fixed: integration_build{,_output}
+    # verified what deacon produced by shelling out to a hardcoded `docker`, reading
+    # a different image store than the deacon under test wrote to. They now use a
+    # `runtime_bin()` helper honoring DEACON_CONTAINER_RUNTIME.
     #
-    # `concurrent_identical_builds_…` uses `--output type=docker,dest=…`, and
-    # podman's buildx shim does not support the docker exporter at all
-    # ("Docker exporter is not supported for the docker driver"). A runtime
-    # capability gap, so the test is docker-only by nature.
+    # The rest are excluded, in two groups.
     #
-    # `compose_features_image_shape_installs_feature` fails on a real deacon
-    # defect, tracked as #706: under podman, Compose cannot resolve the
-    # Feature-extended image deacon built out-of-band and tries to PULL it.
+    # (1) THREE buildx EXPORTER capability gaps. `podman buildx` is an alias for
+    # `podman build`, which supports neither BuildKit's exporter grammar nor its
+    # cache-export grammar, so each of these fails in podman's own parser before
+    # deacon is involved. Docker-only by nature, not deacon defects:
+    #   concurrent_identical_builds_…                        --output type=docker
+    #     "Docker exporter is not supported for the docker driver"
+    #   build_honors_a_container_driver_builder_and_can_oci_export   --output type=oci
+    #     "invalid type \"oci\" selected for build output options"
+    #   …_and_can_export_a_local_cache                     --cache-to type=local
+    #     podman parses the whole value as a repo: "must contain registry and
+    #     repository: invalid reference format"
     #
-    # The obvious fix is NOT the fix, and this comment exists so nobody spends the
-    # afternoon rediscovering that. Prefixing `localhost/` — podman's repository
-    # for locally built images, and what the reference does to its `BASE_IMAGE`
-    # build-arg — was tried and MEASURED to make things worse: it broke the two
-    # sibling tests that were passing. A compose `image:` field is resolved by the
-    # COMPOSE CLIENT, and podman delegates compose to `docker-compose` (its own
-    # `podman version` reports `containers-storage docker-compose`), which reads
-    # `localhost/foo` as registry host `localhost` and dials it:
-    #   app Error Get "http://localhost/v2/": dial tcp [::1]:80: connection refused
-    # The reference does not have this problem because its override carries
-    # `build:` alongside `image:`, so Compose BUILDS rather than resolves.
+    # (2) `integration_compose_features_build` — the WHOLE binary. Every one of its
+    # tests fails under podman, so a binary-level exclusion is both cleaner and
+    # more honest than naming seven. Tracked as #710, with #706 as the first
+    # symptom found.
+    #
+    # The measured shape: podman delegates compose to an EXTERNAL provider, and
+    # the lane's own log names it —
+    #   >>>> Executing external compose provider
+    #        "/usr/libexec/docker/cli-plugins/docker-compose" <<<<
+    # After that build, `podman tag <service-image> <target>` cannot find the image
+    # under ANY spelling: bare, `localhost/…`, or `docker.io/library/…` all return
+    # "image not known". So the compose build's result is not in podman's store,
+    # which makes every downstream step (tag, run, exec) miss.
+    #
+    # TWO `localhost/` fixes were tried here and BOTH were measured wrong; this
+    # comment exists so nobody spends the afternoon rediscovering them:
+    #   - qualifying the compose service-image OVERRIDE broke two passing siblings.
+    #     A compose `image:` is parsed by the compose CLIENT, and docker-compose
+    #     reads `localhost/foo` as registry host `localhost`:
+    #       app Error Get "http://localhost/v2/": dial tcp [::1]:80: refused
+    #   - qualifying the `podman tag` SOURCE only moved the error from
+    #     `X: image not known` to `docker.io/library/X: image not known`, because
+    #     the probe found nothing under `localhost/` either.
+    # Neither is the fix, because the image is not in podman's store to begin with.
+    # The reference sidesteps the whole class: its override carries `build:`
+    # alongside `image:`, so Compose builds the image rather than resolving one.
     - name: Run build tests against Podman (#30)
       run: |
         cargo nextest run --profile mvp-integration --no-fail-fast \
           --ignore-default-filter \
-          -E '(binary(=integration_build) | binary(=integration_build_output) | binary(=integration_compose_features_build))
+          -E '(binary(=integration_build) | binary(=integration_build_output))
               - test(=concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag)
-              - test(=compose_features_image_shape_installs_feature)'
+              - test(=build_honors_a_container_driver_builder_and_can_oci_export)
+              - test(=build_honors_a_container_driver_builder_and_can_export_a_local_cache)'
 
     # `parity_hermetic` runs in this job (it is runtime-agnostic and NOT excluded above), so
     # this job owes the same evidence as the Docker one (#474). Same conditions, same reasons;

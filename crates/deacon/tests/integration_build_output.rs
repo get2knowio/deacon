@@ -15,6 +15,18 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+/// The container runtime binary under test (honors `DEACON_CONTAINER_RUNTIME`,
+/// the same env var deacon reads).
+///
+/// Verification and setup that BYPASSES deacon must go through this, or it reads
+/// a different image store than the deacon under test wrote to. Every GitHub
+/// runner has docker installed, so a hardcoded `docker` here does not fail loudly
+/// on the podman lane — it quietly inspects the wrong daemon, which is how these
+/// assertions kept passing while #708 had the build running on docker anyway.
+fn runtime_bin() -> String {
+    std::env::var("DEACON_CONTAINER_RUNTIME").unwrap_or_else(|_| "docker".to_string())
+}
+
 /// Whether the failure is just "Docker isn't available here" (so the test's real
 /// assertion doesn't apply).
 fn is_docker_unavailable(stderr: &str) -> bool {
@@ -211,7 +223,7 @@ fn concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag() {
     let export_err = String::from_utf8_lossy(&export_out.stderr);
     let sibling_err = String::from_utf8_lossy(&sibling_out.stderr);
 
-    let _ = std::process::Command::new("docker")
+    let _ = std::process::Command::new(runtime_bin())
         .args(["image", "rm", "deacon-test-470-sibling:latest"])
         .output();
 
@@ -238,7 +250,7 @@ fn concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag() {
     // to the two pids this test spawned — a bare `deacon-build-run` substring
     // match would scan daemon-global state and report a sibling's in-flight tag
     // as this test's leak.
-    let images = std::process::Command::new("docker")
+    let images = std::process::Command::new(runtime_bin())
         .args(["images", "--format", "{{.Repository}}:{{.Tag}}"])
         .output()
         .unwrap();
@@ -280,7 +292,7 @@ fn concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag() {
 fn build_honors_a_container_driver_builder_and_can_oci_export() {
     let builder = format!("deacon-t595-{}", std::process::id());
 
-    let created = std::process::Command::new("docker")
+    let created = std::process::Command::new(runtime_bin())
         .args([
             "buildx",
             "create",
@@ -325,7 +337,7 @@ fn build_honors_a_container_driver_builder_and_can_oci_export() {
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-    let _ = std::process::Command::new("docker")
+    let _ = std::process::Command::new(runtime_bin())
         .args(["buildx", "rm", &builder])
         .output();
 
@@ -402,7 +414,7 @@ fn build_honors_a_container_driver_builder_and_can_oci_export() {
 fn build_honors_a_container_driver_builder_and_can_export_a_local_cache() {
     let builder = format!("deacon-t595-cache-{}", std::process::id());
 
-    let created = std::process::Command::new("docker")
+    let created = std::process::Command::new(runtime_bin())
         .args([
             "buildx",
             "create",
@@ -476,7 +488,7 @@ fn build_honors_a_container_driver_builder_and_can_export_a_local_cache() {
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
-    let _ = std::process::Command::new("docker")
+    let _ = std::process::Command::new(runtime_bin())
         .args(["buildx", "rm", &builder])
         .output();
 
@@ -515,7 +527,7 @@ fn build_honors_a_container_driver_builder_and_can_export_a_local_cache() {
                 .map(str::to_string)
                 .or_else(|| n.as_array()?.first()?.as_str().map(str::to_string))
         }) {
-            let _ = std::process::Command::new("docker")
+            let _ = std::process::Command::new(runtime_bin())
                 .args(["rmi", "-f", &name])
                 .output();
         }
@@ -618,7 +630,7 @@ fn feature_install_becomes_root_and_restores_an_arg_named_dockerfile_user() {
     // `docker run --entrypoint <bin> <image> [args...]` — the image comes before
     // the command's own arguments.
     let read_image = |entrypoint: &str, args: &[&str]| -> String {
-        let out = std::process::Command::new("docker")
+        let out = std::process::Command::new(runtime_bin())
             .args(["run", "--rm", "--entrypoint", entrypoint])
             .arg(&tag)
             .args(args)
@@ -651,7 +663,7 @@ fn feature_install_becomes_root_and_restores_an_arg_named_dockerfile_user() {
         );
     });
 
-    let _ = std::process::Command::new("docker")
+    let _ = std::process::Command::new(runtime_bin())
         .args(["rmi", "-f", &tag])
         .output();
 
@@ -740,7 +752,7 @@ fn feature_install_receives_the_users_real_home_not_a_guess() {
 
     let result = std::panic::catch_unwind(|| {
         assert!(output.status.success(), "build failed; stderr:\n{stderr}");
-        let out = std::process::Command::new("docker")
+        let out = std::process::Command::new(runtime_bin())
             .args(["run", "--rm", "--entrypoint", "cat"])
             .arg(&tag)
             .arg("/marker.txt")
@@ -753,7 +765,7 @@ fn feature_install_receives_the_users_real_home_not_a_guess() {
         );
     });
 
-    let _ = std::process::Command::new("docker")
+    let _ = std::process::Command::new(runtime_bin())
         .args(["rmi", "-f", &tag])
         .output();
 
