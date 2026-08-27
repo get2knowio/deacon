@@ -934,3 +934,156 @@ fn build_compose_with_features_keeps_the_services_own_build_keys() {
         "the service's own build.labels must survive deacon's override"
     );
 }
+
+/// A second `up` on a STOPPED Compose devcontainer reuses the container, so
+/// anything written into its filesystem survives.
+///
+/// The cause was not the reuse logic — it was image identity. BuildKit attaches a
+/// fresh provenance attestation to every build, so a fully CACHED rebuild still
+/// produced a new image ID (measured: layers identical, config identical,
+/// `created` identical, IDs `99483d1aab35` then `519839eb5424`). Compose keys
+/// container recreation on the service's image, so it replaced the container and
+/// the old filesystem went with it ([#700]).
+///
+/// **A Feature is required for this test to cover anything**, and sabotage found
+/// that rather than reasoning: a Feature-less config has a stable image, Compose
+/// reuses the container anyway, and the test passes against the defect. Upstream's
+/// own case is "docker-compose with Dockerfile WITH features" for the same reason.
+///
+/// The marker is written to `/` and not into a mount — a mount survives a
+/// recreate and would pass either way. Both CLIs report `outcome: success`
+/// regardless, so no result-document assertion can catch this.
+///
+/// [#700]: https://github.com/get2knowio/deacon/issues/700
+#[test]
+fn compose_up_reuses_a_stopped_container_because_the_image_is_deterministic() {
+    if !is_docker_available() {
+        eprintln!("skipping: docker unavailable");
+        return;
+    }
+
+    let temp = TempDir::new().unwrap();
+    let dc = temp.path().join(".devcontainer");
+    fs::create_dir_all(&dc).unwrap();
+    fs::write(
+        dc.join("Dockerfile"),
+        "FROM debian:bookworm-slim\nRUN true\n",
+    )
+    .unwrap();
+    fs::write(
+        dc.join("docker-compose.yml"),
+        "services:\n  app:\n    build:\n      context: .\n      dockerfile: Dockerfile\n    command: sleep infinity\n",
+    )
+    .unwrap();
+    let feature = dc.join("marker");
+    fs::create_dir_all(&feature).unwrap();
+    fs::write(
+        feature.join("devcontainer-feature.json"),
+        r#"{ "id": "marker", "version": "1.0.0", "name": "marker" }"#,
+    )
+    .unwrap();
+    fs::write(
+        feature.join("install.sh"),
+        "#!/usr/bin/env bash\nset -e\necho marker > /marker.txt\n",
+    )
+    .unwrap();
+    fs::write(
+        dc.join("devcontainer.json"),
+        r#"{
+    "name": "Compose Reuse",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "app",
+    "workspaceFolder": "/workspace",
+    "features": { "./marker": {} }
+}
+"#,
+    )
+    .unwrap();
+
+    let deacon = assert_cmd::cargo::cargo_bin("deacon");
+    let up = || {
+        StdCommand::new(&deacon)
+            .arg("up")
+            .arg("--workspace-folder")
+            .arg(temp.path())
+            .args(["--mount-workspace-git-root", "false"])
+            .args(["--skip-post-create", "--skip-non-blocking-commands"])
+            .output()
+            .unwrap()
+    };
+    let container_id = |out: &std::process::Output| -> Option<String> {
+        serde_json::from_slice::<serde_json::Value>(&out.stdout)
+            .ok()?
+            .get("containerId")?
+            .as_str()
+            .map(str::to_string)
+    };
+
+    let first = up();
+    let Some(id1) = container_id(&first) else {
+        eprintln!(
+            "skipping: first up produced no containerId: {}",
+            String::from_utf8_lossy(&first.stderr)
+        );
+        return;
+    };
+    let project = String::from_utf8_lossy(
+        &StdCommand::new("docker")
+            .args([
+                "inspect",
+                &id1,
+                "--format",
+                "{{index .Config.Labels \"com.docker.compose.project\"}}",
+            ])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .to_string();
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let wrote = StdCommand::new("docker")
+            .args([
+                "exec",
+                &id1,
+                "sh",
+                "-c",
+                "echo survived > /deacon-reuse-marker",
+            ])
+            .output()
+            .unwrap();
+        assert!(wrote.status.success(), "could not write the marker");
+
+        StdCommand::new("docker")
+            .args(["compose", "--project-name", &project, "stop"])
+            .output()
+            .unwrap();
+
+        let second = up();
+        let id2 = container_id(&second).unwrap_or_else(|| {
+            panic!(
+                "second up produced no containerId: {}",
+                String::from_utf8_lossy(&second.stderr)
+            )
+        });
+        assert_eq!(
+            id1, id2,
+            "a second up on a stopped compose project must reuse the container"
+        );
+        let marker = StdCommand::new("docker")
+            .args(["exec", &id2, "cat", "/deacon-reuse-marker"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&marker.stdout).trim(),
+            "survived",
+            "the container's own filesystem must survive a stop/up cycle"
+        );
+    }));
+
+    compose_down_by_project(&project);
+    if let Err(p) = result {
+        std::panic::resume_unwind(p);
+    }
+}
