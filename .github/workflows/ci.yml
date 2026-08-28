@@ -419,9 +419,36 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y podman
         podman version
-        # deacon's PodmanRuntime drives the `podman` CLI directly (no socket).
+        # deacon's PodmanRuntime drives the `podman` CLI directly, and for every
+        # subcommand except compose that is the whole story.
         # Sanity-check rootless pull + run before the suite.
         podman run --rm docker.io/library/alpine:3.18 echo "podman-ok"
+
+        # COMPOSE needs an API socket, and this step used to say "no socket".
+        # `podman compose` is a shim: it execs an external provider — docker-compose,
+        # already on the runner — and points it at podman by exporting
+        # DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock. MEASURED by pointing
+        # `compose_providers` at a script that dumps its environment; it also sets
+        # DOCKER_BUILDKIT=0 and blanks DOCKER_CONFIG. With nothing listening, EVERY
+        # compose call fails with `Cannot connect to the Docker daemon`, which is a
+        # fact about this job's setup and not about deacon. Started directly rather
+        # than through `systemctl --user`, so the lane does not depend on a user
+        # systemd session existing on the runner image.
+        export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+        mkdir -p "$XDG_RUNTIME_DIR/podman"
+        setsid podman system service --time=0 \
+          "unix://$XDG_RUNTIME_DIR/podman/podman.sock" \
+          > "$RUNNER_TEMP/podman-service.log" 2>&1 < /dev/null &
+        for _ in $(seq 1 25); do
+          curl -sf --max-time 2 --unix-socket "$XDG_RUNTIME_DIR/podman/podman.sock" \
+            http://d/v1.41/_ping >/dev/null 2>&1 && break
+          sleep 0.4
+        done
+        curl -sf --max-time 5 --unix-socket "$XDG_RUNTIME_DIR/podman/podman.sock" \
+          http://d/v1.41/_ping >/dev/null \
+          || { echo "podman API socket never came up"; cat "$RUNNER_TEMP/podman-service.log"; exit 1; }
+        echo "podman API socket ready"
+        echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
 
     - name: Acquire GHCR bearer token (read-only)
       run: |
@@ -533,6 +560,20 @@ jobs:
     # Two `localhost/` fixes were tried against the old diagnosis and both were
     # measured wrong. Neither could have worked, because the image was in another
     # daemon entirely — a naming fix for a routing bug.
+    #
+    # (3) THREE of that binary's seven stay excluded, on a fourth capability gap
+    # rather than a deacon defect. Podman sets `DOCKER_BUILDKIT=0` for the compose
+    # provider (measured, same environment dump as above), which pins docker-compose
+    # to the classic builder; deacon's Feature-extended compose build passes the
+    # Feature content as an ADDITIONAL BUILD CONTEXT, which only BuildKit supports:
+    #   the classic builder doesn't support additional contexts, set DOCKER_BUILDKIT=1
+    # Only the `build:`-shape services hit it. The `image:` shape builds its Feature
+    # image with `podman build` directly and passes — which is
+    # `compose_features_image_shape_installs_feature`, the test #706 was originally
+    # filed about.
+    #
+    # MEASURED locally against real rootless podman 4.9.3 (see the devcontainer
+    # podman setup): 4 of 7 pass, and the 3 below fail with that one message.
     - name: Run build tests against Podman (#30)
       run: |
         cargo nextest run --profile mvp-integration --no-fail-fast \
@@ -541,7 +582,10 @@ jobs:
                | binary(=integration_compose_features_build))
               - test(=concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag)
               - test(=build_honors_a_container_driver_builder_and_can_oci_export)
-              - test(=build_honors_a_container_driver_builder_and_can_export_a_local_cache)'
+              - test(=build_honors_a_container_driver_builder_and_can_export_a_local_cache)
+              - test(=build_compose_with_features_tags_final_image)
+              - test(=build_compose_with_features_keeps_the_services_own_build_keys)
+              - test(=compose_features_build_shape_installs_feature)'
 
     # `parity_hermetic` runs in this job (it is runtime-agnostic and NOT excluded above), so
     # this job owes the same evidence as the Docker one (#474). Same conditions, same reasons;
