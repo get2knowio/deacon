@@ -14,7 +14,7 @@ use std::path::Path;
 use tempfile::TempDir;
 
 fn is_docker_available() -> bool {
-    std::process::Command::new("docker")
+    std::process::Command::new(support::runtime_bin())
         .arg("info")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -55,7 +55,7 @@ fn up_container_id(up_output: &std::process::Output) -> Option<String> {
 }
 
 fn docker_inspect_state_running(container_id: &str) -> Option<bool> {
-    let output = std::process::Command::new("docker")
+    let output = std::process::Command::new(support::runtime_bin())
         .args(["inspect", "--format", "{{.State.Running}}", container_id])
         .output()
         .ok()?;
@@ -67,7 +67,7 @@ fn docker_inspect_state_running(container_id: &str) -> Option<bool> {
 }
 
 fn docker_inspect_cmd(container_id: &str) -> Option<String> {
-    let output = std::process::Command::new("docker")
+    let output = std::process::Command::new(support::runtime_bin())
         .args(["inspect", "--format", "{{json .Config.Cmd}}", container_id])
         .output()
         .ok()?;
@@ -269,7 +269,7 @@ fn test_compose_override_command_lifecycle_runs() {
 
     let container_id = up_container_id(&up_output).expect("deacon up should report a containerId");
 
-    let marker = std::process::Command::new("docker")
+    let marker = std::process::Command::new(support::runtime_bin())
         .args([
             "exec",
             &container_id,

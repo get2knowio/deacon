@@ -15,7 +15,7 @@ use std::fs;
 use tempfile::TempDir;
 
 fn is_docker_available() -> bool {
-    std::process::Command::new("docker")
+    std::process::Command::new(support::runtime_bin())
         .arg("info")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -471,7 +471,7 @@ fn test_compose_down_stops_but_keeps_containers() {
             args.push("--filter".to_string());
             args.push(format!("status={}", status));
         }
-        let out = std::process::Command::new("docker")
+        let out = std::process::Command::new(support::runtime_bin())
             .args(&args)
             .output()
             .unwrap();
@@ -481,7 +481,7 @@ fn test_compose_down_stops_but_keeps_containers() {
             .count()
     };
     let cleanup = || {
-        let ids = std::process::Command::new("docker")
+        let ids = std::process::Command::new(support::runtime_bin())
             .args([
                 "ps",
                 "-a",
@@ -492,7 +492,7 @@ fn test_compose_down_stops_but_keeps_containers() {
             .output()
             .unwrap();
         for id in String::from_utf8_lossy(&ids.stdout).split_whitespace() {
-            let _ = std::process::Command::new("docker")
+            let _ = std::process::Command::new(support::runtime_bin())
                 .args(["rm", "-f", id])
                 .output();
         }

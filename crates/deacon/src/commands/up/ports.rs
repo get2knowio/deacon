@@ -70,7 +70,11 @@ pub(crate) async fn handle_port_events(
     debug!("Processing port events for compose project");
 
     let compose_manager = ComposeManager::with_docker_path(docker_path.to_string());
-    let docker = deacon_core::docker::CliDocker::new();
+    // `CliDocker::new()` here talked to `docker` no matter which runtime created the
+    // project, so under podman it inspected an empty daemon and every port event was
+    // silently lost (#710). `docker_path` is the resolved runtime binary — the same
+    // one `compose_manager` above is built with — so both agree on the daemon.
+    let docker = deacon_core::docker::CliDocker::with_path(docker_path.to_string());
 
     // Get all services in the project
     let command = compose_manager.get_command(project);

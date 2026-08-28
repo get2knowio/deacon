@@ -99,3 +99,98 @@ fn build_runs_on_the_runtime_named_by_docker_path() {
          flag and execution did not.\nrecorded:\n{recorded}"
     );
 }
+
+/// The compose CLIENT is the same question one layer up (#710).
+///
+/// `deacon build` on a compose config used to construct its `ComposeManager` with
+/// `ComposeManager::new()`, which defaults `docker_path` to the literal `"docker"`.
+/// So `--docker-path` (and `--runtime podman`, whose resolved binary is `podman`)
+/// selected the runtime for every probe and for `tag`, while `docker compose` did
+/// the actual build — putting the service image in a DIFFERENT daemon's store than
+/// the one deacon went on to tag, run and exec against. On the Podman lane that
+/// surfaced as `image not known` from every step after the build, and all seven
+/// tests in `integration_compose_features_build` failed on it.
+///
+/// MEASURED before the fix, with this same shim technique on a real compose
+/// config: the resolved runtime received `-v`, `image inspect` and `tag` — and
+/// zero `compose` invocations. Afterwards it received three, the service build
+/// among them.
+///
+/// The assertion is on `compose` reaching the named binary at all, which is
+/// exactly the axis that was broken; how far the compose flow then gets depends
+/// on how completely the shim can impersonate Compose, and that is not what this
+/// guards.
+const COMPOSE_SHIM: &str = r#"#!/bin/sh
+printf '%s\n' "$*" >> "$SHIM_LOG"
+case "$1" in
+  -v|--version) echo "Docker version 99.0.0, build shim" ;;
+  version)      echo '{"Client":{"Version":"99.0.0"},"Server":{"Version":"99.0.0"}}' ;;
+  inspect)      echo '[]' ;;
+  compose)
+    # `config --services` lists services; `config --format json` renders the
+    # project. Enough of each for `build` to reach the service build.
+    for a in "$@"; do
+      if [ "$a" = "--services" ]; then echo app; exit 0; fi
+    done
+    echo '{"name":"shimproj","services":{"app":{"image":"alpine:3.18"}}}'
+    ;;
+esac
+exit 0
+"#;
+
+fn write_compose_shim(dir: &Path) -> std::path::PathBuf {
+    let shim = dir.join("compose-shim");
+    fs::write(&shim, COMPOSE_SHIM).unwrap();
+    let mut perms = fs::metadata(&shim).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&shim, perms).unwrap();
+    shim
+}
+
+fn write_compose_workspace(dir: &Path) {
+    fs::write(
+        dir.join("docker-compose.yml"),
+        "services:\n  app:\n    image: alpine:3.18\n    command: [\"sleep\",\"infinity\"]\n",
+    )
+    .unwrap();
+    let dc = dir.join(".devcontainer");
+    fs::create_dir_all(&dc).unwrap();
+    // `dockerComposeFile` is config-dir-relative, so `../` reaches the workspace root.
+    fs::write(
+        dc.join("devcontainer.json"),
+        r#"{ "name": "compose-routing", "dockerComposeFile": "../docker-compose.yml", "service": "app" }"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn compose_build_runs_on_the_runtime_named_by_docker_path() {
+    let workspace = TempDir::new().unwrap();
+    let bin = TempDir::new().unwrap();
+    write_compose_workspace(workspace.path());
+    let shim = write_compose_shim(bin.path());
+    let log = bin.path().join("invocations.log");
+
+    // As above, the exit status is not the subject — the shim cannot produce an
+    // image. What is under test is which binary was asked to run Compose.
+    let _ = Command::cargo_bin("deacon")
+        .unwrap()
+        .arg("build")
+        .arg("--workspace-folder")
+        .arg(workspace.path())
+        .args(["--docker-path", shim.to_str().unwrap()])
+        .env("SHIM_LOG", &log)
+        .assert();
+
+    let recorded = fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        !recorded.is_empty(),
+        "the named binary was never invoked at all; --docker-path is being ignored outright"
+    );
+    assert!(
+        recorded.lines().any(|l| l.starts_with("compose ")),
+        "no `compose` invocation reached the binary named by --docker-path (#710). \
+         deacon probed the named runtime and then ran Compose on a literal `docker`, \
+         so the service image landed in another daemon's store.\nrecorded:\n{recorded}"
+    );
+}

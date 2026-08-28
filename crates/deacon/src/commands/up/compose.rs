@@ -99,7 +99,15 @@ pub(crate) async fn execute_compose_up(
     // single-container path (container.rs), which threads these through.
     let build_options = super::args::build_options_from_args(args);
 
-    let compose_manager = ComposeManager::with_docker_path(args.docker_path.clone());
+    // The compose CLIENT must be the RESOLVED runtime binary, not the raw
+    // `--docker-path` flag (#710). `binary_for` maps an untouched default to the
+    // flavor's own name, so under `--runtime podman` with no explicit path
+    // `args.docker_path` is still the literal "docker" — and every compose call
+    // made with it ran `docker compose`, building the service image into DOCKER's
+    // store while deacon reported success against podman. `runtime` is already
+    // resolved here; take the binary from it.
+    let runtime_bin = runtime.cli_docker().runtime_path().to_string();
+    let compose_manager = ComposeManager::with_docker_path(runtime_bin.clone());
     // Compose files resolve relative to the directory containing devcontainer.json
     // (the `.devcontainer` dir for the standard layout), not the workspace folder.
     let config_dir = config_path.parent().unwrap_or(workspace_folder);
@@ -761,6 +769,7 @@ pub(crate) async fn execute_compose_up(
         identity,
         workspace_folder,
         args,
+        &runtime_bin,
         effective_env,
         cache_folder,
         feature_build
@@ -777,7 +786,7 @@ pub(crate) async fn execute_compose_up(
             &project,
             &args.redaction_config,
             &args.secret_registry,
-            &args.docker_path,
+            &runtime_bin,
             args.auto_forward,
             args.browser_setting.as_deref(),
         )
@@ -791,7 +800,7 @@ pub(crate) async fn execute_compose_up(
             &project,
             state_manager,
             workspace_hash,
-            &args.docker_path,
+            &runtime_bin,
         )
         .await?;
     }
@@ -967,6 +976,7 @@ async fn execute_compose_lifecycle(
     identity: &ContainerIdentity,
     workspace_folder: &Path,
     args: &UpArgs,
+    runtime_bin: &str,
     cli_remote_env: &IndexMap<String, String>,
     cache_folder: &Option<PathBuf>,
     resolved_features: &[deacon_core::features::ResolvedFeature],
@@ -976,20 +986,22 @@ async fn execute_compose_lifecycle(
         container_id
     );
 
-    // Exec against the SAME CLI that created this compose project, which is
-    // `--docker-path` (what `ComposeManager` is built with above) and NOT the
-    // `--runtime`-selected `ContainerRuntimeImpl`. The two can differ: the
-    // Podman CI lane sets `DEACON_CONTAINER_RUNTIME=podman` while
-    // `--docker-path` keeps its `docker` default, so `docker compose` creates
-    // the project in the DOCKER daemon and a `podman exec` against that
-    // container fails with `no container with name or ID … found` — measured on
-    // that lane. `CliRuntime::with_runtime_path` derives the flavor from the
-    // binary name, so this client is Podman-shaped when `--docker-path` names a
-    // podman binary and Docker-shaped otherwise; it follows the containers
-    // rather than a flag that did not create them. Whether the compose path
-    // should honor `--runtime` at all is a separate question, and pre-existing.
+    // Exec against the SAME CLI that created this compose project. That is the
+    // invariant; what satisfies it changed in #710.
+    //
+    // This used to read `args.docker_path`, and the comment here recorded WHY:
+    // on the Podman lane `--runtime podman` left `--docker-path` at its `docker`
+    // default, so `docker compose` created the project in the DOCKER daemon and a
+    // `podman exec` against it failed with `no container with name or ID … found`.
+    // That was a compensation for the compose client ignoring the resolved
+    // runtime — the "separate question" this comment used to defer is the bug
+    // #710 fixed. `ComposeManager` is now built with `runtime_bin`, so following
+    // the raw flag here would re-open the same split from the other side.
+    //
+    // `CliRuntime::with_runtime_path` still derives the flavor from the binary
+    // name, so this client stays Podman-shaped when `runtime_bin` names podman.
     let compose_runtime = ContainerRuntimeImpl::Docker(
-        deacon_core::runtime::DockerRuntime::with_path(args.docker_path.clone()),
+        deacon_core::runtime::DockerRuntime::with_path(runtime_bin.to_string()),
     );
     let runtime = &compose_runtime;
 

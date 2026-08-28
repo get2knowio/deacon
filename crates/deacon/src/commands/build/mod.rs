@@ -1758,7 +1758,13 @@ async fn execute_compose_build(
     // them would derive a DIFFERENT compose project name than `up --env-file` on the same
     // configuration. The flag documents itself as "passed to docker compose" and was
     // parsed-but-unused until now.
-    let compose_manager = ComposeManager::new();
+    // The compose CLIENT must be the RESOLVED runtime, not the literal `docker`
+    // (#710). `ComposeManager::new()` defaults `docker_path` to "docker", so under
+    // `--runtime podman` this ran `docker compose` and the service image landed in
+    // DOCKER's store — after which every podman-side step (`tag`, `run`, `exec`)
+    // reported `image not known`. Same defect class as #708 one layer up: the build
+    // validated against the resolved runtime, then invoked a different one.
+    let compose_manager = ComposeManager::with_docker_path(cli.runtime_path().to_string());
     let config_dir = config_path.parent().unwrap_or(workspace_folder);
     let project = compose_manager
         .create_project(config, workspace_folder, config_dir, &args.env_file)
@@ -2037,7 +2043,13 @@ async fn execute_compose_build_with_features(
         .as_ref()
         .ok_or_else(|| anyhow!("Docker Compose configuration must specify a service"))?;
 
-    let compose_manager = ComposeManager::new();
+    // The compose CLIENT must be the RESOLVED runtime, not the literal `docker`
+    // (#710). `ComposeManager::new()` defaults `docker_path` to "docker", so under
+    // `--runtime podman` this ran `docker compose` and the service image landed in
+    // DOCKER's store — after which every podman-side step (`tag`, `run`, `exec`)
+    // reported `image not known`. Same defect class as #708 one layer up: the build
+    // validated against the resolved runtime, then invoked a different one.
+    let compose_manager = ComposeManager::with_docker_path(cli.runtime_path().to_string());
     // Compose files resolve relative to the config dir (spec parity). `--env-file` is
     // threaded for the same reason as `execute_compose_build` above: it participates in
     // resolving an authored `name: ${VAR}`, so ignoring it here would put `build` on a
