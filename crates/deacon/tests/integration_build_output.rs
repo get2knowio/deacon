@@ -773,3 +773,119 @@ fn feature_install_receives_the_users_real_home_not_a_guess() {
         std::panic::resume_unwind(panic);
     }
 }
+
+/// #719: Features install on a builder with no BuildKit build contexts.
+///
+/// `--buildkit never` used to be a hard refusal — `Installing Features requires
+/// BuildKit, which the current settings disable` — while the reference installs
+/// them fine in the same configuration, by staging the content through an ordinary
+/// image and reading it back with `COPY --from=` instead of `RUN --mount`.
+///
+/// ARTIFACT-LEVEL on purpose. The refusal it replaces was an error, so `outcome:
+/// success` alone would be a real improvement and still prove nothing about
+/// whether the Feature ran: the marker file is the only thing that separates "the
+/// build completed" from "the Feature installed". That distinction is exactly what
+/// #705's build tests got wrong in the other direction.
+///
+/// The same mechanism is what makes Feature-extended COMPOSE builds work under
+/// podman, where the provider runs with `DOCKER_BUILDKIT=0` — but that needs
+/// podman, so it is covered by the Podman lane rather than here.
+#[test]
+fn features_install_without_buildkit_build_contexts() {
+    let temp_dir = TempDir::new().unwrap();
+    let dc = temp_dir.path().join(".devcontainer");
+    let feature = dc.join("features/marker");
+    fs::create_dir_all(&feature).unwrap();
+    fs::write(dc.join("Dockerfile"), "FROM alpine:3.19\n").unwrap();
+    fs::write(
+        dc.join("devcontainer.json"),
+        r#"{
+    "name": "No BuildKit Contexts",
+    "build": { "dockerfile": "Dockerfile" },
+    "features": { "./features/marker": {} }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        feature.join("devcontainer-feature.json"),
+        r#"{ "id": "marker", "version": "1.0.0", "name": "Marker" }"#,
+    )
+    .unwrap();
+    // `/bin/sh`, not bash: the base is alpine, where a bash shebang exits 127.
+    fs::write(
+        feature.join("install.sh"),
+        "#!/bin/sh\nset -e\necho no-buildkit > /usr/local/share/marker\n",
+    )
+    .unwrap();
+
+    let tag = "deacon-test/no-buildkit-contexts:v1";
+    let _ = std::process::Command::new(runtime_bin())
+        .args(["rmi", "-f", tag])
+        .output();
+
+    let out = Command::cargo_bin("deacon")
+        .unwrap()
+        .args([
+            "build",
+            "--workspace-folder",
+            temp_dir.path().to_str().unwrap(),
+            "--buildkit",
+            "never",
+            "--image-name",
+            tag,
+            "--output-format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+    // Same skip convention as this file's other Docker-backed cases: probe by
+    // running, and stand down only on "there is no daemon here".
+    if !out.status.success() && is_docker_unavailable(&stderr) {
+        eprintln!("skipping: docker not available");
+        return;
+    }
+
+    // Read the marker BEFORE cleaning up, so teardown always runs.
+    let marker = std::process::Command::new(runtime_bin())
+        .args(["run", "--rm", tag, "cat", "/usr/local/share/marker"])
+        .output()
+        .ok();
+    // The staged content image is a throwaway; nothing should be left holding it.
+    let leaked = std::process::Command::new(runtime_bin())
+        .args([
+            "images",
+            "--format",
+            "{{.Repository}}",
+            "--filter",
+            "reference=deacon-feature-content",
+        ])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let _ = std::process::Command::new(runtime_bin())
+        .args(["rmi", "-f", tag])
+        .output();
+
+    assert!(
+        out.status.success(),
+        "build with --buildkit never and a Feature must succeed:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+    );
+    let marker = marker.expect("docker run should spawn");
+    assert!(
+        String::from_utf8_lossy(&marker.stdout).contains("no-buildkit"),
+        "the Feature must actually have installed; `cat /usr/local/share/marker` gave \
+         stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&marker.stdout),
+        String::from_utf8_lossy(&marker.stderr)
+    );
+    assert!(
+        leaked.is_empty(),
+        "the staged Feature-content image must be reclaimed after the build; found:\n{leaked}"
+    );
+}

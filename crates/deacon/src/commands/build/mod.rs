@@ -2324,20 +2324,22 @@ async fn execute_single_container_build(
 
     let mut overlay = BuildOverlay::default();
     let mut resolved_features: Vec<ResolvedFeature> = Vec::new();
+    // Removed after the build that reads it; see `drop_feature_content_image`.
+    let mut feature_content_image: Option<String> = None;
     let mut lockfile_written = None;
 
     if features_present {
-        // Refuse before resolving anything. Installing Features needs buildx's
-        // named build contexts, so a disabled BuildKit cannot do it — and finding
-        // that out after downloading every Feature and writing a lockfile would be
-        // work done for a build that was never going to run.
-        if !uses_buildx(args.buildkit.as_ref()) {
-            return Err(DockerError::CLIError(
-                "Installing Features requires BuildKit, which the current settings disable"
-                    .to_string(),
-            )
-            .into());
-        }
+        // A builder without BuildKit build contexts is no longer a refusal (#719).
+        // Installing Features needs the content to reach the build somehow, and
+        // there are two mechanisms: buildx's named build contexts, or an ordinary
+        // image plus `COPY --from=`. The reference falls back to the second and so
+        // does deacon now, which is what makes `--buildkit never` install Features
+        // instead of erroring.
+        let content_image_builder = if uses_buildx(args.buildkit.as_ref()) {
+            None
+        } else {
+            Some(cli)
+        };
 
         let (staged_content, base_stage) =
             base_stage_for_features(&base_content, effective.target.as_deref()).with_context(
@@ -2407,6 +2409,7 @@ async fn execute_single_container_build(
             host_ca_set,
             lockfile_policy,
             args.control_manifest.as_ref(),
+            content_image_builder,
         )
         .await?;
 
@@ -2436,6 +2439,7 @@ async fn execute_single_container_build(
             .collect();
         overlay.extra_args = prepared.buildx_context_args();
         resolved_features = prepared.resolved_features;
+        feature_content_image = prepared.feature_content_image;
         overlay.dockerfile_path = Some(merged_path);
         overlay.target = Some(FEATURE_TARGET_STAGE.to_string());
     }
@@ -2474,7 +2478,7 @@ async fn execute_single_container_build(
         );
     }
 
-    let mut result = execute_docker_build(
+    let result = execute_docker_build(
         cli,
         &effective,
         args,
@@ -2483,7 +2487,16 @@ async fn execute_single_container_build(
         labels,
         &overlay,
     )
-    .await?;
+    .await;
+
+    // Reclaim the staged content image on BOTH paths — a failed build leaves one
+    // behind just as surely as a successful one, and `?` above would have skipped it.
+    crate::commands::up::features_build::drop_feature_content_image(
+        cli,
+        feature_content_image.as_deref(),
+    )
+    .await;
+    let mut result = result?;
 
     // Keep the reported labels describing what the build actually wrote. When the
     // image is not local (a multi-platform export) there is nothing to inspect, so
@@ -2910,15 +2923,25 @@ async fn execute_docker_build(
             build_args.push(ssh.clone());
         }
 
-        // The Feature RUN-mounts' named build contexts. A buildx-only flag, so the
-        // legacy builder cannot install Features at all — say so rather than let it
-        // fail on an `unknown flag`.
+        // Named build contexts are a buildx-only flag. Since #719 the FEATURE
+        // content no longer needs one — it is staged through an image and read with
+        // `COPY --from=` when buildx is unavailable — so anything left here is a
+        // context deacon has no fallback for, host-CA injection being the one that
+        // exists today. Name that rather than fail on an `unknown flag`, and do not
+        // blame Features for it.
         if !overlay.extra_args.is_empty() {
             if !use_buildx {
-                return Err(DockerError::CLIError(
-                    "Installing Features requires BuildKit, which the current settings disable"
-                        .to_string(),
-                )
+                return Err(DockerError::CLIError(format!(
+                    "This build needs a named build context ({}), which requires BuildKit — \
+                     the current settings disable it",
+                    overlay
+                        .extra_args
+                        .iter()
+                        .filter(|a| a.contains('='))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
                 .into());
             }
             build_args.extend(overlay.extra_args.iter().cloned());

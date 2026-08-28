@@ -647,19 +647,14 @@ jobs:
     # measured wrong. Neither could have worked, because the image was in another
     # daemon entirely — a naming fix for a routing bug.
     #
-    # (3) THREE of that binary's seven stay excluded, on a fourth capability gap
-    # rather than a deacon defect. Podman sets `DOCKER_BUILDKIT=0` for the compose
-    # provider (measured, same environment dump as above), which pins docker-compose
-    # to the classic builder; deacon's Feature-extended compose build passes the
-    # Feature content as an ADDITIONAL BUILD CONTEXT, which only BuildKit supports:
-    #   the classic builder doesn't support additional contexts, set DOCKER_BUILDKIT=1
-    # Only the `build:`-shape services hit it. The `image:` shape builds its Feature
-    # image with `podman build` directly and passes — which is
-    # `compose_features_image_shape_installs_feature`, the test #706 was originally
-    # filed about.
-    #
-    # MEASURED locally against real rootless podman 4.9.3 (see the devcontainer
-    # podman setup): 4 of 7 pass, and the 3 below fail with that one message.
+    # `integration_compose_features_build` runs here IN FULL. Three of its seven were
+    # excluded on a fourth capability gap — podman sets `DOCKER_BUILDKIT=0` for the
+    # compose provider, pinning docker-compose to the classic builder, which has no
+    # additional build contexts — and #719 removed the gap rather than the tests:
+    # deacon now stages Feature content through an ordinary image and reads it back
+    # with `COPY --from=` whenever build contexts are unavailable, which is the
+    # reference's own fallback. MEASURED against real rootless podman 4.9.3: 7 of 7,
+    # up from 4 of 7.
     - name: Run build tests against Podman (#30)
       run: |
         cargo nextest run --profile mvp-integration --no-fail-fast \
@@ -669,9 +664,7 @@ jobs:
               - test(=concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag)
               - test(=build_honors_a_container_driver_builder_and_can_oci_export)
               - test(=build_honors_a_container_driver_builder_and_can_export_a_local_cache)
-              - test(=build_compose_with_features_tags_final_image)
-              - test(=build_compose_with_features_keeps_the_services_own_build_keys)
-              - test(=compose_features_build_shape_installs_feature)'
+'
 
     # `parity_hermetic` runs in this job (it is runtime-agnostic and NOT excluded above), so
     # this job owes the same evidence as the Docker one (#474). Same conditions, same reasons;

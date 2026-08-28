@@ -170,6 +170,15 @@ pub(crate) struct PreparedFeatureLayer {
     /// differently: `--build-context name=path` for buildx, an
     /// `additional_contexts:` entry for a Compose-driven build (#629).
     pub build_contexts: Vec<(String, String)>,
+    /// The throwaway image the Feature content was staged into, when this layer
+    /// was prepared for a builder with no BuildKit build contexts (#719).
+    ///
+    /// The consumer removes it once the build that reads it has finished. It is
+    /// tagged per process so concurrent builds cannot read each other's content,
+    /// which makes it accumulate if nobody cleans up — the reference reuses one
+    /// fixed tag and carries a TODO about that, and a fixed tag here would be the
+    /// use-after-free `private_build_temp_dir` already documents.
+    pub feature_content_image: Option<String>,
     /// Feature-contributed `containerEnv`, in install order.
     pub combined_env: HashMap<String, String>,
     /// The Features that will be installed, in installation order — one
@@ -198,6 +207,13 @@ impl PreparedFeatureLayer {
 /// literal form is deliberate: BuildKit only expands a global `ARG` inside a
 /// `FROM` when the `ARG` precedes every `FROM` in the file, a window that closes
 /// as soon as user-authored stages are prepended.
+/// `content_image_builder` is `Some(runtime)` when the builder that will consume
+/// this layer has NO BuildKit build contexts — a Compose Feature build under
+/// podman, whose provider runs with `DOCKER_BUILDKIT=0`, or `--buildkit never`.
+/// The Feature content is then staged through an ordinary image built with that
+/// runtime and read back with `COPY --from=`, which is the reference's own
+/// fallback (#719). `None` uses the build context, which is what BuildKit-capable
+/// builders get and what deacon has always emitted.
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip(config, identity, host_ca_set), fields(base_stage = %base_stage))]
 pub(crate) async fn prepare_feature_layer(
@@ -209,6 +225,7 @@ pub(crate) async fn prepare_feature_layer(
     host_ca_set: Option<&CorporateCaSet>,
     lockfile_policy: LockfilePolicy,
     control_manifest: Option<&ControlManifestSource>,
+    content_image_builder: Option<&deacon_core::docker::CliDocker>,
 ) -> Result<PreparedFeatureLayer> {
     let staged = resolve_and_stage_features(
         config,
@@ -224,6 +241,19 @@ pub(crate) async fn prepare_feature_layer(
         _ => None,
     };
 
+    // Built AFTER staging, because the image's content is the staged tree.
+    let feature_content = match content_image_builder {
+        None => deacon_core::dockerfile_generator::FeatureContentSource::BuildContext,
+        Some(cli) => {
+            let tag = cli
+                .build_feature_content_image(&staged.features_source_dir, &identity.workspace_hash)
+                .await
+                .context("Failed to stage Feature content for a builder without build contexts")?;
+            debug!(tag = %tag, "Staged Feature content as an image (no BuildKit build contexts)");
+            deacon_core::dockerfile_generator::FeatureContentSource::Image(tag)
+        }
+    };
+
     let generator = DockerfileGenerator::new(DockerfileConfig {
         base_image: base_stage.to_string(),
         target_stage: FEATURE_TARGET_STAGE.to_string(),
@@ -231,6 +261,7 @@ pub(crate) async fn prepare_feature_layer(
         feature_install_env,
         host_ca_build_context: host_ca_dir.as_ref().map(|p| p.display().to_string()),
         config_container_env: config.container_env().clone(),
+        feature_content: feature_content.clone(),
     });
     let install_stage = generator.generate_install_stage_from(&staged.plan, base_stage)?;
 
@@ -241,14 +272,28 @@ pub(crate) async fn prepare_feature_layer(
             ca_dir.display().to_string(),
         ));
     }
-    build_contexts.push((
-        "dev_containers_feature_content_source".to_string(),
-        staged.features_source_dir.display().to_string(),
-    ));
+    // Only in build-context mode. In image mode the content is a `FROM` stage in
+    // the document, and passing the flag would be rejected by the very builder
+    // that made us choose image mode in the first place.
+    if matches!(
+        feature_content,
+        deacon_core::dockerfile_generator::FeatureContentSource::BuildContext
+    ) {
+        build_contexts.push((
+            "dev_containers_feature_content_source".to_string(),
+            staged.features_source_dir.display().to_string(),
+        ));
+    }
 
     Ok(PreparedFeatureLayer {
         install_stage,
         build_contexts,
+        feature_content_image: match &feature_content {
+            deacon_core::dockerfile_generator::FeatureContentSource::Image(tag) => {
+                Some(tag.clone())
+            }
+            deacon_core::dockerfile_generator::FeatureContentSource::BuildContext => None,
+        },
         combined_env: staged.combined_env,
         resolved_features: staged.plan.features.clone(),
         lockfile: staged.lockfile,
@@ -368,6 +413,8 @@ pub(crate) async fn build_image_with_features(
         feature_install_env,
         host_ca_build_context,
         config_container_env: config.container_env().clone(),
+        // This path always runs under `ensure_buildkit_or_error`, so contexts exist.
+        feature_content: deacon_core::dockerfile_generator::FeatureContentSource::BuildContext,
     };
 
     let generator = DockerfileGenerator::new(dockerfile_config.clone());
@@ -443,6 +490,39 @@ pub(crate) async fn build_image_with_features(
 /// document to `docker compose build` so the service's own `build:` keys keep
 /// applying (#629). Sharing the preparation is what keeps those two from drifting
 /// on what a Feature layer is.
+/// Remove the throwaway Feature-content image once the build that read it is done.
+///
+/// Best-effort and deliberately quiet: the build has already succeeded or failed
+/// on its own terms, and failing it now over a leftover tag would report the wrong
+/// thing. Skipped entirely in build-context mode, where no image was created.
+///
+/// Not optional bookkeeping — the tag carries the pid so concurrent builds cannot
+/// read each other's content, which means nothing else will ever reuse or reclaim
+/// it. Measured before this existed: one 7-test podman run left 5 images behind.
+pub(crate) async fn drop_feature_content_image(
+    cli: &deacon_core::docker::CliDocker,
+    tag: Option<&str>,
+) {
+    let Some(tag) = tag else { return };
+    match tokio::process::Command::new(cli.runtime_path())
+        .args(["image", "rm", "-f", tag])
+        .output()
+        .await
+    {
+        Ok(out) if out.status.success() => {
+            debug!(tag = %tag, "Removed the staged Feature-content image")
+        }
+        Ok(out) => debug!(
+            tag = %tag,
+            stderr = %String::from_utf8_lossy(&out.stderr).trim(),
+            "Could not remove the staged Feature-content image"
+        ),
+        Err(e) => {
+            debug!(tag = %tag, error = %e, "Could not remove the staged Feature-content image")
+        }
+    }
+}
+
 pub(crate) struct DockerfileFeatureBuild {
     /// The resolved Features and the stage that installs them.
     pub prepared: PreparedFeatureLayer,
@@ -467,6 +547,11 @@ pub(crate) struct DockerfileFeatureBuild {
     skip(config, identity, base_dockerfile_content, declared_build_args),
     fields(base_stage = %base_dockerfile_final_stage, target = ?target)
 )]
+/// `content_image_builder` is passed through to [`prepare_feature_layer`], and the
+/// decision belongs to the CALLER. That mirrors the reference, which gates on
+/// `!params.isPodman` in its COMPOSE resolver (`dockerCompose.ts:191`) and on a
+/// BuildKit version probe elsewhere — two different questions that happen to share
+/// an answer.
 pub(crate) async fn prepare_dockerfile_feature_build(
     config: &DevContainerConfig,
     identity: &ContainerIdentity,
@@ -480,6 +565,7 @@ pub(crate) async fn prepare_dockerfile_feature_build(
     lockfile_policy: LockfilePolicy,
     metadata_raw_config: Option<&DevContainerConfig>,
     control_manifest: Option<&ControlManifestSource>,
+    content_image_builder: Option<&deacon_core::docker::CliDocker>,
 ) -> Result<DockerfileFeatureBuild> {
     info!(
         "Preparing feature layer on top of user-authored Dockerfile (stage={})",
@@ -548,6 +634,7 @@ pub(crate) async fn prepare_dockerfile_feature_build(
         host_ca_set,
         lockfile_policy,
         control_manifest,
+        content_image_builder,
     )
     .await?;
 
@@ -659,6 +746,9 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         lockfile_policy,
         metadata_raw_config,
         control_manifest,
+        // `up`'s single-container Dockerfile path builds through buildx and gates on
+        // `ensure_buildkit_or_error`, so build contexts are available.
+        None,
     )
     .await?;
     let DockerfileFeatureBuild {

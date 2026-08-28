@@ -39,6 +39,30 @@ fn host_ca_run_step() -> String {
     )
 }
 
+/// How Feature content reaches the build.
+///
+/// deacon has always used a BuildKit additional build context, which is the only
+/// mechanism the reference uses when BuildKit >= 0.8.0 is available. It is not the
+/// only one the reference HAS: when build contexts are unavailable it stages the
+/// same content through an ordinary image and `COPY --from=`, and two real
+/// configurations reach that path (#719) — a Compose Feature build under podman,
+/// which runs its provider with `DOCKER_BUILDKIT=0`, and `--buildkit never`.
+///
+/// The two modes differ in more than the copy verb, which is why this is an enum
+/// rather than a bool on the call site: the image mode also emits a `FROM … AS
+/// dev_containers_feature_content_source` stage and must NOT pass
+/// `--build-context`, and the content survives into the image because there is no
+/// bind mount to unmount.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum FeatureContentSource {
+    /// A BuildKit additional build context. Requires BuildKit >= 0.8.0.
+    #[default]
+    BuildContext,
+    /// An image holding the content under `/tmp/build-features/`, referenced by
+    /// `COPY --from=`. Works on the classic builder. The caller builds it.
+    Image(String),
+}
+
 /// Configuration for Dockerfile generation
 #[derive(Debug, Clone)]
 pub struct DockerfileConfig {
@@ -74,6 +98,8 @@ pub struct DockerfileConfig {
     /// Authored order is preserved (`IndexMap`), matching the reference CLI's
     /// `Object.keys` iteration.
     pub config_container_env: IndexMap<String, String>,
+    /// How Feature content reaches the build. See [`FeatureContentSource`].
+    pub feature_content: FeatureContentSource,
 }
 
 /// The four well-known env vars the features spec guarantees to every
@@ -146,6 +172,7 @@ impl Default for DockerfileConfig {
             feature_install_env: FeatureInstallEnv::default(),
             host_ca_build_context: None,
             config_container_env: IndexMap::new(),
+            feature_content: FeatureContentSource::default(),
         }
     }
 }
@@ -199,6 +226,20 @@ impl DockerfileGenerator {
         Self { config }
     }
 
+    /// `FROM <content image> AS dev_containers_feature_content_source`, or empty.
+    ///
+    /// In image mode the stage the `COPY --from=` lines name has to exist in the
+    /// same document. In build-context mode BuildKit supplies it and emitting a
+    /// stage would shadow the context with an empty one.
+    fn feature_content_stage(&self) -> String {
+        match &self.config.feature_content {
+            FeatureContentSource::BuildContext => String::new(),
+            FeatureContentSource::Image(image) => {
+                format!("FROM {} AS {}\n\n", image, FEATURE_CONTENT_SOURCE)
+            }
+        }
+    }
+
     /// Generate a complete Dockerfile for feature installation
     #[instrument(skip(self, plan))]
     pub fn generate(&self, plan: &InstallationPlan) -> Result<String> {
@@ -215,6 +256,8 @@ impl DockerfileGenerator {
             "ARG _DEV_CONTAINERS_BASE_IMAGE={}\n\n",
             self.config.base_image
         ));
+
+        dockerfile.push_str(&self.feature_content_stage());
 
         // FROM stage
         dockerfile.push_str(&format!(
@@ -290,6 +333,8 @@ impl DockerfileGenerator {
         base_stage_name: &str,
     ) -> Result<String> {
         let mut dockerfile = String::new();
+
+        dockerfile.push_str(&self.feature_content_stage());
 
         dockerfile.push_str(&format!(
             "FROM {} AS {}\n\n",
@@ -420,11 +465,35 @@ impl DockerfileGenerator {
 
         let mut command = String::new();
 
-        // Start RUN command with BuildKit mount
-        command.push_str(&format!(
-            "RUN --mount=type=bind,from={},source={},target={},rw \\\n",
-            FEATURE_CONTENT_SOURCE, feature_dir_name, mount_target
-        ));
+        // Two ways to put the Feature's content where its `install.sh` can run, and
+        // which one is available is a property of the BUILDER, not of the Feature.
+        //
+        // BuildKit binds the content in for the duration of one `RUN` — nothing is
+        // added to a layer, so the staging directory costs no image size. The
+        // classic builder has no `--mount`, so the content is COPYed from a stage
+        // instead and stays in the image, exactly as the reference's own non-BuildKit
+        // path leaves it (`containerFeaturesConfiguration.ts:307`). Same source
+        // directory name, same destination, same install invocation below — only the
+        // verb that gets it there differs.
+        match &self.config.feature_content {
+            FeatureContentSource::BuildContext => {
+                command.push_str(&format!(
+                    "RUN --mount=type=bind,from={},source={},target={},rw \\\n",
+                    FEATURE_CONTENT_SOURCE, feature_dir_name, mount_target
+                ));
+            }
+            FeatureContentSource::Image(_) => {
+                // `--chown=root:root` matches the reference: the install runs as root
+                // (the stage has already become root), and content copied out of a
+                // `FROM scratch` image would otherwise carry whatever ownership the
+                // host files had.
+                command.push_str(&format!(
+                    "COPY --chown=root:root --from={} /tmp/build-features/{} {}\n",
+                    FEATURE_CONTENT_SOURCE, feature_dir_name, mount_target
+                ));
+                command.push_str("RUN \\\n");
+            }
+        }
 
         // Export environment variables for feature options so they
         // propagate to the install script (and any other command in the
@@ -704,13 +773,23 @@ impl DockerfileGenerator {
             args.push(label.clone());
         }
 
-        // Add build context and other standard arguments
-        args.extend(vec![
-            "--build-context".to_string(),
-            format!(
+        // The Feature content context is passed ONLY in build-context mode. In image
+        // mode the content arrives as a `FROM` stage in the document itself, and
+        // passing the flag here would both be rejected by a builder that has no
+        // build contexts and shadow the stage on one that does.
+        if matches!(
+            self.config.feature_content,
+            FeatureContentSource::BuildContext
+        ) {
+            args.push("--build-context".to_string());
+            args.push(format!(
                 "{}={}",
                 FEATURE_CONTENT_SOURCE, self.config.features_source_dir
-            ),
+            ));
+        }
+
+        // Add build context and other standard arguments
+        args.extend(vec![
             "--build-arg".to_string(),
             format!("_DEV_CONTAINERS_BASE_IMAGE={}", self.config.base_image),
             "--target".to_string(),
@@ -1585,5 +1664,138 @@ mod tests {
             vec!["my-remote-builder"],
             "an explicit builder must be the only one requested: {args:?}"
         );
+    }
+
+    // ---- #719: staging Feature content without BuildKit build contexts ----
+
+    fn image_mode_config(base: &str) -> DockerfileConfig {
+        DockerfileConfig {
+            base_image: base.to_string(),
+            target_stage: "dev_containers_target_stage".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            feature_content: FeatureContentSource::Image(
+                "dev_container_feature_content_temp".to_string(),
+            ),
+            ..Default::default()
+        }
+    }
+
+    /// The mechanism the classic builder does not have must not appear, and the
+    /// one it does have must. Both halves matter: asserting only the COPY would
+    /// pass while a stray `RUN --mount` still broke the build.
+    #[test]
+    fn image_mode_copies_the_content_instead_of_mounting_it() {
+        let plan = InstallationPlan::new(vec![create_test_feature("go", HashMap::new())]);
+        let out = DockerfileGenerator::new(image_mode_config("ubuntu:22.04"))
+            .generate(&plan)
+            .unwrap();
+
+        assert!(
+            !out.contains("--mount=type=bind"),
+            "the classic builder has no RUN --mount; got:\n{out}"
+        );
+        assert!(
+            out.contains("COPY --chown=root:root --from=dev_containers_feature_content_source"),
+            "content must be COPYed from the content stage; got:\n{out}"
+        );
+    }
+
+    /// `COPY --from=<stage>` needs the stage to exist in the same document.
+    /// BuildKit mode must NOT emit it — there the name resolves to the build
+    /// context, and a `FROM` of the same name would shadow it with an empty stage.
+    #[test]
+    fn the_content_stage_exists_in_image_mode_and_only_there() {
+        let plan = InstallationPlan::new(vec![create_test_feature("go", HashMap::new())]);
+        let stage_line =
+            "FROM dev_container_feature_content_temp AS dev_containers_feature_content_source";
+
+        let image = DockerfileGenerator::new(image_mode_config("ubuntu:22.04"))
+            .generate(&plan)
+            .unwrap();
+        assert!(image.contains(stage_line), "got:\n{image}");
+        // Declared before the stage that copies from it.
+        assert!(
+            image.find(stage_line).unwrap() < image.find("COPY --chown=root:root --from=").unwrap(),
+            "the content stage must precede the COPY that reads it; got:\n{image}"
+        );
+
+        let ctx = DockerfileGenerator::new(DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
+        })
+        .generate(&plan)
+        .unwrap();
+        assert!(
+            !ctx.contains("AS dev_containers_feature_content_source"),
+            "build-context mode must not declare the stage; got:\n{ctx}"
+        );
+    }
+
+    /// The same branch has to hold on the OTHER entry point. `generate` and
+    /// `generate_install_stage_from` are separate emitters and have drifted
+    /// before (#685 had to fix the root/USER switch on both).
+    #[test]
+    fn the_spliced_install_stage_branches_the_same_way() {
+        let plan = InstallationPlan::new(vec![create_test_feature("go", HashMap::new())]);
+        let out = DockerfileGenerator::new(image_mode_config("ubuntu:22.04"))
+            .generate_install_stage_from(&plan, "base_stage")
+            .unwrap();
+
+        assert!(out.contains(
+            "FROM dev_container_feature_content_temp AS dev_containers_feature_content_source"
+        ));
+        assert!(
+            out.contains("COPY --chown=root:root --from=dev_containers_feature_content_source")
+        );
+        assert!(!out.contains("--mount=type=bind"), "got:\n{out}");
+    }
+
+    /// A builder without build contexts rejects the flag outright, so image mode
+    /// must not pass it. The base-image build-arg and the target still must.
+    #[test]
+    fn image_mode_passes_no_feature_build_context() {
+        let args = DockerfileGenerator::new(image_mode_config("ubuntu:22.04")).generate_build_args(
+            Path::new("/tmp/Dockerfile.extended"),
+            "test:latest",
+            None,
+            &[],
+        );
+        assert!(
+            !args
+                .iter()
+                .any(|a| a.starts_with("dev_containers_feature_content_source=")),
+            "got: {args:?}"
+        );
+        assert!(args.contains(&"_DEV_CONTAINERS_BASE_IMAGE=ubuntu:22.04".to_string()));
+        assert!(args.contains(&"dev_containers_target_stage".to_string()));
+    }
+
+    /// The install invocation itself is the SAME in both modes — only the verb
+    /// that stages the content differs. If this drifts, one mode silently stops
+    /// exporting the spec's install environment.
+    #[test]
+    fn the_install_step_is_identical_in_both_modes() {
+        let plan = InstallationPlan::new(vec![create_test_feature("go", HashMap::new())]);
+        let image = DockerfileGenerator::new(image_mode_config("ubuntu:22.04"))
+            .generate(&plan)
+            .unwrap();
+        let ctx = DockerfileGenerator::new(DockerfileConfig {
+            base_image: "ubuntu:22.04".to_string(),
+            features_source_dir: "/tmp/features".to_string(),
+            ..Default::default()
+        })
+        .generate(&plan)
+        .unwrap();
+
+        for needle in [
+            "export _REMOTE_USER=",
+            "export _CONTAINER_USER=",
+            "_REMOTE_USER_HOME=",
+            "chmod +x install.sh && ./install.sh",
+        ] {
+            assert!(image.contains(needle), "image mode lost {needle}:\n{image}");
+            assert!(ctx.contains(needle), "context mode lost {needle}:\n{ctx}");
+        }
     }
 }
