@@ -15,26 +15,36 @@ points at it.
 
 ## Where things stand
 
-_Last updated: 2026-08-27, at `d9f7202` on `main`._
+_Last updated: 2026-08-28, at `d723c12` on `main`._
 
-- **Ledger: 232 recorded behaviors — 1 open nonconformance**, 10 deacon-follows-spec,
-  15 documented choice, 25 deacon extension, 181 conformant. Zero `UNADJUDICATED` records.
+- **Ledger: 232 recorded behaviors — 0 open nonconformances**, 10 deacon-follows-spec,
+  15 documented choice, 25 deacon extension, 182 conformant. Zero `UNADJUDICATED` records.
 - **The verdict of record is the latest nightly**, never this file:
   `gh run list --workflow=parity.yml --branch=main`.
-- **Open, not assigned:** [#710](https://github.com/get2knowio/deacon/issues/710) (compose
-  builds under podman land outside podman's image store) and
-  [#706](https://github.com/get2knowio/deacon/issues/706) (its first-found symptom, very
-  likely subsumed by it). Nothing else in flight.
+- **Nothing open, nothing in flight.** The two podman compose issues (706 and 710) are both
+  resolved by #715.
 
-> The `1 open nonconformance` is #706. That count is a statement about the questions that
-> have been asked, not a statement about deacon — and batches 25+ are a demonstration of
-> exactly that: the count sat at 0 while `deacon build` was running every build on a
-> hardcoded `docker`, because nothing had asked.
+> `0 open nonconformances` is a statement about the questions that have been asked, not a
+> statement about deacon. Batches 25–26 are the demonstration: the count sat at 0 while
+> `deacon build` ran every build on a hardcoded `docker`, and again while every compose call
+> ran on a hardcoded `docker`, because nothing had asked. **Both were found by making a lane
+> honest, not by reading code.**
+
+> **Podman now runs for real in this dev container** (`.devcontainer/setup-podman.sh`,
+> `start-podman-socket.sh`). `DEACON_CONTAINER_RUNTIME=podman cargo nextest run …` is a real
+> local measurement, and it is what validated #715 and found two things CI needed before it
+> could. Earlier handoffs said podman could not run containers here; that was never a sandbox
+> limit — see the trap below.
 
 ### Recently landed
 
 | PR | What |
 |---|---|
+| #715 `d723c12` | Compose runs on the RESOLVED runtime, not a literal `docker` — resolves issues 706 and 710; podman lane gains the compose binary |
+| #716 `a1bffc2` | rootless podman works in this dev container, so the Podman lane is reproducible locally |
+| #714 `768965d` | `chacha20` off the yanked 0.10.0 — `Security (cargo deny)` was red repo-wide |
+| #713 `1891f51` | the closing-keyword trap entry no longer carries a live keyword |
+| #711 `75d34d9` | HANDOFF refresh through batch 25 |
 | #709 `d9f7202` | `build` runs on the runtime it was told to use, not a literal `docker` (closes #708); build tests verify through that runtime |
 | #707 `2832431` | podman's `image not known` reads as *absent*, so `ensure_image_available` pulls instead of erroring |
 | #705 `4abfda8` | the Podman lane runs deacon's build tests (#30) |
@@ -59,8 +69,13 @@ _Last updated: 2026-08-27, at `d9f7202` on `main`._
 ## The arc: [#480](https://github.com/get2knowio/deacon/issues/480), parity mining
 
 The long-running task is mining the reference CLI's own test suite and real-world configs for
-behaviors deacon has never been compared against, one upstream file at a time. Twenty-five
+behaviors deacon has never been compared against, one upstream file at a time. Twenty-six
 batches so far, and the upstream files are now exhausted (see the queue).
+
+**With the files exhausted, the productive source has shifted from mining upstream tests to
+making deacon's own lanes honest.** Batches 25 and 26 found four defects between them — none
+from reading upstream, all from noticing that a green lane was reporting coverage it did not
+have. That is where the remaining yield is.
 
 **The method has held for every batch and should not be shortcut:**
 
@@ -204,6 +219,45 @@ batches so far, and the upstream files are now exhausted (see the queue).
   layer, and two of those layers were mine to fix while two were podman capability gaps.
 - **An assertion that cannot fail is worse than no assertion.** Its variants are written up in
   `docs/PARITY.md`.
+- **A hypothesis written into an issue is still a hypothesis, and filing it makes it look
+  settled.** Issue 710 opened with a stated mechanism — podman delegates compose to an external
+  `docker-compose` which then talks to the DOCKER daemon — and a checklist that began "first
+  step is a measurement, not a fix". The measurement refuted the mechanism: podman points the
+  provider at its OWN socket, exporting `DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock`
+  (plus `DOCKER_BUILDKIT=0`, plus a blanked `DOCKER_CONFIG`). deacon never reached that
+  delegation — it was running `docker compose` itself, because `ComposeManager::new()` defaults
+  `docker_path` to `"docker"` and five other sites passed the raw `--docker-path` flag, which
+  `binary_for` only maps INSIDE `resolve_runtime`. Three wrong diagnoses on one issue, each
+  confidently recorded. **Write the measurement command into the issue, not the conclusion you
+  expect it to reach.**
+- **An environment limit remembered from an error message may be a setting nobody configured.**
+  "Podman cannot run containers in this dev container" was recorded from two real errors —
+  `newuidmap: write to uid_map failed` and `fuse: device not found` — and stood for two days.
+  Neither was a capability the sandbox withheld: the first was `/etc/subuid` naming ids outside
+  the ambient userns, the second a storage driver that needed a device node. Both fixed in a
+  shell script. **Before recording an environment limit, ask whether the error names a
+  capability that is absent or a setting that is wrong.**
+- **When a fix would make a lane honest, expect the honest number to be WORSE, and budget for
+  the layers underneath.** Routing compose onto the resolved runtime turned four green tests
+  red — all of them tests that verified deacon's output by shelling out to a hardcoded
+  `docker`, the same defect class #705 had already fixed elsewhere. They had passed only
+  because compose ALSO ran on docker. The failure surfaced as `postCreateCommand should have
+  created /tmp/deacon-lifecycle-marker`, which reads like a lifecycle bug and is not one.
+- **A test fix that moves the failure to a different LINE is progress; read the line number.**
+  Same test, first run failed at the marker assertion, second at `deacon up`. That is two
+  different facts, and treating the second as "the fix didn't work" would have been wrong.
+- **A plausible mechanism is not evidence — re-run before reclassifying a flake.** A podman
+  `conmon bytes ""` failure had a good story behind it (four concurrent compose projects in
+  `smoke-lite`, now on podman rather than docker, starving conmon on a shared runner) and a
+  ready fix (halve the group). Re-running passed. The story may still be true at the margin,
+  but acting on it would have slowed every docker lane on one data point. **Cost of a re-run:
+  one CI cycle. Cost of a wrong global concurrency change: every lane, forever.**
+- **A permission classifier refusing an edit can be correct.** Wiring podman into the
+  devcontainer, the first attempt added `--device=/dev/fuse` plus `seccomp=unconfined` and
+  `apparmor=unconfined` to `runArgs` — reached for from the standard podman-in-docker recipe,
+  without checking whether this container needed them. It did not: everything was then verified
+  on the `vfs` driver with no added privileges. **When a guard fires on a privilege escalation,
+  check whether the privilege is load-bearing before arguing with it.**
 
 ---
 
@@ -211,14 +265,7 @@ batches so far, and the upstream files are now exhausted (see the queue).
 
 Do not start any of it without being asked.
 
-1. **[#710](https://github.com/get2knowio/deacon/issues/710) — compose under podman.** All 7
-   tests in `integration_compose_features_build` fail; podman delegates compose to an external
-   `docker-compose` provider and the resulting image is in no podman store. **Do not design
-   before measuring**: the issue opens with two measurements (dump `podman images` AND
-   `docker images` after a failure; record `DOCKER_HOST` inside the `podman compose`
-   invocation), precisely because two `localhost/` fixes were already guessed and both were
-   wrong. [#706](https://github.com/get2knowio/deacon/issues/706) is very likely subsumed by it.
-2. **Upstream files still uncited by anything in `parity/`: none with material left.**
+1. **Upstream files still uncited by anything in `parity/`: none with material left.**
    Batches 19–25 closed `dockerfileUtils` (48), `dockerUtils` (5), `dockerComposeUtils` (5),
    `cli.podman` (2), `getHomeFolder` (1), `getEntPasswd` (1), `cli.up` (21) and `cli.test` (11).
    `cli.test` is the reference's Feature-*authoring* surface, permanently out of scope, so batch
@@ -234,24 +281,30 @@ Do not start any of it without being asked.
      whose image can be inspected but not pulled. (`qualifyImageName` is NOT a lead — it only
      builds a registry API path for that function, and deacon's same-sounding
      `qualify_short_remote` is an unrelated podman short-name helper. Do not "align" them.)
-   - **The Podman lane's `build` coverage** (#30) — DONE, and it cost more than it looked.
-     #705 widened the selection; #708 then found that `build` was executing on a hardcoded
-     `docker` regardless, so the first numbers were fiction. The lane now runs **26 build tests,
-     26 passing, on podman for real**. Excluded with measured reasons: three buildx EXPORTER
-     capability gaps (`--output type=docker`, `--output type=oci`, `--cache-to type=local`,
-     each failing in podman's own parser — `podman buildx` is an alias for `podman build`) and
-     all of `integration_compose_features_build` (#710).
-3. The four consciously-dropped coverage areas named in `parity/SPEC_STATUS.md` under
+   - **The Podman lane's `build` coverage** (#30) — DONE, and it cost three passes. #705
+     widened the selection; #708 found `build` was executing on a hardcoded `docker` regardless,
+     so the first numbers were fiction; #715 found the same of every compose call. The lane now
+     selects **30 build tests, all passing on podman for real**, alongside 433 integration
+     tests. Six exclusions, each by name with a measured reason: three buildx EXPORTER
+     capability gaps (`--output type=docker`, `--output type=oci`, `--cache-to type=local` —
+     `podman buildx` is an alias for `podman build` and supports neither grammar), and three
+     Feature-extended compose builds, because podman sets `DOCKER_BUILDKIT=0` for the compose
+     provider and the classic builder has no additional build contexts. Only `build:`-shape
+     services hit the last one; the `image:` shape builds its Feature image with `podman build`
+     directly. **The lane also needs podman's API socket started** — its setup step used to
+     disclaim one, and without it every compose call fails with `Cannot connect to the Docker
+     daemon`. Still open on #30: GPU passthrough is unwired for podman.
+2. The four consciously-dropped coverage areas named in `parity/SPEC_STATUS.md` under
    "Coverage this document does *not* claim".
-4. `up_dotfiles.rs`'s 12 ignored, network-dependent tests.
-5. Teach the harness to discover a case's container by its OWN declared id-labels. This would
+3. `up_dotfiles.rs`'s 12 ignored, network-dependent tests.
+4. Teach the harness to discover a case's container by its OWN declared id-labels. This would
    unblock a differential twin for `${devcontainerId}`: `--id-label` replaces
    `devcontainer.local_folder`, which is the label `require_observed_container` discovers by.
    Until then the pinned digest has no automatic upstream-drift detector — re-measure it at
    each oracle bump.
-6. Smaller leads: a per-case time budget or a lighter digest-pinned Feature; run-twice
+5. Smaller leads: a per-case time budget or a lighter digest-pinned Feature; run-twice
    vocabulary for the operation model (the gap #620 left); the GID half of the uid-remap guard.
-7. An upstream issue for the Compose newline flattening — deliberately **not** filed. The
+6. An upstream issue for the Compose newline flattening — deliberately **not** filed. The
    maintainer has previously said no upstream filing.
 
 ---
@@ -308,13 +361,23 @@ lints and fmt drift in new test files.
   And **check `gh issue view <n> --json state` after any merge whose scope changed
   mid-flight** — nothing warns you, and a ledger row can quietly end up pointing at a shut
   issue. That check is what caught all three.
-- **Podman delegates `compose` to an EXTERNAL provider — on the CI runner, docker's own
-  `docker-compose` plugin.** The lane log says so (`>>>> Executing external compose provider
-  "/usr/libexec/docker/cli-plugins/docker-compose"`), and `podman version` reports it as
-  `containers-storage docker-compose`. Two consequences that cost a day: a compose `image:`
-  value is parsed by **docker-compose**, not by podman's short-name logic; and the image a
-  compose build produces is in **no podman store** afterwards (#710). Never reason about
-  "podman compose" as though podman is doing the composing.
+- **Podman delegates `compose` to an EXTERNAL provider, and points it at PODMAN.** The lane
+  log names the provider (`>>>> Executing external compose provider
+  "/usr/libexec/docker/cli-plugins/docker-compose"`). What matters is the environment podman
+  hands it, measured by pointing `compose_providers` at a script that dumps its own env:
+  `DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock`, `DOCKER_BUILDKIT=0`, and an
+  emptied `DOCKER_CONFIG`. Three consequences:
+  1. **Compose needs a socket listening.** No systemd here or on the runner, so run
+     `podman system service --time=0 unix://…` directly, or every compose call fails with
+     `Cannot connect to the Docker daemon`.
+  2. **`DOCKER_BUILDKIT=0` pins compose to the classic builder**, which has no additional
+     build contexts — the mechanism deacon uses to stage Feature content.
+  3. A compose `image:` value is parsed by **docker-compose**, not by podman's short-name
+     logic, so `localhost/` does not belong there.
+  **An earlier version of this entry said the provider talks to the DOCKER daemon. It does
+  not.** That error survived two batches and produced two wrong fixes and one wrongly-premised
+  issue. The image genuinely was in docker's store — because deacon was running `docker
+  compose` itself, not because of anything podman did.
 - **`git stash` is repo-global.** The stack is shared across every worktree and session. Never
   stash in a worktree agent — copy files instead.
 - **`ci.yml` triggers on `pull_request: branches: [main]` only.** A PR opened against another
@@ -355,11 +418,23 @@ lints and fmt drift in new test files.
   the resource-reclamation guard reporting a false leaked Compose network). It does not gate, and
   `main`'s nightlies are green. **Read the failure before re-running** — "no case diverged, the
   guard fired" is a different fact from "a case diverged".
-- **Podman is installed here (4.9.3) but cannot run containers** — rootless fails on `newuidmap`,
-  rootful on fuse. It DOES answer `-v`, which is enough to measure runtime-flavor detection.
-  Container-level podman behavior belongs to the CI lane. Useful inversion: `deacon <cmd>
-  --docker-path podman` failing with podman's OWN rootless error is positive evidence that deacon
-  selected and executed podman.
+- **Podman runs containers here now — this entry used to say it could not, and that was
+  wrong.** The two errors it cited (`newuidmap: write to uid_map failed`, `fuse: device not
+  found`) were unconfigured prerequisites, not sandbox limits; `.devcontainer/setup-podman.sh`
+  handles them and `start-podman-socket.sh` starts the socket compose needs. Three things it
+  configures, each worth knowing if it ever breaks:
+  - **Subuid ranges must fit the AMBIENT userns.** This container already runs in one
+    (`/proc/self/uid_map` = `0 100000 65536`), so the image's `vscode:100000:65536` names
+    unrepresentable ids. Podman also refuses a single range containing the user's own uid, so
+    it straddles: `1:999` + `1001:64535`. **The size is load-bearing** — a range short of
+    65534 cannot map `nobody`, and Feature installs then die inside apt with
+    `setgroups 65534 failed`, which looks nothing like an id-mapping problem.
+  - **`vfs` unless `/dev/fuse` is present.** Overlay needs the device node; `mknod` is refused
+    inside. vfs needs no added privileges — prefer it over granting `--device` or
+    `seccomp=unconfined`.
+  - **`XDG_RUNTIME_DIR`**, which nothing creates without systemd.
+  Useful inversion, still true: `deacon <cmd> --docker-path podman` failing with podman's OWN
+  error is positive evidence that deacon selected and executed podman.
 - **The upstream checkout does not persist across sessions.** Re-clone into the CURRENT scratchpad:
   `git clone --depth 1 --branch v0.87.0 https://github.com/devcontainers/cli.git upstream-cli`,
   and verify with `git describe --tags` before trusting it as the oracle.
@@ -388,4 +463,8 @@ lints and fmt drift in new test files.
   — `BUILDX_NO_DEFAULT_ATTESTATIONS` on the compose `build` invocation only, never on a
   publishing path), **#688** (a removal that races another removal is waited out, never
   reported as done — `is_already_gone` governs the REMOVE step and `stopping_is_moot` the STOP
-  step, and they are deliberately not one function).
+  step, and they are deliberately not one function), **#715** (the COMPOSE client is the
+  resolved runtime binary — `ComposeManager::with_docker_path(<resolved>)`, never
+  `ComposeManager::new()` and never the raw `--docker-path` flag, which reads `"docker"` under
+  `--runtime podman`; and any test that verifies deacon's output by shelling out uses
+  `support::runtime_bin()`, never a literal `docker`).
