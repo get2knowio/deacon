@@ -378,6 +378,15 @@ lints and fmt drift in new test files.
   not.** That error survived two batches and produced two wrong fixes and one wrongly-premised
   issue. The image genuinely was in docker's store — because deacon was running `docker
   compose` itself, not because of anything podman did.
+- **`smoke-lite` is `max-threads = 2`, and #715 is why.** Compose calls used to run on a
+  hardcoded `docker` even under `DEACON_CONTAINER_RUNTIME=podman`, so four concurrent
+  smoke-lite tests on the Podman lane were four concurrent DOCKER compose projects. Once they
+  became four concurrent ROOTLESS PODMAN ones, `test_compose_override_command_lifecycle_runs`
+  started failing 2 runs in 3 with `container create failed (no logs from conmon): conmon bytes
+  ""` — which surfaces as a bare `deacon up failed` and reads like a lifecycle defect. It
+  passes 5/5 locally when run SERIALLY. `[test-groups]` has no per-profile form, so this slows
+  smoke tests on every lane (measured: the Podman suite step went 195s → 222s). If that cost
+  ever matters, the narrower fix is a separate group for the compose smoke binaries only.
 - **`git stash` is repo-global.** The stack is shared across every worktree and session. Never
   stash in a worktree agent — copy files instead.
 - **`ci.yml` triggers on `pull_request: branches: [main]` only.** A PR opened against another
