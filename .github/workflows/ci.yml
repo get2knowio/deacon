@@ -491,6 +491,43 @@ jobs:
     - name: Run integration suite against Podman (full failure set)
       run: cargo nextest run --profile mvp-integration --no-fail-fast -E 'not binary(=parity_docker)'
 
+    # `test_compose_override_command_lifecycle_runs` fails here intermittently with
+    #   container create failed (no logs from conmon): conmon bytes ""
+    # which is podman failing to START an exec session's conmon, not a deacon error —
+    # it surfaces as a bare `deacon up failed` and reads like a lifecycle defect.
+    #
+    # TWO hypotheses have been tested and REFUTED, which is why this step exists
+    # instead of a third guess (#723):
+    #   - CONTENTION. `smoke-lite` was halved to 2 (#718); the failure recurred
+    #     unchanged, and the change was reverted.
+    #   - CONTAINER NOT RUNNING. `get_primary_container_id` matches a service by name
+    #     with no state check, so a not-yet-running container looked plausible.
+    #     Measured locally against rootless podman 4.9.3: exec into an EXITED compose
+    #     container gives `can only create exec sessions on running containers:
+    #     container state improper` — a clean, DIFFERENT error. Not this.
+    #
+    # It has never reproduced locally, so the next occurrence has to carry its own
+    # evidence. `if: failure()` and `|| true` throughout: this reports, it never fails
+    # the job, and it must not mask the real failure.
+    - name: Podman diagnostics (#723)
+      if: failure()
+      run: |
+        echo "=== memory / load at failure ==="
+        free -m || true
+        uptime || true
+        echo "=== process and fd ceilings, which conmon needs to fork ==="
+        ulimit -a || true
+        echo "  pids.max: $(cat /sys/fs/cgroup/pids.max 2>/dev/null || echo n/a)"
+        echo "=== conmon ==="
+        command -v conmon && conmon --version || echo "  conmon NOT on PATH"
+        echo "=== podman's own view ==="
+        podman info --format '{{json .Host}}' 2>&1 | head -c 2000 || true
+        echo
+        echo "=== containers still around (states are the point) ==="
+        podman ps -a --format '{{.ID}} {{.Status}} {{.Names}}' || true
+        echo "=== kernel ring buffer, for an OOM kill ==="
+        sudo dmesg 2>/dev/null | tail -40 || echo "  dmesg unavailable"
+
     # `deacon build` on podman, which nothing exercised until now (#30).
     #
     # The step above cannot cover it: `mvp-integration`'s `default-filter` excludes
