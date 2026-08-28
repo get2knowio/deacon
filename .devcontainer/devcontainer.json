@@ -30,7 +30,11 @@
       // to the inode, so the first atomic rewrite orphans the container's view
       // and silently discards writes. Relocating into the directory mount avoids
       // that entirely and shares auth across every devcontainer on the host.
-      "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+      "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+      // Podman keeps rootless state and its API socket here. Without systemd
+      // nothing creates it, and podman falls back to a path that does not
+      // survive between invocations.
+      "XDG_RUNTIME_DIR": "/run/user/1000"
   },
   "customizations": {
     "vscode": {
@@ -44,7 +48,24 @@
   },
   "workspaceFolder": "/workspaces/deacon",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/deacon,type=bind,consistency=cached",
-  "postCreateCommand": "rustc --version && node --version",
+  // Rootless podman needs three things this image does not provide by default;
+  // `setup-podman.sh` explains each and is idempotent. It runs at create time so
+  // the apt install is paid once rather than on every start.
+  //
+  // This gets podman working with the `vfs` storage driver, which needs no extra
+  // container privileges. For the faster `overlay` driver podman needs
+  // `/dev/fuse`: the kernel module is loaded, but the device node is not exposed
+  // to a container unless requested and `mknod` is refused from inside. Adding
+  //     "runArgs": ["--device=/dev/fuse"]
+  // switches the setup script over to overlay automatically. It is deliberately
+  // NOT the default: it grants the container a host device, and vfs is correct
+  // without it.
+  "onCreateCommand": ".devcontainer/setup-podman.sh",
+  // `podman compose` shells out to an external provider and points it at
+  // podman's API socket. Nothing socket-activates that without systemd, so start
+  // it on every attach — a no-op when it is already listening.
+  "postStartCommand": ".devcontainer/start-podman-socket.sh",
+  "postCreateCommand": "rustc --version && node --version && podman --version",
   "mounts": [
     "source=${localEnv:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached"
