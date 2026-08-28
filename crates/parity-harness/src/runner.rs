@@ -307,7 +307,32 @@ pub(crate) async fn execute_ops(
                 .map_err(blocking_join_err)??;
         }
 
-        let env = substitute_env(case, op, &workspace, true)?;
+        // Give this side a private TMPDIR before anything the case declares, so a case
+        // that deliberately sets one still wins (`cmd.envs` applies in order).
+        //
+        // Without it the ORACLE is not isolated from its concurrent siblings: the
+        // reference CLI stages its generated Dockerfile under a path keyed only by
+        // version and `Date.now()`, so two invocations in the same millisecond share it
+        // and one builds the other's Dockerfile — measured as a phantom divergence on
+        // `case-build-failure-reported` (#721). deacon is not affected (its own build
+        // temp dir carries the pid), but both sides are isolated here anyway: the two
+        // must run in comparable worlds, and treating only one specially would be its
+        // own defect.
+        let mut env = vec![];
+        let side_tmp =
+            docker_ws
+                .side_tmpdir(side.name())
+                .map_err(|e| HarnessError::DockerUnavailable {
+                    cause: format!("could not create a private TMPDIR for {}: {e}", side.name()),
+                })?;
+        let side_tmp = side_tmp.to_string_lossy().into_owned();
+        // TMPDIR is what Node's `os.tmpdir()` and Rust's `std::env::temp_dir()` both read
+        // on Unix; TMP/TEMP are set alongside so a Windows lane inherits the same
+        // isolation rather than silently keeping the shared path.
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            env.push((key.to_string(), side_tmp.clone()));
+        }
+        env.extend(substitute_env(case, op, &workspace, true)?);
 
         let raw_case = format!("{}__{}", case.id, op.id);
         let inv = run_and_capture(

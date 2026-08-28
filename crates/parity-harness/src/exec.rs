@@ -30,6 +30,11 @@ impl Side {
             Side::Oracle => "oracle",
         }
     }
+
+    /// The side's name, for anything that needs to name a per-side resource.
+    pub fn name(self) -> &'static str {
+        self.prefix()
+    }
 }
 
 /// Per-invocation time bound class.

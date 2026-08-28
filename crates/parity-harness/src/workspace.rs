@@ -188,6 +188,31 @@ impl DockerWorkspace {
         format!("{}-{kind}", self.run_id)
     }
 
+    /// A private `TMPDIR` for one SIDE of one case, created on demand.
+    ///
+    /// The reference CLI stages its generated `Dockerfile-with-features` under
+    /// `<os.tmpdir()>/devcontainercli-<user>/container-features/<version>-<Date.now()>`
+    /// (`spec-node/utils.ts:600` at the pinned tag). That path carries no pid and no
+    /// randomness, so two oracle invocations reaching it in the same MILLISECOND share the
+    /// directory and the second overwrites the first's Dockerfile before `docker buildx
+    /// build` reads it. MEASURED on the `docker-shared` group (98 cases, bounded
+    /// concurrency): `case-build-failure-reported` compared deacon building its own
+    /// fixture (`exit 17`) against the oracle building a DIFFERENT case's
+    /// (`exit 19`), and reported the exit codes as a divergence (#721).
+    ///
+    /// A sibling of the workspace, deliberately NOT a child of it: the workspace is a
+    /// docker build context, and a temp tree inside it would be uploaded with every build
+    /// and change what the CLI sees.
+    ///
+    /// Per SIDE as well as per case. Both sides get the same treatment — asymmetry here
+    /// would be its own bug, since the two must run in comparable worlds — but they need
+    /// distinct directories, or deacon's leftovers become the oracle's inputs.
+    pub fn side_tmpdir(&self, side: &str) -> std::io::Result<PathBuf> {
+        let dir = self._tempdir.path().join(format!("tmp-{side}"));
+        std::fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
     /// Materialize a fixture directory tree into the workspace (recursive copy). Repeated
     /// calls layer fixtures into the same workspace.
     pub fn materialize(&self, fixture_dir: &Path) -> std::io::Result<()> {
@@ -614,5 +639,59 @@ host
             ws.path().to_path_buf()
         };
         assert!(!path.exists(), "the temp workspace is removed on drop");
+    }
+
+    /// #721: the two sides must not share a TMPDIR, or one side's scratch files
+    /// become the other's inputs. The concrete cost was the reference CLI staging
+    /// its generated Dockerfile under a `Date.now()`-keyed shared path and a
+    /// sibling invocation overwriting it.
+    #[test]
+    fn side_tmpdirs_are_private_per_side_and_per_case() {
+        let a = DockerWorkspace::new_filesystem_only().unwrap();
+        let b = DockerWorkspace::new_filesystem_only().unwrap();
+
+        let a_deacon = a.side_tmpdir("deacon").unwrap();
+        let a_oracle = a.side_tmpdir("oracle").unwrap();
+        let b_oracle = b.side_tmpdir("oracle").unwrap();
+
+        assert!(
+            a_deacon.is_dir(),
+            "the directory is created, not just named"
+        );
+        assert!(a_oracle.is_dir());
+        assert_ne!(a_deacon, a_oracle, "the two SIDES of one case must differ");
+        assert_ne!(a_oracle, b_oracle, "the same side of two CASES must differ");
+
+        // A sibling of the workspace, never inside it: the workspace is a docker
+        // build context, and a temp tree within it would be uploaded with every
+        // build and change what the CLI sees.
+        assert!(
+            !a_deacon.starts_with(a.path()),
+            "the side tmpdir must not live inside the build context ({} is under {})",
+            a_deacon.display(),
+            a.path().display()
+        );
+    }
+
+    /// Repeated calls are the same directory — the runner asks once per operation,
+    /// and a fresh directory each time would strand whatever the previous operation
+    /// of the same case left for itself.
+    #[test]
+    fn side_tmpdir_is_stable_across_calls() {
+        let ws = DockerWorkspace::new_filesystem_only().unwrap();
+        assert_eq!(
+            ws.side_tmpdir("oracle").unwrap(),
+            ws.side_tmpdir("oracle").unwrap()
+        );
+    }
+
+    /// It goes away with the case, like everything else the workspace owns.
+    #[test]
+    fn side_tmpdir_is_reclaimed_with_the_workspace() {
+        let path = {
+            let ws = DockerWorkspace::new_filesystem_only().unwrap();
+            ws.side_tmpdir("oracle").unwrap()
+        };
+        assert!(!path.exists(), "the side tmpdir is removed on drop");
     }
 }
