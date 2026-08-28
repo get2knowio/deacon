@@ -26,8 +26,21 @@ env-probe = { max-threads = 12 }
 # Long-running tests: heavy end-to-end or build-with-large-context tests
 long-running = { max-threads = 2 }
 
-# Smoke tests: split lightweight vs heavy daemon cases for higher parallelism
-smoke-lite = { max-threads = 4 }
+# Smoke tests: split lightweight vs heavy daemon cases for higher parallelism.
+#
+# smoke-lite was 4 and is 2 because of what #715 changed underneath it. Compose
+# calls used to run on a hardcoded `docker` even under DEACON_CONTAINER_RUNTIME=podman;
+# now they run on the selected runtime, so on the Podman lane four concurrent
+# smoke tests mean four concurrent ROOTLESS compose projects — each with its own
+# conmon and network helper — where before they were docker's problem.
+#
+# The symptom is podman failing to start an exec session with
+#   container create failed (no logs from conmon): conmon bytes ""
+# on `test_compose_override_command_lifecycle_runs`, which surfaces as an
+# unrelated-looking `deacon up failed`. MEASURED: 2 of the first 3 Podman runs
+# after #715 failed that way, while the same test passes 5/5 locally when run
+# SERIALLY against real rootless podman 4.9.3 — i.e. it is contention, not the test.
+smoke-lite = { max-threads = 2 }
 smoke-heavy = { max-threads = 2 }
 
 # CLI-only smoke tests: safe to run in parallel with light throttling
