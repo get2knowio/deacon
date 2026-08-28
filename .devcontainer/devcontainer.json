@@ -30,7 +30,11 @@
       // to the inode, so the first atomic rewrite orphans the container's view
       // and silently discards writes. Relocating into the directory mount avoids
       // that entirely and shares auth across every devcontainer on the host.
-      "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+      "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+      // Podman keeps rootless state and its API socket here. Without systemd
+      // nothing creates it, and podman falls back to a path that does not
+      // survive between invocations.
+      "XDG_RUNTIME_DIR": "/run/user/1000"
   },
   "customizations": {
     "vscode": {
@@ -44,6 +48,30 @@
   },
   "workspaceFolder": "/workspaces/deacon",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/deacon,type=bind,consistency=cached",
+  // Rootless podman needs three things this image does not provide by default;
+  // `setup-podman.sh` explains each and is idempotent. It runs at create time so
+  // the apt install is paid once rather than on every start.
+  //
+  // This gets podman working with the `vfs` storage driver, which needs no extra
+  // container privileges. For the faster `overlay` driver podman needs
+  // `/dev/fuse`: the kernel module is loaded, but the device node is not exposed
+  // to a container unless requested and `mknod` is refused from inside. Adding
+  //     "runArgs": ["--device=/dev/fuse"]
+  // switches the setup script over to overlay automatically. It is deliberately
+  // NOT the default: it grants the container a host device, and vfs is correct
+  // without it.
+  //
+  // Both hooks are `|| echo`-guarded ON PURPOSE. Podman is an optional
+  // convenience here — docker remains the default runtime — so a host with no
+  // apt mirror, no passwordless sudo, or a kernel that will not give podman a
+  // usable id mapping should get a warning and a working container, not a failed
+  // build. The scripts themselves stay `set -euo pipefail` so the failure is
+  // still loud and debuggable; only the container's fate is decoupled from it.
+  "onCreateCommand": ".devcontainer/setup-podman.sh || echo 'WARNING: podman setup failed; docker still works. See .devcontainer/setup-podman.sh'",
+  // `podman compose` shells out to an external provider and points it at
+  // podman's API socket. Nothing socket-activates that without systemd, so start
+  // it on every attach — a no-op when it is already listening.
+  "postStartCommand": ".devcontainer/start-podman-socket.sh || echo 'WARNING: podman API socket not started; podman compose will not work'",
   "postCreateCommand": "rustc --version && node --version",
   "mounts": [
     "source=${localEnv:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind,consistency=cached",
