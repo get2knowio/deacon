@@ -76,12 +76,22 @@ _Last updated: 2026-08-29, at `f09c5f2` on `main`._
   own. The leading hypothesis was [#729](https://github.com/get2knowio/deacon/issues/729) —
   podman sets `running` early and the `start` event is what says the runtime finished, so an
   exec that does not wait for it races exactly this way under churn. **That gate has now
-  landed** (batch 28), which converts the hypothesis into something the lane itself will
-  answer: if the conmon signature keeps appearing on `main` with the gate in, #729 was not
-  the cause and a fifth hypothesis is owed. Do NOT read one green Podman run as the answer —
-  the lane's own rate is 5 red of 9, so a single pass is inside the noise either way. The two
-  claims were kept separate on purpose: #729 is a real divergence whether or not it explains
-  this.
+  landed** (batch 28) — **and the first result with it in goes AGAINST the hypothesis.**
+  Run 33268702458 (Podman job 99144406001, branch based on `f09c5f2`): `435 passed, 1
+  failed`, the failure being this test with the identical `conmon bytes ""` signature and
+  the same `status=running running=true exit=0 oom=false` capture. The gate applied and
+  HELD — it degrades loudly, and while the captured output carries two WARN lines (both the
+  env-probe failure itself) it carries no gate warning of either kind, so this is not the
+  gate silently not firing. The failing exec is the env probe, which now runs strictly
+  after the compose start-event gate, so **podman-reports-running-early is not a sufficient
+  explanation and a fifth hypothesis is owed.** Written up on the issue.
+  One occurrence is not a rate — the lane's own rate is 5 red of 9 — so nothing says the
+  gate changed the frequency either way. The two claims were kept separate on purpose: #729
+  is a real divergence whether or not it explains this, and it stays fixed.
+  Where to look next: the probe already showed `PHASE A: 0/30` (test alone) versus
+  `PHASE B: 3/3` (whole suite), so the SUITE around it is load-bearing. With the start race
+  ruled out, the candidates are what the suite does to the runtime — exec/conmon fork
+  pressure from co-scheduled projects — rather than anything the test does.
   **The probe has RUN, and the prediction held**
   ([run 33261826509](https://github.com/get2knowio/deacon/actions/runs/33261826509) on
   `1a0670c`, on the failing substrate — podman 5.8.4, `overlay`, `netavark`, `cgroupfs`,
