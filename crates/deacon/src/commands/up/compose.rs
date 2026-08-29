@@ -1409,6 +1409,13 @@ async fn build_compose_service_with_features(
         lockfile_policy,
         metadata_raw_config,
         control_manifest,
+        // Podman runs its external compose provider with `DOCKER_BUILDKIT=0`, which
+        // pins docker-compose to the classic builder — no additional build contexts,
+        // so the Feature content has to arrive as an image instead (#719). This is
+        // the reference's own switch (`dockerCompose.ts:191`, `!params.isPodman`),
+        // and it is scoped to COMPOSE: the single-container podman path builds with
+        // `podman build` directly and keeps its build contexts.
+        if cli.is_podman() { Some(cli) } else { None },
     )
     .await
     .with_context(|| {
@@ -1473,6 +1480,13 @@ async fn build_compose_service_with_features(
     if let Some(r) = &renderer {
         r.finish(build_result.is_ok());
     }
+    // Before the `?` below, so a FAILED compose build reclaims its staged content
+    // image too — that is the path the leak would otherwise hide on (#719).
+    crate::commands::up::features_build::drop_feature_content_image(
+        cli,
+        prepared_build.prepared.feature_content_image.as_deref(),
+    )
+    .await;
     build_result.with_context(|| {
         format!(
             "Failed to build feature-extended image for compose service '{}' \

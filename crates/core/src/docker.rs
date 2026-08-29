@@ -925,6 +925,78 @@ impl CliRuntime {
     }
 
     /// The runtime CLI binary path (e.g. "docker" or "podman").
+    /// Build the throwaway image that carries Feature content for a builder with
+    /// no BuildKit build contexts, and return the tag it was given.
+    ///
+    /// This is the reference's own mechanism (`containerFeatures.ts:326-340`): a
+    /// `FROM scratch` image whose only layer is the staged Feature tree under
+    /// `/tmp/build-features/`, which the generated Dockerfile then reads with
+    /// `COPY --from=`. See [`crate::dockerfile_generator::FeatureContentSource`]
+    /// for when it is used at all (#719).
+    ///
+    /// The tag is made unique per process and per content directory. The reference
+    /// hardcodes `dev_container_feature_content_temp` and carries a TODO about it;
+    /// a shared tag is a use-after-free across concurrent builds — the first
+    /// invocation to finish retags or removes an image the second is still
+    /// building from. Same reasoning as `private_build_temp_dir` in the build
+    /// command, which is where that lesson was already paid for.
+    ///
+    /// The generated Dockerfile is written OUTSIDE the content directory so it
+    /// does not become part of the content it describes.
+    pub async fn build_feature_content_image(
+        &self,
+        source_dir: &Path,
+        discriminator: &str,
+    ) -> Result<String> {
+        let tag = format!(
+            "deacon-feature-content:{}-{}",
+            discriminator,
+            std::process::id()
+        );
+
+        let dockerfile = std::env::temp_dir().join(format!(
+            "deacon-feature-content-{}-{}.Dockerfile",
+            discriminator,
+            std::process::id()
+        ));
+        tokio::fs::write(&dockerfile, "FROM scratch\nCOPY . /tmp/build-features/\n")
+            .await
+            .map_err(|e| {
+                DockerError::CLIError(format!(
+                    "Failed to write the Feature-content Dockerfile {}: {e}",
+                    dockerfile.display()
+                ))
+            })?;
+
+        let output = Command::new(&self.runtime_path)
+            .arg("build")
+            .arg("-t")
+            .arg(&tag)
+            .arg("-f")
+            .arg(&dockerfile)
+            .arg(source_dir)
+            .output()
+            .await
+            .map_err(|e| {
+                DockerError::CLIError(format!("Failed to build the Feature-content image: {e}"))
+            });
+
+        // Best-effort: the build is what matters, and a leaked temp Dockerfile is
+        // not worth failing an otherwise successful build over.
+        let _ = tokio::fs::remove_file(&dockerfile).await;
+
+        let output = output?;
+        if !output.status.success() {
+            return Err(DockerError::CLIError(format!(
+                "Feature-content image build failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
+            .into());
+        }
+
+        Ok(tag)
+    }
+
     pub fn runtime_path(&self) -> &str {
         &self.runtime_path
     }
