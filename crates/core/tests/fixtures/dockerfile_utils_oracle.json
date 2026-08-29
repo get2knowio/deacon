@@ -11,7 +11,8 @@
    "user": "user1",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM image1 AS placeholder\nUSER user1\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -26,7 +27,8 @@
    "user": "user2",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "ARG BASE_IMAGE=\"image2\"\nFROM ${BASE_IMAGE} AS placeholder\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -43,7 +45,8 @@
    "user": "user2",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "ARG BASE_IMAGE=\"image2\"\nFROM ${BASE_IMAGE} AS placeholder\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -58,7 +61,8 @@
    "user": null,
    "lastStageName": "stage4",
    "modifiedDockerfile": "\nFROM image1 as stage1\nFROM stage3 as stage2\nFROM image3 as stage3\nFROM image4 as stage4\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -73,7 +77,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nARG BASE_IMAGE=\"ubuntu:latest\"\n\nFROM \"${BASE_IMAGE}\" AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -90,7 +95,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:+mcr.microsoft.com/}azure-cli:latest AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -105,7 +111,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:+mcr.microsoft.com/}azure-cli:latest AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -122,7 +129,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:-mcr.microsoft.com/}azure-cli:latest AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -137,7 +145,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:-mcr.microsoft.com/}azure-cli:latest AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -154,7 +163,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:+\"mcr.microsoft.com/\"}azure-cli:latest\" AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -169,7 +179,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nARG cloud\nFROM \"${cloud:+\"mcr.microsoft.com/\"}azure-cli:latest\" AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -186,7 +197,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nARG cloud\nFROM \"${cloud:-\"mcr.microsoft.com/\"}azure-cli:latest\" AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -201,7 +213,8 @@
    "user": null,
    "lastStageName": "label",
    "modifiedDockerfile": "\nARG cloud\nFROM ${cloud:-\"mcr.microsoft.com/\"}azure-cli:latest as label\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -216,7 +229,8 @@
    "user": "user1",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nUSER user1\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -231,7 +245,8 @@
    "user": "user2",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -248,7 +263,8 @@
    "user": "user3",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nARG IMAGE_USER=user2\nUSER $IMAGE_USER\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -263,7 +279,8 @@
    "user": "user3_2",
    "lastStageName": "stage4",
    "modifiedDockerfile": "\nFROM image1 as stage1\nUSER user1\nFROM stage3 as stage2\nFROM image3 as stage3\nUSER user3_1\nUSER user3_2\nFROM image4 as stage4\nUSER user4\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -278,7 +295,8 @@
    "user": "user2",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM debian AS placeholder\nENV USERNAME=user1\nARG USERNAME=user2\nUSER ${USERNAME}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -293,7 +311,8 @@
    "user": "user1",
    "lastStageName": "two",
    "modifiedDockerfile": "\nFROM debian as one\nENV USERNAME=user1\nARG USERNAME=user2\n\nFROM one as two\nUSER ${USERNAME}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -308,7 +327,8 @@
    "user": "user1",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nARG USERNAME=user1\nFROM debian AS placeholder\nUSER ${USERNAME}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -323,7 +343,8 @@
    "user": "user1",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM debian AS placeholder\nENV USERNAME=user1\nARG USERNAME\nUSER ${USERNAME}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -338,7 +359,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM debian AS placeholder\nUSER ${USERNAME}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -353,7 +375,8 @@
    "user": "user2",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM debian AS placeholder\nARG USERNAME=user1\nENV USERNAME=user2\nUSER ${USERNAME}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -368,7 +391,8 @@
    "user": "user1",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM debian AS placeholder\nARG USERNAME1=user1\nENV USERNAME2=${USERNAME1}\nUSER ${USERNAME2}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -383,7 +407,8 @@
    "user": "Auser1Auser2A",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM debian AS placeholder\nARG USERNAME1=user1\nENV USERNAME2=user2\nUSER A${USERNAME1}A${USERNAME2}A\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -400,7 +425,8 @@
    "user": "user1",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM mybase AS placeholder\nUSER ${USERNAME}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -415,7 +441,8 @@
    "user": null,
    "lastStageName": "final",
    "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\nFROM base as final\n\nCOPY src dest\nRUN another command\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -430,7 +457,8 @@
    "user": null,
    "lastStageName": "final",
    "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\n \tFROM base  as\t  final  #<- deliberately mixing with whitespace and including: as something here\n\nCOPY src dest\nRUN another command\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -445,7 +473,8 @@
    "user": null,
    "lastStageName": "final",
    "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\n \tFROM  --platform=my-platform \tbase  as\t  final  #<- deliberately mixing with whitespace and including: as something here\n\nCOPY src dest\nRUN another command\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -460,7 +489,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\nFROM base AS placeholder\n\nCOPY src dest\nRUN another command\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -475,7 +505,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\nFROM base AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -490,7 +521,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM ubuntu:latest as base\n\nRUN some command\n\n \tFROM  --platform=my-platform \tbase AS placeholder   #<- deliberately mixing with whitespace and including: as something here\n\nCOPY src dest\nRUN another command\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -505,7 +537,8 @@
    "user": null,
    "lastStageName": null,
    "modifiedDockerfile": null,
-   "ensureError": true
+   "ensureError": true,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -520,7 +553,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -535,7 +569,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker/dockerfile:1.4\nFROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -550,7 +585,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.4\nFROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -565,7 +601,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=mycompany/myimage:1.4\nFROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "unknown"
   }
  },
  {
@@ -580,7 +617,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:0\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -595,7 +633,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -610,7 +649,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.2\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -625,7 +665,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.2.3\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -640,7 +681,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.4\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -655,7 +697,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.4.5\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -670,7 +713,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.5\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -685,7 +729,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.5.0\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -700,7 +745,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:2\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -715,7 +761,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -730,7 +777,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:latest\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -745,7 +793,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:0-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -760,7 +809,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -775,7 +825,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.2-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -790,7 +841,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.2.3-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -805,7 +857,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.4-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -820,7 +873,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.4.5-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -835,7 +889,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.5-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -850,7 +905,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:1.5.0-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -865,7 +921,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:2-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -880,7 +937,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -895,7 +953,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "# syntax=docker.io/docker/dockerfile:latest-labs\n        FROM debian AS placeholder",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "yes"
   }
  },
  {
@@ -910,7 +969,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nENV A=B",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -925,7 +985,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nENV A = B",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -940,7 +1001,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nENV A B",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -955,7 +1017,8 @@
    "user": "D",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "from E AS placeholder\nenv A=B\narg C\nuser D\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -970,7 +1033,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM scratch AS placeholder\nCOPY hello /\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -985,7 +1049,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM $UNSET AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1000,7 +1065,8 @@
    "user": null,
    "lastStageName": "later",
    "modifiedDockerfile": "FROM later as early\nFROM alpine as later\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1015,7 +1081,8 @@
    "user": null,
    "lastStageName": "b",
    "modifiedDockerfile": "FROM b as a\nFROM a as b\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1030,7 +1097,8 @@
    "user": null,
    "lastStageName": "a",
    "modifiedDockerfile": "FROM a as a\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1045,7 +1113,8 @@
    "user": "x",
    "lastStageName": "b",
    "modifiedDockerfile": "FROM b as a\nUSER x\nFROM a as b\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1060,7 +1129,8 @@
    "user": "x",
    "lastStageName": "a",
    "modifiedDockerfile": "FROM a as a\nUSER x\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1075,7 +1145,8 @@
    "user": null,
    "lastStageName": "a",
    "modifiedDockerfile": "FROM alpine AS a\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1090,7 +1161,8 @@
    "user": null,
    "lastStageName": "Base",
    "modifiedDockerfile": "FROM alpine AS Base\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1105,7 +1177,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM alpine AS Base\nFROM base AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1120,7 +1193,8 @@
    "user": "user1:group1",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nUSER user1:group1\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1135,7 +1209,8 @@
    "user": "1000",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nUSER 1000\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1150,7 +1225,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nENV A=1 B=2\nUSER ${B}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1167,7 +1243,8 @@
    "user": "fromcli",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nARG U\nUSER ${U}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1184,7 +1261,8 @@
    "user": "cli",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "ARG U=preamble\nFROM debian AS placeholder\nUSER ${U}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1199,7 +1277,8 @@
    "user": "root",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM --platform=$BUILDPLATFORM alpine AS placeholder\nUSER root\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1214,7 +1293,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "\nFROM ubuntu:latest as base-amd64\nUSER amd64_user\n\nFROM ubuntu:latest as base-arm64\nUSER arm64_user\n\nFROM base-${TARGETARCH} AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1229,7 +1309,8 @@
    "user": "lower",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "from debian AS placeholder\nuser lower\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1244,7 +1325,8 @@
    "user": "bob",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nUSER bob # trailing comment\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1259,7 +1341,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "ARG a\nARG b=B\nFROM ${a:-${b}}img AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1274,7 +1357,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "ARG cloud=x\nFROM $cloud/img:1 AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1289,7 +1373,8 @@
    "user": "quoted",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nENV U=\"quoted\"\nUSER ${U}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1304,7 +1389,8 @@
    "user": "quoted",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\nARG U=\"quoted\"\nUSER ${U}\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1319,7 +1405,8 @@
    "user": "crlfuser",
    "lastStageName": "placeholder",
    "modifiedDockerfile": "FROM debian AS placeholder\r\nARG U=crlfuser\r\nUSER ${U}\r\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1334,7 +1421,8 @@
    "user": "ua",
    "lastStageName": "c",
    "modifiedDockerfile": "FROM alpine AS a\nUSER ua\nFROM a AS b\nFROM b AS c\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1349,7 +1437,8 @@
    "user": null,
    "lastStageName": "placeholder",
    "modifiedDockerfile": "ARG TAG=3.19\nFROM alpine:${TAG} AS a\nFROM a AS placeholder\n",
-   "ensureError": false
+   "ensureError": false,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1364,7 +1453,8 @@
    "user": null,
    "lastStageName": null,
    "modifiedDockerfile": null,
-   "ensureError": true
+   "ensureError": true,
+   "supportsBuildContexts": "no"
   }
  },
  {
@@ -1379,7 +1469,8 @@
    "user": null,
    "lastStageName": null,
    "modifiedDockerfile": null,
-   "ensureError": true
+   "ensureError": true,
+   "supportsBuildContexts": "no"
   }
  }
 ]

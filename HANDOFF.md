@@ -15,18 +15,31 @@ points at it.
 
 ## Where things stand
 
-_Last updated: 2026-08-29, at `796dce4` on `main`._
+_Last updated: 2026-08-29, at `f09c5f2` on `main`._
 
-- **Ledger: 234 recorded behaviors — 0 open nonconformances**, 10 deacon-follows-spec,
-  15 documented choice, 25 deacon extension, 184 conformant. Zero `UNADJUDICATED` records.
+- **Ledger: 236 recorded behaviors — 1 open nonconformance**, 10 deacon-follows-spec,
+  15 documented choice, 25 deacon extension, 185 conformant. Zero `UNADJUDICATED` records.
 - **The verdict of record is the latest nightly**, never this file:
   `gh run list --workflow=parity.yml --branch=main`.
-- **No parity work is in flight.** [#729](https://github.com/get2knowio/deacon/issues/729)
-  — deacon touching a container without waiting for the runtime's `start` event where the
-  reference waits for it — is fixed and its ledger row is conformant. What the fix is, and
-  the three places it deliberately does not transcribe the reference, are in that row and in
+- [#729](https://github.com/get2knowio/deacon/issues/729) — deacon touching a container
+  without waiting for the runtime's `start` event where the reference waits for it — is
+  fixed and its ledger row is conformant. What the fix is, and the three places it
+  deliberately does not transcribe the reference, are in that row and in
   `crates/core/src/start_event.rs`'s module doc; neither is restated here. It earned two
   durable rules, filed under the arc below.
+- **The one open nonconformance is
+  [#732](https://github.com/get2knowio/deacon/issues/732), and it is characterized, not
+  in flight.** deacon does not inject `# syntax=docker/dockerfile:1.4` into the generated
+  Feature Dockerfile where the reference does. The row carries the measurement; the part
+  worth knowing before picking it up is that **its reachability is far narrower than the
+  gap looks**: `skipDefaultSyntax` (`containerFeatures.ts:249`) disables the injection on
+  any Docker engine >= 23.0.0, so on a current engine BOTH CLIs propagate the user's own
+  directive and BOTH fail identically on a Dockerfile pinning an old frontend — measured,
+  same BuildKit error, on docker 29.7.2. It is inert on podman too (buildah ignores
+  `# syntax=`). What is left is BuildKit >= 0.8 on a Docker engine older than February
+  2023, which nothing here can test; a `docker:20.10-dind` runner is the vehicle if
+  somebody wants the end-to-end half. `supports_build_contexts` itself IS ported and
+  measured — only the caller is missing.
   The two podman compose issues (706 and 710) stay resolved by #715, and the backlog issues
   that remain (`#30`, `#480`, the auto-forward family, …) are standing scope, not open
   questions about deacon's behavior.
@@ -96,7 +109,8 @@ _Last updated: 2026-08-29, at `796dce4` on `main`._
 
 | PR | What |
 |---|---|
-| #731 | `up` waits for the runtime's `start` event before touching the container it just started, on both paths (closes issue 729) — batch 28 |
+| #733 | `supportsBuildContexts` ported and measured; the injection caller characterized as issue 732 — batch 29 |
+| #731 `f09c5f2` | `up` waits for the runtime's `start` event before touching the container it just started, on both paths (closes issue 729) — batch 28 |
 | #730 `796dce4` | the missing start-event gate recorded as an open nonconformance, ahead of its fix |
 | #728 `1a0670c` | the conmon flake carries its own evidence: runtime state captured at the failing exec, plus a dispatch-only probe rig |
 | #727 `642f9cb` | HANDOFF refresh for batch 27 |
@@ -319,6 +333,19 @@ have. That is where the remaining yield is.
   ready fix (halve the group). Re-running passed. The story may still be true at the margin,
   but acting on it would have slowed every docker lane on one data point. **Cost of a re-run:
   one CI cycle. Cost of a wrong global concurrency change: every lane, forever.**
+- **Before sizing a port's value, find what DISABLES its caller.** Batch 29 recommended
+  `supportsBuildContexts` on the strength of "deacon fails where the reference succeeds", and
+  the measurement refuted it: `skipDefaultSyntax`, three lines above the caller in the same
+  file, turns the whole branch off on any Docker engine >= 23.0.0. The function's absence was
+  real; the consequence was not, on anything testable. **An exported function missing from a
+  port is a gap in the port — it is not yet evidence of a user-visible difference. Read the
+  caller's guards before promising one.**
+- **Fixture INPUTS can be vendored and unasserted, which reads exactly like coverage.** The
+  26 `sbc-*` cases carrying upstream's own `supportsBuildContexts` table had been in
+  `dockerfile_utils_oracle.json` since the original port — exercised for base image, user and
+  stage naming, and silent on the one thing they were written for, because deacon had no
+  function to ask. Grep a fixture for inputs whose *name* implies a behavior no column
+  asserts.
 - **Spawning a watcher is not attaching it.** `<runtime> events` returns as soon as the
   process exists, not as soon as it has connected to the daemon and begun streaming — so an
   event emitted inside that window lands in a stream nobody is reading, and a wait for it can
@@ -353,10 +380,12 @@ Do not start any of it without being asked.
    25 produced a guard rather than cases: `ledger_covers_every_subcommand` asserts every
    subcommand deacon advertises has a `SPEC_STATUS.md` section. Three parts were deliberately
    left, each with the place it would surface:
-   - **`supportsBuildContexts`** (`dockerfileUtils`). Upstream uses it to decide whether to
-     prepend `# syntax=docker/dockerfile:1.4`; deacon emits no syntax directive while always
-     passing `--build-context`. Fine on modern BuildKit; on an OLDER Docker the reference would
-     succeed where deacon fails. **UNMEASURED** — needs an old BuildKit this container lacks.
+   - **`supportsBuildContexts`** (`dockerfileUtils`) — **the function is DONE** (batch 29:
+     ported, measured across the 91-case table, sabotage-verified). Only its caller remains,
+     as [#732](https://github.com/get2knowio/deacon/issues/732), and the queue's old note that
+     this "needs an old BuildKit" was wrong twice over: the blocker is an old *engine*, not an
+     old BuildKit, and on a current engine there is no divergence at all. See that issue and
+     its ledger row before spending anything on it.
    - **`inspectImageInRegistry`** (`dockerUtils`). No deacon equivalent: deacon pulls and inspects
      locally where the reference reads image metadata WITHOUT pulling. Would surface on a config
      whose image can be inspected but not pulled. (`qualifyImageName` is NOT a lead — it only

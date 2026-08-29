@@ -637,6 +637,110 @@ pub fn find_user_statement(
     extract_dockerfile(dockerfile_content).user_statement(build_args, base_image_env, target)
 }
 
+/// Whether a Dockerfile's declared frontend understands BuildKit named build
+/// contexts (`--build-context`, `COPY --from=<context>`).
+///
+/// Three states, not two, and the third is load-bearing: a `syntax=` directive
+/// naming an image that is not `docker/dockerfile` declares SOME frontend whose
+/// capabilities this cannot know. The reference returns the string `'unknown'`
+/// there and its caller treats it as "does not support" while keeping it
+/// distinguishable, so the port keeps it distinguishable too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildContextSupport {
+    /// The declared frontend is `docker/dockerfile` at a version >= 1.4.
+    Yes,
+    /// No `syntax=` directive at all, or `docker/dockerfile` below 1.4.
+    No,
+    /// A `syntax=` directive naming some other frontend image.
+    Unknown,
+}
+
+/// The reference's `supportsBuildContexts` (`src/spec-node/dockerfileUtils.ts:263`
+/// at the pinned oracle `v0.87.0`), ported field-for-field.
+///
+/// ```text
+/// const version = dockerfile.preamble.version;
+/// if (!version) return dockerfile.preamble.directives.syntax ? 'unknown' : false;
+/// const numVersion = (/^\d+(\.\d+){0,2}/.exec(version) || [])[0];
+/// if (!numVersion) return true; // latest, labs or no tag.
+/// return semver.intersects(numVersion, '>=1.4');
+/// ```
+///
+/// Every case is measured against that compiled source in
+/// `crates/core/tests/dockerfile_utils_parity.rs`; see [`version_range_reaches_1_4`]
+/// for why the last line is a RANGE intersection and not a comparison.
+pub fn supports_build_contexts(dockerfile: &Dockerfile) -> BuildContextSupport {
+    let Some(version) = dockerfile.preamble.version.as_deref() else {
+        // `version` is only `None` when the `syntax=` value did not name
+        // `docker/dockerfile` at all — so a directive being present here means it
+        // named something else.
+        return if dockerfile.preamble.directives.contains_key("syntax") {
+            BuildContextSupport::Unknown
+        } else {
+            BuildContextSupport::No
+        };
+    };
+
+    match leading_numeric_version(version) {
+        // `latest`, `labs`, or any tag not starting with a number.
+        None => BuildContextSupport::Yes,
+        Some(components) => {
+            if version_range_reaches_1_4(&components) {
+                BuildContextSupport::Yes
+            } else {
+                BuildContextSupport::No
+            }
+        }
+    }
+}
+
+/// `^\d+(\.\d+){0,2}` — the leading dotted-numeric run of a tag, as up to three
+/// components. `None` when the tag does not start with a digit.
+fn leading_numeric_version(version: &str) -> Option<Vec<u64>> {
+    let mut components = Vec::new();
+    let mut rest = version;
+    loop {
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if digits.is_empty() {
+            break;
+        }
+        // A tag component wider than u64 is not a version the reference could
+        // handle either — node's semver throws on it. Saturating keeps this
+        // total; no measured case reaches it.
+        components.push(digits.parse::<u64>().unwrap_or(u64::MAX));
+        rest = &rest[digits.len()..];
+        if components.len() == 3 || !rest.starts_with('.') {
+            break;
+        }
+        rest = &rest[1..];
+    }
+    (!components.is_empty()).then_some(components)
+}
+
+/// `semver.intersects(numVersion, '>=1.4')`, which is **not** `numVersion >= 1.4`.
+///
+/// A partial version is a RANGE on the node side, and that is what makes the
+/// reference's own table read strangely until you see it: `1` is `>=1.0.0 <2.0.0`,
+/// which overlaps `>=1.4.0`, so `1` is TRUE — while `1.2` is `>=1.2.0 <1.3.0`,
+/// which does not, so `1.2` is FALSE even though `1` was true. Implemented as the
+/// range's exclusive upper bound versus `1.4.0`, since `>=1.4` is unbounded above
+/// and the two overlap exactly when that bound exceeds it.
+///
+/// Reading this as a comparison passes `1.4`, `1.5` and `2` and silently gets `1`
+/// wrong, which is why it is measured rather than argued.
+fn version_range_reaches_1_4(components: &[u64]) -> bool {
+    const FLOOR: (u64, u64, u64) = (1, 4, 0);
+    match components {
+        // `1.2.3` is an exact version, not a range.
+        [major, minor, patch] => (*major, *minor, *patch) >= FLOOR,
+        // `1.2` is `>=1.2.0 <1.3.0`.
+        [major, minor] => (*major, minor.saturating_add(1), 0) > FLOOR,
+        // `1` is `>=1.0.0 <2.0.0`.
+        [major] => (major.saturating_add(1), 0, 0) > FLOOR,
+        _ => false,
+    }
+}
+
 /// Inspect the final `FROM` instruction in `dockerfile_content` and ensure it
 /// has a named stage alias.
 ///

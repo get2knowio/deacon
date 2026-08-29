@@ -19,8 +19,8 @@
 //! Hermetic: no network, no Docker, no oracle at run time.
 
 use deacon_core::dockerfile_utils::{
-    ensure_dockerfile_has_final_stage_name, extract_dockerfile, find_user_statement,
-    resolve_base_image,
+    BuildContextSupport, ensure_dockerfile_has_final_stage_name, extract_dockerfile,
+    find_user_statement, resolve_base_image, supports_build_contexts,
 };
 use std::collections::HashMap;
 
@@ -32,6 +32,9 @@ struct Expected {
     last_stage_name: Option<String>,
     modified_dockerfile: Option<String>,
     ensure_error: bool,
+    /// `"yes"` / `"no"` / `"unknown"` — a string, so the reference's third state
+    /// cannot be collapsed into a bool on the way into the fixture.
+    supports_build_contexts: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -86,6 +89,18 @@ fn dockerfile_utils_matches_the_reference_on_every_measured_case() {
                 "{:?}",
                 parsed.user_statement(&case.build_args, &case.base_image_env, target)
             ),
+        );
+
+        record(
+            case,
+            "supportsBuildContexts",
+            case.expected.supports_build_contexts.clone(),
+            match supports_build_contexts(&parsed) {
+                BuildContextSupport::Yes => "yes",
+                BuildContextSupport::No => "no",
+                BuildContextSupport::Unknown => "unknown",
+            }
+            .to_string(),
         );
 
         let ensured = ensure_dockerfile_has_final_stage_name(&case.dockerfile, "placeholder");
