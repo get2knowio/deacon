@@ -15,14 +15,23 @@ points at it.
 
 ## Where things stand
 
-_Last updated: 2026-08-28, at `d723c12` on `main`._
+_Last updated: 2026-08-29, at `2746c76` on `main`._
 
-- **Ledger: 232 recorded behaviors — 0 open nonconformances**, 10 deacon-follows-spec,
-  15 documented choice, 25 deacon extension, 182 conformant. Zero `UNADJUDICATED` records.
+- **Ledger: 233 recorded behaviors — 0 open nonconformances**, 10 deacon-follows-spec,
+  15 documented choice, 25 deacon extension, 183 conformant. Zero `UNADJUDICATED` records.
 - **The verdict of record is the latest nightly**, never this file:
   `gh run list --workflow=parity.yml --branch=main`.
-- **Nothing open, nothing in flight.** The two podman compose issues (706 and 710) are both
-  resolved by #715.
+- **No parity work in flight**, and the two podman compose issues (706 and 710) stay resolved
+  by #715. The backlog issues that remain (`#30`, `#480`, the auto-forward family, …) are
+  standing scope, not open questions about deacon's behavior.
+- **One thing WILL cost you time on any PR: [#723](https://github.com/get2knowio/deacon/issues/723).**
+  The Podman lane fails intermittently in `test_compose_override_command_lifecycle_runs` with
+  `container create failed (no logs from conmon): conmon bytes ""`. It is `chore(ci)` —
+  non-behavioral, so it owes no ledger row — but `Test (Podman)` is a REQUIRED check and this
+  fails roughly half of runs (observed across four runs on #725/#726: fail, pass, fail, pass),
+  so expect to re-run. **Three hypotheses are refuted** — daemon contention (#718, reverted by
+  #724), container-not-running, and podman/conmon version skew (#726) — and the issue carries
+  what is left. The `smoke-lite` trap below is the worked example of how the first was retired.
 
 > `0 open nonconformances` is a statement about the questions that have been asked, not a
 > statement about deacon. Batches 25–26 are the demonstration: the count sat at 0 while
@@ -40,6 +49,13 @@ _Last updated: 2026-08-28, at `d723c12` on `main`._
 
 | PR | What |
 |---|---|
+| #725 `2746c76` | Feature content stages without BuildKit build contexts, so Features install on podman compose and under `--buildkit never` (closes issue 719) — ledger back to 0 open |
+| #726 `402d787` | the Podman lane runs the podman the runner image ships (5.8.4), not an apt copy it never executed |
+| #724 `9f81cb6` | reverts #718 — the throttle did not fix the conmon flake, so it was ~14% off every smoke lane for nothing |
+| #722 `89ecc2d` | each side of a parity case gets its own `TMPDIR`, so the reference's `Date.now()`-keyed temp dir cannot collide |
+| #720 `8db4717` | the podman lane's build-test exclusions are named and measured rather than inherited |
+| #718 `a1ada8d` | `smoke-lite` 4 → 2 — **REVERTED by #724**, listed so the round trip is not repeated |
+| #717 `fd74825` | HANDOFF refresh through batch 26 |
 | #715 `d723c12` | Compose runs on the RESOLVED runtime, not a literal `docker` — resolves issues 706 and 710; podman lane gains the compose binary |
 | #716 `a1bffc2` | rootless podman works in this dev container, so the Podman lane is reproducible locally |
 | #714 `768965d` | `chacha20` off the yanked 0.10.0 — `Security (cargo deny)` was red repo-wide |
@@ -355,9 +371,15 @@ lints and fmt drift in new test files.
      because a squash merge consumes the PR body too. Same issue, three times in one afternoon.
      There is no escaping syntax and no prose context that disarms it: quoted, negated or
      merely described, the pattern fires.
+  3. *It caught a fourth issue on 2026-08-29, in a sentence written to AVOID overclaiming.*
+     #726's commit said `This does NOT fix <number>` — a deliberate disclaimer, because the
+     change genuinely did not fix the flake. Merging shut the issue anyway. The author had
+     read this very entry earlier the same session. **Negation is not an escape; there is no
+     prose context that disarms the pattern.**
   **The remedy is to never put such a verb adjacent to a `#`-number in a commit message or PR
-  body at all** — write `issue 706`, or split the verb and the number across clauses. This file
-  now follows its own advice, so the example above is described rather than quoted.
+  body at all** — write `issue 706`, or split the verb and the number across clauses. Say
+  `does not address issue 723`, never `does not fix #723`. This file now follows its own
+  advice, so the examples above are described rather than quoted.
   And **check `gh issue view <n> --json state` after any merge whose scope changed
   mid-flight** — nothing warns you, and a ledger row can quietly end up pointing at a shut
   issue. That check is what caught all three.
@@ -378,15 +400,43 @@ lints and fmt drift in new test files.
   not.** That error survived two batches and produced two wrong fixes and one wrongly-premised
   issue. The image genuinely was in docker's store — because deacon was running `docker
   compose` itself, not because of anything podman did.
-- **`smoke-lite` is `max-threads = 2`, and #715 is why.** Compose calls used to run on a
-  hardcoded `docker` even under `DEACON_CONTAINER_RUNTIME=podman`, so four concurrent
-  smoke-lite tests on the Podman lane were four concurrent DOCKER compose projects. Once they
-  became four concurrent ROOTLESS PODMAN ones, `test_compose_override_command_lifecycle_runs`
-  started failing 2 runs in 3 with `container create failed (no logs from conmon): conmon bytes
-  ""` — which surfaces as a bare `deacon up failed` and reads like a lifecycle defect. It
-  passes 5/5 locally when run SERIALLY. `[test-groups]` has no per-profile form, so this slows
-  smoke tests on every lane (measured: the Podman suite step went 195s → 222s). If that cost
-  ever matters, the narrower fix is a separate group for the compose smoke binaries only.
+- **`smoke-lite` is `max-threads = 4`, and the attempt to make it 2 is a worked example of
+  fixing a flake by theory.** The reasoning was good: #715 had just moved compose onto rootless
+  podman, so four concurrent smoke-lite tests became four concurrent PODMAN compose projects,
+  and `test_compose_override_command_lifecycle_runs` began failing with `container create
+  failed (no logs from conmon): conmon bytes ""`. Contention was the obvious cause, and the
+  test passes 5/5 locally when run serially. #718 dropped the throttle to 2 — **and the failure
+  recurred unchanged.** Reverted in #724. Because `[test-groups]` has no per-profile form, the
+  throttle cost ~14% on EVERY smoke lane (the Podman suite step went 195s → 222s) and bought
+  nothing. The refutation is recorded in `.config/nextest.toml` beside the setting so the round
+  trip is not repeated. **The transferable part: a flake that reproduces serially-never and
+  concurrently-sometimes still is not proof of contention** — measure by removing the
+  suspected cause, and revert when the failure survives. The live state of that flake is
+  [#723](https://github.com/get2knowio/deacon/issues/723).
+- **The Podman lane runs the podman the runner IMAGE ships, not the one apt installs.** The
+  setup step used to `apt-get install -y podman`; `/usr/local/bin` precedes `/usr/bin` on
+  PATH, so the apt copy was never executed. Measured: `podman version` answered **5.8.4**
+  from `/usr/local/bin` with helpers out of `/usr/local/lib/podman`, while apt had just
+  unpacked **4.9.3** and conmon **2.1.10** into `/usr/bin`. The unused binaries were the
+  harmless half — the apt package also lays down `/etc/containers/*` written for 4.9.3, so a
+  5.8.4 engine ran on a 4.9.3 configuration. Removed in #726, after confirming nothing
+  depended on it: the image ships `/etc/containers` complete (`containers.conf`,
+  `policy.json`, `registries.conf`, `seccomp.json`, `storage.conf`) and provides `pasta`,
+  podman 5's default `rootlessNetworkCmd`. **Two reusable pieces.** *`command -v conmon` does
+  not answer the question* — podman resolves helpers through `containers.conf` and never
+  consults PATH, so ask `podman info --format '{{.Host.Conmon.Path}}'`. Asking PATH is what
+  made one round of #723 diagnostics report 2.1.10 while podman was running 2.2.1, a
+  self-contradiction that cost real time. And *a setup step that provisions a tool the job
+  does not use is worse than one that provisions nothing*, because its log reads like
+  evidence.
+- **Copying a file between branches imports that branch's OTHER changes, silently.** Building
+  #726 meant taking `ci.yml` from the #725 working branch (to avoid `git stash`, correctly)
+  and applying it onto `main` — which brought #725's filterset change along without #725's
+  code fix, un-excluding three tests that then failed. It survived review of the step being
+  edited, because the damage was two hundred lines away. **`git diff <base>` and assert the
+  diff contains ONLY what you meant**, by pattern and not by eye: here, that no `test(=`,
+  `binary(=` or `nextest run` line appears at all. A file copy is not a patch; treat it as
+  one and it carries whatever else the source had.
 - **`git stash` is repo-global.** The stack is shared across every worktree and session. Never
   stash in a worktree agent — copy files instead.
 - **`ci.yml` triggers on `pull_request: branches: [main]` only.** A PR opened against another
