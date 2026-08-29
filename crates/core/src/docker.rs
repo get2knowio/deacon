@@ -6,6 +6,7 @@
 use crate::config::DevContainerConfig;
 use crate::container::{ContainerIdentity, ContainerOps, ContainerResult};
 use crate::errors::{DockerError, Result};
+use crate::start_event::{StartEventFilter, StartEventWatch};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -2733,7 +2734,16 @@ impl DockerLifecycle for CliRuntime {
             let container_id = existing_containers[0].clone();
             debug!("Reusing existing container: {}", container_id);
 
-            // Start the container if it's not running
+            // Start the container if it's not running.
+            //
+            // Deliberately NOT gated on the runtime's `start` event, and that follows the
+            // reference rather than merely omitting the gate: `startExistingContainer`
+            // (`singleContainer.ts:303`) calls `docker start` and re-finds the container,
+            // and is the one path in the reference that does not go through
+            // `startEventSeen`. Gating it would also be unsound here in a way it is not on
+            // the create path — deacon reaches this line for a container that may ALREADY
+            // be running, and `start` on a running container emits no event at all, so the
+            // wait could only ever expire.
             self.start_container(&container_id).await?;
             ensure_container_running(self, &container_id).await?;
 
@@ -2767,7 +2777,30 @@ impl DockerLifecycle for CliRuntime {
                 entrypoint_chain,
             )
             .await?;
+
+        // Subscribe to the runtime's `start` event BEFORE starting, then block on it
+        // after — the reference's shape at `singleContainer.ts:421`, where the
+        // subscription is opened before `docker run` and `await started` follows it.
+        // The ordering is the mechanism: opened after the start, the event is emitted
+        // into a stream nobody is reading. See `start_event` for why an exit code and a
+        // `running` state are both weaker signals than the event.
+        //
+        // deacon creates and starts in two steps where the reference does one, which is
+        // why this filters by container id rather than by labels: the reference matches
+        // labels only because `docker run` has not yet told it an id. Filtering by id is
+        // its own idiom for the case where it has one (`dockerUtils.ts:188`).
+        let start_watch = StartEventWatch::open_or_warn(
+            &self.runtime_path,
+            self.is_podman(),
+            StartEventFilter::for_container(container_id.clone()),
+            "devcontainer",
+        )
+        .await;
+
         self.start_container(&container_id).await?;
+        if let Some(watch) = start_watch {
+            watch.wait_and_log().await;
+        }
         ensure_container_running(self, &container_id).await?;
 
         // Get the image ID

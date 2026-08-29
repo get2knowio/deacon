@@ -51,6 +51,7 @@ pub mod secrets;
 pub mod security;
 pub mod semver_utils;
 pub mod settings;
+pub mod start_event;
 pub mod state;
 pub mod templates;
 pub mod text;
