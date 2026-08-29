@@ -32,6 +32,18 @@ _Last updated: 2026-08-29, at `2746c76` on `main`._
   so expect to re-run. **Three hypotheses are refuted** — daemon contention (#718, reverted by
   #724), container-not-running, and podman/conmon version skew (#726) — and the issue carries
   what is left. The `smoke-lite` trap below is the worked example of how the first was retired.
+  **Local non-reproduction is now a number, not an impression**: 3 full Podman-lane runs
+  (436 tests each) plus 44 targeted runs of the test alone — 20 serial, 24 at concurrency 4 —
+  produced zero failures on podman 4.9.3 here. Two tools were added rather than a fourth
+  hypothesis: the test now dumps runtime state on its failure path BEFORE `deacon_down`
+  (`support::runtime_state_dump`), because a job-level `if: failure()` step can never answer
+  "was the container running?" once the test has torn it down; and
+  `.github/workflows/podman-flake-probe.yml` is a dispatch-only rig whose two phases —
+  the test alone N times, the whole lane M times — return the one number that discriminates
+  "the shape reproduces" from "the suite around it is load-bearing".
+  **Do not instrument this with `podman --log-level=debug`.** Podman writes the exec
+  `oci-log` — the only place crun's own error would appear — ONLY when the level is not debug
+  (`libpod/oci_conmon_exec_common.go:50-53` at v5.8.4). Debug logging trades the cause for noise.
 
 > `0 open nonconformances` is a statement about the questions that have been asked, not a
 > statement about deacon. Batches 25–26 are the demonstration: the count sat at 0 while
