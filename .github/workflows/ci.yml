@@ -663,8 +663,7 @@ jobs:
                | binary(=integration_compose_features_build))
               - test(=concurrent_identical_builds_do_not_race_on_the_shared_deterministic_tag)
               - test(=build_honors_a_container_driver_builder_and_can_oci_export)
-              - test(=build_honors_a_container_driver_builder_and_can_export_a_local_cache)
-'
+              - test(=build_honors_a_container_driver_builder_and_can_export_a_local_cache)'
 
     # `parity_hermetic` runs in this job (it is runtime-agnostic and NOT excluded above), so
     # this job owes the same evidence as the Docker one (#474). Same conditions, same reasons;
