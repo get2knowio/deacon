@@ -584,6 +584,11 @@ mod tests {
     /// `events` as a script it cannot open, which is the shape of every real failure here:
     /// the process starts, the stream ends immediately, and the only account of why is on
     /// stderr. Drop the stderr capture and this reports a bare "the events stream ended".
+    ///
+    /// `#[cfg(unix)]` because `/bin/sh` is the VEHICLE, not the subject: the capture itself
+    /// is platform-agnostic and this gate costs no coverage of deacon's own behavior. There
+    /// is no Windows binary that spawns and then fails on these argv in the same shape.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_stream_that_dies_reports_what_the_runtime_said() {
         let watch = StartEventWatch::open("/bin/sh", false, StartEventFilter::default(), "test")
