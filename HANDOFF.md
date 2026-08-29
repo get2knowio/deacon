@@ -15,21 +15,51 @@ points at it.
 
 ## Where things stand
 
-_Last updated: 2026-08-29, at `2746c76` on `main`._
+_Last updated: 2026-08-29, at `1a0670c` on `main`._
 
-- **Ledger: 233 recorded behaviors — 0 open nonconformances**, 10 deacon-follows-spec,
+- **Ledger: 234 recorded behaviors — 1 open nonconformance**, 10 deacon-follows-spec,
   15 documented choice, 25 deacon extension, 183 conformant. Zero `UNADJUDICATED` records.
+  The one open nonconformance is
+  [#729](https://github.com/get2knowio/deacon/issues/729), unfixed; its row landed ahead of
+  the fix so the `Ledger (issue coverage)` job stays green while the work is in flight.
 - **The verdict of record is the latest nightly**, never this file:
   `gh run list --workflow=parity.yml --branch=main`.
-- **No parity work in flight**, and the two podman compose issues (706 and 710) stay resolved
-  by #715. The backlog issues that remain (`#30`, `#480`, the auto-forward family, …) are
-  standing scope, not open questions about deacon's behavior.
+- **ONE piece of parity work is in flight and unstarted:
+  [#729](https://github.com/get2knowio/deacon/issues/729) — deacon execs without waiting for
+  the container's `start` event, where the reference waits for it.** Measured out of the
+  pinned oracle's own compiled source at 0.87.0: `qQ` opens a `docker/podman events --event
+  start` subscription BEFORE the container is started, filtered by the container's labels,
+  and both the compose path (`jV`, `return await m, {containerId: …}`) and the
+  single-container path (`await R` after `docker run`) block on it. deacon's compose path
+  retries `compose ps` until an ID merely APPEARS
+  (`commands/up/compose.rs:44`, and `get_primary_container_id` at `core/src/compose.rs:1722`
+  matches by name with no state check at all), and `start_container`
+  (`core/src/docker.rs:2640`) returns on `start`'s exit code. There is no gate on either
+  path. **Two obligations travel with this issue**, and the first is load-bearing for
+  whoever picks it up:
+  - Its title is `fix(up)`, a behavioral scope, so `owes_a_behavior_row` said it owed a
+    `parity/SPEC_STATUS.md` row **from the moment it was filed**, and until that row landed
+    the `Ledger (issue coverage)` job was RED. **The row is now in** (`up` section, open
+    nonconformance, 234/**1**/10/15/25/183) — land such a row early rather than with the
+    fix, because a red check nobody has explained is how a real one gets ignored.
+  - The mechanism is a real choice, not a transcription. The reference subscribes to
+    events, and #688 established that polling with the SAME guarantee is an acceptable
+    substitute (it made exactly that trade for the destroy path, and wrote down why). But
+    #688's precedent does not transfer by itself: a poll of container STATE is a weaker
+    signal here, because the premise of the issue 723 connection is that podman reports
+    `running=true` with a live pid before the runtime has finished. Whatever is chosen has
+    to carry the `start`-event guarantee, not merely resemble a wait — and be justified
+    against the reference in a comment.
+- The two podman compose issues (706 and 710) stay resolved by #715. The other backlog issues
+  (`#30`, `#480`, the auto-forward family, …) are standing scope, not open questions about
+  deacon's behavior.
 - **One thing WILL cost you time on any PR: [#723](https://github.com/get2knowio/deacon/issues/723).**
   The Podman lane fails intermittently in `test_compose_override_command_lifecycle_runs` with
   `container create failed (no logs from conmon): conmon bytes ""`. It is `chore(ci)` —
   non-behavioral, so it owes no ledger row — but `Test (Podman)` is a REQUIRED check and this
-  fails roughly half of runs (observed across four runs on #725/#726: fail, pass, fail, pass),
-  so expect to re-run. **Three hypotheses are refuted** — daemon contention (#718, reverted by
+  fails often enough to plan around: `fail, pass, fail, pass` across #725/#726, then
+  `fail, fail, fail, pass` across four attempts on #728 — 5 of 9 observed runs red, and #727
+  went green first try in the same window. Budget for two or three re-runs, not one. **Three hypotheses are refuted** — daemon contention (#718, reverted by
   #724), container-not-running, and podman/conmon version skew (#726) — and the issue carries
   what is left. The `smoke-lite` trap below is the worked example of how the first was retired.
   **Local non-reproduction is now a number, not an impression**: 3 full Podman-lane runs
@@ -44,6 +74,29 @@ _Last updated: 2026-08-29, at `2746c76` on `main`._
   **Do not instrument this with `podman --log-level=debug`.** Podman writes the exec
   `oci-log` — the only place crun's own error would appear — ONLY when the level is not debug
   (`libpod/oci_conmon_exec_common.go:50-53` at v5.8.4). Debug logging trades the cause for noise.
+  **The capture fired on its first CI failure and retired a fourth hypothesis.** Across three
+  consecutive failures on #728 the container was `status=running running=true exit=0
+  oom=false` with a live pid at the moment the exec failed — so not "already exited" (refuted
+  earlier, different error) and not "exiting inside a window `podman ps` hides" either. The
+  same three dumps show an IDENTICAL co-scheduled neighbourhood down to the config hashes
+  (ours `…_1f306951` up 3–4s, a sibling compose project `…_49d897f7` up 4–5s, the two-service
+  `…_4bdad49c` torn down 6–8s earlier), because nextest's order is stable — so the flake has a
+  deterministic SETUP and only its timing varies. That also explains why #718 could not have
+  worked: every neighbour is in a DIFFERENT nextest group, and `smoke-lite` bounds only its
+  own. The live hypothesis is now [#729](https://github.com/get2knowio/deacon/issues/729) —
+  podman sets `running` early and the `start` event is what says the runtime finished, so an
+  exec that does not wait for it races exactly this way under churn. **Unproven**, and worth
+  keeping separate: #729 is a real divergence whether or not it explains this.
+  **The probe has RUN, and the prediction held**
+  ([run 33261826509](https://github.com/get2knowio/deacon/actions/runs/33261826509) on
+  `1a0670c`, on the failing substrate — podman 5.8.4, `overlay`, `netavark`, `cgroupfs`,
+  4 CPUs): `PHASE A: 0 failed / 30 runs` and `PHASE B: 3 failed / 3 suite runs`, conmon
+  signature in all three. So the version gap is NOT a sufficient explanation (5.8.4 runs this
+  test thirty times clean) and neither is the test. **What fails is the test inside the suite.**
+  Do not read 3/3 as a rate — the lane's real rate is 5 red of 9 — the probe was not built to
+  measure one. One defect in the probe to fix before trusting its detail output: its
+  per-failure block greps `'^\s+(FAIL|TRY|Summary)'`, which never matches because nextest's
+  ANSI codes precede the leading whitespace; the counts and the `conmon bytes` grep are fine.
 
 > `0 open nonconformances` is a statement about the questions that have been asked, not a
 > statement about deacon. Batches 25–26 are the demonstration: the count sat at 0 while
@@ -61,6 +114,8 @@ _Last updated: 2026-08-29, at `2746c76` on `main`._
 
 | PR | What |
 |---|---|
+| #728 `1a0670c` | the conmon flake carries its own evidence: runtime state captured at the failing exec, plus a dispatch-only probe rig |
+| #727 `642f9cb` | HANDOFF refresh for batch 27 |
 | #725 `2746c76` | Feature content stages without BuildKit build contexts, so Features install on podman compose and under `--buildkit never` (closes issue 719) — ledger back to 0 open |
 | #726 `402d787` | the Podman lane runs the podman the runner image ships (5.8.4), not an apt copy it never executed |
 | #724 `9f81cb6` | reverts #718 — the throttle did not fix the conmon flake, so it was ~14% off every smoke lane for nothing |
