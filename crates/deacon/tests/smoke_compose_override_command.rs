@@ -120,8 +120,18 @@ fn test_compose_override_command_default_keeps_service_alive() {
     let success = up_output.status.success();
 
     if !success {
+        // Snapshot the runtime BEFORE tearing down. This file carries the #723
+        // Podman flake (`conmon bytes ""` on an exec), and the job-level
+        // `if: failure()` diagnostics structurally cannot answer the question
+        // that matters -- whether the container was running when the exec was
+        // attempted -- because the `deacon_down` below has already removed it by
+        // the time a job-level step runs.
+        let state = support::runtime_state_dump(workspace);
         deacon_down(workspace);
-        panic!("deacon up failed: {}", stderr);
+        panic!(
+            "deacon up failed: {}\n\n=== runtime state at failure ===\n{}",
+            stderr, state
+        );
     }
 
     let container_id = up_container_id(&up_output).expect("deacon up should report a containerId");
@@ -179,8 +189,18 @@ fn test_compose_override_command_explicit_false_runs_natural_command() {
 
     let stderr = String::from_utf8_lossy(&up_output.stderr).to_string();
     if !up_output.status.success() {
+        // Snapshot the runtime BEFORE tearing down. This file carries the #723
+        // Podman flake (`conmon bytes ""` on an exec), and the job-level
+        // `if: failure()` diagnostics structurally cannot answer the question
+        // that matters -- whether the container was running when the exec was
+        // attempted -- because the `deacon_down` below has already removed it by
+        // the time a job-level step runs.
+        let state = support::runtime_state_dump(workspace);
         deacon_down(workspace);
-        panic!("deacon up failed: {}", stderr);
+        panic!(
+            "deacon up failed: {}\n\n=== runtime state at failure ===\n{}",
+            stderr, state
+        );
     }
 
     let container_id = up_container_id(&up_output).expect("deacon up should report a containerId");
@@ -263,8 +283,18 @@ fn test_compose_override_command_lifecycle_runs() {
 
     let stderr = String::from_utf8_lossy(&up_output.stderr).to_string();
     if !up_output.status.success() {
+        // Snapshot the runtime BEFORE tearing down. This file carries the #723
+        // Podman flake (`conmon bytes ""` on an exec), and the job-level
+        // `if: failure()` diagnostics structurally cannot answer the question
+        // that matters -- whether the container was running when the exec was
+        // attempted -- because the `deacon_down` below has already removed it by
+        // the time a job-level step runs.
+        let state = support::runtime_state_dump(workspace);
         deacon_down(workspace);
-        panic!("deacon up failed: {}", stderr);
+        panic!(
+            "deacon up failed: {}\n\n=== runtime state at failure ===\n{}",
+            stderr, state
+        );
     }
 
     let container_id = up_container_id(&up_output).expect("deacon up should report a containerId");

@@ -1,0 +1,195 @@
+# A measurement rig for the #723 Podman flake, dispatched by hand.
+#
+# `test_compose_override_command_lifecycle_runs` fails on the Podman lane roughly
+# half the time with
+#   container create failed (no logs from conmon): conmon bytes ""
+# and has never reproduced locally. Three hypotheses have been refuted by
+# measurement (daemon contention, container-not-running, podman/conmon version
+# skew), so what this issue needs is not a fourth guess but a way to ask the real
+# substrate a question and get a number back.
+#
+# It answers exactly one: DOES THE SHAPE ALONE REPRODUCE, OR DOES IT NEED THE
+# SUITE AROUND IT? Phase A runs the failing test by itself N times; phase B runs
+# the whole Podman lane M times. The two rates discriminate:
+#
+#   A fails, B fails   -> the shape reproduces on its own; iterate on phase A.
+#   A passes, B fails  -> the suite context is load-bearing; the next question is
+#                         WHICH sibling, and phase A is the control that proves it
+#                         is not the test.
+#   both pass          -> the runner this dispatch landed on is not the one that
+#                         fails; re-dispatch before concluding anything.
+#
+# Never runs on a push or a pull request. It is a probe, not a gate: nothing here
+# may become a required check, and its failures mean "reproduced", not "broken".
+#
+# WHY IT DUPLICATES THE LANE'S PODMAN SETUP rather than sharing it: the lane is a
+# required check, and refactoring it to share an action risks the gate to serve a
+# throwaway measurement. The cost of duplication is drift, so this prints the
+# substrate it actually ran on (below) and every conclusion drawn from it should
+# be read against that printout rather than against ci.yml.
+name: Podman flake probe (#723)
+
+on:
+  workflow_dispatch:
+    inputs:
+      single_test_iterations:
+        description: "Phase A: how many times to run the failing test alone (0 to skip)"
+        required: false
+        default: "30"
+      suite_iterations:
+        description: "Phase B: how many times to run the whole Podman lane (0 to skip)"
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DEACON_CONTAINER_RUNTIME: podman
+      DEACON_NETWORK_TESTS: "1"
+      TARGET_TEST: test_compose_override_command_lifecycle_runs
+      TARGET_BINARY: smoke_compose_override_command
+    steps:
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-nextest-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-nextest-
+          ${{ runner.os }}-cargo-
+
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest
+
+    - name: Set up Podman (rootless) and record the substrate
+      run: |
+        set -euo pipefail
+        # Deliberately no `apt-get install podman`: the runner image ships it
+        # under /usr/local, which precedes /usr/bin, so an apt copy is never the
+        # podman under test and its /etc/containers overwrite made 5.x run on 4.x
+        # config (#726). Every number this probe produces belongs to the stack
+        # printed here.
+        echo "=== substrate ==="
+        podman version
+        # The whole of `podman info` rather than named fields: a `--format` that
+        # references a field the running podman does not have is a hard template
+        # error, and under `set -e` that would abort the probe over a printout.
+        # (Measured: `.Host.RootlessNetworkCmd` exists on 5.x and not on 4.9.3.)
+        podman info || true
+        nproc --all | sed 's/^/  cpus: /'
+        free -m | sed -n '2p' | sed 's/^/  mem: /'
+
+        # Compose is a shim that execs an external provider against podman's API
+        # socket; nothing socket-activates it without systemd.
+        export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+        mkdir -p "$XDG_RUNTIME_DIR/podman"
+        setsid podman system service --time=0 \
+          "unix://$XDG_RUNTIME_DIR/podman/podman.sock" \
+          > "$RUNNER_TEMP/podman-service.log" 2>&1 < /dev/null &
+        for _ in $(seq 1 25); do
+          curl -sf --max-time 2 --unix-socket "$XDG_RUNTIME_DIR/podman/podman.sock" \
+            http://d/v1.41/_ping >/dev/null 2>&1 && break
+          sleep 0.4
+        done
+        curl -sf --max-time 5 --unix-socket "$XDG_RUNTIME_DIR/podman/podman.sock" \
+          http://d/v1.41/_ping >/dev/null \
+          || { echo "podman API socket never came up"; cat "$RUNNER_TEMP/podman-service.log"; exit 1; }
+        echo "podman API socket ready"
+        echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+
+    - name: Build test binaries
+      run: cargo nextest run --profile mvp-integration --no-run
+
+    # Phase A. The test on its own, serially, N times.
+    #
+    # NOT run with `podman --log-level=debug`, which is the instinctive next move
+    # and is actively counterproductive here: podman only writes the OCI runtime's
+    # own error to the exec `oci-log` when the level is NOT debug
+    # (`oci_conmon_exec_common.go:51` at v5.8.4), and that log is the one place
+    # crun's real complaint would appear. Debug logging would trade the cause for
+    # noise.
+    - name: "Phase A: the failing test, alone"
+      if: ${{ inputs.single_test_iterations != '0' }}
+      run: |
+        set -uo pipefail
+        N='${{ inputs.single_test_iterations }}'
+        mkdir -p "$RUNNER_TEMP/phase-a"
+        pass=0; fail=0
+        for i in $(seq 1 "$N"); do
+          if cargo nextest run --profile mvp-integration --ignore-default-filter \
+               -E "binary(=$TARGET_BINARY) and test(=$TARGET_TEST)" \
+               > "$RUNNER_TEMP/phase-a/iter-$i.log" 2>&1; then
+            pass=$((pass+1))
+          else
+            fail=$((fail+1))
+            echo "::group::phase A iteration $i FAILED"
+            cat "$RUNNER_TEMP/phase-a/iter-$i.log"
+            echo "::endgroup::"
+          fi
+          podman rm -f -a >/dev/null 2>&1 || true
+          podman network prune -f >/dev/null 2>&1 || true
+        done
+        echo "PHASE A: $fail failed / $((pass+fail)) runs"
+        echo "conmon signature seen in: $(grep -lc 'conmon bytes' "$RUNNER_TEMP"/phase-a/*.log 2>/dev/null | wc -l) iterations"
+        echo "### Phase A: $fail failed / $((pass+fail)) runs of \`$TARGET_TEST\` alone" >> "$GITHUB_STEP_SUMMARY"
+
+    # Phase B. The whole lane, M times — the shape that is known to fail ~half of
+    # runs. `--no-fail-fast` so one failure does not hide the rest, and the step
+    # never aborts the loop: the count is the result.
+    - name: "Phase B: the whole Podman lane"
+      if: ${{ inputs.suite_iterations != '0' }}
+      run: |
+        set -uo pipefail
+        M='${{ inputs.suite_iterations }}'
+        mkdir -p "$RUNNER_TEMP/phase-b"
+        pass=0; fail=0
+        for i in $(seq 1 "$M"); do
+          if cargo nextest run --profile mvp-integration --no-fail-fast \
+               -E 'not binary(=parity_docker)' \
+               > "$RUNNER_TEMP/phase-b/suite-$i.log" 2>&1; then
+            pass=$((pass+1))
+          else
+            fail=$((fail+1))
+            echo "::group::phase B suite run $i FAILED"
+            grep -E '^\s+(FAIL|TRY|Summary)' "$RUNNER_TEMP/phase-b/suite-$i.log" || true
+            echo "--- failing test output ---"
+            sed -n '/--- STDERR/,$p' "$RUNNER_TEMP/phase-b/suite-$i.log" | head -200
+            echo "::endgroup::"
+          fi
+          podman rm -f -a >/dev/null 2>&1 || true
+          podman network prune -f >/dev/null 2>&1 || true
+        done
+        echo "PHASE B: $fail failed / $((pass+fail)) suite runs"
+        echo "conmon signature seen in: $(grep -l 'conmon bytes' "$RUNNER_TEMP"/phase-b/*.log 2>/dev/null | wc -l) suite runs"
+        echo "### Phase B: $fail failed / $((pass+fail)) full-lane runs" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Post-mortem
+      if: always()
+      run: |
+        echo "=== containers left behind ==="
+        podman ps -a --format '{{.Names}} {{.Status}}' || true
+        echo "=== podman service log (tail) ==="
+        tail -50 "$RUNNER_TEMP/podman-service.log" || true
+        echo "=== kernel ring buffer, for an OOM kill ==="
+        sudo dmesg 2>/dev/null | tail -40 || echo "  dmesg unavailable"

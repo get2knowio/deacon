@@ -170,3 +170,91 @@ pub fn unique_name(prefix: &str) -> String {
 
     format!("{}{}-{}-{}", prefix, suffix, pid, nanos)
 }
+
+/// Capture the container runtime's view of a workspace's containers, for a test
+/// that is already failing.
+///
+/// The Podman lane's #723 flake surfaces as `deacon up` failing on an exec with
+/// `container create failed (no logs from conmon): conmon bytes ""`. The one
+/// question the job-level `if: failure()` diagnostics structurally cannot answer
+/// is what the container's state was AT THE MOMENT of that exec: by the time a
+/// job-level step runs, the test's own `down` has already removed it. Call this
+/// on a failure path, BEFORE tearing down, and fold the result into the panic
+/// message.
+///
+/// Best-effort by construction — every command may fail and says so inline. This
+/// runs only when the test is already lost, and must never replace the real
+/// error with one of its own.
+pub fn runtime_state_dump(workspace: &std::path::Path) -> String {
+    let runtime = runtime_bin();
+    let mut out = String::new();
+
+    let run = |args: &[&str]| -> String {
+        match std::process::Command::new(&runtime).args(args).output() {
+            Ok(o) => {
+                let mut s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                if !err.is_empty() {
+                    s.push_str("\n  [stderr] ");
+                    s.push_str(&err);
+                }
+                if s.is_empty() {
+                    s.push_str("  (no output)");
+                }
+                s
+            }
+            Err(e) => format!("  <could not run {runtime} {}: {e}>", args.join(" ")),
+        }
+    };
+
+    // deacon names a compose project `deacon_<sanitized-workspace-stem>_<hashes>`
+    // (`compose.rs::generate_project_name`), so the workspace's basename, reduced
+    // to lowercase alphanumerics, identifies this test's containers among any
+    // siblings running concurrently. Approximated here rather than shared: a
+    // diagnostic filter that is slightly too broad costs nothing, and coupling a
+    // test helper to the sanitizer would make a product change able to break it.
+    let fragment: String = workspace
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+
+    out.push_str(&format!(
+        "runtime: {runtime}\nworkspace: {}\n",
+        workspace.display()
+    ));
+    out.push_str(&format!("name fragment: {fragment}\n\n"));
+
+    let all = run(&["ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.ID}}"]);
+    out.push_str("--- every container the runtime can see ---\n");
+    out.push_str(&all);
+    out.push('\n');
+
+    let mine: Vec<String> = all
+        .lines()
+        .filter(|l| !fragment.is_empty() && l.to_lowercase().contains(&fragment))
+        .filter_map(|l| l.split('\t').nth(2).map(str::to_string))
+        .collect();
+
+    if mine.is_empty() {
+        out.push_str("\n--- this workspace's containers: NONE MATCHED ---\n");
+        return out;
+    }
+
+    for id in &mine {
+        out.push_str(&format!("\n--- inspect {id} ---\n"));
+        out.push_str(&run(&[
+            "inspect",
+            "--format",
+            "status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} pid={{.State.Pid}} err={{.State.Error}}",
+            id,
+        ]));
+        out.push_str(&format!("\n--- logs {id} (tail) ---\n"));
+        out.push_str(&run(&["logs", "--tail", "20", id]));
+        out.push('\n');
+    }
+
+    out
+}
