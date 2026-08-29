@@ -416,12 +416,51 @@ jobs:
 
     - name: Set up Podman (rootless)
       run: |
-        sudo apt-get update
-        sudo apt-get install -y podman
-        podman version
+        # This lane used to `apt-get install -y podman` here. It must not: the
+        # runner image ALREADY ships podman under /usr/local, and /usr/local/bin
+        # precedes /usr/bin on PATH, so the apt copy was never the podman under
+        # test. MEASURED on run 33230273383 (#725): `podman version` reported
+        # 5.8.4, with helpers resolved from /usr/local/lib/podman (conmon 2.2.1,
+        # netavark, aardvark-dns) and crun from /usr/local/bin, while apt had just
+        # unpacked podman 4.9.3+ds1-1ubuntu0.2 and conmon 2.1.10 into /usr/bin.
+        # The unused binaries were the harmless half: the apt package also lays
+        # down /etc/containers/* written for 4.9.3 (`podman info` reported it
+        # consuming /etc/containers/seccomp.json), so a 5.8.4 engine was running
+        # on a 4.9.3 configuration, and `conmon --version` answered 2.1.10 while
+        # podman ran 2.2.1 -- which is why diagnostics read as self-contradictory.
+        #
+        # Nothing depended on the apt package. MEASURED on run 33254874969: the
+        # image ships /etc/containers complete (containers.conf, policy.json,
+        # registries.conf, seccomp.json, storage.conf) and provides pasta --
+        # podman 5's default rootlessNetworkCmd -- at /usr/local/bin.
+        #
+        # This does NOT claim to fix the #723 conmon flake; measured, it does not.
+        # The step is corrected because it has to provision the podman it says it
+        # provisions.
+        #
+        # Fail loudly rather than falling back to apt: a silently swapped podman
+        # version is exactly the failure mode this removal exists to end.
+        command -v podman >/dev/null \
+          || { echo "podman is not on PATH; the runner image no longer ships it."; \
+               echo "Re-add an explicit install here, and PIN the version."; exit 1; }
+
+        # Inventory what the image actually provides, so drift shows up in every
+        # log instead of being reconstructed after a failure.
+        echo "=== podman as provisioned by the runner image ==="
+        command -v podman && podman version
+        echo "=== /etc/containers ==="
+        ls -la /etc/containers 2>&1 || echo "  /etc/containers ABSENT"
+        echo "=== rootless helpers ==="
+        for b in pasta slirp4netns crun runc netavark conmon; do
+          printf '  %-14s %s\n' "$b" "$(command -v "$b" 2>/dev/null || echo '<not on PATH>')"
+        done
+        ls -la /usr/local/lib/podman 2>&1 || echo "  /usr/local/lib/podman ABSENT"
+
         # deacon's PodmanRuntime drives the `podman` CLI directly, and for every
         # subcommand except compose that is the whole story.
-        # Sanity-check rootless pull + run before the suite.
+        # Sanity-check rootless pull + run before the suite. This doubles as the
+        # assertion that the image's podman is self-sufficient: a missing
+        # policy.json or registries.conf fails the pull right here, loudly.
         podman run --rm docker.io/library/alpine:3.18 echo "podman-ok"
 
         # COMPOSE needs an API socket, and this step used to say "no socket".
@@ -518,8 +557,18 @@ jobs:
         echo "=== process and fd ceilings, which conmon needs to fork ==="
         ulimit -a || true
         echo "  pids.max: $(cat /sys/fs/cgroup/pids.max 2>/dev/null || echo n/a)"
-        echo "=== conmon ==="
-        command -v conmon && conmon --version || echo "  conmon NOT on PATH"
+        echo "=== conmon (the one PODMAN resolves, not the one on \$PATH) ==="
+        # `command -v conmon` answers about \$PATH; podman does not consult it,
+        # it resolves helpers via containers.conf. Asking PATH is what made run
+        # 33230273383's diagnostics report conmon 2.1.10 while podman was in fact
+        # running 2.2.1 from /usr/local/lib/podman -- a self-contradiction that
+        # cost real time. Ask podman.
+        CONMON=$(podman info --format '{{.Host.Conmon.Path}}' 2>/dev/null || true)
+        echo "  podman resolves: ${CONMON:-<unknown>}"
+        [ -n "$CONMON" ] && "$CONMON" --version || echo "  could not run it"
+        command -v conmon >/dev/null \
+          && echo "  also on PATH: $(command -v conmon)" \
+          || echo "  none on PATH (expected: apt's podman is no longer installed)"
         echo "=== podman's own view ==="
         podman info --format '{{json .Host}}' 2>&1 | head -c 2000 || true
         echo
