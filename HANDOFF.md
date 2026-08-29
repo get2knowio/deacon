@@ -15,44 +15,21 @@ points at it.
 
 ## Where things stand
 
-_Last updated: 2026-08-29, at `1a0670c` on `main`._
+_Last updated: 2026-08-29, at `796dce4` on `main`._
 
-- **Ledger: 234 recorded behaviors — 1 open nonconformance**, 10 deacon-follows-spec,
-  15 documented choice, 25 deacon extension, 183 conformant. Zero `UNADJUDICATED` records.
-  The one open nonconformance is
-  [#729](https://github.com/get2knowio/deacon/issues/729), unfixed; its row landed ahead of
-  the fix so the `Ledger (issue coverage)` job stays green while the work is in flight.
+- **Ledger: 234 recorded behaviors — 0 open nonconformances**, 10 deacon-follows-spec,
+  15 documented choice, 25 deacon extension, 184 conformant. Zero `UNADJUDICATED` records.
 - **The verdict of record is the latest nightly**, never this file:
   `gh run list --workflow=parity.yml --branch=main`.
-- **ONE piece of parity work is in flight and unstarted:
-  [#729](https://github.com/get2knowio/deacon/issues/729) — deacon execs without waiting for
-  the container's `start` event, where the reference waits for it.** Measured out of the
-  pinned oracle's own compiled source at 0.87.0: `qQ` opens a `docker/podman events --event
-  start` subscription BEFORE the container is started, filtered by the container's labels,
-  and both the compose path (`jV`, `return await m, {containerId: …}`) and the
-  single-container path (`await R` after `docker run`) block on it. deacon's compose path
-  retries `compose ps` until an ID merely APPEARS
-  (`commands/up/compose.rs:44`, and `get_primary_container_id` at `core/src/compose.rs:1722`
-  matches by name with no state check at all), and `start_container`
-  (`core/src/docker.rs:2640`) returns on `start`'s exit code. There is no gate on either
-  path. **Two obligations travel with this issue**, and the first is load-bearing for
-  whoever picks it up:
-  - Its title is `fix(up)`, a behavioral scope, so `owes_a_behavior_row` said it owed a
-    `parity/SPEC_STATUS.md` row **from the moment it was filed**, and until that row landed
-    the `Ledger (issue coverage)` job was RED. **The row is now in** (`up` section, open
-    nonconformance, 234/**1**/10/15/25/183) — land such a row early rather than with the
-    fix, because a red check nobody has explained is how a real one gets ignored.
-  - The mechanism is a real choice, not a transcription. The reference subscribes to
-    events, and #688 established that polling with the SAME guarantee is an acceptable
-    substitute (it made exactly that trade for the destroy path, and wrote down why). But
-    #688's precedent does not transfer by itself: a poll of container STATE is a weaker
-    signal here, because the premise of the issue 723 connection is that podman reports
-    `running=true` with a live pid before the runtime has finished. Whatever is chosen has
-    to carry the `start`-event guarantee, not merely resemble a wait — and be justified
-    against the reference in a comment.
-- The two podman compose issues (706 and 710) stay resolved by #715. The other backlog issues
-  (`#30`, `#480`, the auto-forward family, …) are standing scope, not open questions about
-  deacon's behavior.
+- **No parity work is in flight.** [#729](https://github.com/get2knowio/deacon/issues/729)
+  — deacon touching a container without waiting for the runtime's `start` event where the
+  reference waits for it — is fixed and its ledger row is conformant. What the fix is, and
+  the three places it deliberately does not transcribe the reference, are in that row and in
+  `crates/core/src/start_event.rs`'s module doc; neither is restated here. It earned two
+  durable rules, filed under the arc below.
+  The two podman compose issues (706 and 710) stay resolved by #715, and the backlog issues
+  that remain (`#30`, `#480`, the auto-forward family, …) are standing scope, not open
+  questions about deacon's behavior.
 - **One thing WILL cost you time on any PR: [#723](https://github.com/get2knowio/deacon/issues/723).**
   The Podman lane fails intermittently in `test_compose_override_command_lifecycle_runs` with
   `container create failed (no logs from conmon): conmon bytes ""`. It is `chore(ci)` —
@@ -83,10 +60,15 @@ _Last updated: 2026-08-29, at `1a0670c` on `main`._
   `…_4bdad49c` torn down 6–8s earlier), because nextest's order is stable — so the flake has a
   deterministic SETUP and only its timing varies. That also explains why #718 could not have
   worked: every neighbour is in a DIFFERENT nextest group, and `smoke-lite` bounds only its
-  own. The live hypothesis is now [#729](https://github.com/get2knowio/deacon/issues/729) —
+  own. The leading hypothesis was [#729](https://github.com/get2knowio/deacon/issues/729) —
   podman sets `running` early and the `start` event is what says the runtime finished, so an
-  exec that does not wait for it races exactly this way under churn. **Unproven**, and worth
-  keeping separate: #729 is a real divergence whether or not it explains this.
+  exec that does not wait for it races exactly this way under churn. **That gate has now
+  landed** (batch 28), which converts the hypothesis into something the lane itself will
+  answer: if the conmon signature keeps appearing on `main` with the gate in, #729 was not
+  the cause and a fifth hypothesis is owed. Do NOT read one green Podman run as the answer —
+  the lane's own rate is 5 red of 9, so a single pass is inside the noise either way. The two
+  claims were kept separate on purpose: #729 is a real divergence whether or not it explains
+  this.
   **The probe has RUN, and the prediction held**
   ([run 33261826509](https://github.com/get2knowio/deacon/actions/runs/33261826509) on
   `1a0670c`, on the failing substrate — podman 5.8.4, `overlay`, `netavark`, `cgroupfs`,
@@ -114,6 +96,8 @@ _Last updated: 2026-08-29, at `1a0670c` on `main`._
 
 | PR | What |
 |---|---|
+| #731 | `up` waits for the runtime's `start` event before touching the container it just started, on both paths (closes issue 729) — batch 28 |
+| #730 `796dce4` | the missing start-event gate recorded as an open nonconformance, ahead of its fix |
 | #728 `1a0670c` | the conmon flake carries its own evidence: runtime state captured at the failing exec, plus a dispatch-only probe rig |
 | #727 `642f9cb` | HANDOFF refresh for batch 27 |
 | #725 `2746c76` | Feature content stages without BuildKit build contexts, so Features install on podman compose and under `--buildkit never` (closes issue 719) — ledger back to 0 open |
@@ -335,6 +319,20 @@ have. That is where the remaining yield is.
   ready fix (halve the group). Re-running passed. The story may still be true at the margin,
   but acting on it would have slowed every docker lane on one data point. **Cost of a re-run:
   one CI cycle. Cost of a wrong global concurrency change: every lane, forever.**
+- **Spawning a watcher is not attaching it.** `<runtime> events` returns as soon as the
+  process exists, not as soon as it has connected to the daemon and begun streaming — so an
+  event emitted inside that window lands in a stream nobody is reading, and a wait for it can
+  only expire. Measured, not theorised: it cost a full 30-second timeout on a busy daemon, in
+  the very test written to prove the gate blocks. Both runtimes replay with `--since`, which
+  closes it; the reference carries the same race unguarded. **Generalizes to any subscription
+  opened before the event it waits for — ask for replay rather than assume the subscription
+  is live.**
+- **A gate whose only tested outcome is the one that FIRES is indistinguishable from a
+  no-op.** Batch 28's happy-path test — start a container, assert the gate saw it — passes
+  with the wait stubbed to `return Seen`, proven by sabotage. The claim is carried by the
+  negatives: a start the gate is not waiting for must leave it waiting, and a delayed start
+  must actually be waited for. This is the "sabotage distinguishes coverage from green" rule
+  pointed at a synchronization primitive, where the failure mode is silent by construction.
 - **A permission classifier refusing an edit can be correct.** Wiring podman into the
   devcontainer, the first attempt added `--device=/dev/fuse` plus `seccomp=unconfined` and
   `apparmor=unconfined` to `runArgs` — reached for from the standard podman-in-docker recipe,
@@ -593,4 +591,8 @@ lints and fmt drift in new test files.
   resolved runtime binary — `ComposeManager::with_docker_path(<resolved>)`, never
   `ComposeManager::new()` and never the raw `--docker-path` flag, which reads `"docker"` under
   `--runtime podman`; and any test that verifies deacon's output by shelling out uses
-  `support::runtime_bin()`, never a literal `docker`).
+  `support::runtime_bin()`, never a literal `docker`), **#729** (a container deacon has just
+  started is not touched until the runtime's own `start` event says so — the subscription is
+  opened BEFORE the start, which is the whole mechanism, and the resume path is deliberately
+  outside the gate because `start` on a running container emits no event; see
+  `core::start_event`).

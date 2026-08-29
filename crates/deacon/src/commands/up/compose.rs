@@ -31,6 +31,7 @@ use deacon_core::docker::Docker;
 use deacon_core::errors::{DeaconError, DockerError};
 use deacon_core::host_ca::{CA_ENV_VARS, CorporateCaSet, HOST_CA_BUNDLE_PATH, inject_runtime};
 use deacon_core::runtime::ContainerRuntimeImpl;
+use deacon_core::start_event::{StartEventFilter, StartEventWatch};
 use deacon_core::state::{ComposeState, StateManager};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -653,9 +654,44 @@ pub(crate) async fn execute_compose_up(
         debug!("GPU mode for compose: {:?}", args.gpu_mode);
     }
 
+    // Subscribe to the runtime's `start` events BEFORE `compose up`, and block on the
+    // primary service's own start after it — the reference's shape at
+    // `dockerCompose.ts:359`, where `startEventSeen` is opened ahead of the up and
+    // `await started` gates everything downstream, including the container-id lookup
+    // itself.
+    //
+    // Matched by label rather than by id because there is no id yet: the container this
+    // waits for is the one `compose up` is about to create. The two labels are Compose's
+    // own, and are the pair the reference matches on.
+    //
+    // Reaching this line means a container is actually going to start: an
+    // already-running project returned above through the reconnect branch. See
+    // `start_event` for the bound on the wait and why expiring is a warning rather than a
+    // failure.
+    let start_watch = StartEventWatch::open_or_warn(
+        &runtime_bin,
+        runtime.cli_docker().is_podman(),
+        StartEventFilter::for_labels(vec![
+            (
+                "com.docker.compose.project".to_string(),
+                project.name.clone(),
+            ),
+            (
+                "com.docker.compose.service".to_string(),
+                project.service.clone(),
+            ),
+        ]),
+        "compose primary service",
+    )
+    .await;
+
     compose_manager
         .start_project(&project, args.gpu_mode)
         .await?;
+
+    if let Some(watch) = start_watch {
+        watch.wait_and_log().await;
+    }
 
     info!("Compose project {} started successfully", project.name);
 
