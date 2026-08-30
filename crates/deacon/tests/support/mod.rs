@@ -171,6 +171,155 @@ pub fn unique_name(prefix: &str) -> String {
     format!("{}{}-{}-{}", prefix, suffix, pid, nanos)
 }
 
+/// Capture the HOST's resource state, for a test that is already failing.
+///
+/// The container half of this story is answered: across four #723 failures the
+/// container was `status=running running=true exit=0 oom=false` with a live pid at
+/// the moment the exec failed, and two of those were with #729's start-event gate
+/// in place and holding. So the container is healthy and the start is not being
+/// raced — which leaves the host. `conmon bytes ""` is podman reporting that it
+/// read nothing from conmon's sync pipe, and that is what a conmon which never got
+/// far enough to write looks like: a fork or an exec that did not happen.
+///
+/// **Everything here is read from `/proc` rather than shelled out, deliberately.**
+/// The hypothesis under test is that the host could not start a process. A
+/// diagnostic that starts processes to find out would be unreliable in exactly the
+/// condition it exists to characterize, and would perturb the measurement besides.
+/// The one exception is podman's own lock count, which has no `/proc` equivalent.
+///
+/// Best-effort by construction: every read reports its own failure inline and none
+/// of them may replace the real error. Non-Linux hosts have no `/proc` and simply
+/// report every line unavailable, which is why this needs no `cfg` gate — the
+/// helper compiles and runs everywhere, and says nothing where it knows nothing.
+pub fn host_state_dump() -> String {
+    let mut out = String::new();
+    out.push_str("--- host state at failure ---\n");
+
+    // MemFree alone is misleading on Linux: the page cache keeps it low on a
+    // perfectly healthy machine, and reading it as pressure is how a red herring
+    // starts. MemAvailable is the one that estimates what a new allocation can
+    // actually get, so both are reported and neither is reported alone.
+    match std::fs::read_to_string("/proc/meminfo") {
+        Ok(meminfo) => {
+            let wanted = [
+                "MemTotal:",
+                "MemFree:",
+                "MemAvailable:",
+                "SwapTotal:",
+                "SwapFree:",
+                "Committed_AS:",
+            ];
+            for line in meminfo.lines() {
+                if wanted.iter().any(|k| line.starts_with(k)) {
+                    out.push_str("  ");
+                    out.push_str(
+                        line.split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            .as_str(),
+                    );
+                    out.push('\n');
+                }
+            }
+        }
+        Err(e) => out.push_str(&format!("  <no /proc/meminfo: {e}>\n")),
+    }
+
+    for (label, path) in [
+        ("loadavg", "/proc/loadavg"),
+        ("pid ceiling", "/proc/sys/kernel/pid_max"),
+        ("threads-max", "/proc/sys/kernel/threads-max"),
+        ("fd allocation (alloc free max)", "/proc/sys/fs/file-nr"),
+    ] {
+        match std::fs::read_to_string(path) {
+            Ok(v) => out.push_str(&format!("  {label}: {}\n", v.trim())),
+            Err(e) => out.push_str(&format!("  {label}: <unavailable: {e}>\n")),
+        }
+    }
+
+    // How close the machine is to its process ceiling, and how much of that is
+    // conmon. One conmon exists per container and per exec, so a suite running
+    // several compose projects at once is the load this counts.
+    let mut processes = 0usize;
+    let mut conmons = 0usize;
+    match std::fs::read_dir("/proc") {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else { continue };
+                if !name.bytes().all(|b| b.is_ascii_digit()) {
+                    continue;
+                }
+                processes += 1;
+                // `comm` is truncated to 15 bytes and is the process's own name,
+                // so it identifies conmon without matching a command line that
+                // merely mentions it.
+                if let Ok(comm) = std::fs::read_to_string(format!("/proc/{name}/comm"))
+                    && comm.trim() == "conmon"
+                {
+                    conmons += 1;
+                }
+            }
+            out.push_str(&format!("  processes: {processes} (conmon: {conmons})\n"));
+        }
+        Err(e) => out.push_str(&format!("  processes: <no /proc: {e}>\n")),
+    }
+
+    // The cgroup this test's own shell sits in. `pids.max` is the ceiling a fork
+    // actually hits first under a rootless runtime, and the job-level diagnostics
+    // reported it `n/a` because they looked somewhere else.
+    match std::fs::read_to_string("/proc/self/cgroup") {
+        Ok(cgroup) => {
+            let rel = cgroup
+                .lines()
+                .find_map(|l| l.rsplit(':').next())
+                .unwrap_or("")
+                .trim()
+                .trim_start_matches('/')
+                .to_string();
+            out.push_str(&format!("  cgroup: /{rel}\n"));
+            for leaf in ["pids.current", "pids.max", "memory.current", "memory.max"] {
+                let path = format!("/sys/fs/cgroup/{rel}/{leaf}");
+                match std::fs::read_to_string(&path) {
+                    Ok(v) => out.push_str(&format!("  {leaf}: {}\n", v.trim())),
+                    Err(e) => out.push_str(&format!("  {leaf}: <unavailable: {e}>\n")),
+                }
+            }
+        }
+        Err(e) => out.push_str(&format!("  cgroup: <unavailable: {e}>\n")),
+    }
+
+    // The one thing with no `/proc` equivalent. Podman allocates a fixed pool of
+    // SHM locks (2048 by default) across containers, volumes and pods; exhausting
+    // it fails container creation. Measured at 2014 free AFTER a failing suite,
+    // so this is here to rule it in or out AT the failure rather than to accuse it.
+    let runtime = runtime_bin();
+    match std::process::Command::new(&runtime)
+        .args(["info", "--format", "{{.Host.FreeLocks}}"])
+        .output()
+    {
+        Ok(o) => {
+            // Docker has no such field and prints nothing. An empty value would
+            // read as a probe that failed rather than a field that does not
+            // exist, so say which it is.
+            let locks = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            out.push_str(&format!(
+                "  runtime free locks: {}\n",
+                if locks.is_empty() {
+                    "<not reported by this runtime>".to_string()
+                } else {
+                    locks
+                }
+            ));
+        }
+        Err(e) => out.push_str(&format!(
+            "  runtime free locks: <could not ask {runtime}: {e}>\n"
+        )),
+    }
+
+    out
+}
+
 /// Capture the container runtime's view of a workspace's containers, for a test
 /// that is already failing.
 ///
@@ -226,6 +375,11 @@ pub fn runtime_state_dump(workspace: &std::path::Path) -> String {
         workspace.display()
     ));
     out.push_str(&format!("name fragment: {fragment}\n\n"));
+
+    // Host state first: it is the half that is still unexplained, and it is also
+    // the half that is gone by the time a job-level step could look.
+    out.push_str(&host_state_dump());
+    out.push('\n');
 
     let all = run(&["ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.ID}}"]);
     out.push_str("--- every container the runtime can see ---\n");
