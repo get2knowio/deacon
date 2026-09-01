@@ -172,7 +172,12 @@ jobs:
           else
             fail=$((fail+1))
             echo "::group::phase B suite run $i FAILED"
-            grep -E '^\s+(FAIL|TRY|Summary)' "$RUNNER_TEMP/phase-b/suite-$i.log" || true
+            # nextest colours its output, and the ANSI escape precedes the
+            # leading whitespace - so an anchored `^\s+` never matches and this
+            # block printed nothing at all on every failure it was written for.
+            # Strip the escapes first, then anchor.
+            sed -E 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/phase-b/suite-$i.log" \
+              | grep -E '^\s+(FAIL|TRY|Summary)' || true
             echo "--- failing test output ---"
             sed -n '/--- STDERR/,$p' "$RUNNER_TEMP/phase-b/suite-$i.log" | head -200
             echo "::endgroup::"

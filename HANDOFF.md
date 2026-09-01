@@ -85,13 +85,35 @@ _Last updated: 2026-08-29, at `f09c5f2` on `main`._
   gate silently not firing. The failing exec is the env probe, which now runs strictly
   after the compose start-event gate, so **podman-reports-running-early is not a sufficient
   explanation and a fifth hypothesis is owed.** Written up on the issue.
-  One occurrence is not a rate — the lane's own rate is 5 red of 9 — so nothing says the
-  gate changed the frequency either way. The two claims were kept separate on purpose: #729
-  is a real divergence whether or not it explains this, and it stays fixed.
-  Where to look next: the probe already showed `PHASE A: 0/30` (test alone) versus
-  `PHASE B: 3/3` (whole suite), so the SUITE around it is load-bearing. With the start race
-  ruled out, the candidates are what the suite does to the runtime — exec/conmon fork
-  pressure from co-scheduled projects — rather than anything the test does.
+  **A SECOND occurrence made that n=2**, one commit later on the same branch (run
+  33269557759, job 99146932731), identical on every axis — same test, same signature, same
+  `status=running running=true exit=0 oom=false`, no gate warning. So the gate is ruled out
+  with two independent observations rather than one.
+  Neither says anything about the RATE — the lane's own is 5 red of 9, and two reds in a row
+  sits comfortably inside that — so do not read the pair as the gate having made things
+  worse. The two claims were kept separate on purpose: #729 is a real divergence whether or
+  not it explains this, and it stays fixed.
+  **Where to look next, and the instrument is now in place.** The probe already showed
+  `PHASE A: 0/30` (test alone) versus `PHASE B: 3/3` (whole suite), so the SUITE around it
+  is load-bearing; with the start race ruled out, what is left is what the suite does to the
+  HOST rather than anything deacon sequences. `conmon bytes ""` is podman reporting that it
+  read nothing from conmon's sync pipe, which is what a conmon that never got far enough to
+  write looks like — a fork or an exec that did not happen. So batch 30 extended the
+  failure-path capture from the container to the host (`support::host_state_dump`, folded
+  into `runtime_state_dump` so every existing caller gets it): `MemAvailable` as well as
+  `MemFree`, load, the pid and fd ceilings, the cgroup's `pids.current`/`pids.max`, a process
+  census broken out by how many are conmon, and podman's `FreeLocks`.
+  Two things about it worth keeping:
+  - **It reads `/proc` rather than shelling out, deliberately.** The hypothesis is that the
+    host could not start a process; a diagnostic that starts processes to find out is
+    unreliable in exactly the condition it exists to characterize.
+  - **`MemFree` is a trap and the job-level diagnostics walked into it.** They reported
+    `memFree: 250 MB` of 16 GB after a failing suite, which reads like exhaustion and is
+    not — page cache keeps `MemFree` low on a healthy machine. Measured locally the same
+    moment: `MemFree 3.5 GB` against `MemAvailable 17 GB`. Never quote one without the other.
+  A guard (`the_flake_diagnostic_reports_real_numbers`) asserts the dump carries real numbers
+  rather than a block of `<unavailable>` lines, because this repository has already paid once
+  for a step whose log read like evidence while carrying none.
   **The probe has RUN, and the prediction held**
   ([run 33261826509](https://github.com/get2knowio/deacon/actions/runs/33261826509) on
   `1a0670c`, on the failing substrate — podman 5.8.4, `overlay`, `netavark`, `cgroupfs`,

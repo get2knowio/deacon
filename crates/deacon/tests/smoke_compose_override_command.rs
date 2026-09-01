@@ -23,6 +23,53 @@ fn is_docker_available() -> bool {
         .unwrap_or(false)
 }
 
+/// The #723 diagnostic must actually diagnose.
+///
+/// `host_state_dump` is best-effort by design — every read reports its own failure
+/// inline rather than panicking — and that is exactly how it could rot into a block
+/// of `<unavailable>` lines that still LOOKS like evidence in a failure log. This
+/// repository has already paid for one setup step that provisioned a tool nothing
+/// executed, and read like evidence for two batches. So assert the dump carries
+/// real numbers on the platform the flake happens on.
+///
+/// `#[cfg(target_os = "linux")]` because the values come from `/proc`, which no
+/// other platform has. The lane this guards is Linux-only, so the gate costs
+/// nothing; the helper itself compiles and runs everywhere and simply reports what
+/// it cannot read.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_flake_diagnostic_reports_real_numbers() {
+    let dump = support::host_state_dump();
+
+    for field in ["MemTotal:", "MemAvailable:", "loadavg:", "pid ceiling:"] {
+        assert!(
+            dump.contains(field),
+            "host dump is missing `{field}`; it would read as evidence while carrying none:\n{dump}"
+        );
+    }
+    assert!(
+        !dump.contains("MemAvailable: <"),
+        "host dump degraded to unavailable:\n{dump}"
+    );
+
+    // The process census is the number the fork hypothesis turns on, so a zero or
+    // a missing line is a broken diagnostic rather than a quiet machine.
+    let census = dump
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("processes: "))
+        .unwrap_or_else(|| panic!("host dump has no process census:\n{dump}"));
+    let count: usize = census
+        .split_whitespace()
+        .next()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("process census is not a number: {census:?}"));
+    assert!(count > 0, "counted {count} processes, which cannot be true");
+    assert!(
+        census.contains("conmon:"),
+        "process census does not break out conmon, which is the process in question: {census:?}"
+    );
+}
+
 /// Best-effort cleanup; ignore failures since the project may already be torn down.
 fn deacon_down(workspace: &Path) {
     let _ = support::deacon_command()
