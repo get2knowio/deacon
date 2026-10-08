@@ -646,6 +646,20 @@ The shape now, which is the reference CLI's own:
 - `up` follows the same rule: a Dockerfile config that declares Features defers its base
   build (`deferred_dockerfile_build` in `up/mod.rs`) so `container.rs` can build base +
   Features together.
+- **The merged Dockerfile a Compose override names MUST live inside a declared local build
+  context** (#743). buildx 0.37 gates reading any local path outside a build context behind
+  an `fs.read` entitlement, and a Compose `build.dockerfile:` IS such a read — a CLI `-f` is
+  NOT (it is client-sent, which is why the single-container executors are unaffected and why
+  only the Compose route broke). Declaring a directory as a named local context grants the
+  entitlement for that directory, so the document goes in `feature_staging_dst_folder` (the
+  `dev_containers_feature_content_source` context) via `compose_feature_dockerfile_path`,
+  NOT in `feature_staging_root` one level up. This is also the reference CLI's layout — its
+  `Dockerfile-with-features` sits in the same `dstFolder` it passes as `additional_contexts`.
+  The old comment claiming "BuildKit resolves it independently of where the context lives"
+  was true until 0.37 and is the trap; the invariant is guarded hermetically by
+  `the_merged_dockerfile_sits_inside_the_declared_feature_content_context`, because the
+  defect itself reproduces only on buildx >= 0.37 and a Docker-gated test would have been
+  green on every machine that had the bug.
 
 ## Deferral Tracking
 
