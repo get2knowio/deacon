@@ -198,6 +198,18 @@ impl PreparedFeatureLayer {
     }
 }
 
+/// Path of the merged base + Feature Dockerfile for a COMPOSE-driven build.
+///
+/// It must sit inside [`feature_staging_dst_folder`], the directory deacon
+/// declares as the `dev_containers_feature_content_source` build context — see
+/// the write site in [`prepare_dockerfile_feature_build`] for why (#743).
+/// Guarded by `the_merged_dockerfile_sits_inside_the_declared_feature_content_context`,
+/// which fails on any buildx version; the defect itself only shows on 0.37+.
+fn compose_feature_dockerfile_path(workspace_hash: &str) -> std::path::PathBuf {
+    crate::commands::shared::feature_resolver::feature_staging_dst_folder(workspace_hash)
+        .join("Dockerfile.extended")
+}
+
 /// Resolve, download and stage the configuration's Features, then emit the
 /// Dockerfile stage that installs them on top of `base_stage` — WITHOUT building
 /// anything.
@@ -644,12 +656,24 @@ pub(crate) async fn prepare_dockerfile_feature_build(
     let combined = merge_dockerfile_with_feature_stage(base_dockerfile_content, &prepared);
 
     // Write the merged Dockerfile to a temp dir (NOT into the user's context dir,
-    // so we never pollute the workspace). Both executors read it by path, which
-    // BuildKit resolves independently of where the context directory lives.
-    let temp_dir =
-        crate::commands::shared::feature_resolver::feature_staging_root(&identity.workspace_hash);
-    tokio::fs::create_dir_all(&temp_dir).await?;
-    let dockerfile_path = temp_dir.join("Dockerfile.extended");
+    // so we never pollute the workspace) — specifically into the SAME directory
+    // deacon declares as the `dev_containers_feature_content_source` build
+    // context, which is what makes it readable on a Compose-driven build.
+    //
+    // buildx 0.37 gates reading a local path outside the build context behind an
+    // `fs.read` entitlement, and a Compose `build.dockerfile:` IS such a local
+    // read (a CLI `-f` is not — that one is client-sent, which is why the
+    // single-container executors are unaffected). Declaring a directory as a
+    // named local context grants the entitlement for it, so the Dockerfile has to
+    // live INSIDE the context, not one level above it: staging it in the parent
+    // failed with `additional privileges requested: pass "--allow=fs.read=…"`
+    // and built nothing (#743). This is also the reference CLI's layout — its
+    // `Dockerfile-with-features` sits in the same `dstFolder` it passes as
+    // `additional_contexts` — which is why the reference never hit this.
+    let dockerfile_path = compose_feature_dockerfile_path(&identity.workspace_hash);
+    if let Some(dir) = dockerfile_path.parent() {
+        tokio::fs::create_dir_all(dir).await?;
+    }
     tokio::fs::write(&dockerfile_path, combined.as_bytes()).await?;
     debug!(
         "Wrote merged Dockerfile ({} bytes) at {}",
@@ -2064,6 +2088,53 @@ mod local_feature_resolution_tests {
         assert!(
             staged_install_seen,
             "local feature contents (install.sh) should be copied into the BuildKit context"
+        );
+    }
+
+    /// #743: a Compose `build.dockerfile:` is a LOCAL read, and buildx 0.37 gates
+    /// reading anything outside a declared build context behind an `fs.read`
+    /// entitlement. Declaring a directory as a named local context grants it for
+    /// that directory, so the merged document has to live INSIDE the content
+    /// context — not one level above it, which is where it used to be written and
+    /// which failed with `additional privileges requested: pass "--allow=fs.read=…"`
+    /// having built nothing.
+    ///
+    /// Hermetic and version-independent on purpose: the defect only reproduces on
+    /// buildx >= 0.37, so a test that needed one would have been green on every
+    /// machine that had the bug — including this project's CI until the runner
+    /// image moved. This asserts the INVARIANT instead, so moving the write site
+    /// back fails here on any buildx.
+    #[test]
+    fn the_merged_dockerfile_sits_inside_the_declared_feature_content_context() {
+        use crate::commands::shared::feature_resolver::{
+            feature_staging_dst_folder, feature_staging_root,
+        };
+
+        let hash = "0123abcd-build";
+        let declared_context = feature_staging_dst_folder(hash);
+        let dockerfile = compose_feature_dockerfile_path(hash);
+
+        assert_eq!(
+            dockerfile.parent(),
+            Some(declared_context.as_path()),
+            "the merged Dockerfile must sit in the directory declared as \
+             dev_containers_feature_content_source ({}), or a Compose-driven build \
+             cannot read it on buildx >= 0.37; got {}",
+            declared_context.display(),
+            dockerfile.display()
+        );
+        assert!(
+            dockerfile.starts_with(&declared_context),
+            "{} must be inside the declared context {}",
+            dockerfile.display(),
+            declared_context.display()
+        );
+        // The specific regression: the staging ROOT is the parent of the context,
+        // so a document written there is outside every context deacon declares.
+        assert_ne!(
+            dockerfile.parent(),
+            Some(feature_staging_root(hash).as_path()),
+            "the staging root is outside the declared build context"
         );
     }
 
