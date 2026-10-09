@@ -217,6 +217,16 @@ current code before "implementing" a deferral.
   that delegates to an existing method (e.g. `Docker::exec_with_line_prefix` defaults to
   `exec`). Mocks and delegating runtimes then need no change; only override where the new
   behavior matters (and in the enum/wrapper runtimes that must forward it).
+- **A dependency that gates `unsafe` behind a DEFAULT-ON feature must be taken with
+  `default-features = false`.** The workspace `unsafe_code = "deny"` governs our code and
+  says nothing about a dependency's, and most dependencies carry `unsafe` unremarkably. The
+  narrow case worth guarding is a crate that is unsafe-free with a feature OFF, ships it ON
+  by default, and so compiles `unsafe` into the graph as a side effect of a version bump
+  with no diff to review beyond a version string — base64 0.23.0's `simd-unsafe` (#456).
+  Enforced by `crates/core/tests/dependency_unsafe_features.rs`, whose `UNSAFE_BY_DEFAULT`
+  table is the list; adding one is a data edit. "The crate contains unsafe" does NOT
+  qualify — the entry has to be a default-on feature whose absence makes the crate
+  unsafe-free, checked against that crate's own manifest.
 - **Flag-backed env vars use clap's native `env=`, never a hand-rolled `std::env::var`
   read.** A CLI flag that is also settable via the environment MUST declare it on the
   `#[arg(...)]` (`env = "DEACON_<SCREAMING_FLAG>"`), so clap owns the precedence
