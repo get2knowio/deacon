@@ -115,6 +115,37 @@ jobs:
       # need for that assertion shape entirely.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+        with:
+          # PINNED BELOW 0.37, and ONLY in this job, because the ORACLE cannot run
+          # on 0.37 (#745). buildx 0.37 gates reading a local path outside the build
+          # context behind an `fs.read` entitlement; a Compose `build.dockerfile:` is
+          # such a read, and the entitlement is granted by declaring that directory
+          # as a named local build context. The reference CLI ALWAYS runs an extended
+          # Compose build, so with no Features declared it names a Dockerfile in a
+          # directory it never declares as a context, and dies:
+          #
+          #   additional privileges requested: pass
+          #   "--allow=fs.read=.../container-features/0.87.0-.../Dockerfile-with-features"
+          #
+          # MEASURED on `fx-upstream-devport-userenvprobe`, both ways: `devcontainer up`
+          # at the pinned 0.87.0 exits 1 with `{"outcome":"error"}` on buildx 0.37.2 and
+          # succeeds on 0.36.1. deacon succeeds on BOTH, because it runs no extended
+          # build when there are no Features — so this is the reference's defect, and
+          # deacon is the conformant side (see `parity/SPEC_STATUS.md`).
+          #
+          # The oracle is pinned at 0.87.0 and cannot be patched, so without this the
+          # differential lane reports a difference that describes the runner's buildx
+          # rather than deacon — exactly what the reference-version assertion above
+          # exists to prevent, one layer down.
+          #
+          # THE COST IS REAL AND IS ACCEPTED DELIBERATELY: this lane can no longer
+          # observe buildx-0.37 behaviour, which is the very class of defect #743 was.
+          # That is survivable only because the GATING lanes are untouched — they use
+          # the runner's own buildx, currently 0.37.2, and that is where #743 was in
+          # fact caught. Comparison needs an oracle that runs; reality-checking needs a
+          # current buildx; the two lanes now do one job each. Revisit when the pin
+          # moves to a reference release that handles 0.37.
+          version: v0.36.1
 
       - name: Verify BuildKit is available
         # Fail LOUD and early rather than letting a `build` case report a divergence that
