@@ -121,6 +121,27 @@ changes, update this file in the same PR.
   settles it in seconds: `docker build` a two-line Dockerfile that does
   `apt-get update && apt-get install -y openssh-client wget` on
   `debian:bookworm-slim`. If that fails, nothing above it is worth investigating.
+- **⚠️ This dev container's buildx was changed on 2026-10-09, deliberately, and it
+  matters for what a local run can prove.** The image ships buildx **0.36.1**; a
+  user-level plugin at `~/.docker/cli-plugins/docker-buildx` now shadows it with
+  **0.37.2**, with both kept side by side as `docker-buildx.36` / `docker-buildx.37`
+  so either can be selected by copying one over `docker-buildx`. Check with
+  `docker buildx version` before trusting any Compose result.
+  **Why it was done:** buildx 0.37 gates reading a local path outside the build
+  context behind an `fs.read` entitlement, and #743 — every Compose-with-Features
+  build producing NO image — reproduces only on 0.37+. On 0.36 the bug is invisible,
+  so the two local reproductions attempted before the upgrade were worthless and the
+  defect reached users. **A buildx/Compose version is an environment pin as much as a
+  daemon capability is**, and a green local `parity_docker` on 0.36 says nothing about
+  Compose behavior on a current runner.
+  **The flip side, and why both versions are kept:** the pinned oracle CANNOT run a
+  Compose `up` on 0.37 (#745 — it always runs an extended Compose build, so with no
+  Features declared it reads a Dockerfile from a directory it never declares as a
+  context and exits 1). So the reference is only usable on 0.36, while deacon must be
+  exercised on 0.37. `parity.yml`'s `live-certification` job pins v0.36.1 for exactly
+  this reason; locally, select the version that matches the question being asked.
+  Maintainer decides whether to keep the shadowing plugin or revert to the image's
+  0.36.1 — `rm ~/.docker/cli-plugins/docker-buildx*` restores the image default.
 
 - **`down` cannot be mined, and that is structural.** The reference CLI has no `down`
   subcommand (`up`, `set-up`, `build`, `run-user-commands`, `read-configuration`,
