@@ -469,7 +469,7 @@ difference and owes no row.
 cleanly, so verify parity changes for real rather than reasoning about them:
 
 ```bash
-npm install -g @devcontainers/cli@0.87.0
+npm install -g @devcontainers/cli@0.89.0
 cargo nextest run --profile parity
 ```
 

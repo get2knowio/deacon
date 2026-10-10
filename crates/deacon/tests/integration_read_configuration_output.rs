@@ -336,7 +336,17 @@ fn test_complete_output_structure() -> Result<()> {
         "Missing mergedConfiguration"
     );
 
-    // Verify no unexpected fields
+    // `ociAuthDiagnostics` is UNCONDITIONAL — the reference emits it on every
+    // `read-configuration`, including one that contacts no registry, so three falses is
+    // the report for "nothing observed" rather than a missing field (oracle 0.89.0).
+    assert!(
+        parsed.get("ociAuthDiagnostics").is_some(),
+        "ociAuthDiagnostics must be emitted even when no registry was contacted"
+    );
+
+    // Verify no unexpected fields. This closed list is the point of the assertion: it is
+    // what caught `ociAuthDiagnostics` arriving, so keep it exhaustive rather than
+    // loosening it to a prefix or a contains-check.
     let keys: Vec<&str> = parsed
         .as_object()
         .unwrap()
@@ -347,7 +357,11 @@ fn test_complete_output_structure() -> Result<()> {
         assert!(
             matches!(
                 *key,
-                "configuration" | "workspace" | "featuresConfiguration" | "mergedConfiguration"
+                "configuration"
+                    | "workspace"
+                    | "featuresConfiguration"
+                    | "mergedConfiguration"
+                    | "ociAuthDiagnostics"
             ),
             "Unexpected field in output: {}",
             key
