@@ -1,9 +1,23 @@
-//! Integration tests for compose overrideCommand support (Bead 13).
+//! Integration tests for compose overrideCommand support (Bead 13, corrected by T117).
 //!
 //! Covers BEAD-13-T01, T02, T04 from .maverick/plans/consumer-pt2/briefing.md:
-//! - T01: overrideCommand=true (default) keeps a short-lived compose service alive
-//! - T02: overrideCommand=false runs the service's natural command (may exit)
-//! - T04: lifecycle commands execute successfully in compose mode with override active
+//! - T01: on compose, the DEFAULT runs the service's declared command (spec default `false`)
+//! - T02: an explicit `overrideCommand: false` runs the service's natural command
+//! - T04: lifecycle commands execute in compose mode when `overrideCommand: true` keeps the
+//!   container alive
+//!
+//! **T117 corrected T01 and T04's premise.** Both were written asserting that the compose
+//! default is `overrideCommand: true` — that deacon keeps a service whose command is
+//! `echo hello` alive by replacing that command. The spec says the opposite:
+//! `overrideCommand` *"Defaults to `true` for when using an image Dockerfile and `false` when
+//! referencing a Docker Compose file"*, because *"the default command must run for the
+//! container to function properly"*.
+//!
+//! Verified against the pinned oracle 0.87.0 rather than argued: on the `echo hello` fixture
+//! `devcontainer up` **fails** with `{"outcome":"error"}` and exit 1, its container `exited`
+//! with code 0 — because the declared command ran and finished. deacon now does the same.
+//! These two tests were asserting deacon's defect, which is why the defect survived: any
+//! compose service whose command matters never ran.
 //!
 //! These hit a real Docker daemon and are docker-gated via a graceful skip.
 
@@ -101,18 +115,6 @@ fn up_container_id(up_output: &std::process::Output) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn docker_inspect_state_running(container_id: &str) -> Option<bool> {
-    let output = std::process::Command::new(support::runtime_bin())
-        .args(["inspect", "--format", "{{.State.Running}}", container_id])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Some(text == "true")
-}
-
 fn docker_inspect_cmd(container_id: &str) -> Option<String> {
     let output = std::process::Command::new(support::runtime_bin())
         .args(["inspect", "--format", "{{json .Config.Cmd}}", container_id])
@@ -124,9 +126,25 @@ fn docker_inspect_cmd(container_id: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// BEAD-13-T01: default overrideCommand keeps a short-lived service running.
+/// BEAD-13-T01 (corrected, T117): on compose the DEFAULT runs the service's declared
+/// command — it is not replaced by deacon's keep-alive.
+///
+/// The spec default for compose is `overrideCommand: false`, and this fixture omits the key
+/// entirely, so the declared command must run. It proves that by leaving a marker file.
+///
+/// The test previously asserted the opposite — that a service whose command is `echo hello`
+/// stays ALIVE, which is only true if the command is discarded. That premise was deacon's
+/// defect, and it is why the defect survived: verified against the pinned oracle 0.87.0, the
+/// reference FAILS that fixture (`{"outcome":"error"}`, exit 1) because it honors the
+/// default and the container exits with its command.
+///
+/// The assertion is deliberately on the MARKER, not on `up` failing with a short-lived
+/// command. Whether a millisecond-lived container is still present when deacon looks for it
+/// is a race — a first draft of this test asserting `up` fails was flaky under parallel load
+/// for exactly that reason. "Did the declared command run?" is the actual claim and is
+/// deterministic.
 #[test]
-fn test_compose_override_command_default_keeps_service_alive() {
+fn test_compose_default_runs_the_declared_command() {
     if !is_docker_available() {
         eprintln!("Skipping: Docker not available");
         return;
@@ -134,12 +152,15 @@ fn test_compose_override_command_default_keeps_service_alive() {
     let temp_dir = TempDir::new().unwrap();
     let workspace = temp_dir.path();
 
-    // Compose service runs `echo hello` — would exit in milliseconds without override.
+    // Long enough to inspect, and it records that it ran. `sleep infinity` would be
+    // indistinguishable from deacon's own keep-alive; the marker is what makes this test
+    // able to fail.
     let compose_yml = r#"services:
   app:
     image: alpine:3.18
-    command: ["echo", "hello"]
+    command: ["sh", "-c", "touch /tmp/declared-command-ran; sleep 60"]
 "#;
+    // NOTE: no `overrideCommand` key — the point is the DEFAULT.
     let devcontainer_json = r#"{
   "name": "Compose Override Default",
   "dockerComposeFile": "../docker-compose.yml",
@@ -182,14 +203,38 @@ fn test_compose_override_command_default_keeps_service_alive() {
     }
 
     let container_id = up_container_id(&up_output).expect("deacon up should report a containerId");
-    let running = docker_inspect_state_running(&container_id).unwrap_or(false);
+    // `runtime_bin()`, never a hardcoded `docker`: under the Podman lane deacon creates
+    // the container in PODMAN's store, while every GitHub runner also has a docker daemon
+    // running — so `docker exec <podman id>` fails and the marker reads as absent, turning
+    // "we looked in the wrong place" into "the declared command never ran". That is the
+    // hazard CLAUDE.md records for `integration_build{,_output}`, and this test tripped it:
+    // its sibling `docker_inspect_cmd` already honoured the runtime, so the SAME test
+    // reported a correct `Cmd` next to a missing marker.
+    let marker = std::process::Command::new(support::runtime_bin())
+        .args([
+            "exec",
+            &container_id,
+            "test",
+            "-f",
+            "/tmp/declared-command-ran",
+        ])
+        .output()
+        .unwrap();
+    let cmd_json = docker_inspect_cmd(&container_id).unwrap_or_default();
 
     deacon_down(workspace);
 
     assert!(
-        running,
-        "container should still be running with default overrideCommand=true; stderr was: {}",
-        stderr
+        marker.status.success(),
+        "the compose service's DECLARED command must run under the default \
+         (overrideCommand defaults to false for compose) — no marker means deacon replaced \
+         it, so the service's own process never ran (T117). Container Cmd was: {cmd_json}; \
+         stderr from up: {stderr}"
+    );
+    assert!(
+        !cmd_json.contains("sleep infinity"),
+        "the container's Cmd must still be the service's declared command, not deacon's \
+         keep-alive; got: {cmd_json}"
     );
 }
 
@@ -268,7 +313,14 @@ fn test_compose_override_command_explicit_false_runs_natural_command() {
     );
 }
 
-/// BEAD-13-T04: lifecycle commands execute in compose mode with override active.
+/// BEAD-13-T04 (corrected, T117): lifecycle commands execute in compose mode when
+/// `overrideCommand: true` keeps the container alive.
+///
+/// The fixture now sets `overrideCommand: true` EXPLICITLY. It previously relied on the
+/// default doing so, which is the T117 defect: on compose the default is `false`, so
+/// `echo init` runs, the container exits, and no lifecycle hook can attach — the reference
+/// fails this fixture too. Asking for the keep-alive is what the spec's `true` is for, and
+/// the test's real subject is that lifecycle hooks run once the container IS alive.
 #[test]
 fn test_compose_override_command_lifecycle_runs() {
     if !is_docker_available() {
@@ -300,6 +352,15 @@ fn test_compose_override_command_lifecycle_runs() {
     // the container exit before the hook under rootless Podman, which is a
     // property of the added mount and has nothing to do with what this test is
     // for — that lifecycle runs at all once the override keeps the container alive.
+    //
+    // `overrideCommand: true` is now DECLARED rather than relied on (#749). This service's
+    // `command: ["echo", "init"]` exits immediately, so the container has to be held open by
+    // deacon for any hook to run — which is what this test is about. That used to happen by
+    // default, because the compose path defaulted `overrideCommand` to `true`; the spec says
+    // it defaults to `false` when referencing a Docker Compose file, so the default now
+    // honours the declared command and this fixture must ask for the override explicitly.
+    // Without the declaration the test would still pass for the WRONG reason on a service
+    // that happened to be long-lived, which is precisely how the defect hid.
     let compose_yml = r#"services:
   app:
     image: alpine:3.18
@@ -309,6 +370,7 @@ fn test_compose_override_command_lifecycle_runs() {
   "name": "Compose Lifecycle Marker",
   "dockerComposeFile": "../docker-compose.yml",
   "service": "app",
+  "overrideCommand": true,
   "postCreateCommand": "touch /tmp/deacon-lifecycle-marker"
 }"#;
 
