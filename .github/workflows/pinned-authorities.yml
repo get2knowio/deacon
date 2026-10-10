@@ -1,0 +1,102 @@
+# Has either authority deacon measures against moved past its pin?
+#
+# `parity.yml` asserts the INSTALLED oracle equals the pinned one. That is the right
+# check for reproducibility and it is structurally blind to upstream moving. This asks
+# the other question, weekly, and REPORTS it.
+#
+# It exists because the blindness had a cost: #745 pinned buildx below 0.37 in the
+# oracle lane, accepting a real loss of coverage, while two newer oracle releases sat
+# unexamined. Neither fixed it — measured — but that was luck. See
+# `scripts/parity/check-pinned-authorities.sh` for the full reasoning and for why drift
+# is reported per DOCUMENT rather than per commit.
+#
+# NOT A GATE, and nothing here may become a required check. A pin moves on a human's
+# decision: bumping the oracle re-baselines every `live-differential` case, so it is a
+# deliberate exercise, not a cron job's call. Drift therefore produces a tracking issue,
+# never a red build. The job fails only when the PIN ITSELF is unreadable — a repository
+# fault — and an unreachable npm or GitHub API is reported as "no conclusion drawn"
+# rather than as either answer.
+name: Pinned authorities
+
+on:
+  schedule:
+    # Mondays, 06:00 UTC. Weekly is the right cadence for a question whose answer
+    # changes on upstream's release schedule, and whose action is a human exercise.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # One report at a time; a dispatch during the weekly run should supersede it rather
+  # than race it to the same issue.
+  group: pinned-authorities
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check pinned authorities
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Compare pins against upstream
+        id: drift
+        run: |
+          set -uo pipefail
+          # `tee` to the summary so the answer is readable without opening logs, and
+          # capture it for the issue body. The script's exit code is the verdict:
+          # 0 current, 10 drift, anything else a repository fault.
+          ./scripts/parity/check-pinned-authorities.sh > report.md 2>&1
+          code=$?
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          cat report.md
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          if [ "${code}" != "0" ] && [ "${code}" != "10" ]; then
+            echo "::error::the pin itself could not be read; this is a repository fault, not drift"
+            exit "${code}"
+          fi
+          exit 0
+
+      - name: Open or update the tracking issue
+        if: steps.drift.outputs.code == '10'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Stable title, so the issue is updated rather than duplicated every week.
+          #
+          # The title and labels are chosen to NOT trip `ledger-issue-coverage`, which
+          # requires a `SPEC_STATUS.md` row for any open issue that claims a
+          # deacon-vs-reference difference. Its selector is the `parity-drift` label, or
+          # a title starting `parity(` / `parity:` / `fix:`, or `fix(<scope>)` outside a
+          # closed exempt list (`registry.rs::owes_a_behavior_row`). A `chore(parity):`
+          # title with no label matches none of those — correctly, because drift in a
+          # PIN is not a behavior difference and owes no row. Renaming this or adding
+          # that label would redden the ledger check on every open pull request.
+          TITLE: 'chore(parity): pinned authorities have drifted from upstream'
+        run: |
+          set -euo pipefail
+          body="$(cat report.md)"
+          body="${body}
+
+---
+
+_Posted by the \`Pinned authorities\` workflow (\`.github/workflows/pinned-authorities.yml\`),
+which runs weekly and reports rather than gates. This issue is UPDATED in place on each
+run, so its body is always the latest reading. Close it when the pins are re-examined —
+it will reopen as a new issue if drift is still present at the next run._"
+
+          existing="$(gh issue list --state open --search "in:title \"${TITLE}\"" \
+            --json number,title \
+            --jq "[.[] | select(.title == \"${TITLE}\")] | .[0].number // empty")"
+
+          if [ -n "${existing}" ]; then
+            echo "updating existing issue #${existing}"
+            gh issue edit "${existing}" --body "${body}"
+          else
+            echo "opening a new tracking issue"
+            gh issue create --title "${TITLE}" --body "${body}"
+          fi
