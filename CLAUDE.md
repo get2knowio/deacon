@@ -26,7 +26,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 ## Critical Development Principles
 
 **1. Spec-Parity as Source of Truth**
-- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `113500f4`, October 2025) — the single source of truth. Deacon's conformance against it, including every characterized divergence, is recorded in the repository-owned `parity/` data root (see the Differential Parity Suite section), not in prose.
+- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `113500f4`, **2025-08-01** — not October 2025, as this line said until the date was checked against the commit) — the single source of truth. Deacon's conformance against it, including every characterized divergence, is recorded in the repository-owned `parity/` data root (see the Differential Parity Suite section), not in prose.
 - Data structures MUST match spec shapes exactly (map vs vec, field ordering, null handling)
 - Configuration resolution MUST use full extends chains via `ConfigLoader::load_with_extends`
 - Never implement shortcuts that deviate from spec-defined algorithms
@@ -444,6 +444,26 @@ dropped the `default-filter` from four of them, so `dev-fast` selected every Doc
 `tomllib` still reports a profile as *present* when only its `[[…overrides]]` blocks
 survive — so "the profile exists" is NOT the check. After any edit, assert that **every**
 profile carries a filter.
+
+**The two pins are WATCHED, weekly, by a check that reports and never gates.**
+`.github/workflows/pinned-authorities.yml` runs
+`scripts/parity/check-pinned-authorities.sh`, which compares `parity/oracle.json`
+against npm's `latest` and every document in `parity/spec/<pin>/manifest.json` against
+upstream HEAD **by recorded `sha256`, per document**. `parity.yml` already asserts the
+INSTALLED oracle equals the pin — right for reproducibility, structurally blind to
+upstream moving — and this asks the other question. Run it by hand any time:
+`./scripts/parity/check-pinned-authorities.sh` (exit 0 current, 10 drift).
+
+Two things about it are deliberate. It compares **documents, not commits**: at the time
+it was written exactly one of eighteen had changed since the pin, and that one was
+`supporting-tools.md`, a listing of editors — a check firing on any new commit would have
+cried wolf and been ignored. And it **never gates**: a bump re-baselines every
+`live-differential` case, so the procedure is bump → run the nightly → diff the diverging
+set → adjudicate each change, which is a human exercise. Drift produces one tracking
+issue, updated in place. Its title is `chore(parity): …` with NO `parity-drift` label on
+purpose — `registry.rs::owes_a_behavior_row` would otherwise demand a `SPEC_STATUS.md`
+row for it and redden the ledger check on every open PR; drift in a pin is not a behavior
+difference and owes no row.
 
 **Verifying locally.** Docker works in this dev container and the pinned oracle installs
 cleanly, so verify parity changes for real rather than reasoning about them:
