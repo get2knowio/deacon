@@ -187,6 +187,17 @@ pub struct Feature {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeatureRefInfo {
+    /// `http` when the registry's hostname is exactly `localhost`, else `https`
+    /// — upstream's `getRegistryScheme` rule, lifted verbatim
+    /// (`containerCollectionsOCI.ts`): a registry URL is built over the host and
+    /// its `hostname` compared case-insensitively to `localhost`, so a port is
+    /// ignored and `LOCALHOST:5000` is `http` too.
+    ///
+    /// Added at oracle 0.89.0, which introduced it on `OCIRef` and therefore on
+    /// `sourceInformation.featureRef`. It is informational in the output but not
+    /// cosmetic upstream: `isOCIRegistryOrigin` builds `${scheme}://${registry}`
+    /// from it to decide whether an auth challenge came from the registry itself.
+    pub scheme: String,
     /// Feature name, e.g. `node`.
     pub id: String,
     /// First namespace segment, e.g. `devcontainers`.
@@ -209,6 +220,28 @@ pub struct FeatureRefInfo {
     /// form the id used.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,
+}
+
+/// The scheme a registry is reached over: `http` only for `localhost`.
+///
+/// Upstream's `getRegistryScheme` is
+/// `new URL(`https://${registry}`).hostname.toLowerCase() === 'localhost' ? 'http' : 'https'`.
+/// Taking the HOSTNAME is the part worth preserving: it strips any port, so
+/// `localhost:5000` — the shape every local-registry test uses — is `http`, while a
+/// naive equality against the whole authority would call it `https` and build an
+/// unreachable URL.
+fn registry_scheme(registry: &str) -> &'static str {
+    // Split off a port without parsing a full URL. A bracketed IPv6 literal
+    // (`[::1]:5000`) is not `localhost` either way, so the simple rule is enough
+    // and cannot mis-split one.
+    let host = registry
+        .rsplit_once(':')
+        .map_or(registry, |(host, _port)| host);
+    if host.eq_ignore_ascii_case("localhost") {
+        "http"
+    } else {
+        "https"
+    }
 }
 
 /// Source information for a resolved feature, matching the reference CLI's
@@ -295,6 +328,14 @@ pub struct ReadConfigurationOutput {
     pub features_configuration: Option<FeaturesConfiguration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub merged_configuration: Option<serde_json::Value>,
+    /// What OCI auth hardening would have blocked during this invocation.
+    ///
+    /// NOT optional, and that is the point: the reference emits the object on every
+    /// `read-configuration`, including one that contacts no registry at all, so three
+    /// falses is the correct report for "no observations" rather than a missing field
+    /// (added at oracle 0.89.0 — see `oci::auth_diagnostics` for why this is an
+    /// observation deacon can make and not a capability it lacks).
+    pub oci_auth_diagnostics: deacon_core::oci::OciAuthDiagnosticsSnapshot,
 }
 
 /// Build the reference CLI's `configFilePath` value for a resolved config file.
@@ -785,6 +826,7 @@ async fn resolve_features_configuration<C: deacon_core::oci::HttpClient>(
                 manifest,
                 manifest_digest: format!("sha256:{}", digest_hex),
                 feature_ref: FeatureRefInfo {
+                    scheme: registry_scheme(&registry_url).to_string(),
                     id: name,
                     owner,
                     namespace,
@@ -2316,11 +2358,18 @@ pub async fn execute_read_configuration(
     let features_configuration_for_output =
         features_configuration_for_output.filter(|fc| !fc.feature_sets.is_empty());
 
+    // Read AFTER all resolution: the accumulator is populated by registry traffic, so
+    // the snapshot has to be taken once everything that could contact a registry has
+    // finished. An invocation that resolved no Features reports three falses, which is
+    // the truth and is what the reference emits on that shape too.
+    let oci_auth_diagnostics = fetcher.auth_diagnostics();
+
     let output_payload = ReadConfigurationOutput {
         configuration: configuration_document,
         workspace: workspace_config,
         features_configuration: features_configuration_for_output,
         merged_configuration,
+        oci_auth_diagnostics,
     };
 
     // Output the payload as JSON

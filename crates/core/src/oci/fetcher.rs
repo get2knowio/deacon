@@ -109,6 +109,12 @@ pub struct FeatureFetcher<C: HttpClient> {
 }
 impl<C: HttpClient> FeatureFetcher<C> {
     /// Create a new FeatureFetcher with custom HTTP client
+    /// What OCI auth hardening would have blocked, as observed by this fetcher's
+    /// client. Passthrough so a caller holding only the fetcher can report it.
+    pub fn auth_diagnostics(&self) -> crate::oci::OciAuthDiagnosticsSnapshot {
+        self.client.auth_diagnostics()
+    }
+
     pub fn new(client: C) -> Self {
         let cache_dir = get_features_cache_dir().unwrap_or_else(|_| {
             // Fallback to temp directory if persistent cache fails
