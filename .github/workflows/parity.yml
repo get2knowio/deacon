@@ -128,12 +128,19 @@ jobs:
           #   "--allow=fs.read=.../container-features/0.87.0-.../Dockerfile-with-features"
           #
           # MEASURED on `fx-upstream-devport-userenvprobe`, both ways: `devcontainer up`
-          # at the pinned 0.87.0 exits 1 with `{"outcome":"error"}` on buildx 0.37.2 and
-          # succeeds on 0.36.1. deacon succeeds on BOTH, because it runs no extended
-          # build when there are no Features — so this is the reference's defect, and
-          # deacon is the conformant side (see `parity/SPEC_STATUS.md`).
+          # exits 1 with `{"outcome":"error"}` on buildx 0.37.2 and succeeds on 0.36.1.
+          # deacon succeeds on BOTH, because it runs no extended build when there are no
+          # Features — so this is the reference's defect, and deacon is the conformant
+          # side (see `parity/SPEC_STATUS.md`).
           #
-          # The oracle is pinned at 0.87.0 and cannot be patched, so without this the
+          # STILL BROKEN AT 0.89.0, re-measured when the pin was bumped: the same
+          # `--allow=fs.read=…/container-features/0.89.0-…/Dockerfile-with-features`
+          # refusal and the same error document. So the pin is not waiting on a release
+          # that already shipped — upstream owes the fix deacon made in #743, and
+          # `scripts/parity/check-pinned-authorities.sh` is what will tell us when a
+          # newer oracle appears to re-test it against.
+          #
+          # The oracle cannot be patched, so without this the
           # differential lane reports a difference that describes the runner's buildx
           # rather than deacon — exactly what the reference-version assertion above
           # exists to prevent, one layer down.

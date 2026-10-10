@@ -269,7 +269,7 @@ For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md). 
 
 deacon is a reimplementation, so "is it correct?" is really two questions: does it
 match the pinned [containers.dev spec](https://containers.dev), and does it match the
-pinned reference CLI (`@devcontainers/cli` v0.87.0)? Those can disagree — and
+pinned reference CLI (`@devcontainers/cli` v0.89.0)? Those can disagree — and
 sometimes deacon differs from both on purpose.
 
 The instrument is one sentence: run both CLIs over the same scenarios, normalize
