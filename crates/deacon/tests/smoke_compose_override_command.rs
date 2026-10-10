@@ -203,7 +203,14 @@ fn test_compose_default_runs_the_declared_command() {
     }
 
     let container_id = up_container_id(&up_output).expect("deacon up should report a containerId");
-    let marker = std::process::Command::new("docker")
+    // `runtime_bin()`, never a hardcoded `docker`: under the Podman lane deacon creates
+    // the container in PODMAN's store, while every GitHub runner also has a docker daemon
+    // running — so `docker exec <podman id>` fails and the marker reads as absent, turning
+    // "we looked in the wrong place" into "the declared command never ran". That is the
+    // hazard CLAUDE.md records for `integration_build{,_output}`, and this test tripped it:
+    // its sibling `docker_inspect_cmd` already honoured the runtime, so the SAME test
+    // reported a correct `Cmd` next to a missing marker.
+    let marker = std::process::Command::new(support::runtime_bin())
         .args([
             "exec",
             &container_id,
