@@ -143,16 +143,29 @@ async fn a_wrong_version_stub_reports_mismatch() {
                 found, "0.86.0",
                 "must name the wrong version the stub reported"
             );
-            assert_eq!(required, "0.87.0", "must name the pinned required version");
+            // Read the pin rather than duplicating it. This assertion hardcoded
+            // `0.87.0` and went stale the moment the pin moved, failing a fault test
+            // that was working correctly — the version is not what this test is
+            // about, so it should not be a second place the pin lives.
+            let pinned = parity_harness::oracle::OraclePin::load()
+                .expect("the pin must load")
+                .version;
+            assert_eq!(
+                required, &pinned,
+                "must name the pinned required version from parity/oracle.json"
+            );
             assert_eq!(path, &stub);
         }
         other => panic!("expected OracleVersionMismatch, got {other:?}"),
     }
 
+    let pinned = parity_harness::oracle::OraclePin::load()
+        .expect("the pin must load")
+        .version;
     let msg = result.unwrap_err().to_string();
     assert!(
-        msg.contains("0.86.0") && msg.contains("0.87.0") && msg.contains("Remedy"),
-        "Display must name found, required, and a remedy: {msg}"
+        msg.contains("0.86.0") && msg.contains(&pinned) && msg.contains("Remedy"),
+        "Display must name found, required ({pinned}), and a remedy: {msg}"
     );
 }
 

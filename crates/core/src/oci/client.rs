@@ -1,6 +1,8 @@
 //! HTTP client implementations for OCI registry communication
 
 use bytes::Bytes;
+
+use super::auth_diagnostics::{OciAuthDiagnostics, OciAuthDiagnosticsSnapshot};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -91,6 +93,16 @@ pub trait HttpClient: Send + Sync {
         url: &str,
         headers: HashMap<String, String>,
     ) -> std::result::Result<u16, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// What OCI auth hardening would have blocked, as observed by this client.
+    ///
+    /// Defaulted to "nothing observed" so the many implementations — every mock in
+    /// the test suite — need no change, per the trait-extension rule in CLAUDE.md.
+    /// A client that performs no registry traffic has nothing to report, and that is
+    /// exactly what the default says.
+    fn auth_diagnostics(&self) -> OciAuthDiagnosticsSnapshot {
+        OciAuthDiagnosticsSnapshot::default()
+    }
 }
 
 /// Default HTTP client implementation using reqwest
@@ -98,6 +110,9 @@ pub trait HttpClient: Send + Sync {
 pub struct ReqwestClient {
     client: reqwest::Client,
     auth: RegistryAuth,
+    /// Shared so a clone of this client reports into the same accumulator; the
+    /// snapshot is read once after resolution finishes.
+    auth_diagnostics: Arc<OciAuthDiagnostics>,
 }
 
 /// Default total request timeout for OCI HTTP operations.
@@ -112,6 +127,25 @@ const DEFAULT_TOTAL_TIMEOUT: Duration = Duration::from_secs(300);
 /// Default connect-phase timeout. Connect should be fast on a healthy
 /// network — 10s is generous but bounds DNS + TCP handshake hangs.
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The registry authority a request URL names — `host[:port]`.
+///
+/// The reference carries `ociRef.registry` into its auth path; deacon's `HttpClient`
+/// is given a URL rather than a parsed ref, and the registry IS that URL's authority
+/// for every distribution request. Falling back to the whole URL on an unparseable
+/// input keeps the diagnostic honest: it will not match any origin, so the
+/// conservative "would be blocked" answer is the one recorded.
+fn registry_authority(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|parsed| {
+            parsed.host_str().map(|host| match parsed.port() {
+                Some(port) => format!("{}:{}", host.to_ascii_lowercase(), port),
+                None => host.to_ascii_lowercase(),
+            })
+        })
+        .unwrap_or_else(|| url.to_string())
+}
 
 impl ReqwestClient {
     /// Create a new ReqwestClient with sensible default timeouts
@@ -138,6 +172,7 @@ impl ReqwestClient {
     async fn exchange_token(
         &self,
         www_authenticate: &str,
+        registry: &str,
     ) -> std::result::Result<String, Box<dyn std::error::Error + Send + Sync>> {
         // Parse Bearer challenge: Bearer realm="...",service="...",scope="..."
         let mut realm = None;
@@ -162,6 +197,12 @@ impl ReqwestClient {
 
         let realm = realm.ok_or("Missing realm in WWW-Authenticate header")?;
 
+        // Would hardening refuse to contact this token service? Recorded here, where
+        // the realm is first known, and NOT gated on any flag — the reference records
+        // it on the ordinary path too (#755).
+        self.auth_diagnostics
+            .observe_token_service_realm(registry, &realm);
+
         // Build token URL
         let mut token_url = realm;
         let mut params = Vec::new();
@@ -180,6 +221,12 @@ impl ReqwestClient {
 
         // Make token request (anonymous - no credentials)
         let response = self.client.get(&token_url).send().await?;
+
+        // Was the token request redirected? `Response::url()` is the FINAL url after
+        // reqwest followed redirects, so a difference from what we asked for is the
+        // faithful stand-in for the reference's `response.redirected`.
+        self.auth_diagnostics
+            .observe_token_request(&token_url, response.url().as_str());
 
         if !response.status().is_success() {
             return Err(format!("Token exchange failed with status: {}", response.status()).into());
@@ -249,7 +296,11 @@ impl ReqwestClient {
         auth.load_from_env()?;
         auth.load_from_docker_config()?;
 
-        Ok(Self { client, auth })
+        Ok(Self {
+            client,
+            auth,
+            auth_diagnostics: OciAuthDiagnostics::new_shared(),
+        })
     }
 
     /// Create a new ReqwestClient with custom authentication configuration
@@ -266,7 +317,11 @@ impl ReqwestClient {
         // Build the client
         let client = client_builder.build()?;
 
-        Ok(Self { client, auth })
+        Ok(Self {
+            client,
+            auth,
+            auth_diagnostics: OciAuthDiagnostics::new_shared(),
+        })
     }
 
     /// Get credentials for a specific registry URL
@@ -295,6 +350,10 @@ impl ReqwestClient {
 
 #[async_trait::async_trait]
 impl HttpClient for ReqwestClient {
+    fn auth_diagnostics(&self) -> OciAuthDiagnosticsSnapshot {
+        self.auth_diagnostics.snapshot()
+    }
+
     async fn get(
         &self,
         url: &str,
@@ -336,6 +395,12 @@ impl HttpClient for ReqwestClient {
 
         // Handle 401 authentication errors with token exchange
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            // Would hardening have withheld the registry's credentials here? True when
+            // the request was not to the registry's own origin, or the challenge came
+            // from somewhere else. Recorded before the exchange, on the ordinary path.
+            let registry = registry_authority(url);
+            self.auth_diagnostics
+                .observe_auth_challenge(&registry, url, response.url().as_str());
             // Try to get WWW-Authenticate header for token exchange
             if let Some(www_auth) = response.headers().get("www-authenticate") {
                 if let Ok(www_auth_str) = www_auth.to_str() {
@@ -343,7 +408,7 @@ impl HttpClient for ReqwestClient {
                         debug!("Got 401 with Bearer challenge, attempting token exchange");
 
                         // Attempt token exchange for anonymous access
-                        if let Ok(token) = self.exchange_token(www_auth_str).await {
+                        if let Ok(token) = self.exchange_token(www_auth_str, &registry).await {
                             // Retry request with the obtained token
                             let mut retry_headers = headers.clone();
                             retry_headers
@@ -410,6 +475,12 @@ impl HttpClient for ReqwestClient {
 
         // Handle 401 authentication errors with token exchange
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            // Would hardening have withheld the registry's credentials here? True when
+            // the request was not to the registry's own origin, or the challenge came
+            // from somewhere else. Recorded before the exchange, on the ordinary path.
+            let registry = registry_authority(url);
+            self.auth_diagnostics
+                .observe_auth_challenge(&registry, url, response.url().as_str());
             // Try to get WWW-Authenticate header for token exchange
             if let Some(www_auth) = response.headers().get("www-authenticate") {
                 if let Ok(www_auth_str) = www_auth.to_str() {
@@ -417,7 +488,7 @@ impl HttpClient for ReqwestClient {
                         debug!("Got 401 with Bearer challenge, attempting token exchange");
 
                         // Attempt token exchange for anonymous access
-                        if let Ok(token) = self.exchange_token(www_auth_str).await {
+                        if let Ok(token) = self.exchange_token(www_auth_str, &registry).await {
                             // Retry request with the obtained token
                             let mut retry_headers = headers.clone();
                             retry_headers
@@ -661,6 +732,63 @@ mod host_ca_trust_tests {
             || {
                 assert!(ReqwestClient::new().is_err());
             },
+        );
+    }
+}
+
+#[cfg(test)]
+mod auth_diagnostics_wiring_tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// The predicates are unit-tested in `oci::auth_diagnostics`; what THIS proves is
+    /// the wiring — that a real `ReqwestClient` reaches the observation site and
+    /// records a `true`. Without it the field could be permanently `false` and every
+    /// parity case would still pass, which is the shape of a decorative field.
+    ///
+    /// Hermetic: a `wiremock` registry that answers one 401 with a Bearer challenge
+    /// whose realm is on a DIFFERENT authority. The token exchange then fails (the
+    /// realm host does not resolve) and that is fine — the diagnostic is recorded
+    /// when the realm is parsed, before the request, exactly as upstream records it.
+    ///
+    /// Addressed as `localhost` rather than `127.0.0.1` on purpose: `registry_scheme`
+    /// maps only the hostname `localhost` to `http`, so this keeps the request and the
+    /// registry on the same origin and isolates the realm flag from the
+    /// credential-forwarding one.
+    #[tokio::test]
+    async fn a_cross_origin_token_realm_records_that_hardening_would_block_it() {
+        let server = MockServer::start().await;
+        let port = server.address().port();
+
+        Mock::given(method("GET"))
+            .and(path("/v2/devcontainers/features/git/manifests/1"))
+            .respond_with(ResponseTemplate::new(401).insert_header(
+                "www-authenticate",
+                r#"Bearer realm="http://auth.invalid.test:9/token",service="registry""#,
+            ))
+            .mount(&server)
+            .await;
+
+        let client = ReqwestClient::new().expect("client");
+        assert!(
+            !client.auth_diagnostics().auth_lookup_would_be_blocked,
+            "nothing observed before any request"
+        );
+
+        let url = format!("http://localhost:{port}/v2/devcontainers/features/git/manifests/1");
+        // The fetch itself fails — the realm does not resolve — and the diagnostic is
+        // what we are asserting, so the result is deliberately discarded.
+        let _ = client.get(&url).await;
+
+        let snapshot = client.auth_diagnostics();
+        assert!(
+            snapshot.auth_lookup_would_be_blocked,
+            "a realm on another authority must be recorded as blocked-under-hardening"
+        );
+        assert!(
+            !snapshot.registry_redirect_would_prevent_credential_forwarding,
+            "the challenge came from the registry itself, so this one must stay false: {snapshot:?}"
         );
     }
 }

@@ -121,26 +121,35 @@ changes, update this file in the same PR.
   settles it in seconds: `docker build` a two-line Dockerfile that does
   `apt-get update && apt-get install -y openssh-client wget` on
   `debian:bookworm-slim`. If that fails, nothing above it is worth investigating.
-- **⚠️ A STALE `~/.deacon/cache` makes the differential lane report deacon defects that
-  do not exist.** Measured 2026-10-10: a local `--profile parity` run showed three
-  `case-merged-decl-*` cases diverging on
-  `chan-structured-output.mergedConfiguration.customizations.vscode` — the reference
-  reporting SEVEN `vscode` entries against deacon's two, which reads exactly like deacon
-  failing to aggregate Feature-contributed `customizations`. It is not. `rm -rf
-  ~/.deacon/cache` and the divergence disappears entirely, on the same oracle and the
-  same cases.
-  **Why the asymmetry exists:** deacon caches fetched Feature content on disk across
-  runs, while the reference re-downloads into a fresh `/tmp/devcontainercli-vscode/
-  container-features/<version>-<epoch>` per invocation. Fixtures pin Features at FLOATING
-  tags (`ghcr.io/devcontainers/features/node:1`), so when upstream republishes one — the
-  `github.copilot.chat.codeGeneration.instructions` entries are a recent addition — the
-  reference sees the new content immediately and deacon keeps serving the old. The two
-  CLIs are then reading different Features and every difference downstream of that is an
-  artifact.
-  **The tell is that CI disagrees with you**: the nightly on `main` was green on the same
-  pin at the same hour, because a fresh runner has no deacon cache. If a local parity run
-  shows a divergence CI does not, clear the cache before believing it — and note the
-  reverse trap, that a local run can also PASS on stale content CI would fail on.
+- **⚠️ Three `case-merged-decl-*` cases diverge locally on
+  `mergedConfiguration.customizations.vscode`, and it is the image-pull pin above, not a
+  deacon defect.** The reference reports SEVEN `vscode` entries against deacon's two,
+  which reads exactly like deacon failing to aggregate Feature-contributed
+  `customizations`. It is not. `fx-tier1-node-ts` declares exactly ONE feature
+  (`github-cli`) — deacon's single `featureSet` is correct — and the other six entries
+  come from the BASE IMAGE's `devcontainer.metadata` label
+  (`mcr.microsoft.com/devcontainers/typescript-node:1-20-bookworm`, which bakes in git,
+  node, typescript and eslint). deacon must pull the image to read that label, and on this
+  host the pull fails:
+
+  ```
+  WARN Failed to pull image 'mcr.microsoft.com/devcontainers/typescript-node:1-20-bookworm':
+       failed to register layer: RemoveAll root/.npm/_cacache: input/output error
+  ```
+
+  So deacon has no image metadata to merge and emits two entries. CI pulls the image fine,
+  which is why the nightly is green on the same oracle at the same hour. **If a local
+  parity run shows a divergence CI does not, check for a failed pull in the case's
+  `deacon.stderr` before believing it.**
+
+  **This entry previously blamed a stale `~/.deacon/cache`, and that was wrong.** The
+  claim came from a flawed measurement, not a test: `grep -oE 'Diverge at chan-[…]+'`
+  captures only the FIRST diverging path on a line, and these three cases are reported as
+  `featureSets, mergedConfiguration.customizations.vscode` — so the second path was
+  invisible and clearing the cache only appeared to fix it. Count diverging paths with a
+  parser over `target/parity/report/`, not with a grep that silently keeps one match per
+  line.
+
 - **⚠️ This dev container's buildx was changed on 2026-10-09, deliberately, and it
   matters for what a local run can prove.** The image ships buildx **0.36.1**; a
   user-level plugin at `~/.docker/cli-plugins/docker-buildx` now shadows it with
