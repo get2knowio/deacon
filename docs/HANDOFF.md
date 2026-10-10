@@ -88,7 +88,7 @@ changes, update this file in the same PR.
   and the fix is to the product, never to the case. **`parity.yml` is not a required
   check** (see the check-watching rules); it surfaces on PRs as `live-certification`.
 - **The pinned oracle** is `@devcontainers/cli@0.87.0`
-  (`npm install -g @devcontainers/cli@0.87.0`). Docker and the oracle both work in
+  (`npm install -g @devcontainers/cli@0.89.0`). Docker and the oracle both work in
   this dev container — verify parity changes for real, never by reasoning alone.
 - **⚠️ This dev container's Docker daemon was modified (2026-08-06, decision
   pending).** Docker 29's default containerd-snapshotter + BuildKit could not
@@ -121,6 +121,26 @@ changes, update this file in the same PR.
   settles it in seconds: `docker build` a two-line Dockerfile that does
   `apt-get update && apt-get install -y openssh-client wget` on
   `debian:bookworm-slim`. If that fails, nothing above it is worth investigating.
+- **⚠️ A STALE `~/.deacon/cache` makes the differential lane report deacon defects that
+  do not exist.** Measured 2026-10-10: a local `--profile parity` run showed three
+  `case-merged-decl-*` cases diverging on
+  `chan-structured-output.mergedConfiguration.customizations.vscode` — the reference
+  reporting SEVEN `vscode` entries against deacon's two, which reads exactly like deacon
+  failing to aggregate Feature-contributed `customizations`. It is not. `rm -rf
+  ~/.deacon/cache` and the divergence disappears entirely, on the same oracle and the
+  same cases.
+  **Why the asymmetry exists:** deacon caches fetched Feature content on disk across
+  runs, while the reference re-downloads into a fresh `/tmp/devcontainercli-vscode/
+  container-features/<version>-<epoch>` per invocation. Fixtures pin Features at FLOATING
+  tags (`ghcr.io/devcontainers/features/node:1`), so when upstream republishes one — the
+  `github.copilot.chat.codeGeneration.instructions` entries are a recent addition — the
+  reference sees the new content immediately and deacon keeps serving the old. The two
+  CLIs are then reading different Features and every difference downstream of that is an
+  artifact.
+  **The tell is that CI disagrees with you**: the nightly on `main` was green on the same
+  pin at the same hour, because a fresh runner has no deacon cache. If a local parity run
+  shows a divergence CI does not, clear the cache before believing it — and note the
+  reverse trap, that a local run can also PASS on stale content CI would fail on.
 - **⚠️ This dev container's buildx was changed on 2026-10-09, deliberately, and it
   matters for what a local run can prove.** The image ships buildx **0.36.1**; a
   user-level plugin at `~/.docker/cli-plugins/docker-buildx` now shadows it with
