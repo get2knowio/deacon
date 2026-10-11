@@ -88,7 +88,7 @@ changes, update this file in the same PR.
   and the fix is to the product, never to the case. **`parity.yml` is not a required
   check** (see the check-watching rules); it surfaces on PRs as `live-certification`.
 - **The pinned oracle** is `@devcontainers/cli@0.87.0`
-  (`npm install -g @devcontainers/cli@0.87.0`). Docker and the oracle both work in
+  (`npm install -g @devcontainers/cli@0.89.0`). Docker and the oracle both work in
   this dev container — verify parity changes for real, never by reasoning alone.
 - **⚠️ This dev container's Docker daemon was modified (2026-08-06, decision
   pending).** Docker 29's default containerd-snapshotter + BuildKit could not
@@ -121,6 +121,35 @@ changes, update this file in the same PR.
   settles it in seconds: `docker build` a two-line Dockerfile that does
   `apt-get update && apt-get install -y openssh-client wget` on
   `debian:bookworm-slim`. If that fails, nothing above it is worth investigating.
+- **⚠️ Three `case-merged-decl-*` cases diverge locally on
+  `mergedConfiguration.customizations.vscode`, and it is the image-pull pin above, not a
+  deacon defect.** The reference reports SEVEN `vscode` entries against deacon's two,
+  which reads exactly like deacon failing to aggregate Feature-contributed
+  `customizations`. It is not. `fx-tier1-node-ts` declares exactly ONE feature
+  (`github-cli`) — deacon's single `featureSet` is correct — and the other six entries
+  come from the BASE IMAGE's `devcontainer.metadata` label
+  (`mcr.microsoft.com/devcontainers/typescript-node:1-20-bookworm`, which bakes in git,
+  node, typescript and eslint). deacon must pull the image to read that label, and on this
+  host the pull fails:
+
+  ```
+  WARN Failed to pull image 'mcr.microsoft.com/devcontainers/typescript-node:1-20-bookworm':
+       failed to register layer: RemoveAll root/.npm/_cacache: input/output error
+  ```
+
+  So deacon has no image metadata to merge and emits two entries. CI pulls the image fine,
+  which is why the nightly is green on the same oracle at the same hour. **If a local
+  parity run shows a divergence CI does not, check for a failed pull in the case's
+  `deacon.stderr` before believing it.**
+
+  **This entry previously blamed a stale `~/.deacon/cache`, and that was wrong.** The
+  claim came from a flawed measurement, not a test: `grep -oE 'Diverge at chan-[…]+'`
+  captures only the FIRST diverging path on a line, and these three cases are reported as
+  `featureSets, mergedConfiguration.customizations.vscode` — so the second path was
+  invisible and clearing the cache only appeared to fix it. Count diverging paths with a
+  parser over `target/parity/report/`, not with a grep that silently keeps one match per
+  line.
+
 - **⚠️ This dev container's buildx was changed on 2026-10-09, deliberately, and it
   matters for what a local run can prove.** The image ships buildx **0.36.1**; a
   user-level plugin at `~/.docker/cli-plugins/docker-buildx` now shadows it with

@@ -35,6 +35,7 @@
 //! - Compare versions
 
 mod auth;
+mod auth_diagnostics;
 mod client;
 mod fetcher;
 mod types;
@@ -42,6 +43,7 @@ mod utils;
 
 // Re-export public types
 pub use auth::{RegistryAuth, RegistryCredentials};
+pub use auth_diagnostics::{OciAuthDiagnostics, OciAuthDiagnosticsSnapshot};
 pub use client::{HttpClient, MockHttpClient, ReqwestClient};
 pub use fetcher::{
     FEATURE_FETCH_TIMEOUT, FeatureFetcher, default_fetcher, default_fetcher_with_config,

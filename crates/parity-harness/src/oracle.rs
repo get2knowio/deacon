@@ -281,9 +281,13 @@ mod tests {
 
     #[test]
     fn embedded_pin_parses_and_matches_expected() {
+        // The literal here is DELIBERATE and must move with a deliberate bump: its job
+        // is to notice an accidental edit to `parity/oracle.json`, so reading the pin
+        // to compare against itself would make the assertion vacuous. (Contrast the
+        // fault tests, where the version is incidental and IS read from the pin.)
         let pin = OraclePin::load().expect("embedded pin must parse");
         assert_eq!(pin.package, ORACLE_PACKAGE);
-        assert_eq!(pin.version, "0.87.0");
+        assert_eq!(pin.version, "0.89.0");
     }
 
     #[test]
