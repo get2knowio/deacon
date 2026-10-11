@@ -242,6 +242,71 @@
       "notes": "The COMPOSE half of `bhv-up-container-env-merge-precedence`, which is stated over \"the created container\" and not over one container shape. Its single-container twin `case-up-env-merge-precedence` could not have caught the compose defect: `commands/up/compose.rs` built the service's environment from `config.container_env` plus CLI `--remote-env` and never read `feature_build.combined_env`, so a Feature's `containerEnv` was baked into the extended image and then dropped from the compose service's `environment:` block. Fixed in 8772e7c; this case is the evidence (#374).\n\nThe same three variables as the twin, for the same reason: `CONF_LAYER` is declared by BOTH layers and must take the configuration's value, while `CONF_ONLY_CONFIG` and `CONF_ONLY_FEATURE` are declared by one layer each. Without the feature-only variable, a regression that made the configuration win by DROPPING the Feature layer entirely — which is precisely the compose defect — would pass."
     },
     {
+      "id": "case-up-compose-declared-command-runs",
+      "behaviors": [
+        "bhv-up-compose-declared-command-runs"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-up-compose-declared-command"
+          ]
+        },
+        {
+          "id": "op-exec",
+          "subcommand": "exec",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--",
+            "sh",
+            "-c",
+            "cat /tmp/deacon-declared-command"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec",
+          "assertion": {
+            "matches": "(?s)^declared-command-ran\\n"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The regression guard for #749, and the reason the defect survived a year: `overrideCommand` defaults to `true` for an image/Dockerfile and **`false` when referencing a Docker Compose file** (`parity/spec/113500f4/devcontainerjson-reference.md:21`, which spells out the reason — \"Set to `false` if the default command must run for the container to function properly\"). deacon read `unwrap_or(true)` on a path reached ONLY for compose, so it replaced the service's declared command with its own keep-alive and the service's process never ran. Any Compose service whose command matters — a server, a database bootstrap, a queue worker — silently did not start, at `{\"outcome\":\"success\"}`.\n\n**The fixture's command has an OBSERVABLE SIDE EFFECT, and that is the whole design.** Every other Compose fixture in the suite declares `command: [\"sleep\", \"infinity\"]` — the one idiom under which the defect is invisible, because replacing THAT command with deacon's own keep-alive is behaviourally identical. So the suite was green throughout and could never have reported this. A command that writes a file can tell the two apart; an assertion on liveness cannot.\n\nIt asserts through `chan-stdout` of a follow-on `exec` rather than on container state because the claim is \"the declared command RAN\", not \"something is alive\" — deacon's keep-alive also leaves the container alive, which is exactly why the old test (`BEAD-13-T01`, asserting liveness under the default) passed while asserting the defect.\n\n`spec-expectation` rather than `live-differential` so it gates every pull request, the reference having been MEASURED to agree: at oracle 0.87.0 on this shape both CLIs run the declared command and both leave `Cmd` as the service declared it, the reference wrapping it in `[\"/bin/sh\",\"-c\",\"… exec \\\"$@\\\" …\",\"-\"]` and deacon in its own equivalent wrapper — same structure, differing only in the wrapper's text (deacon's falls back to `tail -f /dev/null` for BusyBox).\n\n`workspaceFolder` is deliberately absent: a Compose config without one resolves to `/`, which always exists. Declaring `/workspace` while the service mounts nothing there is the incoherent shape #460 removed from `smoke_compose_override_command`."
+    },
+    {
       "id": "case-up-compose-feature-restart",
       "behaviors": [
         "bhv-up-feature-install-order",
@@ -546,13 +611,6 @@
         {
           "behavior": "bhv-compose-project-name-robust",
           "context": [],
-          "observablePath": "chan-container-state.cmd",
-          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (both stop in ~200 ms on SIGTERM). Scoped to `cmd`; `entrypoint` and every other field stay compared.",
-          "divergenceId": "bhv-container-keepalive-command"
-        },
-        {
-          "behavior": "bhv-compose-project-name-robust",
-          "context": [],
           "observablePath": "chan-container-state.labelNamespaces.devcontainer",
           "rationale": "deacon stamps five identity labels the reference does not set, so the `devcontainer` namespace's key SET differs. Scoped to that one namespace — the derived grouping is what makes a one-sided label visible (FR-052), and the per-key paths below stay named individually.",
           "divergenceId": "ext-container-identity-labels"
@@ -603,7 +661,7 @@
           "behavior": "bhv-container-keepalive-command",
           "context": [],
           "observablePath": "chan-container-state.entrypoint",
-          "rationale": "On a Compose service the keep-alive lands on `entrypoint` rather than `cmd`: the reference overrides the service entrypoint with its own keep-alive wrapper, deacon leaves the entrypoint unset and lets the service's own command hold the container open. The same characterized difference as the single-container `cmd` tolerance, on the field Compose puts it in; `cmd` is compared here and agrees.",
+          "rationale": "On a Compose service the keep-alive lands on `entrypoint`, and only its TEXT differs: both CLIs wrap as `[\"/bin/sh\",\"-c\",\"… exec \\\"$@\\\" …\",\"-\"]` and both leave `cmd` as the service declared it, so Docker appends the declared command to the wrapper and the service's own process runs under each. deacon's wrapper falls back to `tail -f /dev/null` for BusyBox and keeps the `trap`+background+`wait` shape its single-container path uses, so SIGTERM is serviced; the reference's echoes a line and loops on `while sleep 1`. MEASURED equal in observable behavior. Scoped to `entrypoint`; `cmd` is COMPARED here and agrees — it was tolerated until #749, when deacon stopped replacing the declared command with its keep-alive, and that tolerance went stale and was removed.",
           "divergenceId": "bhv-container-keepalive-command"
         },
         {
@@ -3239,15 +3297,8 @@
         {
           "behavior": "bhv-compose-authored-project-name-honored",
           "context": [],
-          "observablePath": "chan-container-state.cmd",
-          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (both stop in ~200 ms on SIGTERM). Scoped to `cmd`; every other field stays compared.",
-          "divergenceId": "bhv-container-keepalive-command"
-        },
-        {
-          "behavior": "bhv-compose-authored-project-name-honored",
-          "context": [],
           "observablePath": "chan-container-state.entrypoint",
-          "rationale": "The other half of the keep-alive difference: the two CLIs deliver the same never-exit behavior through a different entrypoint/cmd split.",
+          "rationale": "On a Compose service the keep-alive lands on `entrypoint`, and only its TEXT differs: both CLIs wrap as `[\"/bin/sh\",\"-c\",\"… exec \\\"$@\\\" …\",\"-\"]` and both leave `cmd` as the service declared it, so Docker appends the declared command to the wrapper and the service's own process runs under each. deacon's wrapper falls back to `tail -f /dev/null` for BusyBox and keeps the `trap`+background+`wait` shape its single-container path uses, so SIGTERM is serviced; the reference's echoes a line and loops on `while sleep 1`. MEASURED equal in observable behavior. Scoped to `entrypoint`; `cmd` is COMPARED here and agrees — it was tolerated until #749, when deacon stopped replacing the declared command with its keep-alive, and that tolerance went stale and was removed.",
           "divergenceId": "bhv-container-keepalive-command"
         },
         {
@@ -3347,15 +3398,8 @@
         {
           "behavior": "bhv-compose-authored-project-name-honored",
           "context": [],
-          "observablePath": "chan-container-state.cmd",
-          "rationale": "The keep-alive command strings differ; the observable behavior is measured equal (both stop in ~200 ms on SIGTERM). Scoped to `cmd`; every other field stays compared.",
-          "divergenceId": "bhv-container-keepalive-command"
-        },
-        {
-          "behavior": "bhv-compose-authored-project-name-honored",
-          "context": [],
           "observablePath": "chan-container-state.entrypoint",
-          "rationale": "The other half of the keep-alive difference: the two CLIs deliver the same never-exit behavior through a different entrypoint/cmd split.",
+          "rationale": "On a Compose service the keep-alive lands on `entrypoint`, and only its TEXT differs: both CLIs wrap as `[\"/bin/sh\",\"-c\",\"… exec \\\"$@\\\" …\",\"-\"]` and both leave `cmd` as the service declared it, so Docker appends the declared command to the wrapper and the service's own process runs under each. deacon's wrapper falls back to `tail -f /dev/null` for BusyBox and keeps the `trap`+background+`wait` shape its single-container path uses, so SIGTERM is serviced; the reference's echoes a line and loops on `while sleep 1`. MEASURED equal in observable behavior. Scoped to `entrypoint`; `cmd` is COMPARED here and agrees — it was tolerated until #749, when deacon stopped replacing the declared command with its keep-alive, and that tolerance went stale and was removed.",
           "divergenceId": "bhv-container-keepalive-command"
         },
         {

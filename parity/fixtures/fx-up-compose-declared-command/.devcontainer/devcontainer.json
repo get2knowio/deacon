@@ -1,0 +1,6 @@
+{
+	"name": "ComposeDeclaredCommand",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"remoteUser": "root"
+}
