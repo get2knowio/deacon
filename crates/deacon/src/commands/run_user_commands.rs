@@ -388,11 +388,18 @@ async fn execute_run_user_commands_inner(
         }
     }
 
+    let substitution_context = if container_only_mode {
+        container_only_substitution_context(workspace_folder.as_path(), &args.id_label)?
+    } else {
+        SubstitutionContext::new(workspace_folder.as_path())?
+    };
+
     // Execute lifecycle commands
     let outcome = execute_lifecycle_commands(
         &container_id,
         &config,
         workspace_folder.as_path(),
+        &substitution_context,
         &args,
         &cli,
         &config_hash,
@@ -401,6 +408,35 @@ async fn execute_run_user_commands_inner(
 
     info!("Run-user-commands execution completed successfully");
     Ok(outcome)
+}
+
+/// The substitution context for container-only mode (`--container-id` / `--id-label`
+/// with no `--workspace-folder`, `--config` or `--override-config`) (#765).
+///
+/// No workspace was named, so `${localWorkspaceFolder}` and
+/// `${localWorkspaceFolderBasename}` stay LITERAL — in `remoteEnv` and in hook commands
+/// alike — while `${localEnv:*}` resolves against the host. `anchor` is the cwd and roots
+/// only the mechanical paths; no variable observes it. Substituting it is what handed
+/// the container whatever directory the operator happened to run from.
+///
+/// `${devcontainerId}` follows the id-labels the CALLER named, exactly as the reference
+/// computes it (`dg` returns them as-is): `--id-label` identifies the container, so its
+/// hash is the dev container's id. With `--container-id` alone there are no such labels
+/// and the token stays literal. The reference instead hashes the label it builds from an
+/// absent workspace, `devcontainer.local_folder=undefined` — one constant for every
+/// container on every host — which the spec's "unique among other dev containers on the
+/// same Docker host" (`parity/spec/c95ffeed/devcontainer-id-variable.md`) rules out.
+fn container_only_substitution_context(
+    anchor: &Path,
+    id_label: &[String],
+) -> Result<SubstitutionContext> {
+    let mut context = SubstitutionContext::without_workspace(anchor)?;
+    let id_labels = deacon_core::container::ContainerSelector::parse_labels(id_label)?;
+    if !id_labels.is_empty() {
+        context.devcontainer_id = deacon_core::container::compute_dev_container_id(&id_labels);
+        context.resolve_devcontainer_id = true;
+    }
+    Ok(context)
 }
 
 /// Execute lifecycle commands in the container
@@ -413,14 +449,12 @@ async fn execute_lifecycle_commands(
     container_id: &str,
     config: &DevContainerConfig,
     workspace_folder: &Path,
+    substitution_context: &SubstitutionContext,
     args: &RunUserCommandsArgs,
     cli: &CliRuntime,
     config_hash: &str,
 ) -> Result<RunOutcome> {
     info!("Executing lifecycle commands in container");
-
-    // Create substitution context
-    let substitution_context = SubstitutionContext::new(workspace_folder)?;
 
     // Determine the container workspace folder = the lifecycle cwd. Prefer the
     // RUNNING container's ACTUAL workspace bind-mount over host-side re-derivation
@@ -458,7 +492,7 @@ async fn execute_lifecycle_commands(
                 crate::commands::shared::container_metadata::resolve_config_against_container(
                     info,
                     config.clone(),
-                    workspace_folder,
+                    substitution_context,
                 );
             (resolved.config, resolved.composition)
         }
@@ -704,7 +738,7 @@ async fn execute_lifecycle_commands(
     let result = execute_container_lifecycle_with_progress_callback_and_docker(
         &lifecycle_config,
         &commands,
-        &substitution_context,
+        substitution_context,
         cli,
         Some(crate::commands::shared::progress::make_progress_callback(
             &args.progress_tracker,
@@ -897,5 +931,47 @@ mod tests {
 
         assert_eq!(args.container_id.as_deref(), Some("deadbeef"));
         assert_eq!(args.id_label.len(), 1);
+    }
+
+    fn substitute(context: &SubstitutionContext, value: &str) -> String {
+        let mut report = deacon_core::variable::SubstitutionReport::new();
+        deacon_core::variable::VariableSubstitution::substitute_string(value, context, &mut report)
+    }
+
+    /// #765: with no workspace named, the cwd anchor must not leak into any token.
+    #[test]
+    fn container_only_context_leaves_workspace_tokens_literal() {
+        let anchor = tempfile::tempdir().unwrap();
+        let context = container_only_substitution_context(anchor.path(), &[]).unwrap();
+
+        for token in [
+            "${localWorkspaceFolder}",
+            "${localWorkspaceFolderBasename}",
+            "${devcontainerId}",
+        ] {
+            assert_eq!(substitute(&context, token), token);
+        }
+    }
+
+    /// #765: `--id-label` identifies the container, so `${devcontainerId}` is the hash
+    /// of exactly those labels — what the reference computes from the same input.
+    #[test]
+    fn container_only_context_derives_devcontainer_id_from_the_callers_id_labels() {
+        let anchor = tempfile::tempdir().unwrap();
+        let context =
+            container_only_substitution_context(anchor.path(), &["probe=765".to_string()]).unwrap();
+
+        assert_eq!(
+            substitute(&context, "${devcontainerId}"),
+            deacon_core::container::compute_dev_container_id(&[(
+                "probe".to_string(),
+                "765".to_string()
+            )])
+        );
+        assert_eq!(
+            substitute(&context, "${localWorkspaceFolder}"),
+            "${localWorkspaceFolder}",
+            "an id-label names a container, not a workspace"
+        );
     }
 }

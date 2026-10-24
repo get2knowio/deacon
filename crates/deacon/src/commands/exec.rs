@@ -683,12 +683,22 @@ where
                     // `exec` runs no lifecycle phase, so the composition the
                     // helper reports is irrelevant here — it reads only the
                     // last-wins `remoteUser` / `remoteEnv` off the result.
-                    crate::commands::shared::container_metadata::resolve_config_against_container(
-                        &container_info,
-                        config_ctx.config.clone(),
+                    match deacon_core::variable::SubstitutionContext::new(
                         config_ctx.workspace_folder.as_path(),
-                    )
-                    .config
+                    ) {
+                        Ok(context) => {
+                            crate::commands::shared::container_metadata::resolve_config_against_container(
+                                &container_info,
+                                config_ctx.config.clone(),
+                                &context,
+                            )
+                            .config
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to resolve effective config with labels: {}", e);
+                            config_ctx.config.clone()
+                        }
+                    }
                 }
                 Ok(None) => config_ctx.config.clone(),
                 Err(e) => {

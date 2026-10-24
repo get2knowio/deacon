@@ -11,12 +11,11 @@
 //! the CONTAINER's metadata label at lower precedence. `exec` and
 //! `run-user-commands` share it (#405, source corrected in #527).
 
-use std::path::Path;
-
 use anyhow::{Context, Result};
 
 use deacon_core::config::{ConfigMerger, DevContainerConfig, LifecycleHookLayer};
 use deacon_core::docker::ContainerInfo;
+use deacon_core::variable::SubstitutionContext;
 
 /// Extract a merged [`DevContainerConfig`] from a container's
 /// `devcontainer.metadata` label.
@@ -242,7 +241,7 @@ pub fn carries_workspace_identity_labels(container: &ContainerInfo) -> bool {
 pub fn resolve_config_against_container(
     container: &ContainerInfo,
     config: DevContainerConfig,
-    workspace_folder: &Path,
+    substitution_context: &SubstitutionContext,
 ) -> ContainerResolvedConfig {
     let label = container.labels.get("devcontainer.metadata");
 
@@ -269,17 +268,11 @@ pub fn resolve_config_against_container(
         config,
     );
 
-    let config = match ConfigMerger::resolve_effective_config(
+    let (config, _report) = ConfigMerger::resolve_effective_config_with_context(
         &base,
         Some(&container.labels),
-        workspace_folder,
-    ) {
-        Ok((resolved, _report)) => resolved,
-        Err(e) => {
-            tracing::warn!("Failed to resolve effective config with labels: {}", e);
-            base
-        }
-    };
+        substitution_context,
+    );
 
     ContainerResolvedConfig {
         config,
@@ -440,7 +433,7 @@ mod tests {
         let resolved = resolve_config_against_container(
             &container,
             DevContainerConfig::default(),
-            workspace.path(),
+            &SubstitutionContext::new(workspace.path()).unwrap(),
         );
 
         assert_eq!(
@@ -486,7 +479,11 @@ mod tests {
             ..Default::default()
         };
 
-        let resolved = resolve_config_against_container(&container, user_config, workspace.path());
+        let resolved = resolve_config_against_container(
+            &container,
+            user_config,
+            &SubstitutionContext::new(workspace.path()).unwrap(),
+        );
 
         assert_eq!(resolved.composition, MetadataComposition::Layered);
         let cfg = resolved.config;
@@ -520,7 +517,11 @@ mod tests {
             ..Default::default()
         };
 
-        let resolved = resolve_config_against_container(&container, user_config, workspace.path());
+        let resolved = resolve_config_against_container(
+            &container,
+            user_config,
+            &SubstitutionContext::new(workspace.path()).unwrap(),
+        );
 
         assert_eq!(resolved.composition, MetadataComposition::Layered);
         assert_eq!(resolved.config.remote_user.as_deref(), Some("from-config"));
@@ -562,7 +563,11 @@ mod tests {
             ..Default::default()
         };
 
-        let resolved = resolve_config_against_container(&container, user_config, workspace.path());
+        let resolved = resolve_config_against_container(
+            &container,
+            user_config,
+            &SubstitutionContext::new(workspace.path()).unwrap(),
+        );
 
         assert_eq!(resolved.composition, MetadataComposition::CompleteRecord);
         assert!(
@@ -607,7 +612,11 @@ mod tests {
             ..Default::default()
         };
 
-        let resolved = resolve_config_against_container(&container, user_config, workspace.path());
+        let resolved = resolve_config_against_container(
+            &container,
+            user_config,
+            &SubstitutionContext::new(workspace.path()).unwrap(),
+        );
 
         assert_eq!(resolved.composition, MetadataComposition::CompleteRecord);
         assert_eq!(resolved.config.remote_user.as_deref(), Some("from-config"));
@@ -633,7 +642,11 @@ mod tests {
             ..Default::default()
         };
 
-        let resolved = resolve_config_against_container(&container, user_config, workspace.path());
+        let resolved = resolve_config_against_container(
+            &container,
+            user_config,
+            &SubstitutionContext::new(workspace.path()).unwrap(),
+        );
 
         assert_eq!(resolved.composition, MetadataComposition::Layered);
         assert!(!resolved.composition.suppresses_caller_features());
