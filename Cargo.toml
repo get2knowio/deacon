@@ -60,7 +60,7 @@ fs2 = "0.4"
 # Shared dev-dependencies.
 tempfile = "3.12"
 assert_cmd = "2.0"
-testcontainers = "0.27"
+testcontainers = "0.28"
 # Scoped, serialized env-var mutation for tests (sets vars for a closure/future
 # then restores them). Encapsulates the edition-2024 `unsafe` env calls behind a
 # safe API and serializes via an internal lock, so test code stays unsafe-free.
