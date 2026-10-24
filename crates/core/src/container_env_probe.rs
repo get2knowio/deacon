@@ -679,7 +679,10 @@ impl ContainerEnvironmentProber {
                 container_env: Some(container_env_for_substitution.clone()),
                 feature_vars: HashMap::new(),
                 template_options: None,
-                resolve_devcontainer_id: true,
+                // Same reasoning as the workspace tokens below: this context carries an
+                // EMPTY `devcontainer_id`, so resolving here could only blank a
+                // `${devcontainerId}` that a workspace-less pass kept literal (#751).
+                resolve_devcontainer_id: false,
                 // This context carries an EMPTY `local_workspace_folder`, so resolving
                 // the workspace-derived tokens here would silently blank them. Per the
                 // comment above they are already resolved by the time this pass runs;
@@ -1239,6 +1242,35 @@ mod tests {
         );
         // No unresolved template should remain.
         assert!(!result.get("PATH").unwrap().contains("${"));
+    }
+
+    #[test]
+    fn test_build_effective_env_keeps_workspace_tokens_it_cannot_answer() {
+        // #751: this pass's context has no workspace and no devcontainer id. A token a
+        // workspace-less pass deliberately kept literal (`exec --container-id`) must
+        // survive it rather than be blanked.
+        let prober = ContainerEnvironmentProber::new();
+        let probed_env = HashMap::new();
+
+        let mut config_remote_env: IndexMap<String, Option<String>> = IndexMap::new();
+        for (k, v) in [
+            ("LWF", "${localWorkspaceFolder}"),
+            ("LWFB", "${localWorkspaceFolderBasename}"),
+            ("DID", "${devcontainerId}"),
+        ] {
+            config_remote_env.insert(k.to_string(), Some(v.to_string()));
+        }
+
+        let result = prober.build_effective_env(
+            &probed_env,
+            &probed_env,
+            Some(&config_remote_env),
+            &IndexMap::new(),
+        );
+
+        assert_eq!(result["LWF"], "${localWorkspaceFolder}");
+        assert_eq!(result["LWFB"], "${localWorkspaceFolderBasename}");
+        assert_eq!(result["DID"], "${devcontainerId}");
     }
 
     #[test]

@@ -1,0 +1,10 @@
+{
+	"name": "ParityExecContainerIdLabelSubstitution",
+	"image": "alpine:3.19",
+	"remoteEnv": {
+		"LENV": "${localEnv:PARITY_HOST_VALUE}",
+		"LWF": "${localWorkspaceFolder}",
+		"LWFB": "${localWorkspaceFolderBasename}",
+		"DID": "${devcontainerId}"
+	}
+}

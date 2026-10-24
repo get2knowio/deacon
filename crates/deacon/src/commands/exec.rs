@@ -7,7 +7,7 @@ use crate::commands::shared::{
     ConfigLoadArgs, ConfigLoadResult, NormalizedRemoteEnv, TerminalDimensions,
     canonical_reconnect_identity, load_config, resolve_env_and_user,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use deacon_core::IndexMap;
 use deacon_core::compose::{ComposeManager, ComposeProject};
 use deacon_core::config::DevContainerConfig;
@@ -429,8 +429,10 @@ async fn resolve_compose_target_container(
 /// load) so the probed container env can resolve them here. Mirrors
 /// `containerSubstitute` in the reference CLI (variableSubstitution.ts:41-44).
 ///
-/// `workspace_path` is best-effort: when None we fall back to "." for the
-/// SubstitutionContext (which is enough since pass 3 only touches containerEnv).
+/// `workspace_path` is `None` on `exec --container-id` with no workspace inputs. The
+/// context is then built by `SubstitutionContext::without_workspace`, so a
+/// `${localWorkspaceFolder}` that survived the label read-back stays literal instead of
+/// becoming the directory deacon happened to be run from (#751).
 fn apply_container_substitution(
     working_dir: String,
     effective_env: HashMap<String, String>,
@@ -439,8 +441,11 @@ fn apply_container_substitution(
 ) -> (String, HashMap<String, String>) {
     use deacon_core::variable::{SubstitutionContext, SubstitutionReport, VariableSubstitution};
 
-    let ctx_path = workspace_path.unwrap_or_else(|| Path::new("."));
-    let mut ctx = match SubstitutionContext::new(ctx_path) {
+    let ctx = match workspace_path {
+        Some(path) => SubstitutionContext::new(path),
+        None => SubstitutionContext::without_workspace(Path::new(".")),
+    };
+    let mut ctx = match ctx {
         Ok(c) => c,
         Err(e) => {
             debug!(error = %e, "Skipping containerSubstitute: failed to build context");
@@ -459,6 +464,29 @@ fn apply_container_substitution(
         })
         .collect();
     (new_working_dir, new_env)
+}
+
+/// Pass 1 over a configuration recovered from a container's `devcontainer.metadata`
+/// label on `exec --container-id`, where no workspace was named (#751).
+///
+/// The label records the AUTHORED configuration, templates intact, because the spec
+/// substitutes "at the time the value is applied"
+/// (`parity/spec/c95ffeed/image-metadata.md:79`) and this is that time. With no
+/// workspace in hand only the host environment can answer: `${localEnv:*}` resolves,
+/// while `${localWorkspaceFolder}`, `${localWorkspaceFolderBasename}` and
+/// `${devcontainerId}` stay literal — what the reference CLI prints on the same
+/// container. `${containerEnv:*}` is left for pass 3, as everywhere else.
+///
+/// The cwd is the context's mechanical anchor only; `without_workspace` guarantees no
+/// variable observes it, which is the whole defect this replaces.
+fn substitute_without_workspace(
+    config: deacon_core::config::DevContainerConfig,
+) -> Result<deacon_core::config::DevContainerConfig> {
+    let anchor = std::env::current_dir()
+        .context("Failed to resolve the current directory for container-only exec")?;
+    let context = deacon_core::variable::SubstitutionContext::without_workspace(&anchor)?;
+    let (substituted, _report) = config.apply_variable_substitution(&context);
+    Ok(substituted)
 }
 
 /// Execute the exec command
@@ -683,7 +711,9 @@ where
                 }
                 match crate::commands::shared::container_metadata::config_from_metadata_label(
                     &container_info,
-                ) {
+                )
+                .and_then(|meta| meta.map(substitute_without_workspace).transpose())
+                {
                     Ok(Some(meta)) => {
                         config_remote_user = meta.remote_user.clone();
                         config_remote_env = Some(meta.remote_env().clone());
@@ -1524,5 +1554,66 @@ services:
             apply_container_substitution("/work".to_string(), env, probed, Some(temp_dir.path()));
 
         assert_eq!(new_env.get("X").unwrap(), "[]");
+    }
+
+    /// #751: with no workspace named, pass 3 must not invent one. It used to anchor a
+    /// full context at `.`, so `${localWorkspaceFolder}` became the directory deacon
+    /// was run from.
+    #[test]
+    fn test_apply_container_substitution_without_workspace_keeps_workspace_tokens_literal() {
+        let mut probed = HashMap::new();
+        probed.insert("HOME".to_string(), "/root".to_string());
+
+        let mut env = HashMap::new();
+        env.insert("LWF".to_string(), "${localWorkspaceFolder}".to_string());
+        env.insert(
+            "LWFB".to_string(),
+            "${localWorkspaceFolderBasename}".to_string(),
+        );
+        env.insert("DID".to_string(), "${devcontainerId}".to_string());
+        env.insert("H".to_string(), "${containerEnv:HOME}".to_string());
+
+        let (_wd, new_env) = apply_container_substitution("/work".to_string(), env, probed, None);
+
+        assert_eq!(new_env["LWF"], "${localWorkspaceFolder}");
+        assert_eq!(new_env["LWFB"], "${localWorkspaceFolderBasename}");
+        assert_eq!(new_env["DID"], "${devcontainerId}");
+        assert_eq!(new_env["H"], "/root", "containerEnv still resolves");
+    }
+
+    /// #751: the label read-back on `exec --container-id` resolves `${localEnv:*}`
+    /// against the host and leaves every workspace-derived token literal — what the
+    /// reference prints on the same container.
+    #[test]
+    fn substitute_without_workspace_resolves_host_env_only() {
+        // Read through `env::vars()`, the same iteration the substitution context uses:
+        // `unsafe_code` is denied, so `set_var` is out, and on Windows `env::var("PATH")`
+        // matches `Path` case-insensitively where the context's map does not.
+        let (name, want) = std::env::vars()
+            .find(|(k, v)| {
+                !v.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+            .expect("at least one non-empty environment variable with a simple name");
+
+        let config: deacon_core::config::DevContainerConfig =
+            serde_json::from_value(serde_json::json!({
+                "remoteEnv": {
+                    "LENV": format!("${{localEnv:{name}}}"),
+                    "LWF": "${localWorkspaceFolder}",
+                    "LWFB": "${localWorkspaceFolderBasename}",
+                    "DID": "${devcontainerId}",
+                    "CENV": "${containerEnv:PATH}"
+                }
+            }))
+            .unwrap();
+
+        let substituted = substitute_without_workspace(config).unwrap();
+        let get = |k: &str| substituted.remote_env()[k].clone().unwrap_or_default();
+
+        assert_eq!(get("LENV"), want);
+        assert_eq!(get("LWF"), "${localWorkspaceFolder}");
+        assert_eq!(get("LWFB"), "${localWorkspaceFolderBasename}");
+        assert_eq!(get("DID"), "${devcontainerId}");
+        assert_eq!(get("CENV"), "${containerEnv:PATH}", "left for pass 3");
     }
 }
