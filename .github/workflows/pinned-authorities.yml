@@ -51,8 +51,13 @@ jobs:
           # `tee` to the summary so the answer is readable without opening logs, and
           # capture it for the issue body. The script's exit code is the verdict:
           # 0 current, 10 drift, anything else a repository fault.
-          ./scripts/parity/check-pinned-authorities.sh > report.md 2>&1
-          code=$?
+          #
+          # Actions runs this step as `bash -e {0}`, and `set -uo pipefail` above does
+          # not turn `-e` off: a bare call followed by `code=$?` aborts the step on exit
+          # 10 before the code is ever captured, which turned every drift report into a
+          # red run with no tracking issue. Capture it with `||` instead.
+          code=0
+          ./scripts/parity/check-pinned-authorities.sh > report.md 2>&1 || code=$?
           cat report.md >> "$GITHUB_STEP_SUMMARY"
           cat report.md
           echo "code=${code}" >> "$GITHUB_OUTPUT"
