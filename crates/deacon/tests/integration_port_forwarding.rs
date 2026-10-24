@@ -8,6 +8,12 @@ use serde_json::json;
 use std::fs;
 use tempfile::TempDir;
 
+/// A container runtime that does not exist. Every `up` here asserts on a decision made
+/// BEFORE the runtime is reached (merging and validating `--forward-port`, which deacon serves with its own forwarder after start, not with `docker -p`); naming an unusable one stops `up` at
+/// its runtime check, so no test starts a container it never removes. Pointing at the
+/// default `docker` instead leaked one container per test on every machine with a daemon.
+const NO_RUNTIME: &str = "/nonexistent/deacon-test-runtime/docker";
+
 /// Helper function to check if stderr/stdout contains docker command with specific port flags
 ///
 /// Note: When Docker is not available or containers fail to start, the exact port mappings
@@ -74,6 +80,8 @@ fn test_forward_port_cli_flag_single_port() {
             "--workspace-folder",
             &temp_dir.path().to_string_lossy(),
             "--skip-post-create",
+            "--docker-path",
+            NO_RUNTIME,
             "--forward-port",
             "8080",
         ])
@@ -116,6 +124,8 @@ fn test_forward_port_cli_flag_multiple_ports() {
             "--workspace-folder",
             &temp_dir.path().to_string_lossy(),
             "--skip-post-create",
+            "--docker-path",
+            NO_RUNTIME,
             "--forward-port",
             "8080",
             "--forward-port",
@@ -162,6 +172,8 @@ fn test_forward_port_with_host_mapping() {
             "--workspace-folder",
             &temp_dir.path().to_string_lossy(),
             "--skip-post-create",
+            "--docker-path",
+            NO_RUNTIME,
             "--forward-port",
             "8080:3000",
         ])
@@ -205,6 +217,8 @@ fn test_forward_port_with_config_ports() {
             "--workspace-folder",
             &temp_dir.path().to_string_lossy(),
             "--skip-post-create",
+            "--docker-path",
+            NO_RUNTIME,
             "--forward-port",
             "8080",
         ])
@@ -247,6 +261,8 @@ fn test_forward_port_validation() {
             "--workspace-folder",
             &temp_dir.path().to_string_lossy(),
             "--skip-post-create",
+            "--docker-path",
+            NO_RUNTIME,
             "--forward-port",
             "invalid",
             "--forward-port",

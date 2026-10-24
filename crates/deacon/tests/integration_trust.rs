@@ -14,6 +14,12 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+/// A container runtime that does not exist. Every `up` here asserts on a decision made
+/// BEFORE the runtime is reached (the trust gate and the host-side `initializeCommand`); naming an unusable one stops `up` at
+/// its runtime check, so no test starts a container it never removes. Pointing at the
+/// default `docker` instead leaked one container per test on every machine with a daemon.
+const NO_RUNTIME: &str = "/nonexistent/deacon-test-runtime/docker";
+
 fn write_devcontainer_with_init(workspace: &std::path::Path, init_cmd: &str) {
     let dc_dir = workspace.join(".devcontainer");
     fs::create_dir_all(&dc_dir).unwrap();
@@ -54,6 +60,7 @@ fn untrusted_workspace_refuses_initialize_command() {
         .arg("--user-data-folder")
         .arg(&user_data)
         .arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(workspace)
         .output()
@@ -110,6 +117,7 @@ fn trust_workspace_flag_allows_initialize_command() {
         .arg(&user_data)
         .arg("--trust-workspace")
         .arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(workspace)
         .output()
@@ -139,6 +147,7 @@ fn deacon_no_prompt_denies_without_explicit_trust() {
         .arg("--user-data-folder")
         .arg(&user_data)
         .arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(workspace)
         .output()
@@ -179,6 +188,7 @@ fn trust_workspace_persist_remembers_for_next_run() {
         .arg(&user_data)
         .arg("--trust-workspace-persist")
         .arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(&workspace)
         .output()
@@ -192,6 +202,7 @@ fn trust_workspace_persist_remembers_for_next_run() {
         .arg("--user-data-folder")
         .arg(&user_data)
         .arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(&workspace)
         .output()
