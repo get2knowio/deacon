@@ -70,7 +70,7 @@ nix.workspace = true
 assert_cmd = "2.0"
 tokio-test = "0.4"
 wiremock = "0.6"
-testcontainers = "0.27"
+testcontainers = "0.28"
 temp-env.workspace = true
 
 [lints]
