@@ -85,14 +85,16 @@ jobs:
         run: |
           set -euo pipefail
           body="$(cat report.md)"
+          # Every line of this string stays indented to the block: a line at column 0 ends
+          # the `run: |` scalar, and the step then fails on an unterminated quote.
           body="${body}
 
----
+          ---
 
-_Posted by the \`Pinned authorities\` workflow (\`.github/workflows/pinned-authorities.yml\`),
-which runs weekly and reports rather than gates. This issue is UPDATED in place on each
-run, so its body is always the latest reading. Close it when the pins are re-examined —
-it will reopen as a new issue if drift is still present at the next run._"
+          _Posted by the \`Pinned authorities\` workflow (\`.github/workflows/pinned-authorities.yml\`),
+          which runs weekly and reports rather than gates. This issue is UPDATED in place on each
+          run, so its body is always the latest reading. Close it when the pins are re-examined —
+          it will reopen as a new issue if drift is still present at the next run._"
 
           existing="$(gh issue list --state open --search "in:title \"${TITLE}\"" \
             --json number,title \
