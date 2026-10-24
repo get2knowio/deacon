@@ -30,6 +30,18 @@ fn is_docker_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Removes everything `up` created for a workspace, on drop: `down --all --force`.
+struct RemoveOnDrop(std::path::PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = support::deacon_command()
+            .args(["down", "--all", "--force", "--workspace-folder"])
+            .arg(&self.0)
+            .output();
+    }
+}
+
 /// Test down command before any up: should succeed or gracefully handle "no container"
 #[test]
 fn test_down_before_up() {
@@ -81,6 +93,10 @@ fn test_down_after_up_idempotent() {
         return;
     }
     let temp_dir = TempDir::new().unwrap();
+    // Plain `down` STOPS (the default `shutdownAction`), so nothing in this test removes
+    // the container; without this every run left one behind. Declared after `temp_dir`
+    // so it drops first, while the configuration `down` reads still exists.
+    let _cleanup = RemoveOnDrop(temp_dir.path().to_path_buf());
 
     // Create minimal devcontainer.json
     let devcontainer_config = r#"{
@@ -476,22 +492,33 @@ fn test_down_all_tears_down_the_compose_project() {
         String::from_utf8_lossy(&up.stderr)
     );
 
+    // Read the label through `inspect` with `index`: `ps --format '{{.Label "…"}}'` is a
+    // Docker-only template method and prints nothing under Podman.
     let project = {
-        let out = std::process::Command::new(runtime_bin())
-            .args(["ps", "-a", "--filter"])
+        let ids = std::process::Command::new(runtime_bin())
+            .args(["ps", "-a", "-q", "--filter"])
             .arg(format!(
                 "label=devcontainer.local_folder={}",
                 workspace.display()
             ))
-            .args(["--format", "{{.Label \"com.docker.compose.project\"}}"])
             .output()
             .unwrap();
-        String::from_utf8_lossy(&out.stdout)
+        let id = String::from_utf8_lossy(&ids.stdout)
             .lines()
             .next()
             .unwrap_or_default()
             .trim()
-            .to_string()
+            .to_string();
+        let out = std::process::Command::new(runtime_bin())
+            .args([
+                "inspect",
+                "--format",
+                "{{index .Config.Labels \"com.docker.compose.project\"}}",
+                &id,
+            ])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
     let _guard = ComposeProjectGuard(project.clone());
     assert!(
