@@ -53,7 +53,7 @@ Prior report (1.12.0 → 1.13.0)
 ### I. Spec‑Parity as Source of Truth
 Deacon MUST implement behavior consistent with the upstream [devcontainers/spec](https://github.com/devcontainers/spec)
 repository and the local CLI specification in `docs/subcommand-specs/*/SPEC.md`. The upstream spec (currently at commit
-`113500f4`, October 2025) defines canonical behavior for all DevContainer properties, lifecycle commands, variable
+`c95ffeed`, March 2026) defines canonical behavior for all DevContainer properties, lifecycle commands, variable
 substitution, and property merge rules. When the local CLI-SPEC.md and upstream spec conflict, the upstream spec wins.
 Terminology (feature, template, lifecycle, workspace, container environment, variable substitution) MUST be preserved.
 Any requested change conflicting with the spec requires explicit clarification and spec updates before implementation;

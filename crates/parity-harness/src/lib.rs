@@ -371,7 +371,7 @@ pub fn workspace_root() -> PathBuf {
 
 /// The vendored upstream spec revision these scenarios are pinned to. Bumped only on a
 /// conscious re-vendoring.
-pub const CURRENT_SPEC_PIN: &str = "113500f4";
+pub const CURRENT_SPEC_PIN: &str = "c95ffeed";
 
 /// The parity data root: `<workspace_root>/parity`. Scenario records live under
 /// `cases/`, their inputs under `fixtures/`, the tolerated differences in

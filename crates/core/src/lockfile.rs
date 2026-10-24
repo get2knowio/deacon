@@ -664,7 +664,7 @@ fn detect_dependency_cycles(lockfile: &Lockfile) -> Result<()> {
 ///
 /// 1. **Entry keys are `version, resolved, integrity, dependsOn`** — the order
 ///    the reference builds its entry object literal in, and the order every
-///    example in `parity/spec/113500f4/devcontainer-lockfile.md` uses. This is
+///    example in `parity/spec/c95ffeed/devcontainer-lockfile.md` uses. This is
 ///    simply `LockfileFeature`'s declaration order, preserved because
 ///    `serde_json` is built with `preserve_order`. Do NOT re-sort it: writing
 ///    the keys alphabetically is what made deacon reject every lockfile the

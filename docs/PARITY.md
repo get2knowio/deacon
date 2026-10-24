@@ -25,7 +25,7 @@ deleted.
 ## Two authorities, and why both
 
 **The spec.** [containers.dev](https://containers.dev) defines what a devcontainer tool
-must do. It is pinned at commit `113500f4`, so "the spec" means one exact document rather
+must do. It is pinned at commit `c95ffeed`, so "the spec" means one exact document rather
 than a moving target.
 
 **The reference.** [`@devcontainers/cli`](https://github.com/devcontainers/cli), pinned at
@@ -160,7 +160,7 @@ Four rules travel with it:
 | `parity/fixtures/fx-*/` | one directory per fixture id, 1:1 with case references |
 | `parity/ALLOWLIST.json` | every tolerated difference's identity and its reasoning |
 | `parity/oracle.json` | the oracle pin, `include_str!`-embedded at compile time |
-| `parity/spec/113500f4/` | the vendored upstream spec revision the scenarios are pinned to |
+| `parity/spec/c95ffeed/` | the vendored upstream spec revision the scenarios are pinned to |
 | `parity/SPEC_STATUS.md` | the hand-maintained answer to "does deacon behave like the CLI?" |
 | `crates/parity-harness/` | the runner. Dev-only; not a dependency of the shipped binary |
 
