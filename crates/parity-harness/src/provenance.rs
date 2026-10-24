@@ -65,7 +65,7 @@ pub const NORMALIZER_VERSION: &str = "8";
 pub struct Provenance {
     /// Pinned `@devcontainers/cli` version (verified via `oracle.rs` at record time).
     pub oracle_version: String,
-    /// Pinned spec/source revision (e.g. `113500f4`).
+    /// Pinned spec/source revision (e.g. `c95ffeed`).
     pub source_revision: String,
     /// The case hash over behavior-affecting inputs (`case_hash`).
     pub case_hash: String,

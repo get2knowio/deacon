@@ -326,7 +326,7 @@ impl Mount {
         // Source rules follow Docker's `--mount` flag, which the spec defers to
         // verbatim ("Each value is a string that accepts the same values as the
         // Docker CLI `--mount` flag" —
-        // `parity/spec/113500f4/devcontainerjson-reference.md:27`):
+        // `parity/spec/c95ffeed/devcontainerjson-reference.md:27`):
         //
         // - `bind` genuinely requires a source: there is no host path to bind
         //   without one.

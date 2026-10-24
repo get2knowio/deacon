@@ -11,7 +11,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 **Workspace Structure:**
 - `crates/deacon/` - CLI binary crate (argument parsing, command orchestration, UI)
 - `crates/core/` - Core library with domain logic (config parsing, container runtime, OCI registry, features/templates)
-- upstream [devcontainers/spec](https://github.com/devcontainers/spec) (pinned commit `113500f4`) - authoritative CLI behavior; `parity/` holds the scenarios, fixtures and allowlist that record deacon's conformance against it (see the Differential Parity Suite section)
+- upstream [devcontainers/spec](https://github.com/devcontainers/spec) (pinned commit `c95ffeed`) - authoritative CLI behavior; `parity/` holds the scenarios, fixtures and allowlist that record deacon's conformance against it (see the Differential Parity Suite section)
 - `.specify/memory/constitution.md` - Development constitution defining principles and constraints
 - `examples/` - Executable examples with `exec.sh` scripts demonstrating features
 
@@ -26,7 +26,7 @@ Deacon is a Rust implementation of the Development Containers CLI, following the
 ## Critical Development Principles
 
 **1. Spec-Parity as Source of Truth**
-- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `113500f4`, **2025-08-01** — not October 2025, as this line said until the date was checked against the commit) — the single source of truth. Deacon's conformance against it, including every characterized divergence, is recorded in the repository-owned `parity/` data root (see the Differential Parity Suite section), not in prose.
+- ALL behavior MUST align with the upstream [devcontainers/spec](https://github.com/devcontainers/spec) repository (commit `c95ffeed`, **2026-03-20**; re-pinned from `113500f4` (2025-08-01), whose only delta was the non-normative `supporting-tools.md` editor listing) — the single source of truth. Deacon's conformance against it, including every characterized divergence, is recorded in the repository-owned `parity/` data root (see the Differential Parity Suite section), not in prose.
 - Data structures MUST match spec shapes exactly (map vs vec, field ordering, null handling)
 - Configuration resolution MUST use full extends chains via `ConfigLoader::load_with_extends`
 - Never implement shortcuts that deviate from spec-defined algorithms
@@ -184,7 +184,7 @@ Pattern axes worth re-running periodically:
 - Config-relative vs workspace-relative paths: BOTH `dockerComposeFile` and local feature
   paths (`./…`) resolve against the **config dir** (`config_path.parent()` or
   `<workspace>/.devcontainer`) — the spec says `dockerComposeFile` is "relative to the
-  `devcontainer.json` file" (`parity/spec/113500f4/devcontainerjson-reference.md:56`), so
+  `devcontainer.json` file" (`parity/spec/c95ffeed/devcontainerjson-reference.md:56`), so
   for the standard layout it is the `.devcontainer` dir, NOT the workspace folder
   (`ComposeManager::create_project`, which cites the spec). What IS workspace-relative on
   that same path: the compose project name and working dir, both derived from `base_path`.
@@ -521,7 +521,7 @@ passing one until you take the input away.
   names one opaque blob, not one field: `compare.rs::diff_paths` diffs arrays wholesale, so
   filling the fields an issue happens to name can turn *zero* cases green.
 - **A "deacon follows the spec, the CLI deviates" row is only as good as the spec text
-  behind it.** Grep `parity/spec/113500f4/` before trusting one — on a spec-silent output
+  behind it.** Grep `parity/spec/c95ffeed/` before trusting one — on a spec-silent output
   surface the reference is the authority, and the difference is deacon's.
 - **Case data can be environment-pinned** (host OS, Docker capabilities, uid assumptions,
   image pulls). The first run on a new substrate is a measurement, not a regression.

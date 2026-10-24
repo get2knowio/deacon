@@ -69,7 +69,7 @@ The `crates/core/src/` module set is comprehensive: `config`, `features`, `conta
 
 **The headline:** between our pin `113500f4` (2025-08-01 — note `CLAUDE.md` records "October 2025"; the SHA is actually August) and spec HEAD `c95ffee` (May 2026), every merged commit is doc/typo/formatting. **No new fields, no new behaviors, no new contracts.** Our pin is current.
 
-**Action:** Update `CLAUDE.md` line 6 to read `113500f4` (Aug 2025) — or move the pin to spec HEAD now (no behavioral consequence). Either way, fix the date.
+**Action:** ~~Fix the pin date or move the pin to spec HEAD.~~ Done: the pin moved to `c95ffeed` (2026-03-20); CLAUDE.md and the constitution carry the corrected date.
 
 **Open proposals to watch (not 1.0 blockers):**
 - [spec#22](https://github.com/devcontainers/spec/issues/22) `extends` finalization — we already support it.
