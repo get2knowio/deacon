@@ -20,7 +20,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-jsonc-parser = { version = "0.33", default-features = false, features = ["preserve_order"] }
+jsonc-parser = { version = "0.34", default-features = false, features = ["preserve_order"] }
 regex.workspace = true
 tokio.workspace = true
 once_cell.workspace = true
@@ -35,7 +35,7 @@ indexmap = { version = "2.0", features = ["serde"] }
 shell-words.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
-zip = "2.1"
+zip.workspace = true
 fastrand = "2.3.0"
 # `simd-unsafe` is default-ON from 0.23 and is the only feature that introduces
 # `unsafe` in base64; without it the crate is `#![forbid(unsafe_code)]`. This

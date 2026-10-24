@@ -113,7 +113,7 @@ fn test_doctor_bundle_contains_enhanced_details() {
 
     // Check that new files exist in the bundle
     let file_names: Vec<String> = (0..archive.len())
-        .map(|i| archive.by_index(i).unwrap().name().to_string())
+        .map(|i| archive.by_index(i).unwrap().name().unwrap().to_string())
         .collect();
 
     assert!(
