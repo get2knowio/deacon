@@ -215,6 +215,12 @@ async fn execute_down_all(
     // the end only if a container genuinely survived. Errors that just mean
     // "the container is already gone" (e.g. a `--rm` container auto-removed
     // on stop, or a concurrent removal) are treated as success.
+    let tearing_down = args.remove || args.force || args.volumes;
+    let compose_projects = if tearing_down {
+        compose_projects_of(&docker, &containers).await
+    } else {
+        Vec::new()
+    };
     let mut failures = 0usize;
     for container in containers {
         debug!("Processing container: {}", container.id);
@@ -266,6 +272,21 @@ async fn execute_down_all(
         }
     }
 
+    // Removing a Compose service's container one `docker rm` at a time leaves the
+    // PROJECT behind: its network, its named volumes, and any sidecar service, which
+    // carries no `devcontainer.local_folder` label and so was never in the sweep. Each
+    // surviving network holds an address pool, and enough of them exhaust the daemon
+    // (`all predefined address pools have been fully subnetted`). Tear each project
+    // down as a project, the way the non-`--all` path does.
+    if tearing_down {
+        for project in &compose_projects {
+            if let Err(e) = compose_down_by_name(docker.runtime_path(), project, args).await {
+                warn!("Failed to tear down compose project {}: {}", project, e);
+                failures += 1;
+            }
+        }
+    }
+
     if failures > 0 {
         anyhow::bail!("{} container(s) could not be torn down by --all", failures);
     }
@@ -281,6 +302,61 @@ async fn execute_down_all(
     }
 
     info!("All matching containers processed successfully");
+    Ok(())
+}
+
+/// The label Compose stamps on every container it creates, naming its project.
+const COMPOSE_PROJECT_LABEL: &str = "com.docker.compose.project";
+
+/// The distinct Compose projects the swept containers belong to, in a stable order.
+///
+/// Read through `inspect`, not from the listing: `ps --format json` reports labels as
+/// one comma-joined string that cannot be split safely (`devcontainer.metadata` alone
+/// is JSON full of commas), so `list_containers` leaves `labels` empty. Called BEFORE
+/// the sweep, while the containers still exist to be inspected.
+async fn compose_projects_of(
+    docker: &CliDocker,
+    containers: &[deacon_core::docker::ContainerInfo],
+) -> Vec<String> {
+    let mut labels = Vec::with_capacity(containers.len());
+    for container in containers {
+        match docker.inspect_container(&container.id).await {
+            Ok(Some(info)) => labels.push(info.labels),
+            Ok(None) => {}
+            Err(e) => warn!(
+                container_id = %container.id,
+                error = %e,
+                "could not inspect container for its compose project; its project network may survive down --all"
+            ),
+        }
+    }
+    distinct_compose_projects(&labels)
+}
+
+fn distinct_compose_projects(labels: &[std::collections::HashMap<String, String>]) -> Vec<String> {
+    let projects: std::collections::BTreeSet<&String> = labels
+        .iter()
+        .filter_map(|l| l.get(COMPOSE_PROJECT_LABEL))
+        .filter(|p| !p.is_empty())
+        .collect();
+    projects.into_iter().cloned().collect()
+}
+
+/// `docker compose -p <project> down`, by name alone.
+///
+/// `--all` reaches a project through a container label, not through saved state, so
+/// there is no compose file to hand Compose — and none is needed: Compose resolves a
+/// project's resources by their labels. It runs from an empty directory so that a
+/// compose file which happens to sit in the working directory cannot be loaded and
+/// widen the teardown to resources that are not this project's.
+async fn compose_down_by_name(docker_path: &str, project: &str, args: &DownArgs) -> Result<()> {
+    let scratch = tempfile::tempdir()?;
+    let command =
+        deacon_core::compose::ComposeCommand::new(scratch.path().to_path_buf(), Vec::new())
+            .with_docker_path(docker_path.to_string())
+            .with_project_name(project.to_string());
+    let flags: &[&str] = if args.volumes { &["--volumes"] } else { &[] };
+    command.down_with_flags(flags).await?;
     Ok(())
 }
 
@@ -734,5 +810,19 @@ mod tests {
         };
 
         assert!(!should_remove_container(&config, &container_state));
+    }
+
+    #[test]
+    fn distinct_compose_projects_dedupes_and_skips_non_compose_containers() {
+        use std::collections::HashMap;
+        let label = |p: &str| HashMap::from([(COMPOSE_PROJECT_LABEL.to_string(), p.to_string())]);
+        let labels = vec![
+            label("proj_b"),
+            label("proj_a"),
+            label("proj_b"),
+            label(""),
+            HashMap::from([("devcontainer.local_folder".to_string(), "/ws".to_string())]),
+        ];
+        assert_eq!(distinct_compose_projects(&labels), vec!["proj_a", "proj_b"]);
     }
 }

@@ -418,3 +418,128 @@ fn down_wins_a_race_with_a_concurrent_removal() {
         );
     }
 }
+
+/// Tears a Compose project down by name on drop, so a failing assertion below cannot
+/// leave the very resources the test is about behind.
+struct ComposeProjectGuard(String);
+
+impl Drop for ComposeProjectGuard {
+    fn drop(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        let scratch = TempDir::new().unwrap();
+        let _ = std::process::Command::new(runtime_bin())
+            .current_dir(scratch.path())
+            .args(["compose", "-p", &self.0, "down", "--volumes"])
+            .output();
+    }
+}
+
+/// `down --all` on a Compose workspace tears down the PROJECT, not only the container
+/// carrying the workspace label. It used to `docker rm` each labelled container and stop:
+/// the project network, its named volumes and every sidecar service — which carries no
+/// `devcontainer.local_folder` label, so was never in the sweep — all survived. Leaked
+/// networks each hold an address pool, and enough of them exhaust the daemon
+/// (`all predefined address pools have been fully subnetted`). Asserts ABSENCE of each
+/// resource kind, never the exit code: the defect exited 0.
+#[test]
+fn test_down_all_tears_down_the_compose_project() {
+    if !is_docker_available() {
+        eprintln!("Skipping test_down_all_tears_down_the_compose_project: Docker not available");
+        return;
+    }
+    let temp_dir = TempDir::new().unwrap();
+    let workspace = temp_dir.path().canonicalize().unwrap();
+    let dc = workspace.join(".devcontainer");
+    fs::create_dir(&dc).unwrap();
+    fs::write(
+        dc.join("devcontainer.json"),
+        r#"{ "dockerComposeFile": "docker-compose.yml", "service": "app", "workspaceFolder": "/workspace" }"#,
+    )
+    .unwrap();
+    fs::write(
+        dc.join("docker-compose.yml"),
+        "services:\n  app:\n    image: alpine:3.19\n    command: sleep infinity\n  db:\n    image: alpine:3.19\n    command: sleep infinity\n    volumes: [data:/data]\nvolumes:\n  data: {}\n",
+    )
+    .unwrap();
+
+    let up = support::deacon_command()
+        .args(["up", "--skip-post-create", "--skip-non-blocking-commands"])
+        .arg("--workspace-folder")
+        .arg(&workspace)
+        .output()
+        .unwrap();
+    assert!(
+        up.status.success(),
+        "Up failed: {}",
+        String::from_utf8_lossy(&up.stderr)
+    );
+
+    let project = {
+        let out = std::process::Command::new(runtime_bin())
+            .args(["ps", "-a", "--filter"])
+            .arg(format!(
+                "label=devcontainer.local_folder={}",
+                workspace.display()
+            ))
+            .args(["--format", "{{.Label \"com.docker.compose.project\"}}"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+    let _guard = ComposeProjectGuard(project.clone());
+    assert!(
+        !project.is_empty(),
+        "the service container names no compose project"
+    );
+
+    let count = |kind: &str| -> usize {
+        let mut cmd = std::process::Command::new(runtime_bin());
+        match kind {
+            "container" => cmd.args(["ps", "-a"]),
+            other => cmd.args([other, "ls"]),
+        };
+        let out = cmd
+            .args(["-q", "--filter"])
+            .arg(format!("label=com.docker.compose.project={project}"))
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count()
+    };
+    // The premise: both services, the project network and the named volume exist.
+    assert_eq!(count("container"), 2, "expected the app and db services");
+    assert_eq!(count("network"), 1, "expected the project network");
+    assert_eq!(count("volume"), 1, "expected the named volume");
+
+    let down = support::deacon_command()
+        .args(["down", "--all", "--force", "--volumes"])
+        .arg("--workspace-folder")
+        .arg(&workspace)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&down.stderr);
+    assert_eq!(
+        count("container"),
+        0,
+        "a service survived down --all: {stderr}"
+    );
+    assert_eq!(
+        count("network"),
+        0,
+        "the project network survived down --all: {stderr}"
+    );
+    assert_eq!(
+        count("volume"),
+        0,
+        "the named volume survived down --all --volumes: {stderr}"
+    );
+}

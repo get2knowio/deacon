@@ -11,6 +11,12 @@ use deacon_core::errors::{ConfigError, DeaconError};
 use std::fs;
 use tempfile::TempDir;
 
+/// A container runtime that does not exist. Every `up` here asserts on a decision made
+/// BEFORE the runtime is reached (the advisory `hostRequirements` check); naming an unusable one stops `up` at
+/// its runtime check, so no test starts a container it never removes. Pointing at the
+/// default `docker` instead leaked one container per test on every machine with a daemon.
+const NO_RUNTIME: &str = "/nonexistent/deacon-test-runtime/docker";
+
 /// Create a test devcontainer.json with host requirements
 fn create_test_devcontainer_with_requirements(
     temp_dir: &TempDir,
@@ -48,6 +54,7 @@ async fn test_host_requirements_validation_passes_with_reasonable_requirements()
         skip_post_create: true,
         skip_non_blocking_commands: true,
         mount_workspace_git_root: false,
+        docker_path: NO_RUNTIME.to_string(),
         workspace_folder: Some(temp_dir.path().to_path_buf()),
         ..Default::default()
     };
@@ -92,6 +99,7 @@ async fn test_host_requirements_unmet_warns_and_proceeds() {
         skip_post_create: true,
         skip_non_blocking_commands: true,
         mount_workspace_git_root: false,
+        docker_path: NO_RUNTIME.to_string(),
         workspace_folder: Some(temp_dir.path().to_path_buf()),
         ..Default::default()
     };
@@ -135,6 +143,7 @@ async fn test_host_requirements_ignored_with_flag() {
         skip_post_create: true,
         skip_non_blocking_commands: true,
         mount_workspace_git_root: false,
+        docker_path: NO_RUNTIME.to_string(),
         workspace_folder: Some(temp_dir.path().to_path_buf()),
         ignore_host_requirements: true,
         ..Default::default()

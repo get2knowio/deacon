@@ -6,6 +6,12 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+/// A container runtime that does not exist. Every `up` here asserts on a decision made
+/// BEFORE the runtime is reached (parsing and merging `--additional-features`); naming an unusable one stops `up` at
+/// its runtime check, so no test starts a container it never removes. Pointing at the
+/// default `docker` instead leaked one container per test on every machine with a daemon.
+const NO_RUNTIME: &str = "/nonexistent/deacon-test-runtime/docker";
+
 #[test]
 fn test_help_shows_additional_features_flags() {
     let mut cmd = Command::cargo_bin("deacon").unwrap();
@@ -46,6 +52,7 @@ fn test_invalid_additional_features_json() {
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(temp_dir.path())
         .arg("--additional-features")
@@ -80,6 +87,7 @@ fn test_invalid_feature_install_order() {
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(temp_dir.path())
         .arg("--feature-install-order")
@@ -105,6 +113,7 @@ fn test_additional_features_with_invalid_type() {
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(temp_dir.path())
         .arg("--additional-features")
@@ -130,6 +139,7 @@ fn test_additional_features_array_not_object() {
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(temp_dir.path())
         .arg("--additional-features")
@@ -155,6 +165,7 @@ fn test_empty_feature_install_order() {
 
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(temp_dir.path())
         .arg("--feature-install-order")
@@ -192,6 +203,7 @@ fn test_feature_merging_integration() {
     // Test 1: Additional features without conflicts (should succeed)
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(temp_dir.path())
         .arg("--additional-features")
@@ -233,6 +245,7 @@ fn test_feature_install_order_override() {
     // Test with custom install order
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(temp_dir.path())
         .arg("--feature-install-order")
@@ -268,6 +281,7 @@ fn test_cli_features_precedence() {
     // Test with CLI features overriding config features
     let mut cmd = Command::cargo_bin("deacon").unwrap();
     cmd.arg("up")
+        .args(["--docker-path", NO_RUNTIME])
         .arg("--workspace-folder")
         .arg(temp_dir.path())
         .arg("--additional-features")
