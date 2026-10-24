@@ -164,6 +164,70 @@
       "notes": "Ports the `container-id` half of `parity_up_exec` and gives `bhv-exec-container-id-metadata` an INDEPENDENTLY REPORTED case — the thing its behavior record said was deferred (T110) because the declarative model had no way to name a container created mid-case. `${CONTAINER_ID}` is that way: the runner substitutes the id observed after `op-up`, and fails loud if an operation uses the token before any container exists, so the case cannot silently degrade into a workspace-addressed exec. The claim is #322: `exec --container-id` with NO `--workspace-folder` and NO `--config` has only the container to work from, so `remoteEnv` — which lives solely in devcontainer.json and is never baked into the image — is recoverable only if `up` stamped it into the `devcontainer.metadata` label and `exec` read it back. `FROM_CONTAINER_ENV` is asserted alongside it as the control: it reaches the process through the container's own environment either way, so a run where the metadata path is broken prints `remote=[] env=[baked-into-the-container]` rather than failing outright, and asserting only the exit code would call that a pass. Image pinned to alpine:3.19 (V18)."
     },
     {
+      "id": "case-exec-container-id-label-substitution",
+      "behaviors": [
+        "bhv-exec-container-id-label-substitution"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}"
+          ],
+          "fixtures": [
+            "fx-exec-container-id-label-substitution"
+          ],
+          "env": {
+            "PARITY_HOST_VALUE": "from-the-up-host"
+          }
+        },
+        {
+          "id": "op-exec-by-container",
+          "subcommand": "exec",
+          "argv": [
+            "--container-id",
+            "${CONTAINER_ID}",
+            "--",
+            "sh",
+            "-c",
+            "printf 'LENV=[%s] LWF=[%s] LWFB=[%s] DID=[%s]\\n' \"$LENV\" \"$LWF\" \"$LWFB\" \"$DID\""
+          ],
+          "env": {
+            "PARITY_HOST_VALUE": "from-the-exec-host"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-exec-by-container",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-stdout",
+          "operation": "op-exec-by-container",
+          "assertion": {
+            "contains": "LENV=[from-the-exec-host] LWF=[${localWorkspaceFolder}] LWFB=[${localWorkspaceFolderBasename}] DID=[${devcontainerId}]"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "#751. `devcontainer.metadata` records the AUTHORED configuration, templates intact, because the spec substitutes \"at the time the value is applied\" (`parity/spec/c95ffeed/image-metadata.md:79`) — so `exec --container-id`, with no `--workspace-folder` and no `--config`, is where they are applied, and the host environment is all it has to apply them with. `${localEnv:*}` resolves; `${localWorkspaceFolder}`, `${localWorkspaceFolderBasename}` and `${devcontainerId}` stay LITERAL because the invocation names no workspace. deacon used to do the opposite on both halves — blank the host value and substitute the directory it was RUN from, an unrelated path on the operator's machine. `PARITY_HOST_VALUE` differs between `op-up` and `op-exec-by-container` on purpose: a CLI that baked the value in at stamp time would print `from-the-up-host`, so the assertion pins WHEN the substitution happens, not only that it does. Image pinned to alpine:3.19 (V18)."
+    },
+    {
       "id": "case-exec-decl-tty",
       "behaviors": [
         "bhv-exec-command-parity"
