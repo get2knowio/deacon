@@ -2442,6 +2442,22 @@ impl ConfigMerger {
         image_labels: Option<&HashMap<String, String>>,
         workspace: &std::path::Path,
     ) -> Result<(DevContainerConfig, crate::variable::SubstitutionReport)> {
+        let context = SubstitutionContext::new(workspace)?;
+        Ok(Self::resolve_effective_config_with_context(
+            config,
+            image_labels,
+            &context,
+        ))
+    }
+
+    /// [`Self::resolve_effective_config`] against a caller-built context, for a caller
+    /// that has no workspace to anchor one at (`run-user-commands --container-id`, #765)
+    /// and so builds it with [`SubstitutionContext::without_workspace`].
+    pub fn resolve_effective_config_with_context(
+        config: &DevContainerConfig,
+        image_labels: Option<&HashMap<String, String>>,
+        context: &SubstitutionContext,
+    ) -> (DevContainerConfig, crate::variable::SubstitutionReport) {
         // Start with a clone of the base config
         let mut resolved = config.clone();
 
@@ -2465,18 +2481,17 @@ impl ConfigMerger {
         }
 
         // Apply variable substitution to a selection of string fields
-        let context = SubstitutionContext::new(workspace)?;
         let mut report = SubstitutionReport::new();
 
         // Substitute workspace_folder if present
         if let Some(ref wf) = resolved.workspace_folder {
-            let s = VariableSubstitution::substitute_string(wf, &context, &mut report);
+            let s = VariableSubstitution::substitute_string(wf, context, &mut report);
             resolved.workspace_folder = Some(s);
         }
 
         // Substitute workspace_mount if present
         if let Some(ref wm) = resolved.workspace_mount {
-            let s = VariableSubstitution::substitute_string(wm, &context, &mut report);
+            let s = VariableSubstitution::substitute_string(wm, context, &mut report);
             resolved.workspace_mount = Some(s);
         }
 
@@ -2486,7 +2501,7 @@ impl ConfigMerger {
             for (k, v_opt) in remote_env {
                 match v_opt {
                     Some(v) => {
-                        let sub = VariableSubstitution::substitute_string(v, &context, &mut report);
+                        let sub = VariableSubstitution::substitute_string(v, context, &mut report);
                         substituted_remote.insert(k.clone(), Some(sub));
                     }
                     None => {
@@ -2498,7 +2513,7 @@ impl ConfigMerger {
             resolved.remote_env = Some(substituted_remote);
         }
 
-        Ok((resolved, report))
+        (resolved, report)
     }
 
     /// Merge port attributes maps with overlay taking precedence
