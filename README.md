@@ -332,6 +332,15 @@ deacon --runtime podman up
 DEACON_CONTAINER_RUNTIME=podman deacon up
 ```
 
+**Without an explicit choice, deacon uses what is installed.** If you pass no
+`--runtime`, set no `DEACON_CONTAINER_RUNTIME`, and leave `--docker-path` at its
+default, deacon runs `docker` — unless there is no `docker` on your `PATH` and
+there is a `podman`, in which case it runs podman (logged at `info`, visible with
+`-v`; `deacon doctor` reports the runtime it picked). Only a *missing* `docker`
+binary triggers this: a `docker` that is installed but not running is reported as
+such rather than silently swapped for podman. The reference CLI has no
+equivalent and fails on a podman-only host.
+
 ## Runtime Configuration
 
 ### Logging

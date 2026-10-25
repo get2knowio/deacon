@@ -472,8 +472,13 @@ async fn collect_diagnostics(context: &DoctorContext) -> Result<DoctorInfo> {
     // `create_runtime(...).cli_docker()` reuses the single kind → binary
     // mapping that `runtime.rs` already owns, rather than restringing
     // "docker"/"podman" here.
-    let runtime_kind = RuntimeFactory::detect_runtime(context.runtime);
-    let runtime_cli = RuntimeFactory::create_runtime(runtime_kind)?.cli_docker();
+    // `doctor` has no `--docker-path`, so it resolves the default binary — through the
+    // SAME decision every other command makes, so a podman-only host is reported as the
+    // podman host the other commands will treat it as.
+    let (runtime_kind, runtime_binary) =
+        RuntimeFactory::resolve(context.runtime, crate::runtime::DEFAULT_DOCKER_PATH).await;
+    let runtime_cli =
+        RuntimeFactory::create_runtime_with_path(runtime_kind, &runtime_binary).cli_docker();
     let runtime_path = runtime_cli.runtime_path();
 
     let cli_version = crate::version().to_string();

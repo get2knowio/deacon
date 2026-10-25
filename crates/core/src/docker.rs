@@ -925,6 +925,14 @@ impl CliRuntime {
         self.flavor == RuntimeFlavor::Podman
     }
 
+    /// The error for a runtime binary that could not be run, naming this runtime.
+    fn not_installed(&self) -> DockerError {
+        DockerError::NotInstalled {
+            runtime: if self.is_podman() { "Podman" } else { "Docker" }.to_string(),
+            binary: self.runtime_path.clone(),
+        }
+    }
+
     /// The runtime CLI binary path (e.g. "docker" or "podman").
     /// Build the throwaway image that carries Feature content for a builder with
     /// no BuildKit build contexts, and return the tag it was given.
@@ -1277,7 +1285,7 @@ impl CliRuntime {
             }
             Err(e) => {
                 debug!("Container runtime binary not found: {}", e);
-                Err(DockerError::NotInstalled.into())
+                Err(self.not_installed().into())
             }
         }
     }
@@ -1631,7 +1639,7 @@ impl Docker for CliRuntime {
             }
             Err(e) => {
                 debug!("Runtime ping failed: {}", e);
-                Err(DockerError::NotInstalled.into())
+                Err(self.not_installed().into())
             }
         }
     }
@@ -3242,7 +3250,11 @@ pub mod mock {
 
             let config = self.config.lock().unwrap();
             if config.daemon_unavailable {
-                return Err(DockerError::NotInstalled.into());
+                return Err(DockerError::NotInstalled {
+                    runtime: "Docker".to_string(),
+                    binary: "docker".to_string(),
+                }
+                .into());
             }
 
             if config.ping_success {
@@ -3266,7 +3278,11 @@ pub mod mock {
 
             let config = self.config.lock().unwrap();
             if config.daemon_unavailable {
-                return Err(DockerError::NotInstalled.into());
+                return Err(DockerError::NotInstalled {
+                    runtime: "Docker".to_string(),
+                    binary: "docker".to_string(),
+                }
+                .into());
             }
 
             let containers = self.containers.lock().unwrap();
@@ -3294,7 +3310,11 @@ pub mod mock {
 
             let config = self.config.lock().unwrap();
             if config.daemon_unavailable {
-                return Err(DockerError::NotInstalled.into());
+                return Err(DockerError::NotInstalled {
+                    runtime: "Docker".to_string(),
+                    binary: "docker".to_string(),
+                }
+                .into());
             }
 
             let containers = self.containers.lock().unwrap();
@@ -3335,7 +3355,11 @@ pub mod mock {
             let response = {
                 let mock_config = self.config.lock().unwrap();
                 if mock_config.daemon_unavailable {
-                    return Err(DockerError::NotInstalled.into());
+                    return Err(DockerError::NotInstalled {
+                        runtime: "Docker".to_string(),
+                        binary: "docker".to_string(),
+                    }
+                    .into());
                 }
 
                 // Find appropriate response
@@ -3385,7 +3409,11 @@ pub mod mock {
 
             let config = self.config.lock().unwrap();
             if config.daemon_unavailable {
-                return Err(DockerError::NotInstalled.into());
+                return Err(DockerError::NotInstalled {
+                    runtime: "Docker".to_string(),
+                    binary: "docker".to_string(),
+                }
+                .into());
             }
 
             // Update container state to stopped
@@ -3449,7 +3477,11 @@ pub mod mock {
 
             let mock_config = self.config.lock().unwrap();
             if mock_config.daemon_unavailable {
-                return Err(DockerError::NotInstalled.into());
+                return Err(DockerError::NotInstalled {
+                    runtime: "Docker".to_string(),
+                    binary: "docker".to_string(),
+                }
+                .into());
             }
 
             // Generate a mock container ID
@@ -3481,7 +3513,11 @@ pub mod mock {
 
             let config = self.config.lock().unwrap();
             if config.daemon_unavailable {
-                return Err(DockerError::NotInstalled.into());
+                return Err(DockerError::NotInstalled {
+                    runtime: "Docker".to_string(),
+                    binary: "docker".to_string(),
+                }
+                .into());
             }
             let state_after_start = config.state_after_start.clone();
             let status_after_start = config.status_after_start.clone();
@@ -3511,7 +3547,11 @@ pub mod mock {
 
             let config = self.config.lock().unwrap();
             if config.daemon_unavailable {
-                return Err(DockerError::NotInstalled.into());
+                return Err(DockerError::NotInstalled {
+                    runtime: "Docker".to_string(),
+                    binary: "docker".to_string(),
+                }
+                .into());
             }
 
             // Remove container from mock list
@@ -3537,7 +3577,11 @@ pub mod mock {
 
             let config = self.config.lock().unwrap();
             if config.daemon_unavailable {
-                return Err(DockerError::NotInstalled.into());
+                return Err(DockerError::NotInstalled {
+                    runtime: "Docker".to_string(),
+                    binary: "docker".to_string(),
+                }
+                .into());
             }
 
             let containers = self.containers.lock().unwrap();
@@ -3561,7 +3605,11 @@ pub mod mock {
 
             let config = self.config.lock().unwrap();
             if config.daemon_unavailable {
-                return Err(DockerError::NotInstalled.into());
+                return Err(DockerError::NotInstalled {
+                    runtime: "Docker".to_string(),
+                    binary: "docker".to_string(),
+                }
+                .into());
             }
 
             let containers = self.containers.lock().unwrap();

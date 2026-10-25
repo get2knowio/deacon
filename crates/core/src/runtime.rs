@@ -9,7 +9,31 @@ use crate::docker::{
     CliRuntime, ContainerInfo, Docker, DockerLifecycle, ExecConfig, ExecResult, ImageInfo,
 };
 use crate::errors::{DeaconError, Result};
-use std::path::Path;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use tracing::info;
+
+/// `--docker-path`'s default.
+///
+/// It belongs to the DOCKER flavor and is not a choice the user made, which is what lets
+/// [`RuntimeFactory::resolve`] treat it as "nothing chosen". Telling an explicit
+/// `--docker-path docker` apart from the default would need clap's `ValueSource`; it is not
+/// worth it, because the two mean the same thing everywhere except the podman flavor, which
+/// is exactly the case [`binary_for`] repairs.
+pub const DEFAULT_DOCKER_PATH: &str = "docker";
+
+/// The binary to run for `kind`, given whatever `--docker-path` holds.
+///
+/// Handing the docker default to a podman-flavored runtime would run the `docker` binary
+/// with podman's argument construction, which is how a first cut of #692 broke
+/// `--runtime podman` on a host that has podman: it stopped running podman at all. So an
+/// explicit path always wins, and an untouched default resolves to the flavor's own name.
+pub fn binary_for(kind: RuntimeKind, docker_path: &str) -> &str {
+    match kind {
+        RuntimeKind::Podman if docker_path == DEFAULT_DOCKER_PATH => "podman",
+        _ => docker_path,
+    }
+}
 
 /// Container runtime abstraction that combines Docker and ContainerOps traits
 #[allow(async_fn_in_trait)]
@@ -117,6 +141,55 @@ impl RuntimeFactory {
         }
     }
 
+    /// Choose the runtime flavor AND the binary to run, in one decision.
+    ///
+    /// This is the selection every container-touching command and `doctor` make. On top of
+    /// [`detect_runtime_for_path`](Self::detect_runtime_for_path) it adds one rule the
+    /// reference does not have: **when the user chose nothing** (no `--runtime`, no
+    /// `DEACON_CONTAINER_RUNTIME`, `--docker-path` left at its default) **and there is no
+    /// `docker` on `PATH` but there is a `podman`, run podman.** The reference defaults to
+    /// `docker` and fails on such a host; a podman-only machine is common enough (Fedora,
+    /// RHEL, a Windows box with `podman machine` and no Docker Desktop) that failing there
+    /// helps nobody.
+    ///
+    /// Deliberately narrow:
+    /// - it reacts to the docker BINARY being absent, never to a docker that is present but
+    ///   unusable (daemon down, socket denied). Switching runtimes because Docker Desktop is
+    ///   not running would hide the problem the user needs to hear about.
+    /// - the lookup is a `PATH` walk on the filesystem, not a probe, so the case it applies
+    ///   to costs no process spawn at all.
+    /// - it is announced at `info` and shown by `doctor`; `--runtime` makes it explicit.
+    pub async fn resolve(
+        cli_runtime: Option<RuntimeKind>,
+        docker_path: &str,
+    ) -> (RuntimeKind, String) {
+        Self::resolve_with_search_path(
+            cli_runtime,
+            docker_path,
+            std::env::var_os("PATH").as_deref(),
+        )
+        .await
+    }
+
+    /// [`resolve`](Self::resolve) against an explicit search path, so the fallback is
+    /// testable without mutating the process environment.
+    async fn resolve_with_search_path(
+        cli_runtime: Option<RuntimeKind>,
+        docker_path: &str,
+        search_path: Option<&OsStr>,
+    ) -> (RuntimeKind, String) {
+        if let Some(podman) = podman_fallback(cli_runtime, docker_path, search_path).await {
+            info!(
+                "No `docker` on PATH; using podman ({}). Pass --runtime (or set \
+                 DEACON_CONTAINER_RUNTIME) to choose the runtime explicitly.",
+                podman.display()
+            );
+            return (RuntimeKind::Podman, "podman".to_string());
+        }
+        let kind = Self::detect_runtime_for_path(cli_runtime, docker_path).await;
+        (kind, binary_for(kind, docker_path).to_string())
+    }
+
     /// Create a runtime instance for `kind`, running `runtime_path` as its CLI.
     pub fn create_runtime_with_path(kind: RuntimeKind, runtime_path: &str) -> ContainerRuntimeImpl {
         match kind {
@@ -135,6 +208,64 @@ impl RuntimeFactory {
             RuntimeKind::Docker => Ok(ContainerRuntimeImpl::Docker(DockerRuntime::new())),
             RuntimeKind::Podman => Ok(ContainerRuntimeImpl::Podman(PodmanRuntime::new())),
         }
+    }
+}
+
+/// The podman binary [`RuntimeFactory::resolve`] falls back to, if the fallback applies.
+///
+/// Applies only when the user chose nothing and `docker` is absent from `search_path`
+/// while `podman` is present. Separate from `resolve` so every arm is testable without a
+/// probe spawning whatever `docker` the test host happens to have.
+async fn podman_fallback(
+    cli_runtime: Option<RuntimeKind>,
+    docker_path: &str,
+    search_path: Option<&OsStr>,
+) -> Option<PathBuf> {
+    if cli_runtime.is_some() || docker_path != DEFAULT_DOCKER_PATH {
+        return None;
+    }
+    if find_executable("docker", search_path).await.is_some() {
+        return None;
+    }
+    find_executable("podman", search_path).await
+}
+
+/// Find `name` the way spawning it by bare name would: the first match on `search_path`.
+///
+/// On Windows only `<name>.exe` is tried, because that is the only extension
+/// `std::process::Command` appends; finding a `docker.cmd` the spawn would never run would
+/// make the lookup disagree with what actually runs.
+async fn find_executable(name: &str, search_path: Option<&OsStr>) -> Option<PathBuf> {
+    for dir in std::env::split_paths(search_path?) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        #[cfg(windows)]
+        let candidate = dir.join(format!("{name}.exe"));
+        #[cfg(not(windows))]
+        let candidate = dir.join(name);
+        if is_executable_file(&candidate).await {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+async fn is_executable_file(path: &Path) -> bool {
+    let Ok(meta) = tokio::fs::metadata(path).await else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
     }
 }
 
@@ -730,6 +861,162 @@ impl ContainerRuntime for PodmanRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `--docker-path` defaults to the literal `"docker"`, and that default is the DOCKER
+    /// flavor's — not a choice the user made. A first cut of #692 handed it to
+    /// podman-flavored runtimes, so `--runtime podman` on a host WITH podman stopped
+    /// running podman at all and ran the docker binary with podman's argument
+    /// construction. CI caught it; this keeps it caught.
+    #[test]
+    fn podman_defaults_to_the_podman_binary_but_an_explicit_path_wins() {
+        assert_eq!(binary_for(RuntimeKind::Podman, "docker"), "podman");
+        assert_eq!(
+            binary_for(RuntimeKind::Podman, "/usr/local/bin/podman4"),
+            "/usr/local/bin/podman4"
+        );
+        // An explicit non-default path is honored even when it names docker.
+        assert_eq!(
+            binary_for(RuntimeKind::Podman, "/opt/docker"),
+            "/opt/docker"
+        );
+
+        // The docker flavor keeps whatever it was given, default included.
+        assert_eq!(binary_for(RuntimeKind::Docker, "docker"), "docker");
+        assert_eq!(
+            binary_for(RuntimeKind::Docker, "/opt/mydocker"),
+            "/opt/mydocker"
+        );
+    }
+
+    /// Put an executable named `name` (as a bare-name spawn would look for it) in `dir`.
+    fn place_executable(dir: &Path, name: &str) -> PathBuf {
+        #[cfg(windows)]
+        let path = dir.join(format!("{name}.exe"));
+        #[cfg(not(windows))]
+        let path = dir.join(name);
+        std::fs::write(&path, b"").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
+    }
+
+    fn search_path(dirs: &[&Path]) -> std::ffi::OsString {
+        std::env::join_paths(dirs).unwrap()
+    }
+
+    /// The lookup returns the FIRST match in PATH order, as a spawn would run it, and
+    /// passes over directories that do not have it.
+    #[tokio::test]
+    async fn find_executable_takes_the_first_match_in_path_order() {
+        let empty = tempfile::tempdir().unwrap();
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let expected = place_executable(first.path(), "podman");
+        place_executable(second.path(), "podman");
+
+        let path = search_path(&[empty.path(), first.path(), second.path()]);
+        assert_eq!(find_executable("podman", Some(&path)).await, Some(expected));
+        assert_eq!(find_executable("docker", Some(&path)).await, None);
+        assert_eq!(find_executable("podman", None).await, None);
+    }
+
+    /// A same-named DIRECTORY or a non-executable file is not something a spawn could
+    /// run, so it must not count as `docker` being present.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn find_executable_ignores_what_a_spawn_could_not_run() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("docker")).unwrap();
+        std::fs::write(dir.path().join("podman"), b"").unwrap(); // mode 0644
+
+        let path = search_path(&[dir.path()]);
+        assert_eq!(find_executable("docker", Some(&path)).await, None);
+        assert_eq!(find_executable("podman", Some(&path)).await, None);
+    }
+
+    /// The fallback fires on exactly one shape: nothing chosen, no docker, podman present.
+    #[tokio::test]
+    async fn podman_fallback_applies_only_when_nothing_was_chosen_and_docker_is_absent() {
+        let podman_only = tempfile::tempdir().unwrap();
+        let podman = place_executable(podman_only.path(), "podman");
+        let both = tempfile::tempdir().unwrap();
+        place_executable(both.path(), "docker");
+        place_executable(both.path(), "podman");
+        let neither = tempfile::tempdir().unwrap();
+
+        let podman_only = search_path(&[podman_only.path()]);
+        let both = search_path(&[both.path()]);
+        let neither = search_path(&[neither.path()]);
+
+        // The one shape it is for.
+        assert_eq!(
+            podman_fallback(None, DEFAULT_DOCKER_PATH, Some(&podman_only)).await,
+            Some(podman)
+        );
+
+        // docker present: the existing selection stands, shim detection included.
+        assert_eq!(
+            podman_fallback(None, DEFAULT_DOCKER_PATH, Some(&both)).await,
+            None
+        );
+        // Neither present: nothing to fall back to; the command reports docker missing.
+        assert_eq!(
+            podman_fallback(None, DEFAULT_DOCKER_PATH, Some(&neither)).await,
+            None
+        );
+        // An explicit flavor, either one, is never second-guessed.
+        assert_eq!(
+            podman_fallback(
+                Some(RuntimeKind::Docker),
+                DEFAULT_DOCKER_PATH,
+                Some(&podman_only)
+            )
+            .await,
+            None
+        );
+        assert_eq!(
+            podman_fallback(
+                Some(RuntimeKind::Podman),
+                DEFAULT_DOCKER_PATH,
+                Some(&podman_only)
+            )
+            .await,
+            None
+        );
+        // An explicit --docker-path is a choice too, even one that does not exist.
+        assert_eq!(
+            podman_fallback(None, "/opt/docker", Some(&podman_only)).await,
+            None
+        );
+    }
+
+    /// When the fallback applies, `resolve` hands back the podman FLAVOR and binary
+    /// together — a podman binary under the docker flavor's argument construction is the
+    /// #692 regression in another shape.
+    #[tokio::test]
+    async fn resolve_selects_podman_flavor_and_binary_together_on_a_podman_only_path() {
+        let dir = tempfile::tempdir().unwrap();
+        place_executable(dir.path(), "podman");
+        let path = search_path(&[dir.path()]);
+
+        assert_eq!(
+            RuntimeFactory::resolve_with_search_path(None, DEFAULT_DOCKER_PATH, Some(&path)).await,
+            (RuntimeKind::Podman, "podman".to_string())
+        );
+        // An explicit flavor goes straight through, with no probe and no lookup.
+        assert_eq!(
+            RuntimeFactory::resolve_with_search_path(
+                Some(RuntimeKind::Docker),
+                DEFAULT_DOCKER_PATH,
+                Some(&path)
+            )
+            .await,
+            (RuntimeKind::Docker, "docker".to_string())
+        );
+    }
 
     #[test]
     fn test_runtime_kind_from_str() {
