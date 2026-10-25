@@ -17,6 +17,9 @@ mod ui;
 /// large stack so behavior matches Unix on every platform.
 const STACK_SIZE: usize = 16 * 1024 * 1024;
 
+/// How long the runtime may wait for outstanding blocking work once the command is done.
+const RUNTIME_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 fn main() -> Result<()> {
     // Drive everything on a thread with a generous, platform-independent stack.
     let child = std::thread::Builder::new()
@@ -31,7 +34,15 @@ fn run() -> Result<()> {
         .enable_all()
         .thread_stack_size(STACK_SIZE) // worker threads, too
         .build()?;
-    runtime.block_on(async_main())
+    let result = runtime.block_on(async_main());
+    // Bound how long a finished command waits on leftover blocking work. Dropping the
+    // runtime waits for every blocking thread with no limit, and on Windows tokio reads
+    // child-process pipes on blocking threads. A pipe whose write end outlives the child we
+    // killed (a Chocolatey/Scoop shim's grandchild still streaming `podman events`) never
+    // returns EOF, so `up` printed its result and then never exited (#239). A timeout
+    // rather than `shutdown_background` so an in-flight `tokio::fs` write still finishes.
+    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
+    result
 }
 
 async fn async_main() -> Result<()> {

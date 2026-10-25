@@ -260,8 +260,8 @@ unchanged.
 
 | Limitation | Notes |
 |---|---|
-| **Podman runtime** | **Supported.** A required CI lane runs the integration suite against rootless Podman, and `up`/`exec`/`down`/`run-user-commands`/`set-up` handle Podman's image-ref qualification, `ps`-JSON shape, SELinux `label=disable`, and rootless `--userns=keep-id`. Remaining gap: **GPU passthrough is not wired for Podman** (`--gpu detect` cleanly reports no GPU; CDI/`--device` support is a follow-up). See [#30](https://github.com/get2knowio/deacon/issues/30). |
-| **`build` features** | Feature installation during `build` is supported for **Dockerfile-based** configs only. Compose-build and image-reference configs still error out with features (different integration patterns; tracked as a post-1.0 follow-up). |
+| **Podman runtime** | **Supported.** A required CI lane runs the integration suite against rootless Podman, and `up`/`exec`/`down`/`run-user-commands`/`set-up` handle Podman's image-ref qualification, `ps`-JSON shape, SELinux `label=disable`, and rootless `--userns=keep-id`. Remaining gaps: **GPU passthrough is not wired for Podman** (`--gpu detect` cleanly reports no GPU; CDI/`--device` support is a follow-up); `build --output type=docker`, `--output type=oci` and `--cache-to type=local` are rejected by Podman itself; and Compose configurations need a Podman API socket (see [Runtime Selection](#runtime-selection)). Windows + Podman is not yet verified in CI ([#239](https://github.com/get2knowio/deacon/issues/239)). See [#30](https://github.com/get2knowio/deacon/issues/30). |
+| **`build` on Compose configs** | Features install during `build` for every configuration shape — Dockerfile, image reference, and Compose. A Compose configuration does not accept `--push`, `--output`, `--cache-to` or `--platform`, and `build` fails fast when one is given. |
 
 For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md). Post-1.0 hardening landed in May 2026 — redaction wiring into the tracing pipeline, a [workspace-trust gate](#workspace-trust) for host-side lifecycle hooks, async I/O conversion across `crates/core`, typed errors throughout `crates/core`, and the `json5`→`jsonc-parser` migration (see closed [#52](https://github.com/get2knowio/deacon/issues/52)).
 
@@ -318,8 +318,23 @@ required CI lane that runs the integration suite against rootless Podman, and
 the consumer commands handle Podman's specifics automatically: local image-ref
 qualification (`localhost/…`), the `podman ps` JSON shape, SELinux relabeling
 (`--security-opt label=disable`), and rootless UID mapping (`--userns=keep-id`
-for non-root users). The one remaining gap is GPU passthrough, which is not yet
+for non-root users). The main functional gap is GPU passthrough, which is not yet
 wired for Podman (tracked in [#30](https://github.com/get2knowio/deacon/issues/30)).
+
+`--docker-path podman` selects Podman too: with no explicit `--runtime`, deacon
+detects the flavor from the binary, which is also how it recognizes a
+`podman-docker` shim installed as `docker`.
+
+**Compose configurations need Podman's API socket.** `podman compose` hands the
+work to a Compose provider (such as `docker-compose`), which talks to Podman over
+`$XDG_RUNTIME_DIR/podman/podman.sock`. If nothing is listening there, every
+Compose call fails with `Cannot connect to the Docker daemon`. Start it with
+`systemctl --user enable --now podman.socket`, or run
+`podman system service --time=0 &` for the session.
+
+**Podman's builder is not BuildKit.** `podman buildx` is an alias for
+`podman build`, so `build --output type=docker`, `--output type=oci` and
+`--cache-to type=local` are rejected by Podman's own parser.
 
 ```bash
 # Explicitly select Docker (optional, it's the default)
