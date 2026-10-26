@@ -37,6 +37,11 @@ jobs:
       # A fully-qualified ref sidesteps podman short-name resolution so the lane
       # measures the runtime/mount path, not image qualification.
       SMOKE_IMAGE: docker.io/library/alpine:3.18
+      # PINNED. An unpinned `choco install podman-cli` took whatever was newest
+      # (6.1.3 on one night, 6.1.4 the next), so a change in podman was
+      # indistinguishable from a change in deacon. The Linux lane learned the same
+      # lesson in #726. Bump deliberately.
+      PODMAN_CLI_VERSION: 6.1.4
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -85,7 +90,7 @@ jobs:
         $ErrorActionPreference = 'Continue'
         if (-not (Get-Command podman -ErrorAction SilentlyContinue)) {
           Write-Host "podman not on PATH; installing via Chocolatey"
-          choco install podman-cli -y --no-progress
+          choco install podman-cli --version $env:PODMAN_CLI_VERSION -y --no-progress
         } else {
           Write-Host "podman already present"
         }
@@ -147,6 +152,10 @@ jobs:
       id: e2e
       if: steps.smoke.outcome == 'success' && steps.build.outcome == 'success'
       continue-on-error: true
+      # Its own budget, well under the job's. `deacon up` once printed success and
+      # then never exited (#239), and with only the job timeout that read as a
+      # "cancelled" run rather than as this step failing.
+      timeout-minutes: 10
       shell: bash
       run: |
         set -x

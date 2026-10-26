@@ -83,23 +83,25 @@ fn test_runtime_selection_help_shows_options() -> Result<()> {
     Ok(())
 }
 
-// This test demonstrates that runtime selection works for up command specifically
-// We expect either success (if podman is installed) or a clear error about podman not being installed
+// `up` under podman reaches the runtime instead of a "not implemented" stub.
+//
+// Hermetic on purpose: `--docker-path` names a binary that does not exist, so the outcome
+// is the same on every host. This test used to run `up` against whatever podman the host
+// had and accept any stderr containing one of a few words. That made it flaky in the fast
+// lane (a broken rootless podman answers differently from run to run), and on a host
+// with a working podman it pulled a registry image in a lane that is meant to be offline.
 #[test]
 fn test_up_command_with_podman_runtime() -> Result<()> {
     use tempfile::TempDir;
 
-    // Create a temporary directory with a basic devcontainer.json
     let temp_dir = TempDir::new()?;
     let devcontainer_path = temp_dir
         .path()
         .join(".devcontainer")
         .join("devcontainer.json");
     std::fs::create_dir_all(devcontainer_path.parent().unwrap())?;
-    std::fs::write(
-        &devcontainer_path,
-        r#"{"image": "mcr.microsoft.com/devcontainers/base:ubuntu"}"#,
-    )?;
+    std::fs::write(&devcontainer_path, r#"{"image": "alpine:3.18"}"#)?;
+    let missing_podman = temp_dir.path().join("no-such-bin").join("podman");
 
     let mut cmd = Command::cargo_bin("deacon")?;
     cmd.current_dir(temp_dir.path())
@@ -107,45 +109,31 @@ fn test_up_command_with_podman_runtime() -> Result<()> {
         .args([
             "--workspace-folder",
             temp_dir.path().to_str().unwrap(),
+            "--docker-path",
+            missing_podman.to_str().unwrap(),
             "up",
             "--skip-post-create",
             "--skip-non-blocking-commands",
         ]);
 
-    // The test can succeed if podman is installed, or fail with a clear error if not
-    // We just verify that it doesn't say "Not implemented yet"
     let output = cmd.output()?;
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Should NOT contain the old "Not implemented yet" message
     assert!(
         !stderr.contains("Not implemented yet: Podman support"),
         "Podman runtime should be implemented, not stubbed. stderr: {}",
         stderr
     );
-
-    // If it succeeded, ensure there are no availability error hints
-    if output.status.success() {
-        assert!(
-            !stderr.to_ascii_lowercase().contains("not installed")
-                && !stderr.to_ascii_lowercase().contains("not found"),
-            "Successful run should not mention podman availability errors. stderr: {}",
-            stderr
-        );
-    }
-
-    // If it failed, it should be a clear runtime error (podman not found/available)
-    // or potentially a configuration error if validation happens first
-    if !output.status.success() {
-        assert!(
-            stderr.to_ascii_lowercase().contains("podman")
-                || stderr.to_ascii_lowercase().contains("not found")
-                || stderr.to_ascii_lowercase().contains("not installed")
-                || stderr.to_ascii_lowercase().contains("configuration"),
-            "Expected clear podman availability or configuration error, got: {}",
-            stderr
-        );
-    }
+    assert!(
+        !output.status.success(),
+        "up must fail when the selected runtime binary does not exist. stderr: {}",
+        stderr
+    );
+    assert!(
+        stderr.to_ascii_lowercase().contains("not installed"),
+        "Expected the missing runtime to be reported as not installed, got: {}",
+        stderr
+    );
 
     Ok(())
 }

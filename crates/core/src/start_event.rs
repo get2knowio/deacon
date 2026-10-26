@@ -168,8 +168,26 @@ pub struct StartEventWatch {
     /// is the silent fallback this repository does not allow. A runtime that rejects the
     /// invocation (an unsupported flag, a daemon it cannot reach) says so here.
     stderr: std::sync::Arc<tokio::sync::Mutex<String>>,
+    /// The stdout and stderr reader tasks, aborted when the watch is dropped.
+    ///
+    /// Killing `_child` is not enough to end them: a pipe ends only when EVERY holder of
+    /// its write end has exited, and a Chocolatey/Scoop shim on Windows hands the pipes to
+    /// a grandchild that `kill_on_drop` never reaches, which keeps streaming (#239).
+    _readers: AbortOnDrop,
     /// Names the container in log messages.
     what: String,
+}
+
+/// Task handles that are aborted, not detached, when this is dropped.
+#[derive(Debug, Default)]
+struct AbortOnDrop(Vec<tokio::task::JoinHandle<()>>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        for handle in &self.0 {
+            handle.abort();
+        }
+    }
 }
 
 impl StartEventWatch {
@@ -250,10 +268,11 @@ impl StartEventWatch {
             .take()
             .ok_or_else(|| anyhow::anyhow!("events subscription produced no stdout"))?;
 
+        let mut readers = AbortOnDrop::default();
         let stderr = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
         if let Some(pipe) = child.stderr.take() {
             let sink = std::sync::Arc::clone(&stderr);
-            tokio::spawn(async move {
+            readers.0.push(tokio::spawn(async move {
                 let mut lines = BufReader::new(pipe).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     let mut sink = sink.lock().await;
@@ -264,11 +283,11 @@ impl StartEventWatch {
                         sink.push('\n');
                     }
                 }
-            });
+            }));
         }
 
         let (tx, seen) = oneshot::channel();
-        tokio::spawn(async move {
+        readers.0.push(tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             // Read continuously from the moment we subscribe rather than only once the
             // caller waits. The reference attaches its handler the same way, and a reader
@@ -280,12 +299,13 @@ impl StartEventWatch {
                 }
             }
             // Dropping `tx` here is the signal that the stream ended without a match.
-        });
+        }));
 
         Ok(Self {
             seen,
             _child: child,
             stderr,
+            _readers: readers,
             what: what.into(),
         })
     }
@@ -334,6 +354,7 @@ impl StartEventWatch {
             seen,
             _child,
             stderr,
+            _readers,
             what: _,
         } = self;
 
@@ -608,6 +629,83 @@ mod tests {
             }
             other => panic!("expected Unavailable, got {other:?}"),
         }
+    }
+
+    /// **Dropping the watch ends its reader tasks even when the pipes stay open** (#239).
+    ///
+    /// The runtime here is a shim in the shape of a Chocolatey/Scoop one: it hands its
+    /// stdout and stderr to a grandchild and waits. `kill_on_drop` kills the shim and never
+    /// reaches the grandchild, so the pipes never reach EOF and a reader that only ends at
+    /// EOF lives on. On Windows that reader is a blocking thread, and it held `deacon up`
+    /// open after it had printed success. The stderr reader's clone of the capture is the
+    /// observable: it is released only when that task ends.
+    ///
+    /// `#[cfg(unix)]` because `/bin/sh` is the VEHICLE for the shim; the abort under test is
+    /// platform-agnostic.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dropping_the_watch_ends_its_readers_when_a_grandchild_holds_the_pipes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pid_file = dir.path().join("grandchild.pid");
+        let shim = dir.path().join("shim");
+        tokio::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\nsleep 30 &\necho $! > '{}'\nwait\n",
+                pid_file.display()
+            ),
+        )
+        .await
+        .expect("write shim");
+        tokio::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755))
+            .await
+            .expect("chmod shim");
+
+        let watch = StartEventWatch::open(
+            shim.to_str().expect("utf-8 path"),
+            false,
+            StartEventFilter::default(),
+            "test",
+        )
+        .await
+        .expect("shim spawns");
+
+        let mut grandchild = None;
+        for _ in 0..500 {
+            if let Ok(pid) = tokio::fs::read_to_string(&pid_file).await {
+                if !pid.trim().is_empty() {
+                    grandchild = Some(pid.trim().to_string());
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let grandchild = grandchild.expect("the shim never started its grandchild");
+
+        let capture = std::sync::Arc::clone(&watch.stderr);
+        drop(watch);
+
+        let mut released = false;
+        for _ in 0..200 {
+            if std::sync::Arc::strong_count(&capture) == 1 {
+                released = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        // Reap the grandchild before asserting, so a failure does not leak it.
+        let _ = tokio::process::Command::new("kill")
+            .arg(&grandchild)
+            .status()
+            .await;
+
+        assert!(
+            released,
+            "the stderr reader outlived the watch while a grandchild held the pipe open"
+        );
     }
 
     /// A start event whose container carries no labels cannot satisfy a label filter —
