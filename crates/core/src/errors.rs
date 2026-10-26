@@ -92,9 +92,18 @@ pub enum ConfigError {
 /// Docker/Runtime-related errors (placeholder implementations)
 #[derive(Error, Debug)]
 pub enum DockerError {
-    /// Docker is not installed or not accessible
-    #[error("Docker is not installed or not accessible")]
-    NotInstalled,
+    /// The selected container runtime's binary could not be run.
+    ///
+    /// Names the runtime and the binary, because under podman a bare "Docker is not
+    /// installed" sent the user looking for the wrong program — and `--docker-path` makes
+    /// the binary something the user chose, so the message should say which one failed.
+    #[error("{runtime} is not installed or not accessible: could not run `{binary}`")]
+    NotInstalled {
+        /// The runtime flavor as a user would name it: `Docker` or `Podman`.
+        runtime: String,
+        /// The binary that could not be run (the `--docker-path` value, or the default).
+        binary: String,
+    },
 
     /// Docker CLI command error
     #[error("Docker CLI error: {0}")]
@@ -526,10 +535,22 @@ mod tests {
 
     #[test]
     fn test_docker_error_display() {
-        let error = DockerError::NotInstalled;
+        let error = DockerError::NotInstalled {
+            runtime: "Docker".to_string(),
+            binary: "docker".to_string(),
+        };
         assert_eq!(
             format!("{}", error),
-            "Docker is not installed or not accessible"
+            "Docker is not installed or not accessible: could not run `docker`"
+        );
+
+        let error = DockerError::NotInstalled {
+            runtime: "Podman".to_string(),
+            binary: "/opt/podman".to_string(),
+        };
+        assert_eq!(
+            format!("{}", error),
+            "Podman is not installed or not accessible: could not run `/opt/podman`"
         );
 
         let error = DockerError::CLIError("Command failed".to_string());
@@ -617,7 +638,10 @@ mod tests {
         let deacon_error: DeaconError = config_error.into();
         assert!(matches!(deacon_error, DeaconError::Config(_)));
 
-        let docker_error = DockerError::NotInstalled;
+        let docker_error = DockerError::NotInstalled {
+            runtime: "Docker".to_string(),
+            binary: "docker".to_string(),
+        };
         let deacon_error: DeaconError = docker_error.into();
         assert!(matches!(deacon_error, DeaconError::Docker(_)));
 
@@ -653,7 +677,10 @@ mod tests {
                 .contains("Failed to parse configuration file")
         );
 
-        let deacon_error = DeaconError::Docker(DockerError::NotInstalled);
+        let deacon_error = DeaconError::Docker(DockerError::NotInstalled {
+            runtime: "Docker".to_string(),
+            binary: "docker".to_string(),
+        });
         let anyhow_error = anyhow::Error::from(deacon_error);
         assert!(anyhow_error.to_string().contains("Docker error"));
     }

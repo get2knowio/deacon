@@ -137,3 +137,109 @@ fn test_up_command_with_podman_runtime() -> Result<()> {
 
     Ok(())
 }
+
+/// With no runtime chosen and no `docker` on PATH, `up` runs the `podman` that IS there.
+///
+/// The PATH holds only a recording fake `podman`, so the test proves which binary ran
+/// rather than inferring it from an error message, and touches no real runtime. HOME is
+/// redirected so nothing lands in the developer's `~/.deacon`. `#[cfg(unix)]` because the
+/// fake is a `/bin/sh` script; the lookup itself is covered on every platform by the
+/// `runtime` unit tests.
+#[cfg(unix)]
+#[test]
+fn test_up_falls_back_to_podman_when_docker_is_not_on_path() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new()?;
+    let bin = temp_dir.path().join("bin");
+    let workspace = temp_dir.path().join("ws");
+    let home = temp_dir.path().join("home");
+    let calls = temp_dir.path().join("podman-calls.log");
+    std::fs::create_dir_all(&bin)?;
+    std::fs::create_dir_all(workspace.join(".devcontainer"))?;
+    std::fs::create_dir_all(&home)?;
+    std::fs::write(
+        workspace.join(".devcontainer").join("devcontainer.json"),
+        r#"{"image": "alpine:3.18"}"#,
+    )?;
+    let fake = bin.join("podman");
+    std::fs::write(
+        &fake,
+        format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 1\n", calls.display()),
+    )?;
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755))?;
+
+    let output = Command::cargo_bin("deacon")?
+        .env_clear()
+        .env("PATH", &bin)
+        .env("HOME", &home)
+        .args([
+            "--workspace-folder",
+            workspace.to_str().unwrap(),
+            "--log-level",
+            "info",
+            "up",
+        ])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let recorded = std::fs::read_to_string(&calls).unwrap_or_default();
+    assert!(
+        !recorded.trim().is_empty(),
+        "the podman on PATH was never run. stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("No `docker` on PATH; using podman"),
+        "the fallback must announce itself. stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Docker is not installed"),
+        "a podman-only host must not be told Docker is missing. stderr: {stderr}"
+    );
+    Ok(())
+}
+
+/// An explicit `--runtime podman` whose binary is missing is reported as PODMAN missing,
+/// naming the binary — not as "Docker is not installed".
+#[test]
+fn test_missing_podman_is_reported_as_podman() -> Result<()> {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new()?;
+    let workspace = temp_dir.path();
+    std::fs::create_dir_all(workspace.join(".devcontainer"))?;
+    std::fs::write(
+        workspace.join(".devcontainer").join("devcontainer.json"),
+        r#"{"image": "alpine:3.18"}"#,
+    )?;
+    let missing = workspace.join("no-such-bin").join("podman");
+
+    let output = Command::cargo_bin("deacon")?
+        .args([
+            "--runtime",
+            "podman",
+            "--workspace-folder",
+            workspace.to_str().unwrap(),
+            "--docker-path",
+            missing.to_str().unwrap(),
+            "up",
+        ])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success(), "stderr: {stderr}");
+    assert!(
+        stderr.contains("Podman is not installed or not accessible"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains(missing.to_str().unwrap()),
+        "the message must name the binary that could not be run. stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Docker is not installed"),
+        "stderr: {stderr}"
+    );
+    Ok(())
+}
