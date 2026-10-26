@@ -403,9 +403,11 @@ impl UpResult {
                     ),
                 },
                 DeaconError::Docker(docker_error) => match docker_error {
-                    DockerError::NotInstalled => UpResult::error(
-                        "Docker is not installed or not accessible".to_string(),
-                        "Please ensure Docker is installed and running".to_string(),
+                    DockerError::NotInstalled { runtime, binary } => UpResult::error(
+                        format!("{runtime} is not installed or not accessible"),
+                        format!(
+                            "Could not run `{binary}`. Please ensure {runtime} is installed and running"
+                        ),
                     ),
                     DockerError::CLIError(msg) => {
                         UpResult::error("Docker CLI operation failed".to_string(), msg.clone())
