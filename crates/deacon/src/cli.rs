@@ -342,6 +342,10 @@ pub enum Commands {
         /// Mutually exclusive with --no-lockfile.
         #[arg(long)]
         frozen_lockfile: bool,
+        /// Omit the `# syntax=` directive from the generated Feature Dockerfile,
+        /// including one the base Dockerfile declares (hidden, as in the reference)
+        #[arg(long, hide = true)]
+        omit_syntax_directive: bool,
         /// Dotfiles repository URL
         #[arg(long)]
         dotfiles_repository: Option<String>,
@@ -522,6 +526,10 @@ pub enum Commands {
         /// Mutually exclusive with --no-lockfile.
         #[arg(long)]
         frozen_lockfile: bool,
+        /// Omit the `# syntax=` directive from the generated Feature Dockerfile,
+        /// including one the base Dockerfile declares (hidden, as in the reference)
+        #[arg(long, hide = true)]
+        omit_syntax_directive: bool,
     },
 
     /// Execute a command inside a running container.
@@ -1459,6 +1467,7 @@ impl Cli {
                 skip_feature_auto_mapping,
                 no_lockfile,
                 frozen_lockfile,
+                omit_syntax_directive,
                 dotfiles_repository,
                 dotfiles_install_command,
                 dotfiles_target_path,
@@ -1521,6 +1530,7 @@ impl Cli {
                     ignore_additional_features,
                     no_lockfile,
                     frozen_lockfile,
+                    omit_syntax_directive,
                     dotfiles_repository,
                     dotfiles_install_command,
                     dotfiles_target_path,
@@ -1674,6 +1684,7 @@ impl Cli {
                 skip_feature_auto_mapping,
                 no_lockfile,
                 frozen_lockfile,
+                omit_syntax_directive,
                 inject_host_ca,
             }) => {
                 use crate::commands::build::{BuildArgs, execute_build};
@@ -1738,6 +1749,7 @@ impl Cli {
                     ignore_additional_features,
                     no_lockfile,
                     frozen_lockfile,
+                    omit_syntax_directive,
                     host_ca_activation,
                     user_data_folder: self.user_data_folder.clone(),
                 };
@@ -2490,6 +2502,49 @@ mod tests {
         let cli = result.unwrap();
         assert_eq!(cli.terminal_columns, Some(80));
         assert_eq!(cli.terminal_rows, Some(24));
+    }
+
+    /// The reference's hidden `--omit-syntax-directive` exists on `up` and
+    /// `build`, defaults off, and stays out of `--help` as it does there (#732).
+    #[test]
+    fn omit_syntax_directive_is_a_hidden_up_and_build_flag() {
+        let up = Cli::parse_from(["deacon", "up", "--omit-syntax-directive"]);
+        assert!(matches!(
+            up.command,
+            Some(Commands::Up {
+                omit_syntax_directive: true,
+                ..
+            })
+        ));
+        let build = Cli::parse_from(["deacon", "build", "--omit-syntax-directive"]);
+        assert!(matches!(
+            build.command,
+            Some(Commands::Build {
+                omit_syntax_directive: true,
+                ..
+            })
+        ));
+        let default = Cli::parse_from(["deacon", "build"]);
+        assert!(matches!(
+            default.command,
+            Some(Commands::Build {
+                omit_syntax_directive: false,
+                ..
+            })
+        ));
+
+        let mut cmd = <Cli as clap::CommandFactory>::command();
+        for sub in ["up", "build"] {
+            let help = cmd
+                .find_subcommand_mut(sub)
+                .expect("subcommand exists")
+                .render_long_help()
+                .to_string();
+            assert!(
+                !help.contains("omit-syntax-directive"),
+                "`{sub} --help` must not advertise the hidden flag"
+            );
+        }
     }
 
     #[test]

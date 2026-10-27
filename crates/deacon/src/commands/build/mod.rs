@@ -92,6 +92,9 @@ pub struct BuildArgs {
     /// semantic comparison against the freshly-resolved set after the Feature
     /// layering pass (#556).
     pub frozen_lockfile: bool,
+    /// `--omit-syntax-directive`: head the generated Feature Dockerfile with no
+    /// `# syntax=` line at all, dropping the base Dockerfile's own (#732).
+    pub omit_syntax_directive: bool,
 
     /// Resolved host-CA injection activation (016). Resolved at the CLI tier
     /// from `--inject-host-ca` > `DEACON_INJECT_HOST_CA` > `settings.json`
@@ -150,6 +153,7 @@ impl Default for BuildArgs {
             ignore_additional_features: false,
             no_lockfile: false,
             frozen_lockfile: false,
+            omit_syntax_directive: false,
             host_ca_activation: deacon_core::host_ca::HostCaActivation::Off,
             user_data_folder: None,
         }
@@ -2077,6 +2081,7 @@ async fn execute_compose_build_with_features(
     // like the other build paths (cache/builder options stay default here).
     let build_options = deacon_core::build::BuildOptions {
         output_mode: args.build_output_mode,
+        omit_syntax_directive: args.omit_syntax_directive,
         ..Default::default()
     };
     let feature_build = resolve_compose_feature_image(
@@ -2413,7 +2418,21 @@ async fn execute_single_container_build(
         )
         .await?;
 
-        let merged = merge_dockerfile_with_feature_stage(&staged_content, &prepared);
+        // An image-reference configuration has no Dockerfile of the user's: the
+        // synthesized `FROM <image>` is deacon's, and the reference decides with
+        // no Dockerfile at all there (#732).
+        let syntax_directive = crate::commands::up::features_build::feature_syntax_directive(
+            cli,
+            config.image.is_none().then_some(base_content.as_str()),
+            prepared.feature_content_image.is_none(),
+            args.omit_syntax_directive,
+        )
+        .await;
+        let merged = merge_dockerfile_with_feature_stage(
+            &staged_content,
+            &prepared,
+            syntax_directive.as_deref(),
+        );
         let staging_root = crate::commands::shared::feature_resolver::feature_staging_root(
             &identity.workspace_hash,
         );

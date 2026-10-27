@@ -455,6 +455,9 @@ pub struct UpArgs {
     pub no_lockfile: bool,
     /// Require an up-to-date lockfile; fail if resolution would change it.
     pub frozen_lockfile: bool,
+    /// `--omit-syntax-directive`: head the generated Feature Dockerfile with no
+    /// `# syntax=` line at all, dropping the base Dockerfile's own (#732).
+    pub omit_syntax_directive: bool,
 
     // Metadata and output control
     pub omit_config_remote_env_from_metadata: bool,
@@ -588,6 +591,7 @@ impl Default for UpArgs {
             dotfiles_target_path: None,
             no_lockfile: false,
             frozen_lockfile: false,
+            omit_syntax_directive: false,
             omit_config_remote_env_from_metadata: false,
             include_configuration: false,
             include_merged_configuration: false,
@@ -659,6 +663,7 @@ pub(crate) fn build_options_from_args(args: &UpArgs) -> BuildOptions {
         platform: None,
         // Resolved at the CLI tier from verbosity + TTY + log-format.
         output_mode: args.build_output_mode,
+        omit_syntax_directive: args.omit_syntax_directive,
     }
 }
 

@@ -1472,6 +1472,7 @@ async fn build_compose_service_with_features(
         // and it is scoped to COMPOSE: the single-container podman path builds with
         // `podman build` directly and keeps its build contexts.
         if cli.is_podman() { Some(cli) } else { None },
+        build_options.is_some_and(|o| o.omit_syntax_directive),
     )
     .await
     .with_context(|| {

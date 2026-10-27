@@ -12,7 +12,7 @@
 Deacon is in much better shape than the issue tracker suggests. The **spec itself has had zero substantive changes since the Aug 2025 pin (`113500f4`)** — everything new is in the reference CLI's surface, the Rust ecosystem, or our own deferred work. The path to 1.0 is bounded and visible:
 
 - ~~**One real spec-parity bug** (issue #1: features installed in running container instead of during image build).~~ **Done**: issue #1 is closed, and Features install during the image build (see §3.E).
-- **CLI-surface gaps added upstream since our pin** that consumers will expect. Most have landed since (§3.B). Still open: syntax-directive injection / `--omit-syntax-directive` (#732), BuildKit inline-cache hints, and buildx platform envvars.
+- **CLI-surface gaps added upstream since our pin** that consumers will expect. Most have landed since (§3.B). Still open: BuildKit inline-cache hints and buildx platform envvars (syntax-directive injection landed with #732).
 - ~~**Two unmaintained dependencies** (`serde_yaml`, `json5`) and one critical CVE we need to audit (`async-tar`/`tokio-tar` TARmageddon).~~ **Done**: the dependency graph has no YAML crate and no `json5`, and `jsonc-parser` parses `devcontainer.json` (see §4).
 - ~~**Two specced-but-not-implemented subcommands** (`set-up`, `upgrade`) the reference CLI exposes as consumer-side.~~ **Done**: both ship (`commands/set_up.rs`, `commands/upgrade.rs`) with parity scenarios (`parity/cases/set-up.json`, `parity/cases/upgrade.json`); see §3.A.
 - ~~**Distribution story missing**: no `CHANGELOG.md`, no release artifacts (`cargo-dist`), no security gates (`cargo-audit`/`cargo-deny`) in CI.~~ **Done**: `CHANGELOG.md` exists. The tag-triggered `release.yml` publishes 8 targets with SHA256s, SPDX SBOMs and build provenance, built with `cross` rather than `cargo-dist`. CI runs `cargo deny check`, which includes advisories.
@@ -96,7 +96,7 @@ As of 2026-10-27, 16 markers remain (19 before #777 removed the three `#270` not
 | B.3 | ~~`--mount-git-worktree-common-dir` for worktrees with `--relative-paths`~~ — **done** (#664) | Medium | v0.81.0, [PR #1127](https://github.com/devcontainers/cli/pull/1127) |
 | B.4 | ~~Default `--workspace-folder` to CWD when omitted~~ — **done** on every subcommand: `up` by issue #610 and `read-configuration` by issue #615, the last one out of step; `exec`, `build`, `down` and `run-user-commands` already did. On `read-configuration` the default applies only when no other selector is given — `--config` alone still anchors at the config file's directory and `--container-id`/`--id-label` alone still mean container-only mode | Medium — UX | v0.82.0, [PR #1104](https://github.com/devcontainers/cli/pull/1104) |
 | B.5 | ~~Windows drive-letter lowercase normalization for id-labels (parity with VS Code)~~ — **done** (`label_path`, #682) | Low — Windows-only | v0.86.0 |
-| B.6 | Skip injecting `# syntax=docker/dockerfile:1.4` when Docker Engine ≥ 23.0.0; hidden `--omit-syntax-directive` flag. Still open: deacon never injects the directive, which is recorded as an open nonconformance (#732) | Low | v0.80.3, [PR #1118](https://github.com/devcontainers/cli/pull/1118) |
+| B.6 | ~~Skip injecting `# syntax=docker/dockerfile:1.4` when Docker Engine ≥ 23.0.0; hidden `--omit-syntax-directive` flag~~ — **done** by issue #732: the reference's four-way prefix rule is ported, including the injection itself on engines older than 23.0.0 and the hidden flag on `up` and `build` | Low | v0.80.3, [PR #1118](https://github.com/devcontainers/cli/pull/1118) |
 | B.7 | `BUILDKIT_INLINE_CACHE=1` on Feature build path for cache reuse | Low — perf | v0.83.0, [PR #1135](https://github.com/devcontainers/cli/pull/1135) |
 | B.8 | Buildx platform envvars inlined when resolving base image/user. Still open: `dockerfile_utils` accepts them, but no caller supplies them yet | Low | v0.85.0, [PR #1169](https://github.com/devcontainers/cli/pull/1169) |
 
@@ -242,7 +242,7 @@ implementation (`@devcontainers/cli`).
 
 ### Tier 3 — Nice-to-have for 1.0; otherwise post-1.0
 
-25. CLI parity §B.6–B.8 (Dockerfile syntax injection, BuildKit cache hints, buildx platform envvars). **Still open** (B.6 is #732).
+25. CLI parity §B.7–B.8 (BuildKit cache hints, buildx platform envvars). **Still open** (B.6 done by #732).
 26. ~~`--secrets-file` and `--omit-config-remote-env-from-metadata`.~~ **Done**: both accepted.
 27. ~~`--workspace-mount-consistency` on macOS.~~ **Done**: accepted on `up`.
 28. Lifecycle command timeout enforcement (`core/src/lifecycle.rs:1199`). **Still open.**

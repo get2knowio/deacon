@@ -1562,6 +1562,7 @@ mod tests {
             builder: Some("mybuilder".to_string()),
             platform: None,
             output_mode: crate::build::BuildOutputMode::default(),
+            omit_syntax_directive: false,
         };
 
         let generator = DockerfileGenerator::new(config);

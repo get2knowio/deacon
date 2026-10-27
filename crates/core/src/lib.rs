@@ -22,6 +22,7 @@ pub mod entrypoint;
 pub mod env_probe;
 pub mod errors;
 pub mod feature_ref;
+pub mod feature_syntax_directive;
 pub mod features;
 pub mod gpu;
 pub mod host_ca;
