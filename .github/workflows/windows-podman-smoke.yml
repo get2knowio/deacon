@@ -19,12 +19,20 @@ on:
     # 06:00 UTC daily.
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      podman_cli_version:
+        description: 'podman-cli Chocolatey version to install instead of the pin (diagnostic; empty = pin)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-podman-smoke
+  # Overlapping nightlies replace each other; a manual dispatch (a diagnostic, a
+  # branch verifying itself) gets a group of its own, so it never cancels another
+  # dispatch or the nightly.
+  group: windows-podman-smoke-${{ github.event_name == 'schedule' && 'nightly' || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -41,7 +49,11 @@ jobs:
       # (6.1.3 on one night, 6.1.4 the next), so a change in podman was
       # indistinguishable from a change in deacon. The Linux lane learned the same
       # lesson in #726. Bump deliberately.
-      PODMAN_CLI_VERSION: 6.1.4
+      # This pins the Windows CLIENT only. The machine image it boots
+      # (quay.io/podman/machine-os:<major.minor>) is a floating tag whose old
+      # digests quay garbage-collects within weeks, so it cannot be pinned; what
+      # the lane needs from that image is checked in the machine step (#774).
+      PODMAN_CLI_VERSION: ${{ inputs.podman_cli_version || '6.1.4' }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -102,6 +114,10 @@ jobs:
     - name: Init + start podman machine (WSL2 backend)
       id: machine
       continue-on-error: true
+      # Its own budget, like the e2e step's. A machine that never came up once
+      # ran into the job timeout, which cancels the summary steps and uploads no
+      # step log, so the run said nothing about which layer hung.
+      timeout-minutes: 15
       shell: pwsh
       run: |
         # Accurate exit semantics: this step's outcome must reflect whether the
@@ -111,17 +127,55 @@ jobs:
         if ($LASTEXITCODE -ne 0) { Write-Host "podman machine init FAILED"; exit 1 }
         podman machine start 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { Write-Host "podman machine start FAILED"; exit 1 }
+
+        # #774: under WSL 2.9+ the machine's cgroups sit in a `non-systemd`
+        # subtree (microsoft/WSL#41492), so a rootless container scope created
+        # through systemd gets no `pids` controller and every `podman run` fails
+        # with "crun: controller `pids` is not available". podman-machine-os
+        # answered by defaulting WSL images to cgroup_manager=cgroupfs
+        # (podman-machine-os#329, in machine-os:6.1 from 6.1.4 on); the client
+        # pin above had nothing to do with it. Apply the same setting whenever
+        # the image we booted lacks it, so the lane stays rootless (what Windows
+        # users get by default) whichever image the floating tag serves.
+        $hostInfo = (podman info --format json | ConvertFrom-Json).host
+        $controllers = @($hostInfo.cgroupControllers)
+        Write-Host "cgroupManager=$($hostInfo.cgroupManager) cgroupControllers=[$($controllers -join ',')] rootless=$($hostInfo.security.rootless)"
+        $cgroups = "$($hostInfo.cgroupManager) (image default)"
+        if ($hostInfo.cgroupManager -eq 'systemd' -and $controllers -notcontains 'pids') {
+          Write-Host "::warning title=podman machine cgroups (#774)::systemd cgroup manager with no pids controller delegated; switching the machine to cgroup_manager=cgroupfs"
+          # base64 keeps the TOML quotes out of the pwsh -> ssh -> sh quoting.
+          $conf = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("[engine]`ncgroup_manager = `"cgroupfs`"`n"))
+          podman machine ssh "mkdir -p ~/.config/containers/containers.conf.d && echo $conf | base64 -d > ~/.config/containers/containers.conf.d/50-wsl-cgroupfs.conf" 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { Write-Host "writing the cgroupfs drop-in FAILED"; exit 1 }
+          podman machine stop 2>&1 | Out-String
+          podman machine start 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { Write-Host "podman machine restart FAILED"; exit 1 }
+          $manager = (podman info --format json | ConvertFrom-Json).host.cgroupManager
+          if ($manager -ne 'cgroupfs') { Write-Host "cgroup manager is still '$manager' after the drop-in"; exit 1 }
+          $cgroups = "cgroupfs (#774 workaround applied)"
+        }
+        "cgroups=$cgroups" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
         Write-Host "== podman info =="
         podman info 2>&1 | Out-String
 
     - name: Podman smoke (run alpine)
       id: smoke
       continue-on-error: true
+      timeout-minutes: 10
       shell: pwsh
       run: |
-        # Trailing native exit code is the step outcome and gates the deacon
-        # e2e below — do NOT swallow it with `exit 0`.
-        podman run --rm $env:SMOKE_IMAGE echo "podman-windows-ok" 2>&1 | Out-String
+        # This step's outcome gates the deacon e2e below. deacon has not even
+        # been built yet, so a failure here is the podman substrate, and the
+        # annotation says so on the run page.
+        $out = podman run --rm $env:SMOKE_IMAGE echo "podman-windows-ok" 2>&1 | Out-String
+        $code = $LASTEXITCODE
+        Write-Host $out
+        if ($code -ne 0) {
+          $cause = $out -split "`r?`n" | Where-Object { $_ -match 'Error' } | Select-Object -Last 1
+          Write-Host "::error title=Podman environment (not deacon)::podman run $env:SMOKE_IMAGE failed (exit $code) before deacon ran: $cause"
+          exit 1
+        }
 
     # ---- deacon e2e (only attempted if the podman backend actually works) ----
 
@@ -181,6 +235,7 @@ jobs:
           echo "| Ensure WSL2 | ${{ steps.wsl.outcome }} |"
           echo "| Install podman client | ${{ steps.install.outcome }} |"
           echo "| podman machine init + start | ${{ steps.machine.outcome }} |"
+          echo "| machine cgroup manager | ${{ steps.machine.outputs.cgroups }} |"
           echo "| podman run alpine (smoke) | ${{ steps.smoke.outcome }} |"
           echo "| cargo build -p deacon | ${{ steps.build.outcome }} |"
           echo "| deacon up/exec/down | ${{ steps.e2e.outcome }} |"
@@ -200,7 +255,10 @@ jobs:
         # are already captured in the summary + logs above).
         if [ "${{ steps.e2e.outcome }}" = "success" ]; then
           echo "deacon up/exec/down succeeded under Windows podman"
+        elif [ "${{ steps.machine.outcome }}" != "success" ] || [ "${{ steps.smoke.outcome }}" != "success" ]; then
+          echo "::error title=Podman environment (not deacon)::podman machine or a plain podman run failed, so deacon was never exercised; see the summary for the failing layer."
+          exit 1
         else
-          echo "Windows + Podman e2e not achieved this run; see summary for the failing layer."
+          echo "::error title=deacon::podman works on this runner, but cargo build or deacon up/exec/down failed; see the summary for the failing layer."
           exit 1
         fi
