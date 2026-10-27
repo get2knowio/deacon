@@ -50,7 +50,7 @@ use std::time::Duration;
 use anyhow::Result;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::{ChildStderr, ChildStdout, Command};
 use tokio::sync::oneshot;
 use tracing::{debug, instrument, warn};
 
@@ -159,8 +159,11 @@ pub struct StartEventWatch {
     /// Resolves once a matching event has been read. Dropped by the reader task without
     /// sending when the stream ends first.
     seen: oneshot::Receiver<()>,
-    /// Held so it is killed on drop; `kill_on_drop` then ends the reader task's read.
-    _child: Child,
+    /// Held so it is killed on drop, which is what ends the reader tasks' reads.
+    ///
+    /// On Windows this is the whole process TREE (see [`EventsProcess`]), so a shim's
+    /// grandchild dies with it and the pipes reach EOF.
+    _child: EventsProcess,
     /// Whatever the runtime wrote to stderr, so a stream that dies can say WHY.
     ///
     /// Without this a degradation is announced as "the events stream ended", which names
@@ -170,9 +173,11 @@ pub struct StartEventWatch {
     stderr: std::sync::Arc<tokio::sync::Mutex<String>>,
     /// The stdout and stderr reader tasks, aborted when the watch is dropped.
     ///
-    /// Killing `_child` is not enough to end them: a pipe ends only when EVERY holder of
-    /// its write end has exited, and a Chocolatey/Scoop shim on Windows hands the pipes to
-    /// a grandchild that `kill_on_drop` never reaches, which keeps streaming (#239).
+    /// Killing `_child` is not always enough to end them: a pipe ends only when EVERY
+    /// holder of its write end has exited, and a Chocolatey/Scoop shim on Windows hands the
+    /// pipes to a grandchild, which keeps streaming (#239). Since #773 the Windows spawn
+    /// kills that grandchild too, so this is belt-and-braces there; it still covers a
+    /// unix shim that backgrounds the real runtime, where only the direct child is killed.
     _readers: AbortOnDrop,
     /// Names the container in log messages.
     what: String,
@@ -255,22 +260,21 @@ impl StartEventWatch {
             runtime_path, args
         );
 
-        let mut child = Command::new(runtime_path)
+        let mut command = Command::new(runtime_path);
+        command
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()?;
+            .kill_on_drop(true);
+        let (child, stdout, stderr_pipe) = spawn_events_process(command)?;
 
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("events subscription produced no stdout"))?;
+        let stdout =
+            stdout.ok_or_else(|| anyhow::anyhow!("events subscription produced no stdout"))?;
 
         let mut readers = AbortOnDrop::default();
         let stderr = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
-        if let Some(pipe) = child.stderr.take() {
+        if let Some(pipe) = stderr_pipe {
             let sink = std::sync::Arc::clone(&stderr);
             readers.0.push(tokio::spawn(async move {
                 let mut lines = BufReader::new(pipe).lines();
@@ -349,7 +353,7 @@ impl StartEventWatch {
     /// from a no-op.
     pub async fn wait_with_timeout(self, budget: Duration) -> StartEventOutcome {
         // Destructured rather than field-accessed so `_child` stays bound for the whole
-        // wait: it is what keeps the subscription alive, and `kill_on_drop` ends it here.
+        // wait: it is what keeps the subscription alive, and dropping it ends it here.
         let Self {
             seen,
             _child,
@@ -377,6 +381,52 @@ impl StartEventWatch {
         let what = self.what.clone();
         self.wait().await.log(&what)
     }
+}
+
+/// The spawned `events` process, owned so that dropping it ends the subscription.
+///
+/// On unix this is the direct child, killed on drop by tokio's `kill_on_drop`.
+#[cfg(not(windows))]
+type EventsProcess = tokio::process::Child;
+
+/// The spawned `events` process, owned so that dropping it ends the subscription.
+///
+/// **On Windows this owns a Job Object holding the whole process tree** (#773). The
+/// `podman`/`docker` on PATH is often a Chocolatey ShimGen or Scoop launcher that runs the
+/// real executable as a child of its own and hands it our pipes. `TerminateProcess` on the
+/// shim — all `kill_on_drop` does — leaves that grandchild streaming events with the pipes
+/// open: an orphaned `podman events` per `up`, and a blocking pipe read that held the
+/// runtime's shutdown for its full timeout (#769). `process-wrap` starts the child
+/// suspended, assigns it to a job created with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and
+/// only then resumes it, so every process the shim starts is in the job from its first
+/// instruction; dropping this closes the job handle and Windows kills all of them.
+#[cfg(windows)]
+type EventsProcess = Box<dyn process_wrap::tokio::ChildWrapper>;
+
+/// Spawn `command` as an [`EventsProcess`], returning it with its stdout and stderr pipes.
+#[cfg(not(windows))]
+fn spawn_events_process(
+    mut command: Command,
+) -> std::io::Result<(EventsProcess, Option<ChildStdout>, Option<ChildStderr>)> {
+    let mut child = command.spawn()?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    Ok((child, stdout, stderr))
+}
+
+/// Spawn `command` as an [`EventsProcess`], returning it with its stdout and stderr pipes.
+#[cfg(windows)]
+fn spawn_events_process(
+    command: Command,
+) -> std::io::Result<(EventsProcess, Option<ChildStdout>, Option<ChildStderr>)> {
+    let mut wrapped = process_wrap::tokio::CommandWrap::from(command);
+    wrapped
+        .wrap(process_wrap::tokio::JobObject)
+        .wrap(process_wrap::tokio::KillOnDrop);
+    let mut child = wrapped.spawn()?;
+    let stdout = child.stdout().take();
+    let stderr = child.stderr().take();
+    Ok((child, stdout, stderr))
 }
 
 /// Does this event line announce the start of a container the filter names?
@@ -705,6 +755,90 @@ mod tests {
         assert!(
             released,
             "the stderr reader outlived the watch while a grandchild held the pipe open"
+        );
+    }
+
+    /// **Dropping the watch kills the runtime's whole process tree on Windows** (#773).
+    ///
+    /// The Windows counterpart of the test above, and stronger: it asserts the grandchild
+    /// is GONE, not only that our readers stopped. The shim is a `.cmd` script, so the
+    /// direct child is `cmd.exe`, which runs a long-lived PowerShell and waits on it — the
+    /// shape of a Chocolatey ShimGen shim running the real `podman.exe`. PowerShell
+    /// inherits the pipes and records its own PID. A plain `kill_on_drop` terminates
+    /// `cmd.exe` and orphans PowerShell; the Job Object takes both.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn dropping_the_watch_kills_the_grandchild_that_holds_the_pipes() {
+        use sysinfo::{Pid, ProcessesToUpdate, System};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pid_file = dir.path().join("grandchild.pid");
+        let shim = dir.path().join("shim.cmd");
+        tokio::fs::write(
+            &shim,
+            format!(
+                "@echo off\r\npowershell.exe -NoProfile -NonInteractive -Command \
+                 \"Set-Content -NoNewline -Encoding ascii -Path '{}' -Value $PID; \
+                 Start-Sleep -Seconds 120\"\r\n",
+                pid_file.display()
+            ),
+        )
+        .await
+        .expect("write shim");
+
+        // `is_podman` so the argv carries no `{{…}}`, which a batch file would mangle.
+        let watch = StartEventWatch::open(
+            shim.to_str().expect("utf-8 path"),
+            true,
+            StartEventFilter::default(),
+            "test",
+        )
+        .await
+        .expect("shim spawns");
+
+        let mut grandchild = None;
+        for _ in 0..600 {
+            if let Ok(pid) = tokio::fs::read_to_string(&pid_file).await {
+                if let Ok(pid) = pid.trim().parse::<u32>() {
+                    grandchild = Some(Pid::from_u32(pid));
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let grandchild = grandchild.expect("the shim never started its grandchild");
+
+        let alive = |pid: Pid| {
+            let mut system = System::new();
+            system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+            system.process(pid).is_some()
+        };
+        assert!(
+            alive(grandchild),
+            "the grandchild was not running to begin with"
+        );
+
+        drop(watch);
+
+        let mut gone = false;
+        for _ in 0..100 {
+            if !alive(grandchild) {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        // Reap the grandchild before asserting, so a failure does not leak it.
+        if !gone {
+            let _ = tokio::process::Command::new("taskkill")
+                .args(["/F", "/PID", &grandchild.as_u32().to_string()])
+                .status()
+                .await;
+        }
+        assert!(
+            gone,
+            "the grandchild {grandchild} outlived the watch: only the shim was killed"
         );
     }
 

@@ -165,7 +165,28 @@ jobs:
         { "name": "win-podman-smoke", "image": "$SMOKE_IMAGE", "overrideCommand": true }
         JSON
         bin="target/debug/deacon.exe"
-        "$bin" up --workspace-folder "$ws" --skip-post-create --skip-non-blocking-commands
+        # The start-event gate's own debug line is the proof it saw the event. Without
+        # it a gate that degraded (a subscription that could not open, or a stream that
+        # died) still lets `up` print success.
+        up_log="$RUNNER_TEMP/deacon-up.log"
+        # The log's timestamp on the next `+` line after `up`'s JSON is its exit: before
+        # #773 that gap was the 2s runtime-shutdown timeout (run 40239686347).
+        DEACON_LOG="info,deacon_core::start_event=debug" \
+          "$bin" up --workspace-folder "$ws" --skip-post-create --skip-non-blocking-commands \
+          2>"$up_log" || { cat "$up_log" >&2; exit 1; }
+        cat "$up_log" >&2
+        grep -q "Runtime reported the .* container started" "$up_log"
+        # `up` must leave no `<runtime> events` process behind (#773). On this runner
+        # `podman` is a Chocolatey ShimGen shim, so the real `podman.exe events` is a
+        # grandchild of deacon, which a plain kill of the shim used to orphan.
+        powershell.exe -NoProfile -NonInteractive -Command '
+          $procs = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "podman.exe" })
+          $procs | Select-Object ProcessId, ParentProcessId, CommandLine |
+            Format-Table -Wrap -AutoSize | Out-String -Width 400 | Write-Host
+          $events = @($procs | Where-Object { $_.CommandLine -match "\bevents\b" })
+          if ($events.Count -gt 0) { Write-Host "orphaned events process(es) after up"; exit 1 }
+          Write-Host "no podman events process left after up"
+        '
         "$bin" exec --workspace-folder "$ws" -- echo "deacon-podman-windows-e2e-ok"
         "$bin" down --workspace-folder "$ws"
 
