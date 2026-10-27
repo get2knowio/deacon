@@ -1420,7 +1420,7 @@ async fn build_compose_service_with_features(
     // Refuse before resolving anything: installing Features needs BuildKit's named
     // contexts and RUN mounts, and finding that out after downloading every
     // Feature would be work done for a build that was never going to run.
-    ensure_buildkit_or_error().await?;
+    ensure_buildkit_or_error(cli).await?;
 
     let dockerfile_content = tokio::fs::read_to_string(&dockerfile_path)
         .await

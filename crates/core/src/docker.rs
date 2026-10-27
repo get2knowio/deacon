@@ -1336,9 +1336,15 @@ impl CliRuntime {
 
     /// Detect GPU capability on this container runtime.
     ///
-    /// This is a convenience wrapper around `crate::gpu::detect_gpu_capability`.
-    /// See that function for detailed documentation.
+    /// This is a convenience wrapper around `crate::gpu::detect_gpu_capability`,
+    /// asked of THIS runtime's binary. See that function for detailed
+    /// documentation. The podman short-circuit there is decided by the binary's
+    /// name, so it is decided here by the flavor first: `--runtime podman` with a
+    /// `--docker-path` that does not say "podman" is still podman.
     pub async fn detect_gpu_capability(&self) -> crate::gpu::HostGpuCapability {
+        if self.is_podman() {
+            return crate::gpu::HostGpuCapability::unavailable();
+        }
         crate::gpu::detect_gpu_capability(&self.runtime_path).await
     }
 
