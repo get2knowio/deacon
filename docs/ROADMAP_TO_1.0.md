@@ -31,7 +31,7 @@ Deacon is in much better shape than the issue tracker suggests. The **spec itsel
 | `build` | Implemented | Features install for Dockerfile, image-reference and Compose configs. The `devcontainer.metadata` label carries one entry per Feature plus the config pick (§3.B.2). Compose configs reject `--push`/`--output`/`--cache-to`/`--platform`. `feature_set_digest` is still a placeholder (`build/mod.rs:1630`) |
 | `exec` | Implemented | Recent signal-exit and home-fallback fixes landed |
 | `down` | Implemented | Not in upstream CLI — Deacon-original |
-| `read-configuration` | Implemented | Container-based reading done (`--container-id`/`--id-label`; reads `devcontainer.metadata` off the container, issue #268) |
+| `read-configuration` | Implemented | Container-based reading done (`--container-id`/`--id-label`; reads `devcontainer.metadata` off the container) |
 | `run-user-commands` | Implemented | Container selection is wired: `--container-id` / `--id-label`, with the configuration read from the container's `devcontainer.metadata` label when no `--config` is given |
 | `config substitute` | Implemented | Deacon-original utility surface. `substitute` is the only `config` subcommand, and there are no `config merge-*` subcommands: merging is done with the `--override-config` / `--merge-config` flags (#286) |
 | `templates apply` / `pull` | Implemented | `--omit-paths` missing |
@@ -50,16 +50,15 @@ The `crates/core/src/` module set is comprehensive: `config`, `features`, `conta
 - `crates/deacon/tests/` — 114 integration test files
 - `crates/core/tests/` — 44 integration test files
 - `set-up` is covered by in-module unit tests, Docker-gated tests (`integration_container_id_foreign.rs`, `integration_feature_lifecycle.rs`) and parity cases. `upgrade` is covered by in-module unit tests and parity cases.
-- Gaps: `config substitute` has no CLI-level integration test and no parity scenario, only unit tests in `commands/config.rs` and the `examples/configuration/substitute` canary. The two span tests in `crates/core/tests/integration_spans.rs` that drive it are `#[ignore]`d with the stale reason "Uses non-existent 'config substitute' subcommand". `upgrade` has no dedicated `crates/deacon/tests/` file; its CLI-level coverage is the parity cases.
+- Gaps: `config substitute` has no CLI-level integration test and no parity scenario, only unit tests in `commands/config.rs` and the `examples/configuration/substitute` canary. The two span tests in `crates/core/tests/integration_spans.rs` that drive it are re-enabled in #777. `upgrade` has no dedicated `crates/deacon/tests/` file; its CLI-level coverage is the parity cases.
 - `#[ignore]`d tests cluster around feature-gates T020–T029 (compose profiles, reconnect/secrets-file, postAttach/init).
 
 ### TODO/FIXME inventory
-As of 2026-10-27, 19 markers remain in `crates/*/src` (57 in May 2026). Most are `#[allow(dead_code)]` scaffolding notes in `up/args.rs` and `up/result.rs`. The non-test TODOs worth tracking on the 1.0 punchlist:
+As of 2026-10-27, 16 markers remain (19 before #777 removed the three `#270` notes) in `crates/*/src` (57 in May 2026). Most are `#[allow(dead_code)]` scaffolding notes in `up/args.rs` and `up/result.rs`. The non-test TODOs worth tracking on the 1.0 punchlist:
 
 | File | Note |
 |---|---|
-| `core/src/container.rs:1669` | Workspace-based container resolution (`TODO(#270)`) |
-| ~~`read_configuration.rs:33`~~ | ~~Container-based config reading (issue #268)~~ — **done** (`--container-id`/`--id-label` + `devcontainer.metadata` read) |
+| ~~`read_configuration.rs:33`~~ | ~~Container-based config reading~~ — **done** (`--container-id`/`--id-label` + `devcontainer.metadata` read) |
 | ~~`read_configuration.rs:467,507`~~ | ~~Feature metadata caching; `metadata.init` field~~ — markers gone |
 | ~~`run_user_commands.rs:32,36,158`~~ | ~~Container selection wiring; collect lifecycle commands from extends/features~~ — **done**, markers gone |
 | `build/mod.rs:1630` | `feature_set_digest` placeholder. The Feature-integration TODO is gone, since Features now install in `build` |
@@ -223,8 +222,8 @@ implementation (`@devcontainers/cli`).
 8. ~~**Migrate off `json5`** (RUSTSEC-2025-0120) → `jsonc-parser` if used for devcontainer.json comments.~~ **Done**: `jsonc-parser` 0.34 (#52).
 9. ~~**MSRV bump** to 1.82; update `rust-version` in workspace and document in CI.~~ **Done**: MSRV 1.95, pinned in the CI `MSRV (cargo check)` job.
 10. ~~**Add `cargo-audit` + `cargo-deny` to CI**.~~ **Done**: `cargo deny check` in `ci.yml`.
-11. ~~**Resolve `run-user-commands` container-selection wiring** (`run_user_commands.rs:32,36`, issue #269).~~ **Done**: `--container-id` / `--id-label`, with the configuration read from the container's metadata label.
-12. ~~**Resolve `read-configuration` from-running-container path** (issue #268).~~ **Done** — `read-configuration` accepts `--container-id`/`--id-label`, resolves the container, and reads the `devcontainer.metadata` label (`getImageMetadataFromContainer` parity).
+11. ~~**Resolve `run-user-commands` container-selection wiring** (`run_user_commands.rs:32,36`).~~ **Done**: `--container-id` / `--id-label`, with the configuration read from the container's metadata label.
+12. ~~**Resolve `read-configuration` from-running-container path**.~~ **Done** — `read-configuration` accepts `--container-id`/`--id-label`, resolves the container, and reads the `devcontainer.metadata` label (`getImageMetadataFromContainer` parity).
 13. ~~**Pick a Podman story**: either ship supported (own the items in §3.D) or explicitly mark experimental in help text + docs.~~ **Done**: supported, with a required CI lane (§3.D). Follow-ups are on #30.
 14. ~~**Add `CHANGELOG.md`** and start filling it (1.0.0-rc.1, 1.0.0-rc.2, … entries).~~ **Done**: `CHANGELOG.md` exists.
 
@@ -247,7 +246,7 @@ implementation (`@devcontainers/cli`).
 26. ~~`--secrets-file` and `--omit-config-remote-env-from-metadata`.~~ **Done**: both accepted.
 27. ~~`--workspace-mount-consistency` on macOS.~~ **Done**: accepted on `up`.
 28. Lifecycle command timeout enforcement (`core/src/lifecycle.rs:1199`). **Still open.**
-29. Workspace-based container resolution (`TODO(#270)`, `core/src/container.rs:1669`). **Still open.**
+29. ~~Workspace-based container resolution.~~ **Not a gap**: every caller of `resolve_container` does workspace discovery itself from `up`'s identity labels; the stale `TODO(#270)` is removed in #777.
 30. ~~Address tech-debt issues #4–#9.~~ **Done**: all six closed (#9 completed, #4–#8 not planned).
 
 ### Explicitly post-1.0
