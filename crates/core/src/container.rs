@@ -1595,12 +1595,18 @@ where
 /// Resolves a container using the provided selector, following priority order:
 /// 1. Direct container ID (highest priority)
 /// 2. Label-based lookup
-/// 3. Workspace-based lookup (TODO: implement when workspace labels defined - see issue #270)
+///
+/// Workspace-based discovery is NOT done here. Every caller (`exec`,
+/// `run-user-commands`, `read-configuration`) reaches this function only when
+/// `--container-id` or `--id-label` was given, and otherwise finds the container
+/// itself from the identity labels `up` stamps (`canonical_reconnect_identity`),
+/// which need the loaded configuration this function does not have.
 ///
 /// **Priority Order Details:**
 /// - **Container ID**: If provided, performs direct lookup ignoring other selectors
 /// - **Labels**: If no ID but labels provided, finds containers matching all specified labels
-/// - **Workspace**: TODO(#270) - When implemented, will query containers with workspace-specific labels
+///
+/// A selector carrying only a workspace folder therefore resolves to `Ok(None)`.
 ///
 /// Returns the first matching container when using label-based lookup.
 ///
@@ -1665,11 +1671,8 @@ where
         return Ok(None);
     }
 
-    // Priority 3: Workspace-based lookup
-    // TODO(#270): Implement workspace-based container resolution
-    // This would query containers with workspace-specific labels (e.g., workspace folder hash)
-    // Priority: Low - most users will use direct ID or labels
-    debug!("Workspace-based lookup not yet implemented");
+    // No ID and no labels: workspace discovery is the caller's job (see above).
+    debug!("Selector names neither a container ID nor labels; nothing to resolve here");
 
     Ok(None)
 }
