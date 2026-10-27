@@ -621,6 +621,15 @@ jobs:
     #     podman parses the whole value as a repo: "must contain registry and
     #     repository: invalid reference format"
     #
+    # Since #775 deacon refuses all three under podman BEFORE invoking it ("Cannot
+    # use --output with Podman" / "Cannot use --cache-to with Podman"), so they
+    # still fail here, now on deacon's error (not measured on this lane's podman
+    # 5.8.4; measured locally on 4.9.3). They stay excluded: each asserts a
+    # Docker-only artifact. The refusal itself is guarded hermetically, with no
+    # daemon, by `build_runtime_routing` — along with the SILENT siblings the
+    # #775 measurement found (`--output type=docker`/`type=registry` writing a
+    # directory of that name, multi-platform `--platform` tagging one arch).
+    #
     # `integration_compose_features_build` USED to be excluded here in full — every
     # one of its seven tests failed under podman — and it is back in because #710
     # fixed the cause. That cause was NOT the one this comment used to assert, so

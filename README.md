@@ -260,7 +260,7 @@ unchanged.
 
 | Limitation | Notes |
 |---|---|
-| **Podman runtime** | **Supported.** A required CI lane runs the integration suite against rootless Podman, and `up`/`exec`/`down`/`run-user-commands`/`set-up` handle Podman's image-ref qualification, `ps`-JSON shape, SELinux `label=disable`, and rootless `--userns=keep-id`. Remaining gaps: **GPU passthrough is not wired for Podman** (`--gpu detect` cleanly reports no GPU; CDI/`--device` support is a follow-up); `build --output type=docker`, `--output type=oci` and `--cache-to type=local` are rejected by Podman itself; and Compose configurations need a Podman API socket (see [Runtime Selection](#runtime-selection)). Windows + Podman is not yet verified in CI ([#239](https://github.com/get2knowio/deacon/issues/239)). See [#30](https://github.com/get2knowio/deacon/issues/30). |
+| **Podman runtime** | **Supported.** A required CI lane runs the integration suite against rootless Podman, and `up`/`exec`/`down`/`run-user-commands`/`set-up` handle Podman's image-ref qualification, `ps`-JSON shape, SELinux `label=disable`, and rootless `--userns=keep-id`. Remaining gaps: **GPU passthrough is not wired for Podman** (`--gpu detect` cleanly reports no GPU; CDI/`--device` support is a follow-up); `build` refuses the BuildKit-only shapes Podman's Buildah builder cannot honour (`--output` other than `type=local`/`type=tar`, a multi-platform `--platform`, `--cache-to`/`--cache-from type=…`) before building, rather than reporting a success Podman did not deliver; and Compose configurations need a Podman API socket (see [Runtime Selection](#runtime-selection)). Windows + Podman is not yet verified in CI ([#239](https://github.com/get2knowio/deacon/issues/239)). See [#30](https://github.com/get2knowio/deacon/issues/30). |
 | **`build` on Compose configs** | Features install during `build` for every configuration shape — Dockerfile, image reference, and Compose. A Compose configuration does not accept `--push`, `--output`, `--cache-to` or `--platform`, and `build` fails fast when one is given. |
 
 For the full 1.0 roadmap, see [docs/ROADMAP_TO_1.0.md](docs/ROADMAP_TO_1.0.md). Post-1.0 hardening landed in May 2026 — redaction wiring into the tracing pipeline, a [workspace-trust gate](#workspace-trust) for host-side lifecycle hooks, async I/O conversion across `crates/core`, typed errors throughout `crates/core`, and the `json5`→`jsonc-parser` migration (see closed [#52](https://github.com/get2knowio/deacon/issues/52)).
@@ -333,8 +333,23 @@ Compose call fails with `Cannot connect to the Docker daemon`. Start it with
 `podman system service --time=0 &` for the session.
 
 **Podman's builder is not BuildKit.** `podman buildx` is an alias for
-`podman build`, so `build --output type=docker`, `--output type=oci` and
-`--cache-to type=local` are rejected by Podman's own parser.
+`podman build`, whose builder is Buildah. Several BuildKit-only `build` flags
+used to reach it and report success while Podman ignored them or did something
+else (`--output type=docker` wrote a root filesystem into a directory named
+`type=docker`; a multi-platform `--platform` tagged a single-architecture image),
+so under Podman `deacon build` refuses them before building, naming the flag:
+
+| Flag under Podman | Result |
+|---|---|
+| `--output type=local,dest=…`, `--output type=tar,dest=…`, `--output <dir>` | Works (Buildah's own exporters); the image is also in local storage |
+| `--output` with any other `type=` (`docker`, `oci`, `image`, `registry`, …) | Refused |
+| `--platform <one platform>` | Works |
+| `--platform a,b` (multi-platform) | Refused: Podman would tag only the last platform |
+| `--cache-to` / `--cache-from <repository>` | Works (Buildah's layer cache) |
+| `--cache-to` / `--cache-from type=…` | Refused: Buildah takes only a repository |
+| `--push` (single platform) | Works: pushed with `podman push` after the build |
+
+The reference CLI passes all of these through to Podman unchanged.
 
 ```bash
 # Explicitly select Docker (optional, it's the default)

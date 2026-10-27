@@ -39,9 +39,20 @@ use tracing::{debug, instrument};
 /// * `Err(_)` - Failed to detect BuildKit (should be treated as unavailable)
 #[instrument]
 pub async fn is_buildkit_available() -> Result<bool> {
+    is_buildkit_available_with("docker").await
+}
+
+/// [`is_buildkit_available`] for the runtime binary a build will actually run
+/// (`--docker-path`), via `<runtime_path> buildx version`.
+///
+/// Do not use this to ask about podman: `podman buildx version` succeeds and
+/// reports Buildah's version, so it answers `true` for a builder that is not
+/// BuildKit. Callers branch on the runtime flavor first.
+#[instrument]
+pub async fn is_buildkit_available_with(runtime_path: &str) -> Result<bool> {
     debug!("Checking BuildKit availability");
 
-    let output = Command::new("docker")
+    let output = Command::new(runtime_path)
         .args(["buildx", "version"])
         .output()
         .await;
