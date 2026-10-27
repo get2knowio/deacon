@@ -430,7 +430,19 @@ pub(crate) async fn build_image_with_features(
     };
 
     let generator = DockerfileGenerator::new(dockerfile_config.clone());
-    let dockerfile_content = generator.generate(&staged.plan)?;
+    let mut dockerfile_content = generator.generate(&staged.plan)?;
+    // No Dockerfile of the user's on this path, so the reference's prefix is
+    // either nothing or its injected default frontend (#732).
+    if let Some(directive) = feature_syntax_directive(
+        cli,
+        None,
+        true,
+        build_options.is_some_and(|o| o.omit_syntax_directive),
+    )
+    .await
+    {
+        dockerfile_content = format!("{directive}\n{dockerfile_content}");
+    }
 
     // Write Dockerfile
     let dockerfile_path = staged.temp_dir.join("Dockerfile.extended");
@@ -578,6 +590,7 @@ pub(crate) async fn prepare_dockerfile_feature_build(
     metadata_raw_config: Option<&DevContainerConfig>,
     control_manifest: Option<&ControlManifestSource>,
     content_image_builder: Option<&deacon_core::docker::CliDocker>,
+    omit_syntax_directive: bool,
 ) -> Result<DockerfileFeatureBuild> {
     info!(
         "Preparing feature layer on top of user-authored Dockerfile (stage={})",
@@ -650,10 +663,21 @@ pub(crate) async fn prepare_dockerfile_feature_build(
     )
     .await?;
 
-    // Final Dockerfile: user prologue + feature install stage. The user's
-    // Dockerfile may carry a `# syntax=` directive at the very top; that's already
-    // preserved because we copy the full content first.
-    let combined = merge_dockerfile_with_feature_stage(base_dockerfile_content, &prepared);
+    // Final Dockerfile: the decided `# syntax=` line + user prologue + feature
+    // install stage. The decision keeps the user's own directive unless the
+    // reference would replace or omit it (#732).
+    let syntax_directive = feature_syntax_directive(
+        cli,
+        Some(base_dockerfile_content),
+        prepared.feature_content_image.is_none(),
+        omit_syntax_directive,
+    )
+    .await;
+    let combined = merge_dockerfile_with_feature_stage(
+        base_dockerfile_content,
+        &prepared,
+        syntax_directive.as_deref(),
+    );
 
     // Write the merged Dockerfile to a temp dir (NOT into the user's context dir,
     // so we never pollute the workspace) — specifically into the SAME directory
@@ -773,6 +797,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         // `up`'s single-container Dockerfile path builds through buildx and gates on
         // `ensure_buildkit_or_error`, so build contexts are available.
         None,
+        build_options.is_some_and(|o| o.omit_syntax_directive),
     )
     .await?;
     let DockerfileFeatureBuild {
@@ -869,22 +894,112 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
 /// Splice a prepared Feature-install stage onto the end of a base Dockerfile,
 /// producing the single document one BuildKit invocation builds.
 ///
-/// The base content is copied verbatim — including any `# syntax=` parser
-/// directive, which must stay on line 1 — and the install stage is appended after
-/// a blank line so the two never share one instruction.
+/// `syntax_directive` is the decided `# syntax=` line
+/// ([`feature_syntax_directive`]). As in the reference, it REPLACES the base
+/// document's own leading directive rather than adding a second one; when it
+/// names the user's directive the result is the base content verbatim. The
+/// install stage is appended after a blank line so the two never share one
+/// instruction.
 pub(crate) fn merge_dockerfile_with_feature_stage(
     base_dockerfile_content: &str,
     prepared: &PreparedFeatureLayer,
+    syntax_directive: Option<&str>,
 ) -> String {
-    let mut combined =
-        String::with_capacity(base_dockerfile_content.len() + prepared.install_stage.len() + 2);
-    combined.push_str(base_dockerfile_content);
-    if !base_dockerfile_content.ends_with('\n') {
+    let mut combined = deacon_core::feature_syntax_directive::apply_syntax_directive(
+        base_dockerfile_content,
+        syntax_directive,
+    );
+    if !combined.ends_with('\n') {
         combined.push('\n');
     }
     combined.push('\n');
     combined.push_str(&prepared.install_stage);
     combined
+}
+
+/// Decide the `# syntax=` line heading the generated Feature Dockerfile — the
+/// reference's `dockerfilePrefixContent` (#732), via the pure
+/// [`deacon_core::feature_syntax_directive::feature_dockerfile_syntax_directive`].
+///
+/// `base_dockerfile` is the user's Dockerfile, `None` for an image-reference
+/// configuration. `uses_build_contexts` is whether the generated document reads
+/// its Feature content through a BuildKit named build context; when it does not
+/// (#719's image fallback), the reference's BuildKit version is cleared too, and
+/// the only possible answer is the user's own directive, so nothing is probed.
+///
+/// The engine and BuildKit versions are read with the same two commands the
+/// reference runs. A probe that fails is NOT an error, because it is not one in
+/// the reference either: an unknown engine counts as older than 23.0.0 and an
+/// unknown BuildKit as unable to use build contexts. The failure is logged, never
+/// guessed past silently. The BuildKit probe is skipped when the engine alone
+/// settles the answer.
+pub(crate) async fn feature_syntax_directive(
+    cli: &deacon_core::docker::CliRuntime,
+    base_dockerfile: Option<&str>,
+    uses_build_contexts: bool,
+    omit_syntax_directive: bool,
+) -> Option<String> {
+    use deacon_core::feature_syntax_directive::{
+        SKIP_DEFAULT_SYNTAX_MIN_ENGINE, SyntaxDirectiveInputs, feature_dockerfile_syntax_directive,
+        version_triplet,
+    };
+
+    let parsed = base_dockerfile.map(deacon_core::dockerfile_utils::extract_dockerfile);
+    let probe = !omit_syntax_directive && uses_build_contexts;
+
+    let docker_engine_version = if probe {
+        match cli.server_version_output().await {
+            Ok(out) => {
+                let version = version_triplet(&out);
+                if version.is_none() {
+                    debug!(output = %out, "Engine version has no MAJOR.MINOR.PATCH; treating it as unknown (older than 23.0.0), as the reference does");
+                }
+                version
+            }
+            Err(e) => {
+                debug!(error = %e, "Could not read the engine version; treating it as unknown (older than 23.0.0), as the reference does");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let engine_settles_it =
+        docker_engine_version.is_some_and(|v| v >= SKIP_DEFAULT_SYNTAX_MIN_ENGINE);
+    let buildkit_version = if probe && !engine_settles_it {
+        match cli.buildx_version_output().await {
+            Ok(out) => {
+                let version = version_triplet(&out);
+                if version.is_none() {
+                    debug!(output = %out, "BuildKit version has no MAJOR.MINOR.PATCH; treating it as unknown, as the reference does");
+                }
+                version
+            }
+            Err(e) => {
+                debug!(error = %e, "Could not read the BuildKit version; treating it as unknown, as the reference does");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let directive = feature_dockerfile_syntax_directive(SyntaxDirectiveInputs {
+        omit_syntax_directive,
+        docker_engine_version,
+        buildkit_version,
+        base_dockerfile: parsed.as_ref(),
+    });
+    debug!(
+        ?docker_engine_version,
+        ?buildkit_version,
+        omit_syntax_directive,
+        uses_build_contexts,
+        directive = ?directive,
+        "Decided the Feature Dockerfile's syntax directive"
+    );
+    directive
 }
 
 /// Convert a `devcontainer.json` feature-options JSON value (the value side of
@@ -1684,6 +1799,72 @@ pub(crate) fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std:
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod merge_syntax_directive_tests {
+    use super::*;
+
+    fn layer() -> PreparedFeatureLayer {
+        PreparedFeatureLayer {
+            install_stage: "FROM base AS dev_containers_target_stage\n".to_string(),
+            build_contexts: Vec::new(),
+            feature_content_image: None,
+            combined_env: HashMap::new(),
+            resolved_features: Vec::new(),
+            lockfile: Lockfile {
+                features: HashMap::new(),
+            },
+        }
+    }
+
+    /// The decided directive heads the merged document and REPLACES the base's
+    /// own, so a pre-23 engine's injected 1.4 is the only directive BuildKit sees
+    /// (#732). A second `# syntax=` would be a comment, not a directive.
+    #[test]
+    fn the_decided_directive_replaces_the_base_documents_own() {
+        let base = "# syntax=docker/dockerfile:1.2\nFROM debian AS base\n";
+        assert_eq!(
+            merge_dockerfile_with_feature_stage(
+                base,
+                &layer(),
+                Some("# syntax=docker/dockerfile:1.4")
+            ),
+            "# syntax=docker/dockerfile:1.4\nFROM debian AS base\n\n\
+             FROM base AS dev_containers_target_stage\n"
+        );
+    }
+
+    /// On a current engine the decision is the user's own directive, and the
+    /// merged document is the base verbatim plus the install stage — what deacon
+    /// emitted before #732.
+    #[test]
+    fn keeping_the_users_directive_leaves_the_base_verbatim() {
+        let base = "# syntax=docker/dockerfile:1.2\nFROM debian AS base";
+        assert_eq!(
+            merge_dockerfile_with_feature_stage(
+                base,
+                &layer(),
+                Some("# syntax=docker/dockerfile:1.2")
+            ),
+            "# syntax=docker/dockerfile:1.2\nFROM debian AS base\n\n\
+             FROM base AS dev_containers_target_stage\n"
+        );
+        assert_eq!(
+            merge_dockerfile_with_feature_stage("FROM debian AS base\n", &layer(), None),
+            "FROM debian AS base\n\nFROM base AS dev_containers_target_stage\n"
+        );
+    }
+
+    /// `--omit-syntax-directive` drops the user's directive too.
+    #[test]
+    fn no_directive_drops_the_users_own() {
+        let base = "# syntax=docker/dockerfile:1.2\nFROM debian AS base\n";
+        assert_eq!(
+            merge_dockerfile_with_feature_stage(base, &layer(), None),
+            "FROM debian AS base\n\nFROM base AS dev_containers_target_stage\n"
+        );
+    }
 }
 
 #[cfg(test)]

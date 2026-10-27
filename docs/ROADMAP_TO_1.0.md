@@ -94,7 +94,7 @@ Both are already specced; treat as primary 1.0 work.
 | B.3 | `--mount-git-worktree-common-dir` for worktrees with `--relative-paths` | Medium | v0.81.0, [PR #1127](https://github.com/devcontainers/cli/pull/1127) |
 | B.4 | ~~Default `--workspace-folder` to CWD when omitted~~ — **done** on every subcommand: `up` by issue #610 and `read-configuration` by issue #615, the last one out of step; `exec`, `build`, `down` and `run-user-commands` already did. On `read-configuration` the default applies only when no other selector is given — `--config` alone still anchors at the config file's directory and `--container-id`/`--id-label` alone still mean container-only mode | Medium — UX | v0.82.0, [PR #1104](https://github.com/devcontainers/cli/pull/1104) |
 | B.5 | Windows drive-letter lowercase normalization for id-labels (parity with VS Code) | Low — Windows-only | v0.86.0 |
-| B.6 | Skip injecting `# syntax=docker/dockerfile:1.4` when Docker Engine ≥ 23.0.0; hidden `--omit-syntax-directive` flag | Low | v0.80.3, [PR #1118](https://github.com/devcontainers/cli/pull/1118) |
+| B.6 | ~~Skip injecting `# syntax=docker/dockerfile:1.4` when Docker Engine ≥ 23.0.0; hidden `--omit-syntax-directive` flag~~ — **done** by issue #732: the reference's four-way prefix rule is ported, including the injection itself on engines older than 23.0.0 and the hidden flag on `up` and `build` | Low | v0.80.3, [PR #1118](https://github.com/devcontainers/cli/pull/1118) |
 | B.7 | `BUILDKIT_INLINE_CACHE=1` on Feature build path for cache reuse | Low — perf | v0.83.0, [PR #1135](https://github.com/devcontainers/cli/pull/1135) |
 | B.8 | Buildx platform envvars inlined when resolving base image/user | Low | v0.85.0, [PR #1169](https://github.com/devcontainers/cli/pull/1169) |
 
