@@ -420,9 +420,8 @@ fn spawn_events_process(
     command: Command,
 ) -> std::io::Result<(EventsProcess, Option<ChildStdout>, Option<ChildStderr>)> {
     let mut wrapped = process_wrap::tokio::CommandWrap::from(command);
-    wrapped
-        .wrap(process_wrap::tokio::JobObject)
-        .wrap(process_wrap::tokio::KillOnDrop);
+    // PERTURBATION (do not merge): no JobObject, so only the shim is killed.
+    wrapped.wrap(process_wrap::tokio::KillOnDrop);
     let mut child = wrapped.spawn()?;
     let stdout = child.stdout().take();
     let stderr = child.stderr().take();
