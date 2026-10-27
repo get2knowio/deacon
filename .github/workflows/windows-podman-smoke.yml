@@ -168,7 +168,7 @@ jobs:
         Write-Host $out
         if ($code -ne 0) {
           $cause = $out -split "`r?`n" | Where-Object { $_ -match 'Error' } | Select-Object -Last 1
-          Write-Host "::error title=Podman environment, not deacon::podman run $env:SMOKE_IMAGE failed (exit $code) before deacon ran: $cause"
+          Write-Host "::error title=Podman environment (not deacon)::podman run $env:SMOKE_IMAGE failed (exit $code) before deacon ran: $cause"
           exit 1
         }
 
@@ -251,7 +251,7 @@ jobs:
         if [ "${{ steps.e2e.outcome }}" = "success" ]; then
           echo "deacon up/exec/down succeeded under Windows podman"
         elif [ "${{ steps.machine.outcome }}" != "success" ] || [ "${{ steps.smoke.outcome }}" != "success" ]; then
-          echo "::error title=Podman environment, not deacon::podman machine or a plain podman run failed, so deacon was never exercised; see the summary for the failing layer."
+          echo "::error title=Podman environment (not deacon)::podman machine or a plain podman run failed, so deacon was never exercised; see the summary for the failing layer."
           exit 1
         else
           echo "::error title=deacon::podman works on this runner, but cargo build or deacon up/exec/down failed; see the summary for the failing layer."
