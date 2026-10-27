@@ -1549,3 +1549,102 @@ fn build_honors_docker_path_and_fails_when_it_cannot_run() {
         .assert()
         .failure();
 }
+
+/// On a Docker engine older than 23.0.0 the generated Feature Dockerfile is headed
+/// by `# syntax=docker/dockerfile:1.4`, replacing a user pin too old to read the
+/// named build context the Feature content arrives through (#732).
+///
+/// No pre-23 engine is available to CI, so the engine version is the ONE thing
+/// faked: a shim answers `docker version --format {{.Server.Version}}` with
+/// `20.10.24` — the probe the reference runs — and hands every other command to
+/// the real daemon. The build itself is real BuildKit, and the assertion is on the
+/// artifact (the Feature's marker in the produced image), not on the outcome.
+///
+/// The negative control is the same build without the shim: on the real (>= 23)
+/// engine the user's `1.2` pin is kept, as the reference keeps it, and BuildKit
+/// refuses `--build-context`. Both halves were measured against the reference CLI
+/// 0.89.0 with the same shim and agree. Docker only: under podman the shim would
+/// mislabel the runtime, and buildah does not honor `# syntax=` at all.
+#[cfg(unix)]
+#[test]
+fn build_on_a_pre_23_engine_injects_the_dockerfile_1_4_frontend() {
+    use std::os::unix::fs::PermissionsExt;
+
+    if runtime_bin() != "docker" || !docker_available() {
+        eprintln!("Skipping: needs the docker runtime");
+        return;
+    }
+
+    let nonce = std::process::id();
+    let tag = format!("deacon-t732-old-engine-{}:v1", nonce);
+    let control_tag = format!("deacon-t732-control-{}:v1", nonce);
+    let _cleanup = ImageTags(vec![tag.clone(), control_tag.clone()]);
+
+    let temp_dir = TempDir::new().unwrap();
+    let dc = temp_dir.path().join(".devcontainer");
+    fs::create_dir_all(dc.join("marker")).unwrap();
+    fs::write(
+        dc.join("Dockerfile"),
+        "# syntax=docker/dockerfile:1.2\nFROM alpine:3.19\n",
+    )
+    .unwrap();
+    fs::write(
+        dc.join("devcontainer.json"),
+        r#"{"build":{"dockerfile":"Dockerfile"},"features":{"./marker":{}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dc.join("marker/devcontainer-feature.json"),
+        r#"{"id":"marker","version":"1.0.0","name":"marker"}"#,
+    )
+    .unwrap();
+    let install = dc.join("marker/install.sh");
+    fs::write(
+        &install,
+        format!("#!/bin/sh\necho t732-{nonce} > /t732-marker\n"),
+    )
+    .unwrap();
+    fs::set_permissions(&install, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let shim_dir = TempDir::new().unwrap();
+    let shim = shim_dir.path().join("docker");
+    fs::write(
+        &shim,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = version ] && [ \"$2\" = --format ] && [ \"$3\" = '{{.Server.Version}}' ]; then\n",
+            "  echo 20.10.24; exit 0\n",
+            "fi\n",
+            "exec docker \"$@\"\n",
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let build = |docker_path: &str, image_name: &str| {
+        Command::cargo_bin("deacon")
+            .unwrap()
+            .arg("--docker-path")
+            .arg(docker_path)
+            .arg("build")
+            .arg("--workspace-folder")
+            .arg(temp_dir.path())
+            .args(["--image-name", image_name, "--no-lockfile"])
+            .assert()
+    };
+
+    build(&shim.display().to_string(), &tag).success();
+    assert_eq!(
+        run_and_capture(&tag, &["cat", "/t732-marker"]).trim(),
+        format!("t732-{nonce}"),
+        "the Feature must be installed in the image the pre-23 build produced"
+    );
+
+    let control = build("docker", &control_tag).failure();
+    let stderr = String::from_utf8_lossy(&control.get_output().stderr).to_string();
+    assert!(
+        stderr.contains("--build-context"),
+        "on a >= 23 engine the user's 1.2 pin is kept and BuildKit refuses the \
+         build context; got:\n{stderr}"
+    );
+}

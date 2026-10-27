@@ -1010,6 +1010,45 @@ impl CliRuntime {
         &self.runtime_path
     }
 
+    /// Raw stdout of `<runtime> version --format {{.Server.Version}}`, trimmed —
+    /// the reference's `getDockerEngineVersion` probe, run by the same command on
+    /// both flavors (podman answers it with its own version).
+    pub async fn server_version_output(&self) -> Result<String> {
+        self.version_probe(&["version", "--format", "{{.Server.Version}}"])
+            .await
+            .map(|s| s.trim().to_string())
+    }
+
+    /// Raw stdout of `<runtime> buildx version` — the reference's
+    /// `getBuildKitVersion` probe (podman answers it with its buildah version).
+    pub async fn buildx_version_output(&self) -> Result<String> {
+        self.version_probe(&["buildx", "version"]).await
+    }
+
+    async fn version_probe(&self, args: &[&str]) -> Result<String> {
+        let output = Command::new(&self.runtime_path)
+            .args(args)
+            .output()
+            .await
+            .map_err(|e| {
+                DockerError::CLIError(format!(
+                    "Failed to run `{} {}`: {e}",
+                    self.runtime_path,
+                    args.join(" ")
+                ))
+            })?;
+        if !output.status.success() {
+            return Err(DockerError::CLIError(format!(
+                "`{} {}` failed: {}",
+                self.runtime_path,
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
+            .into());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
     /// Whether an image reference is already fully qualified (carries an
     /// explicit registry, the `localhost/` repository, or is a bare digest).
     ///

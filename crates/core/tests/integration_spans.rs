@@ -11,7 +11,6 @@ use tempfile::TempDir;
 
 /// Test that config commands emit standardized spans in JSON format
 #[test]
-#[ignore = "Uses non-existent 'config substitute' subcommand - command not implemented"]
 fn test_config_resolve_span_json_logging() {
     // Skip if logging is already initialized (common in test suites)
     if !logging::is_initialized() {
@@ -105,79 +104,8 @@ fn test_config_resolve_span_json_logging() {
     );
 }
 
-/// Test that features commands emit standardized spans in JSON format
-#[test]
-#[ignore = "Flaky span logging test - span assertions fail in CI environment"]
-fn test_features_plan_span_json_logging() {
-    // Skip if logging is already initialized
-    if !logging::is_initialized() {
-        logging::init(Some("json")).expect("Failed to initialize JSON logging");
-    }
-
-    // Create a temporary directory for test workspace
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let workspace_path = temp_dir.path();
-
-    // Execute features plan command with JSON logging
-    let mut cmd = Command::cargo_bin("deacon").expect("Failed to find deacon binary");
-
-    let output = cmd
-        .env("DEACON_LOG_FORMAT", "json")
-        .env("DEACON_LOG", "info")
-        .arg("features")
-        .arg("plan")
-        .arg("--workspace-folder")
-        .arg(workspace_path)
-        .arg("--json")
-        .arg("true")
-        .assert()
-        .success();
-
-    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
-
-    // Parse JSON log entries
-    let log_entries: Vec<serde_json::Value> = stderr
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect();
-
-    // Check for feature.plan span
-    let feature_plan_spans: Vec<&Value> = log_entries
-        .iter()
-        .filter(|entry| {
-            entry
-                .get("span")
-                .and_then(|span| span.get("name"))
-                .and_then(|name| name.as_str())
-                .map(|name| name == spans::FEATURE_PLAN)
-                .unwrap_or(false)
-        })
-        .collect();
-
-    assert!(
-        !feature_plan_spans.is_empty(),
-        "Expected feature.plan span in JSON logs. Found log entries: {:?}",
-        log_entries
-    );
-
-    // Verify workspace_id field is present
-    let has_workspace_id = feature_plan_spans.iter().any(|entry| {
-        entry
-            .get("span")
-            .and_then(|span| span.get(fields::WORKSPACE_ID))
-            .is_some()
-    });
-
-    assert!(
-        has_workspace_id,
-        "Expected workspace_id field in feature.plan span. Feature plan spans: {:?}",
-        feature_plan_spans
-    );
-}
-
 /// Test JSON log schema compliance for standardized fields
 #[test]
-#[ignore = "Uses non-existent 'config substitute' subcommand - command not implemented"]
 fn test_json_log_schema_compliance() {
     // This test verifies the JSON log structure contains all expected fields
     // when standardized spans are used

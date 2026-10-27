@@ -643,8 +643,10 @@ pub fn find_user_statement(
 /// Three states, not two, and the third is load-bearing: a `syntax=` directive
 /// naming an image that is not `docker/dockerfile` declares SOME frontend whose
 /// capabilities this cannot know. The reference returns the string `'unknown'`
-/// there and its caller treats it as "does not support" while keeping it
-/// distinguishable, so the port keeps it distinguishable too.
+/// there, and its caller tests it for TRUTHINESS — so `'unknown'` behaves as
+/// "may support" and the user's custom frontend is left in place rather than
+/// overridden (see `feature_syntax_directive`, #732). The port keeps the third
+/// state distinguishable so that caller can be ported exactly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildContextSupport {
     /// The declared frontend is `docker/dockerfile` at a version >= 1.4.

@@ -84,6 +84,13 @@ pub struct BuildOptions {
     /// [`BuildOutputMode::Plain`] (safe for non-interactive callers/tests).
     #[serde(default)]
     pub output_mode: BuildOutputMode,
+
+    /// `--omit-syntax-directive` (#732): the generated Feature Dockerfile carries
+    /// no `# syntax=` line, not even the base Dockerfile's own. Like
+    /// [`Self::output_mode`] it is not a docker flag, so it does not participate
+    /// in [`Self::is_default`] / [`Self::to_docker_args`].
+    #[serde(default)]
+    pub omit_syntax_directive: bool,
 }
 
 impl BuildOptions {
@@ -559,6 +566,7 @@ mod tests {
             builder: Some("mybuilder".to_string()),
             platform: Some("linux/amd64".to_string()),
             output_mode: BuildOutputMode::default(),
+            omit_syntax_directive: false,
         };
         let args = opts.to_docker_args();
 

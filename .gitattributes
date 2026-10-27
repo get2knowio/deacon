@@ -92,3 +92,7 @@ parity/fixtures/** -text
 # every other entry here — and makes the "regenerate, never hand-edit" rule in
 # the test's own module doc mean something on a Windows checkout too (#686).
 crates/core/tests/fixtures/dockerfile_utils_oracle.json -text
+
+# The Feature-Dockerfile `# syntax=` oracle table (#732) holds measured expectations
+# under the same "regenerate, never hand-edit" rule; same pin.
+crates/core/tests/fixtures/feature_syntax_directive_oracle.json -text
