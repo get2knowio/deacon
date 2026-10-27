@@ -580,6 +580,7 @@ async fn validate_buildkit_requirement(
     feature_name: &str,
     flag_name: &str,
     disabled_by: Option<&str>,
+    runtime_path: &str,
 ) -> Result<()> {
     if let Some(cause) = disabled_by {
         return Err(report_and_fail(
@@ -594,7 +595,7 @@ async fn validate_buildkit_requirement(
             format!("BuildKit is required for {feature_name} but {cause} disabled it"),
         ));
     }
-    match deacon_core::build::buildkit::is_buildkit_available().await {
+    match deacon_core::build::buildkit::is_buildkit_available_with(runtime_path).await {
         Ok(true) => {
             // BuildKit available, proceed
             Ok(())
@@ -611,6 +612,137 @@ async fn validate_buildkit_requirement(
             // Failed to detect BuildKit
             Err(anyhow!("Failed to detect BuildKit: {}", e))
         }
+    }
+}
+
+/// The BuildKit gates for a build that runs on Docker: each BuildKit-only flag
+/// needs BuildKit present (probed on the runtime binary this build will run) and
+/// not switched off for the primary invocation.
+async fn validate_buildkit_flags(args: &BuildArgs, runtime_path: &str) -> Result<()> {
+    // Whether something explicitly switched BuildKit off for the primary build.
+    // Consulted only by the flags the primary invocation carries (#592).
+    let buildkit_off = buildkit_disabled(args.buildkit.as_ref());
+    let fmt = &args.output_format;
+
+    // `--push` passes no `buildkit_off`: see `validate_buildkit_requirement`.
+    if args.push {
+        validate_buildkit_requirement(fmt, "push", "--push", None, runtime_path).await?;
+    }
+
+    // `buildkit_off` applies to `--output` since #595: it rides the primary build
+    // now, and the legacy builder has no such flag. It used to be deferred to a
+    // `docker buildx build` pass that ran whatever the primary build did, which is
+    // why it was ungated.
+    if args.output.is_some() {
+        validate_buildkit_requirement(fmt, "output", "--output", buildkit_off, runtime_path)
+            .await?;
+    }
+    if args.platform.is_some() {
+        validate_buildkit_requirement(fmt, "platform", "--platform", buildkit_off, runtime_path)
+            .await?;
+    }
+    if !args.cache_to.is_empty() {
+        validate_buildkit_requirement(fmt, "cache-to", "--cache-to", buildkit_off, runtime_path)
+            .await?;
+    }
+    Ok(())
+}
+
+/// The value of the `type=` field in a BuildKit `key=value[,key=value…]` spec
+/// (`--output`, `--cache-to`, `--cache-from`), if it names one.
+fn buildkit_spec_type(spec: &str) -> Option<&str> {
+    spec.split(',')
+        .find_map(|field| match field.split_once('=') {
+            Some((key, value)) if key.trim() == "type" => Some(value.trim()),
+            _ => None,
+        })
+}
+
+/// Why Podman's builder cannot honour one of this build's flags, if it cannot:
+/// `(flag, description)`.
+///
+/// Podman's builder is Buildah, not BuildKit; `podman buildx build` is an alias
+/// for `podman build`. MEASURED against rootless podman 4.9.3 (buildah 1.33.7),
+/// with buildah's source read for podman >= 5.6 (#775). Only the shapes that do
+/// NOT work are refused; the ones podman serves equivalently pass through:
+///
+/// - `--output` with `type=local` / `type=tar` (Buildah's two exporters) or a
+///   bare directory is honoured, the same as BuildKit's `local` / `tar`. Any
+///   other type is refused. Buildah reads a value without a comma as a
+///   DIRECTORY, so `--output type=docker` / `type=registry` wrote the image's
+///   root filesystem into a directory literally named `type=docker` in the
+///   workspace and reported success, exporting and pushing nothing. `type=oci` /
+///   `type=image` error in podman's parser on podman >= 5.6 and were masked into
+///   a silent success on older podman; refused here so both behave alike.
+/// - `--platform` naming more than one platform: podman builds each one and tags
+///   the image with the LAST, so the build "succeeded" with a single-architecture
+///   image and no manifest list. A single platform is honoured.
+/// - `--cache-to` / `--cache-from` in BuildKit's `type=…` grammar: Buildah takes
+///   only a repository and fails on the whole value as an "invalid repo". That is
+///   not silent; it is refused here to name the actual cause. A plain repository
+///   is Buildah's own layer cache and passes through.
+///
+/// `--push` is not refused: a single-platform push is issued afterwards as
+/// `podman push` from local storage, which works. A multi-platform push is
+/// already refused through `--platform`.
+fn podman_unsupported_flag(args: &BuildArgs) -> Option<(&'static str, String)> {
+    const WHY: &str = "Podman builds with Buildah, not BuildKit";
+
+    if let Some(kind) = args.output.as_deref().and_then(buildkit_spec_type) {
+        if kind != "local" && kind != "tar" {
+            return Some((
+                "--output",
+                format!(
+                    "{WHY}: Buildah exports only `type=local` and `type=tar` and would not \
+                     honour `type={kind}`. Use `type=local,dest=<dir>` or \
+                     `type=tar,dest=<file>`, or build with Docker"
+                ),
+            ));
+        }
+    }
+
+    if let Some(platform) = args.platform.as_deref().filter(|p| p.contains(',')) {
+        return Some((
+            "--platform",
+            format!(
+                "{WHY}: podman builds each platform of `{platform}` and tags the image with \
+                 only the last one, so no multi-platform image would be produced. Pass a \
+                 single platform, or build with Docker"
+            ),
+        ));
+    }
+
+    for (flag, specs) in [
+        ("--cache-to", &args.cache_to),
+        ("--cache-from", &args.cache_from),
+    ] {
+        if let Some(kind) = specs.iter().find_map(|spec| buildkit_spec_type(spec)) {
+            return Some((
+                flag,
+                format!(
+                    "{WHY}: Buildah's {flag} takes only a repository for its layer cache, \
+                     not BuildKit's `type={kind}` cache grammar. Pass a repository \
+                     (e.g. `registry.example.com/cache`), or build with Docker"
+                ),
+            ));
+        }
+    }
+
+    None
+}
+
+/// Refuse, before any build runs, a flag Podman's builder cannot honour (#775).
+fn reject_buildkit_only_flags_on_podman(args: &BuildArgs) -> Result<()> {
+    match podman_unsupported_flag(args) {
+        None => Ok(()),
+        Some((flag, description)) => Err(report_and_fail(
+            &args.output_format,
+            result::BuildError::with_description(
+                format!("Cannot use {flag} with Podman"),
+                description,
+            ),
+            format!("{flag} is not supported when building with Podman"),
+        )),
     }
 }
 
@@ -742,34 +874,57 @@ async fn execute_build_inner(
         ));
     }
 
-    // Whether something explicitly switched BuildKit off for the primary build.
-    // Consulted only by the flags the primary invocation carries (#592).
-    let buildkit_off = buildkit_disabled(args.buildkit.as_ref());
+    // The container runtime for this build: BOTH the flavor and the binary.
+    //
+    // `build` used to hardcode `CliDocker::new()` at four sites, so it ignored
+    // `--runtime` entirely and `--docker-path` with it (#692/#694). Passing only
+    // the path would still be wrong: podman needs its FLAVOR too, because the
+    // `localhost/` image-ref qualification and the SELinux/userns handling hang
+    // off `CliRuntime::is_podman()`. The reference does the same thing — it never
+    // branches its build command on podman (it pushes `buildx build`
+    // unconditionally, and podman aliases `buildx` to `build`), only its
+    // arguments.
+    //
+    // Resolved before the flag validation below, because what a flag needs
+    // depends on which builder will run it (#775).
+    let cli = crate::commands::shared::resolve_runtime(runtime, &args.docker_path)
+        .await
+        .cli_docker();
 
-    // Validate BuildKit requirements for --push
-    if args.push {
-        validate_buildkit_requirement(&args.output_format, "push", "--push", None).await?;
-    }
-
-    // Validate BuildKit requirements for --output. `buildkit_off` applies here
-    // since #595: `--output` rides the primary build now, and the legacy builder
-    // has no such flag. It used to be deferred to a `docker buildx build` pass
-    // that ran whatever the primary build did, which is why it was ungated.
-    if args.output.is_some() {
-        validate_buildkit_requirement(&args.output_format, "output", "--output", buildkit_off)
-            .await?;
-    }
-
-    // Validate BuildKit requirements for --platform
-    if args.platform.is_some() {
-        validate_buildkit_requirement(&args.output_format, "platform", "--platform", buildkit_off)
-            .await?;
-    }
-
-    // Validate BuildKit requirements for --cache-to
-    if !args.cache_to.is_empty() {
-        validate_buildkit_requirement(&args.output_format, "cache-to", "--cache-to", buildkit_off)
-            .await?;
+    if cli.is_podman() {
+        // Podman's builder is Buildah, whatever `--buildkit` says, so the BuildKit
+        // probe below would answer a question about a builder that will not run
+        // (it used to probe a literal `docker buildx` — the wrong binary, and on a
+        // machine without docker a refusal of flags podman serves). What matters
+        // is which BuildKit-only shapes Buildah cannot honour (#775).
+        //
+        // An explicit `--buildkit never` is still refused alongside a flag that
+        // needs BuildKit: that is the user's own instruction, not a probe, and
+        // answering it differently per runtime would make the same command line
+        // mean two things (`case-build-buildkit-never-platform-refused-spec`).
+        // Only the flags `buildkit_off` gates; with a cause set, the check returns
+        // before it would probe anything. `--push` is not among them.
+        if let Some(cause) = buildkit_disabled(args.buildkit.as_ref()) {
+            for (present, feature, flag) in [
+                (args.output.is_some(), "output", "--output"),
+                (args.platform.is_some(), "platform", "--platform"),
+                (!args.cache_to.is_empty(), "cache-to", "--cache-to"),
+            ] {
+                if present {
+                    validate_buildkit_requirement(
+                        &args.output_format,
+                        feature,
+                        flag,
+                        Some(cause),
+                        cli.runtime_path(),
+                    )
+                    .await?;
+                }
+            }
+        }
+        reject_buildkit_only_flags_on_podman(&args)?;
+    } else {
+        validate_buildkit_flags(&args, cli.runtime_path()).await?;
     }
 
     // Load configuration using shared helper for consistency with up/exec
@@ -896,20 +1051,6 @@ async fn execute_build_inner(
     // Calculate configuration hash for caching
     let config_hash = calculate_config_hash(&build_config, &workspace_folder)?;
     debug!("Configuration hash: {}", config_hash);
-
-    // The container runtime for this build: BOTH the flavor and the binary.
-    //
-    // `build` used to hardcode `CliDocker::new()` at four sites, so it ignored
-    // `--runtime` entirely and `--docker-path` with it (#692/#694). Passing only
-    // the path would still be wrong: podman needs its FLAVOR too, because the
-    // `localhost/` image-ref qualification and the SELinux/userns handling hang
-    // off `CliRuntime::is_podman()`. The reference does the same thing — it never
-    // branches its build command on podman (it pushes `buildx build`
-    // unconditionally, and podman aliases `buildx` to `build`), only its
-    // arguments.
-    let cli = crate::commands::shared::resolve_runtime(runtime, &args.docker_path)
-        .await
-        .cli_docker();
 
     // Feature installation during build.
     //
@@ -3065,7 +3206,13 @@ async fn execute_docker_build(
             // one) name the image this build produced. `--load` alone is dropped as
             // a duplicate of an explicit `type=docker` spec, so name the exporter
             // directly — and only when the user's own spec is not already it.
-            if produces_local_image && !exports_to_daemon(output) {
+            //
+            // Never on podman (#775): Buildah always commits the image to local
+            // storage, so there is nothing to load, and it has no `docker`
+            // exporter. It reads `type=docker` as a DIRECTORY to write the root
+            // filesystem into, and podman < 5.6 keeps only the last `--output`,
+            // so the appended one silently replaced the user's own destination.
+            if produces_local_image && !docker.is_podman() && !exports_to_daemon(output) {
                 build_args.push("--output".to_string());
                 build_args.push("type=docker".to_string());
             }

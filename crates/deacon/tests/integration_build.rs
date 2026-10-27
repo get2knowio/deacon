@@ -1499,7 +1499,8 @@ fn test_cache_to_requires_buildkit() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
-        // When the command fails, accept either our validation error, Docker driver error, or Docker errors
+        // When the command fails, accept either our validation error, Docker driver error, or Docker errors.
+        // Under podman, BuildKit's `type=` cache grammar is refused up front (#775).
         assert!(
             !output.status.success(),
             "Expected build to fail when BuildKit is not available or driver doesn't support cache"
@@ -1507,6 +1508,7 @@ fn test_cache_to_requires_buildkit() {
         assert!(
             stderr.contains("BuildKit is required")
                 || stdout.contains("BuildKit is required")
+                || stdout.contains("Cannot use --cache-to with Podman")
                 || stderr.contains("Cache export is not supported")
                 || stderr.contains("Docker")
                 || stderr.contains("error getting credentials"),
