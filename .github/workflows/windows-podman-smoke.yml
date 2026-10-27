@@ -114,6 +114,10 @@ jobs:
     - name: Init + start podman machine (WSL2 backend)
       id: machine
       continue-on-error: true
+      # Its own budget, like the e2e step's. A machine that never came up once
+      # ran into the job timeout, which cancels the summary steps and uploads no
+      # step log, so the run said nothing about which layer hung.
+      timeout-minutes: 15
       shell: pwsh
       run: |
         # Accurate exit semantics: this step's outcome must reflect whether the
@@ -158,6 +162,7 @@ jobs:
     - name: Podman smoke (run alpine)
       id: smoke
       continue-on-error: true
+      timeout-minutes: 10
       shell: pwsh
       run: |
         # This step's outcome gates the deacon e2e below. deacon has not even
