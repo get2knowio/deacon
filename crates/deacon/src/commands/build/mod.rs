@@ -893,6 +893,31 @@ async fn execute_build_inner(
         // (it used to probe a literal `docker buildx` — the wrong binary, and on a
         // machine without docker a refusal of flags podman serves). What matters
         // is which BuildKit-only shapes Buildah cannot honour (#775).
+        //
+        // An explicit `--buildkit never` is still refused alongside a flag that
+        // needs BuildKit: that is the user's own instruction, not a probe, and
+        // answering it differently per runtime would make the same command line
+        // mean two things (`case-build-buildkit-never-platform-refused-spec`).
+        // Only the flags `buildkit_off` gates; with a cause set, the check returns
+        // before it would probe anything. `--push` is not among them.
+        if let Some(cause) = buildkit_disabled(args.buildkit.as_ref()) {
+            for (present, feature, flag) in [
+                (args.output.is_some(), "output", "--output"),
+                (args.platform.is_some(), "platform", "--platform"),
+                (!args.cache_to.is_empty(), "cache-to", "--cache-to"),
+            ] {
+                if present {
+                    validate_buildkit_requirement(
+                        &args.output_format,
+                        feature,
+                        flag,
+                        Some(cause),
+                        cli.runtime_path(),
+                    )
+                    .await?;
+                }
+            }
+        }
         reject_buildkit_only_flags_on_podman(&args)?;
     } else {
         validate_buildkit_flags(&args, cli.runtime_path()).await?;
