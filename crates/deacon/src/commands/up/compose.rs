@@ -1293,6 +1293,9 @@ pub(crate) async fn resolve_compose_feature_image(
             let mut synth_config = config.clone();
             synth_config.image = Some(base_image.clone());
 
+            // The Compose route keeps its BuildKit requirement; only the
+            // single-container route falls back to the classic builder (#783).
+            ensure_buildkit_or_error(cli).await?;
             build_image_with_features(
                 &synth_config,
                 &identity,
@@ -1301,6 +1304,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 build_options,
                 host_ca_set,
                 cli,
+                super::features_build::FeatureBuilder::BuildKit,
                 lockfile_policy,
                 metadata_raw_config,
                 control_manifest,
@@ -1420,7 +1424,7 @@ async fn build_compose_service_with_features(
     // Refuse before resolving anything: installing Features needs BuildKit's named
     // contexts and RUN mounts, and finding that out after downloading every
     // Feature would be work done for a build that was never going to run.
-    ensure_buildkit_or_error().await?;
+    ensure_buildkit_or_error(cli).await?;
 
     let dockerfile_content = tokio::fs::read_to_string(&dockerfile_path)
         .await

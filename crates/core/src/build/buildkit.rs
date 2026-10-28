@@ -1,93 +1,68 @@
-//! BuildKit capability detection and validation
+//! BuildKit capability detection
 //!
-//! This module provides helpers to detect BuildKit availability and flag
-//! operations that require BuildKit execution.
+//! [`probe_buildkit`] answers whether the builder a runtime's `buildx build`
+//! will run is BuildKit, asked of THAT runtime's binary. It is the one place the
+//! question is asked, shared by `build` and `up`, so the answer cannot come from
+//! a binary the build will not run (#775, #780).
 //!
-//! ## Usage
-//!
-//! Use [`BuildKitOptions`] to track which CLI options require BuildKit support,
-//! then call [`require_buildkit_for_options`] to fail-fast if BuildKit is unavailable:
-//!
-//! ```no_run
-//! use deacon_core::build::buildkit::{BuildKitOptions, require_buildkit_for_options};
-//!
-//! # async fn run() -> Result<(), deacon_core::errors::DeaconError> {
-//! let options = BuildKitOptions {
-//!     cache_from: vec!["type=registry,ref=myregistry.io/cache:latest".to_string()],
-//!     cache_to: vec![],
-//!     builder: None,
-//! };
-//!
-//! // This will fail with a clear error if BuildKit is not available
-//! require_buildkit_for_options(&options).await?;
-//! # Ok(())
-//! # }
-//! ```
+//! [`BuildKitOptions`] tracks which CLI options depend on BuildKit.
 
-use crate::errors::Result;
+use crate::docker::CliRuntime;
 use tokio::process::Command;
 use tracing::{debug, instrument};
 
-/// Detects if BuildKit is available on the host.
-///
-/// Uses `docker buildx version` to determine BuildKit availability.
-///
-/// # Returns
-///
-/// * `Ok(true)` - BuildKit is available
-/// * `Ok(false)` - BuildKit is not available
-/// * `Err(_)` - Failed to detect BuildKit (should be treated as unavailable)
-#[instrument]
-pub async fn is_buildkit_available() -> Result<bool> {
-    is_buildkit_available_with("docker").await
+/// The answer to "will this runtime's build run on BuildKit?"
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildKitProbe {
+    /// Docker, and `<runtime> buildx version` succeeded.
+    Available,
+    /// Docker, and `<runtime> buildx version` failed or could not be run.
+    Unavailable,
+    /// Podman. Its builder is Buildah, not BuildKit, so nothing was probed:
+    /// `podman buildx version` exits 0 with Buildah's version, which would
+    /// answer `Available` for a builder that is not BuildKit. What Buildah can
+    /// and cannot serve is the caller's podman-specific decision.
+    Buildah,
 }
 
-/// [`is_buildkit_available`] for the runtime binary a build will actually run
-/// (`--docker-path`), via `<runtime_path> buildx version`.
+/// Ask the runtime a build will ACTUALLY run whether its builder is BuildKit.
 ///
-/// Do not use this to ask about podman: `podman buildx version` succeeds and
-/// reports Buildah's version, so it answers `true` for a builder that is not
-/// BuildKit. Callers branch on the runtime flavor first.
-#[instrument]
-pub async fn is_buildkit_available_with(runtime_path: &str) -> Result<bool> {
-    debug!("Checking BuildKit availability");
+/// On Docker this runs `<cli.runtime_path()> buildx version` — the
+/// `--docker-path` / resolved binary, never a literal `docker`. A host with a
+/// second docker on `PATH`, or with no docker at all because podman was
+/// selected, must not decide the answer. On podman nothing is run; see
+/// [`BuildKitProbe::Buildah`].
+#[instrument(skip(cli), fields(runtime = %cli.runtime_path(), podman = cli.is_podman()))]
+pub async fn probe_buildkit(cli: &CliRuntime) -> BuildKitProbe {
+    if cli.is_podman() {
+        debug!("Podman builds with Buildah; not probing BuildKit");
+        return BuildKitProbe::Buildah;
+    }
+    if buildx_answers(cli.runtime_path()).await {
+        BuildKitProbe::Available
+    } else {
+        BuildKitProbe::Unavailable
+    }
+}
 
-    let output = Command::new(runtime_path)
+/// Whether `<runtime_path> buildx version` runs and exits 0. A binary that
+/// cannot be spawned counts as "no", and is logged rather than guessed past.
+async fn buildx_answers(runtime_path: &str) -> bool {
+    match Command::new(runtime_path)
         .args(["buildx", "version"])
         .output()
-        .await;
-
-    match output {
+        .await
+    {
         Ok(output) => {
             let available = output.status.success();
-            debug!("BuildKit available: {}", available);
-            Ok(available)
+            debug!(runtime_path, available, "Probed `buildx version`");
+            available
         }
         Err(e) => {
-            debug!("Failed to check BuildKit: {}", e);
-            Ok(false)
+            debug!(runtime_path, error = %e, "Could not run `buildx version`");
+            false
         }
     }
-}
-
-/// Validates that BuildKit is available for the given operation.
-///
-/// # Arguments
-///
-/// * `operation` - The operation name that requires BuildKit (e.g., "--push", "--output")
-///
-/// # Errors
-///
-/// Returns a validation error with a spec-compliant message if BuildKit is not available.
-#[instrument]
-pub async fn require_buildkit(operation: &str) -> Result<()> {
-    if !is_buildkit_available().await? {
-        return Err(crate::errors::DeaconError::Runtime(format!(
-            "BuildKit is required for {}. Enable BuildKit or remove {} flag.",
-            operation, operation
-        )));
-    }
-    Ok(())
 }
 
 /// Tracks CLI options that require BuildKit support.
@@ -184,71 +159,71 @@ impl BuildKitOptions {
     }
 }
 
-/// Validates that BuildKit is available when required by the given options.
-///
-/// This function implements fail-fast behavior per spec edge case:
-/// "Unsupported or conflicting build options (e.g., buildx requested when BuildKit is
-/// unavailable) must fail fast with an actionable error before builds start."
-///
-/// # Arguments
-///
-/// * `options` - The build options that may require BuildKit support
-///
-/// # Errors
-///
-/// Returns a validation error with a spec-compliant message listing which options
-/// require BuildKit if any require it and BuildKit is not available.
-///
-/// # Example
-///
-/// ```no_run
-/// use deacon_core::build::buildkit::{BuildKitOptions, require_buildkit_for_options};
-///
-/// # async fn run() -> Result<(), deacon_core::errors::DeaconError> {
-/// let options = BuildKitOptions {
-///     cache_from: vec!["type=registry,ref=cache".to_string()],
-///     cache_to: vec!["type=local,dest=/tmp".to_string()],
-///     builder: Some("mybuilder".to_string()),
-/// };
-///
-/// // Will fail if BuildKit is not available, with message like:
-/// // "BuildKit is required for --cache-from, --cache-to, --builder. Enable BuildKit or remove these flags."
-/// require_buildkit_for_options(&options).await?;
-/// # Ok(())
-/// # }
-/// ```
-#[instrument(skip(options), fields(requires_buildkit = options.requires_buildkit()))]
-pub async fn require_buildkit_for_options(options: &BuildKitOptions) -> Result<()> {
-    // If no options require BuildKit, validation passes immediately
-    if !options.requires_buildkit() {
-        debug!("No BuildKit-requiring options present, skipping availability check");
-        return Ok(());
-    }
-
-    // Check BuildKit availability
-    if !is_buildkit_available().await? {
-        let required_options = options.buildkit_required_options();
-        let options_list = required_options.join(", ");
-
-        return Err(crate::errors::DeaconError::Runtime(format!(
-            "BuildKit is required for {}. Enable BuildKit or remove these flags.",
-            options_list
-        )));
-    }
-
-    debug!("BuildKit is available for requested options");
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // ==========================================================================
+    // probe_buildkit tests
+    // ==========================================================================
+
+    /// A runtime shim that records its argv to `<dir>/argv` and exits `rc`.
+    #[cfg(unix)]
+    fn recording_shim(dir: &std::path::Path, name: &str, rc: i32) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        let log = dir.join("argv");
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nexit {rc}\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path.display().to_string()
+    }
+
+    /// The probe asks the binary it was handed, not a literal `docker`.
+    #[cfg(unix)]
     #[tokio::test(flavor = "current_thread")]
-    async fn test_is_buildkit_available() {
-        // This test will pass regardless of BuildKit availability
-        // The function should not panic
-        let _ = is_buildkit_available().await;
+    async fn probe_asks_the_selected_docker_binary() {
+        for (rc, expected) in [
+            (0, BuildKitProbe::Available),
+            (1, BuildKitProbe::Unavailable),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let shim = recording_shim(dir.path(), "docker-selected", rc);
+            let cli = CliRuntime::with_runtime_path(shim);
+            assert!(!cli.is_podman());
+            assert_eq!(probe_buildkit(&cli).await, expected, "rc={rc}");
+            let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap();
+            assert_eq!(argv, "buildx version\n", "rc={rc}");
+        }
+    }
+
+    /// Podman is never asked: `podman buildx version` would answer with
+    /// Buildah's version and exit 0.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_does_not_ask_podman() {
+        let dir = tempfile::tempdir().unwrap();
+        let shim = recording_shim(dir.path(), "podman", 0);
+        let cli = CliRuntime::with_runtime_path(shim);
+        assert!(cli.is_podman());
+        assert_eq!(probe_buildkit(&cli).await, BuildKitProbe::Buildah);
+        assert!(
+            !dir.path().join("argv").exists(),
+            "podman was asked a BuildKit question"
+        );
+    }
+
+    /// A docker binary that cannot be run is "no BuildKit", not an error.
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_of_an_unrunnable_docker_is_unavailable() {
+        let cli = CliRuntime::with_runtime_path("/nonexistent/deacon-test/docker".to_string());
+        assert_eq!(probe_buildkit(&cli).await, BuildKitProbe::Unavailable);
     }
 
     // ==========================================================================
@@ -340,24 +315,9 @@ mod tests {
         assert!(required.contains(&"--cache-to"));
     }
 
-    // ==========================================================================
-    // require_buildkit_for_options tests
-    // ==========================================================================
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn require_buildkit_for_options_passes_when_empty() {
-        let options = BuildKitOptions::default();
-
-        // Should always pass when no BuildKit-requiring options are set
-        // (does not even check BuildKit availability)
-        let result = require_buildkit_for_options(&options).await;
-        assert!(result.is_ok());
-    }
-
     #[test]
-    fn require_buildkit_for_options_preserves_option_order() {
-        // When BuildKit is not available and options require it,
-        // the error message should list options in consistent order
+    fn buildkit_required_options_preserves_option_order() {
+        // Options are listed in a consistent order, for error messages
         let options = BuildKitOptions {
             cache_from: vec!["test".to_string()],
             cache_to: vec!["test".to_string()],
