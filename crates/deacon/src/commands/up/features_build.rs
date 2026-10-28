@@ -1,4 +1,5 @@
-//! Feature image building with BuildKit.
+//! Feature image building, on BuildKit or, as the reference falls back to, the
+//! classic builder with the Feature content staged as an image (#783).
 //!
 //! This module contains:
 //! - `FeatureBuildOutput` - Output from feature image building
@@ -325,7 +326,11 @@ struct StagedFeatures {
     lockfile: Lockfile,
 }
 
-/// Build an extended Docker image with features installed using BuildKit.
+/// Build an extended Docker image with features installed.
+///
+/// `builder` picks the form ([`resolve_feature_builder`]): BuildKit with the
+/// Feature content in a build context, or the classic builder with it staged into
+/// an image first (#783).
 ///
 /// This is the `image:`-shape entry point: `config.image` must be set. The
 /// returned image extends the base image with one BuildKit RUN-mount per
@@ -354,11 +359,12 @@ pub(crate) async fn build_image_with_features(
     build_options: Option<&BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
+    builder: FeatureBuilder,
     lockfile_policy: LockfilePolicy,
     metadata_raw_config: Option<&DevContainerConfig>,
     control_manifest: Option<&ControlManifestSource>,
 ) -> Result<FeatureBuildOutput> {
-    info!("Building extended image with features");
+    info!(?builder, "Building extended image with features");
 
     // Get base image
     let base_image = config
@@ -383,6 +389,16 @@ pub(crate) async fn build_image_with_features(
             metadata_label: None,
         });
     }
+
+    // Refuse what the classic builder cannot honour BEFORE downloading anything.
+    let classic_option_args = match builder {
+        FeatureBuilder::BuildKit => None,
+        FeatureBuilder::Classic { why } => Some(classic_feature_build_option_args(
+            why,
+            build_options,
+            host_ca_set,
+        )?),
+    };
 
     let staged = resolve_and_stage_features(
         config,
@@ -418,6 +434,25 @@ pub(crate) async fn build_image_with_features(
         _ => None,
     };
 
+    // The classic builder has no build contexts, so the staged Feature tree is
+    // built into an image the install stage reads with `COPY --from=` (#719, #783).
+    // Built AFTER staging, because the image's content is the staged tree.
+    let feature_content_image = match builder {
+        FeatureBuilder::BuildKit => None,
+        FeatureBuilder::Classic { why } => {
+            let tag = cli
+                .build_feature_content_image(&staged.features_source_dir, &identity.workspace_hash)
+                .await
+                .context("Failed to stage Feature content for a build without BuildKit")?;
+            debug!(tag = %tag, why, "Staged Feature content as an image (classic builder)");
+            Some(tag)
+        }
+    };
+    let feature_content = match &feature_content_image {
+        None => deacon_core::dockerfile_generator::FeatureContentSource::BuildContext,
+        Some(tag) => deacon_core::dockerfile_generator::FeatureContentSource::Image(tag.clone()),
+    };
+
     let dockerfile_config = DockerfileConfig {
         base_image: base_image.clone(),
         target_stage: "dev_containers_target_stage".to_string(),
@@ -425,18 +460,73 @@ pub(crate) async fn build_image_with_features(
         feature_install_env,
         host_ca_build_context,
         config_container_env: config.container_env().clone(),
-        // This path always runs under `ensure_buildkit_or_error`, so contexts exist.
-        feature_content: deacon_core::dockerfile_generator::FeatureContentSource::BuildContext,
+        feature_content,
     };
 
     let generator = DockerfileGenerator::new(dockerfile_config.clone());
-    let mut dockerfile_content = generator.generate(&staged.plan)?;
+    let generated = generator.generate(&staged.plan);
+    let result = match generated {
+        Ok(dockerfile_content) => {
+            build_generated_feature_image(
+                cli,
+                &generator,
+                dockerfile_content,
+                &staged,
+                identity,
+                base_image,
+                build_options,
+                classic_option_args,
+                metadata_raw_config,
+            )
+            .await
+        }
+        Err(e) => Err(e.into()),
+    };
+    // Reclaim the staged content image on BOTH paths: a failed build leaves one
+    // behind just as surely as a successful one.
+    drop_feature_content_image(cli, feature_content_image.as_deref()).await;
+    let metadata_label = result?;
+
+    let extended_image_tag = feature_image_tag(identity);
+    info!("Successfully built extended image: {}", extended_image_tag);
+
+    Ok(FeatureBuildOutput {
+        image_tag: extended_image_tag,
+        combined_env: staged.combined_env,
+        resolved_features: staged.plan.features.clone(),
+        lockfile: staged.lockfile,
+        metadata_label,
+    })
+}
+
+/// The tag `up`'s single-container Feature builds produce.
+fn feature_image_tag(identity: &ContainerIdentity) -> String {
+    format!("deacon-devcontainer-features:{}", identity.workspace_hash)
+}
+
+/// Run the image-reference Feature build over an already generated document, on
+/// the builder `classic_option_args` selects: `None` is BuildKit, `Some(args)` is
+/// the classic builder with its vetted option flags. Returns the
+/// `devcontainer.metadata` label the build wrote, if any.
+#[allow(clippy::too_many_arguments)]
+async fn build_generated_feature_image(
+    cli: &deacon_core::docker::CliRuntime,
+    generator: &DockerfileGenerator,
+    mut dockerfile_content: String,
+    staged: &StagedFeatures,
+    identity: &ContainerIdentity,
+    base_image: &str,
+    build_options: Option<&BuildOptions>,
+    classic_option_args: Option<Vec<String>>,
+    metadata_raw_config: Option<&DevContainerConfig>,
+) -> Result<Option<String>> {
     // No Dockerfile of the user's on this path, so the reference's prefix is
-    // either nothing or its injected default frontend (#732).
+    // either nothing or its injected default frontend (#732). Without build
+    // contexts the only possible answer is no directive at all.
     if let Some(directive) = feature_syntax_directive(
         cli,
         None,
-        true,
+        classic_option_args.is_none(),
         build_options.is_some_and(|o| o.omit_syntax_directive),
     )
     .await
@@ -451,9 +541,8 @@ pub(crate) async fn build_image_with_features(
     debug!("Generated Dockerfile at {}", dockerfile_path.display());
 
     // Generate image tag
-    let extended_image_tag = format!("deacon-devcontainer-features:{}", identity.workspace_hash);
+    let extended_image_tag = feature_image_tag(identity);
 
-    ensure_buildkit_or_error(cli).await?;
     log_cache_configuration(build_options);
 
     // `devcontainer.metadata`, when the caller wants one recorded, computed from
@@ -462,7 +551,7 @@ pub(crate) async fn build_image_with_features(
     // already local: `resolve_feature_install_env` above pulled it.
     let metadata_label = compute_metadata_label(
         cli,
-        Some(base_image.as_str()),
+        Some(base_image),
         metadata_raw_config,
         &staged.plan.features,
     )
@@ -472,14 +561,49 @@ pub(crate) async fn build_image_with_features(
         .map(|m| format!("devcontainer.metadata={}", m))
         .collect();
 
-    // `base_image` here is a REGISTRY reference the configuration named, so every
-    // buildx driver can resolve this build's `FROM` and no builder is pinned (#595).
-    let build_args = generator.generate_build_args(
-        &dockerfile_path,
-        &extended_image_tag,
-        build_options,
-        &extra_labels,
-    );
+    let build_args = match classic_option_args {
+        // `base_image` here is a REGISTRY reference the configuration named, so every
+        // buildx driver can resolve this build's `FROM` and no builder is pinned (#595).
+        None => generator.generate_build_args(
+            &dockerfile_path,
+            &extended_image_tag,
+            build_options,
+            &extra_labels,
+        ),
+        // The reference's non-BuildKit form: plain `build`, no build contexts. The
+        // content arrives as a `FROM` stage in the document. The context is an
+        // empty directory, as the reference's is: nothing on this path reads it,
+        // and the classic builder would upload all of it.
+        Some(option_args) => {
+            let empty_context = staged.temp_dir.join("empty-build-context");
+            tokio::fs::create_dir_all(&empty_context)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to create the empty build context {}",
+                        empty_context.display()
+                    )
+                })?;
+            let mut args = vec!["build".to_string()];
+            args.extend(option_args);
+            for label in &extra_labels {
+                args.push("--label".to_string());
+                args.push(label.clone());
+            }
+            args.extend([
+                "--build-arg".to_string(),
+                format!("_DEV_CONTAINERS_BASE_IMAGE={base_image}"),
+                "--target".to_string(),
+                FEATURE_TARGET_STAGE.to_string(),
+                "-f".to_string(),
+                dockerfile_path.display().to_string(),
+                "-t".to_string(),
+                extended_image_tag.clone(),
+                empty_context.display().to_string(),
+            ]);
+            args
+        }
+    };
 
     debug!("Building image with args: {:?}", build_args);
     let mode = build_options.map(|o| o.output_mode).unwrap_or_default();
@@ -495,15 +619,7 @@ pub(crate) async fn build_image_with_features(
     }
     let _image_id = build_result?;
 
-    info!("Successfully built extended image: {}", extended_image_tag);
-
-    Ok(FeatureBuildOutput {
-        image_tag: extended_image_tag,
-        combined_env: staged.combined_env,
-        resolved_features: staged.plan.features.clone(),
-        lockfile: staged.lockfile,
-        metadata_label,
-    })
+    Ok(metadata_label)
 }
 
 /// The document, the Feature layer and the label a Dockerfile-based Feature build
@@ -773,11 +889,21 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     build_options: Option<&BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
+    builder: FeatureBuilder,
     lockfile_policy: LockfilePolicy,
     metadata_raw_config: Option<&DevContainerConfig>,
     extra_build_args: &[String],
     control_manifest: Option<&ControlManifestSource>,
 ) -> Result<FeatureBuildOutput> {
+    // Refuse what the classic builder cannot honour BEFORE downloading anything.
+    let classic_option_args = match builder {
+        FeatureBuilder::BuildKit => None,
+        FeatureBuilder::Classic { why } => Some(classic_feature_build_option_args(
+            why,
+            build_options,
+            host_ca_set,
+        )?),
+    };
     let build = prepare_dockerfile_feature_build(
         config,
         identity,
@@ -794,9 +920,8 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         lockfile_policy,
         metadata_raw_config,
         control_manifest,
-        // `up`'s single-container Dockerfile path builds through buildx and gates on
-        // `ensure_buildkit_or_error`, so build contexts are available.
-        None,
+        // The classic builder has no build contexts: stage the content as an image.
+        classic_option_args.is_some().then_some(cli),
         build_options.is_some_and(|o| o.omit_syntax_directive),
     )
     .await?;
@@ -806,9 +931,54 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         metadata_label,
     } = build;
 
-    let extended_image_tag = format!("deacon-devcontainer-features:{}", identity.workspace_hash);
+    let result = run_dockerfile_feature_build(
+        cli,
+        identity,
+        &prepared,
+        &dockerfile_path,
+        metadata_label.as_deref(),
+        base_context_dir,
+        build_options,
+        classic_option_args,
+        extra_build_args,
+    )
+    .await;
+    // Reclaim the staged content image on BOTH paths: a failed build leaves one
+    // behind just as surely as a successful one.
+    drop_feature_content_image(cli, prepared.feature_content_image.as_deref()).await;
+    let extended_image_tag = result?;
 
-    ensure_buildkit_or_error(cli).await?;
+    info!(
+        "Successfully built extended image from Dockerfile: {}",
+        extended_image_tag
+    );
+
+    Ok(FeatureBuildOutput {
+        image_tag: extended_image_tag,
+        combined_env: prepared.combined_env,
+        resolved_features: prepared.resolved_features,
+        lockfile: prepared.lockfile,
+        metadata_label,
+    })
+}
+
+/// Run the single build of a Dockerfile-based Feature build, on BuildKit when
+/// `classic_option_args` is `None` and on the classic builder (with those vetted
+/// option flags) otherwise. Returns the tag it produced.
+#[allow(clippy::too_many_arguments)]
+async fn run_dockerfile_feature_build(
+    cli: &deacon_core::docker::CliRuntime,
+    identity: &ContainerIdentity,
+    prepared: &PreparedFeatureLayer,
+    dockerfile_path: &Path,
+    metadata_label: Option<&str>,
+    base_context_dir: &Path,
+    build_options: Option<&BuildOptions>,
+    classic_option_args: Option<Vec<String>>,
+    extra_build_args: &[String],
+) -> Result<String> {
+    let extended_image_tag = feature_image_tag(identity);
+
     log_cache_configuration(build_options);
 
     // Build args: hand-rolled here (NOT the generator's defaults) because the
@@ -823,17 +993,29 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
     // any buildx driver can execute it and the builder the user selected is the
     // one that should (#595). `cli` is unused for driver detection here for the
     // same reason.
-    let mut build_args: Vec<String> = vec![
-        "buildx".to_string(),
-        "build".to_string(),
-        "--load".to_string(),
-    ];
-
-    if let Some(opts) = build_options {
-        if !opts.is_default() {
-            build_args.extend(opts.to_docker_args());
+    //
+    // The classic form is the reference's non-BuildKit one: plain `build`, and the
+    // Feature content is a `FROM` stage in the document rather than a context (#783).
+    let mut build_args: Vec<String> = match classic_option_args {
+        None => {
+            let mut args = vec![
+                "buildx".to_string(),
+                "build".to_string(),
+                "--load".to_string(),
+            ];
+            if let Some(opts) = build_options {
+                if !opts.is_default() {
+                    args.extend(opts.to_docker_args());
+                }
+            }
+            args
         }
-    }
+        Some(option_args) => {
+            let mut args = vec!["build".to_string()];
+            args.extend(option_args);
+            args
+        }
+    };
 
     // The base half's own `build.args` / `build.options`. They reach BuildKit here
     // because there is no separate base build any more (#595).
@@ -841,11 +1023,13 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
 
     // `devcontainer.metadata`, when the caller wants one recorded — computed
     // BEFORE the build, so this invocation can write it (#595).
-    if let Some(metadata) = &metadata_label {
+    if let Some(metadata) = metadata_label {
         build_args.push("--label".to_string());
         build_args.push(format!("devcontainer.metadata={}", metadata));
     }
 
+    // Empty on the classic builder: host-CA injection was refused, and the Feature
+    // content is an image there, not a context.
     build_args.extend(prepared.buildx_context_args());
     build_args.extend(vec![
         "--target".to_string(),
@@ -877,18 +1061,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
         )
     })?;
 
-    info!(
-        "Successfully built extended image from Dockerfile: {}",
-        extended_image_tag
-    );
-
-    Ok(FeatureBuildOutput {
-        image_tag: extended_image_tag,
-        combined_env: prepared.combined_env,
-        resolved_features: prepared.resolved_features,
-        lockfile: prepared.lockfile,
-        metadata_label,
-    })
+    Ok(extended_image_tag)
 }
 
 /// Splice a prepared Feature-install stage onto the end of a base Dockerfile,
@@ -1758,7 +1931,10 @@ fn build_lockfile_from_features(
     Lockfile { features: entries }
 }
 
-/// Refuse a Feature build the runtime `up` will build with cannot run.
+/// Refuse a Compose Feature build the runtime `up` will build with cannot run.
+///
+/// Only the Compose route still asks this. The single-container route takes the
+/// reference's classic fallback instead ([`resolve_feature_builder`], #783).
 ///
 /// Asked of `cli`, the runtime the build runs on, through the probe `build`
 /// shares ([`deacon_core::build::buildkit::probe_buildkit`]). It used to run a
@@ -1781,6 +1957,102 @@ pub(crate) async fn ensure_buildkit_or_error(cli: &deacon_core::docker::CliRunti
         ))
         .into()),
     }
+}
+
+/// The builder a single-container Feature build of `up` runs on (#783).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FeatureBuilder {
+    /// `<runtime> buildx build`, with the Feature content in a named build context
+    /// that each install `RUN` mounts.
+    BuildKit,
+    /// `<runtime> build`, with the Feature content staged into an image first and
+    /// copied into the install stage with `COPY --from=`. `why` names what chose
+    /// it, for the log and for any refusal of an option this builder cannot honour.
+    Classic { why: &'static str },
+}
+
+/// Pick the builder for `up`'s single-container Feature build, as the reference does.
+///
+/// The reference (`addContainerFeatures`, `containerFeatures.ts`) has no BuildKit
+/// version when `--buildkit never` was passed or when `<docker-path> buildx version`
+/// fails, and with none it builds a Feature-content image and runs plain
+/// `docker build`. It does not refuse. deacon refused on a failed probe and ignored
+/// `--buildkit never` (#783).
+///
+/// Podman ([`BuildKitProbe::Buildah`]) keeps the BuildKit form. The reference's own
+/// `podman buildx version` succeeds there and Buildah serves the build contexts and
+/// `RUN --mount`s that form uses. `--buildkit never` still selects the classic
+/// form on podman, which is also what the reference does.
+///
+/// [`BuildKitProbe::Buildah`]: deacon_core::build::buildkit::BuildKitProbe::Buildah
+pub(crate) async fn resolve_feature_builder(
+    cli: &deacon_core::docker::CliRuntime,
+    buildkit: Option<&crate::cli::BuildKitOption>,
+) -> FeatureBuilder {
+    use deacon_core::build::buildkit::{BuildKitProbe, probe_buildkit};
+    if matches!(buildkit, Some(crate::cli::BuildKitOption::Never)) {
+        return FeatureBuilder::Classic {
+            why: "--buildkit never",
+        };
+    }
+    match probe_buildkit(cli).await {
+        BuildKitProbe::Available | BuildKitProbe::Buildah => FeatureBuilder::BuildKit,
+        BuildKitProbe::Unavailable => {
+            info!(
+                runtime = %cli.runtime_path(),
+                "`buildx version` failed; building Features without BuildKit, as the reference does"
+            );
+            FeatureBuilder::Classic {
+                why: "the runtime has no buildx",
+            }
+        }
+    }
+}
+
+/// Refuse the inputs a classic (non-BuildKit) Feature build cannot honour.
+///
+/// The reference silently drops `--cache-to` on this path. deacon refuses it
+/// instead, as `deacon build --buildkit never --cache-to` already does: a cache
+/// export the user asked for and never got is a silent fallback. `--cache-from`
+/// and `--no-cache` are flags the classic builder accepts, and they pass through.
+/// Build-time host-CA injection mounts the bundle through a BuildKit build context
+/// and a `RUN --mount`, and the classic builder has neither, so it is refused.
+fn classic_feature_build_option_args(
+    why: &str,
+    build_options: Option<&BuildOptions>,
+    host_ca_set: Option<&CorporateCaSet>,
+) -> Result<Vec<String>> {
+    if host_ca_set.is_some_and(|set| !set.is_empty()) {
+        return Err(DeaconError::Runtime(format!(
+            "Host-CA injection into a Feature build requires BuildKit, but {why} \
+             selected the classic builder. Remove --inject-host-ca, or build with BuildKit."
+        ))
+        .into());
+    }
+    let mut args = Vec::new();
+    if let Some(opts) = build_options {
+        for (flag, set) in [
+            ("--cache-to", opts.cache_to.is_some()),
+            ("--builder", opts.builder.is_some()),
+            ("--platform", opts.platform.is_some()),
+        ] {
+            if set {
+                return Err(DeaconError::Runtime(format!(
+                    "{flag} requires BuildKit, but {why} selected the classic builder \
+                     for this Feature build. Remove {flag}, or build with BuildKit."
+                ))
+                .into());
+            }
+        }
+        if opts.no_cache {
+            args.push("--no-cache".to_string());
+        }
+        for source in &opts.cache_from {
+            args.push("--cache-from".to_string());
+            args.push(source.clone());
+        }
+    }
+    Ok(args)
 }
 
 fn log_cache_configuration(build_options: Option<&BuildOptions>) {
