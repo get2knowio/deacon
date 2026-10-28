@@ -304,7 +304,7 @@ pub(crate) async fn execute_container_up(
         .map(|o| !o.is_empty())
         .unwrap_or(false)
     {
-        info!("Features detected in configuration - building feature-extended image with BuildKit");
+        info!("Features detected in configuration - building feature-extended image");
 
         // Pass build_options to propagate cache-from/cache-to/buildx settings per spec (data-model.md).
         // `config_path` anchors local feature references (#69). Pause the
@@ -314,6 +314,14 @@ pub(crate) async fn execute_container_up(
             args.no_lockfile,
             args.frozen_lockfile,
         );
+        // BuildKit, or the reference's classic fallback when `--buildkit never` was
+        // passed or the runtime has no buildx (#783). Decided before anything is
+        // downloaded, because the classic builder refuses some inputs up front.
+        let feature_builder = super::features_build::resolve_feature_builder(
+            &runtime.cli_docker(),
+            args.buildkit.as_ref(),
+        )
+        .await;
         let feature_build = {
             let _pause =
                 crate::commands::shared::progress::SpinnerPause::new(&args.progress_tracker);
@@ -366,6 +374,7 @@ pub(crate) async fn execute_container_up(
                         Some(build_options),
                         host_ca_set,
                         &runtime.cli_docker(),
+                        feature_builder,
                         lockfile_policy,
                         // `up` records `devcontainer.metadata` on the CONTAINER it
                         // creates, not on this image.
@@ -384,6 +393,7 @@ pub(crate) async fn execute_container_up(
                     Some(build_options),
                     host_ca_set,
                     &runtime.cli_docker(),
+                    feature_builder,
                     lockfile_policy,
                     None,
                     args.control_manifest.as_ref(),
