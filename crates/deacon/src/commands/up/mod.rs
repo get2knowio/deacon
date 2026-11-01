@@ -136,7 +136,10 @@ pub async fn execute_up(args: UpArgs) -> Result<UpContainerInfo> {
     // Step 2: Resolve effective GPU mode if detect mode is requested
     let effective_gpu_mode = if args.gpu_mode == deacon_core::gpu::GpuMode::Detect {
         debug!("GPU mode is 'detect', probing for GPU capability");
-        let gpu_capability = deacon_core::gpu::detect_gpu_capability(runtime.runtime_name()).await;
+        // Asked of the resolved binary, not of a name: `runtime_name()` is the
+        // literal "docker", which on a `--docker-path` run probed whatever
+        // `docker` was on PATH instead of the runtime this `up` uses (#780).
+        let gpu_capability = runtime.cli_docker().detect_gpu_capability().await;
 
         if gpu_capability.available {
             info!(

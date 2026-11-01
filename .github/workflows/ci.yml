@@ -174,7 +174,7 @@ jobs:
           - os: ubuntu
             runs_on: ubuntu-latest
           - os: macos
-            runs_on: macos-14
+            runs_on: macos-15
           # Windows runs the dev-fast profile, which already EXCLUDES Docker /
           # smoke / testcontainers tests — so no Docker daemon is required here.
           # This exercises the platform-agnostic logic (config parse/merge,

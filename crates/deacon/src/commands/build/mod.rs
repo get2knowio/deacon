@@ -531,8 +531,8 @@ fn report_and_fail(
 
 /// Why BuildKit will not run this build's PRIMARY invocation, if it will not.
 ///
-/// Distinct from [`deacon_core::build::buildkit::is_buildkit_available`], which
-/// asks whether the host HAS BuildKit. Both questions have to be answered, and
+/// Distinct from [`deacon_core::build::buildkit::probe_buildkit`], which
+/// asks whether the selected runtime HAS BuildKit. Both questions have to be answered, and
 /// answering only the first is what let `--buildkit never --platform <arch>`
 /// build for the host architecture and exit 0 ([#592]).
 ///
@@ -580,7 +580,7 @@ async fn validate_buildkit_requirement(
     feature_name: &str,
     flag_name: &str,
     disabled_by: Option<&str>,
-    runtime_path: &str,
+    cli: &deacon_core::docker::CliRuntime,
 ) -> Result<()> {
     if let Some(cause) = disabled_by {
         return Err(report_and_fail(
@@ -595,12 +595,13 @@ async fn validate_buildkit_requirement(
             format!("BuildKit is required for {feature_name} but {cause} disabled it"),
         ));
     }
-    match deacon_core::build::buildkit::is_buildkit_available_with(runtime_path).await {
-        Ok(true) => {
-            // BuildKit available, proceed
-            Ok(())
-        }
-        Ok(false) => Err(report_and_fail(
+    use deacon_core::build::buildkit::{BuildKitProbe, probe_buildkit};
+    match probe_buildkit(cli).await {
+        BuildKitProbe::Available => Ok(()),
+        // Podman's flags are vetted by `reject_buildkit_only_flags_on_podman`:
+        // Buildah is not BuildKit, so there is no BuildKit to require (#775).
+        BuildKitProbe::Buildah => Ok(()),
+        BuildKitProbe::Unavailable => Err(report_and_fail(
             output_format,
             result::BuildError::with_description(
                 format!("BuildKit is required for {}", flag_name),
@@ -608,17 +609,16 @@ async fn validate_buildkit_requirement(
             ),
             format!("BuildKit is required for {feature_name}"),
         )),
-        Err(e) => {
-            // Failed to detect BuildKit
-            Err(anyhow!("Failed to detect BuildKit: {}", e))
-        }
     }
 }
 
 /// The BuildKit gates for a build that runs on Docker: each BuildKit-only flag
 /// needs BuildKit present (probed on the runtime binary this build will run) and
 /// not switched off for the primary invocation.
-async fn validate_buildkit_flags(args: &BuildArgs, runtime_path: &str) -> Result<()> {
+async fn validate_buildkit_flags(
+    args: &BuildArgs,
+    cli: &deacon_core::docker::CliRuntime,
+) -> Result<()> {
     // Whether something explicitly switched BuildKit off for the primary build.
     // Consulted only by the flags the primary invocation carries (#592).
     let buildkit_off = buildkit_disabled(args.buildkit.as_ref());
@@ -626,7 +626,7 @@ async fn validate_buildkit_flags(args: &BuildArgs, runtime_path: &str) -> Result
 
     // `--push` passes no `buildkit_off`: see `validate_buildkit_requirement`.
     if args.push {
-        validate_buildkit_requirement(fmt, "push", "--push", None, runtime_path).await?;
+        validate_buildkit_requirement(fmt, "push", "--push", None, cli).await?;
     }
 
     // `buildkit_off` applies to `--output` since #595: it rides the primary build
@@ -634,16 +634,13 @@ async fn validate_buildkit_flags(args: &BuildArgs, runtime_path: &str) -> Result
     // `docker buildx build` pass that ran whatever the primary build did, which is
     // why it was ungated.
     if args.output.is_some() {
-        validate_buildkit_requirement(fmt, "output", "--output", buildkit_off, runtime_path)
-            .await?;
+        validate_buildkit_requirement(fmt, "output", "--output", buildkit_off, cli).await?;
     }
     if args.platform.is_some() {
-        validate_buildkit_requirement(fmt, "platform", "--platform", buildkit_off, runtime_path)
-            .await?;
+        validate_buildkit_requirement(fmt, "platform", "--platform", buildkit_off, cli).await?;
     }
     if !args.cache_to.is_empty() {
-        validate_buildkit_requirement(fmt, "cache-to", "--cache-to", buildkit_off, runtime_path)
-            .await?;
+        validate_buildkit_requirement(fmt, "cache-to", "--cache-to", buildkit_off, cli).await?;
     }
     Ok(())
 }
@@ -916,7 +913,7 @@ async fn execute_build_inner(
                         feature,
                         flag,
                         Some(cause),
-                        cli.runtime_path(),
+                        &cli,
                     )
                     .await?;
                 }
@@ -924,7 +921,7 @@ async fn execute_build_inner(
         }
         reject_buildkit_only_flags_on_podman(&args)?;
     } else {
-        validate_buildkit_flags(&args, cli.runtime_path()).await?;
+        validate_buildkit_flags(&args, &cli).await?;
     }
 
     // Load configuration using shared helper for consistency with up/exec
