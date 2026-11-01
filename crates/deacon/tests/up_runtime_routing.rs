@@ -11,6 +11,10 @@
 //! the build. On CI, where docker and buildx sit next to podman, the probe
 //! passed for the wrong reason, which is why the Podman lane never saw it.
 //!
+//! A docker whose answer is "no buildx" no longer gets a refusal at all (#783).
+//! As in the reference, it gets the classic route: a Feature-content image plus
+//! a plain `build`. `--buildkit never` selects the same route.
+//!
 //! Every runtime here is a recording shim, and `PATH` is controlled so that a
 //! host docker cannot answer. No daemon is needed. The shim cannot really run a
 //! container, so `up` fails AFTER the build. The assertions are on which binary
@@ -185,31 +189,109 @@ fn up_probes_buildkit_on_the_binary_named_by_docker_path() {
     }
 }
 
-/// The refusal stays, and is now decided by the SELECTED binary: one without
-/// buildx is refused even when the `docker` on `PATH` has it. Before #780 the
-/// `PATH` docker's answer let this build go ahead on a runtime without BuildKit.
+/// The SELECTED binary decides, and a selected docker without buildx gets the
+/// reference's non-BuildKit route rather than a refusal (#783): the Feature
+/// content is built into an image, and the Feature image is built with plain
+/// `build`, no `--build-context`. Before #780 the `PATH` docker's answer decided;
+/// between #780 and #783 this was refused with `BuildKit is required for feature
+/// installation`, which the reference never says.
 #[test]
-fn up_refuses_features_when_the_selected_docker_has_no_buildx() {
-    let host = Host::new(Shape::Image);
-    write_shim(&host.path_dir.join("docker"), "PATH", 0, DOCKER_VERSION);
-    let selected = host.off_path.join("docker-selected");
-    write_shim(&selected, "selected", 1, DOCKER_VERSION);
+fn up_builds_features_without_buildkit_when_the_selected_docker_has_no_buildx() {
+    for shape in [Shape::Image, Shape::Dockerfile] {
+        let host = Host::new(shape);
+        write_shim(&host.path_dir.join("docker"), "PATH", 0, DOCKER_VERSION);
+        let selected = host.off_path.join("docker-selected");
+        write_shim(&selected, "selected", 1, DOCKER_VERSION);
 
-    let (success, stderr, recorded) = host.up(&[], &["--docker-path", selected.to_str().unwrap()]);
+        let (_, stderr, recorded) = host.up(&[], &["--docker-path", selected.to_str().unwrap()]);
+
+        assert_classic_feature_build(shape, &stderr, &recorded, "selected");
+        assert!(
+            lines_of(&recorded, "PATH", "").is_empty(),
+            "{shape:?}: the `docker` on PATH was invoked although --docker-path named another:\n{recorded}"
+        );
+    }
+}
+
+/// `up --buildkit never` takes the same route even where buildx works (#783). It
+/// used to be parsed and then ignored, so the Feature image went through
+/// `buildx build` and a BuildKit build context anyway.
+#[test]
+fn up_buildkit_never_builds_features_with_the_classic_builder() {
+    for shape in [Shape::Image, Shape::Dockerfile] {
+        let host = Host::new(shape);
+        let docker = host.path_dir.join("docker");
+        write_shim(&docker, "docker", 0, DOCKER_VERSION);
+
+        let (_, stderr, recorded) = host.up(&[], &["--buildkit", "never"]);
+
+        assert_classic_feature_build(shape, &stderr, &recorded, "docker");
+    }
+}
+
+/// The reference drops `--cache-to` on its non-BuildKit path; deacon refuses it,
+/// as `deacon build --buildkit never --cache-to` does, rather than report success
+/// for a cache export that never happened. Refused before any build runs.
+#[test]
+fn up_refuses_cache_to_on_the_classic_feature_builder() {
+    let host = Host::new(Shape::Image);
+    write_shim(&host.path_dir.join("docker"), "docker", 0, DOCKER_VERSION);
+
+    let (success, stderr, recorded) = host.up(
+        &[],
+        &[
+            "--buildkit",
+            "never",
+            "--cache-to",
+            "type=local,dest=/tmp/x",
+        ],
+    );
 
     assert!(!success, "must refuse; recorded:\n{recorded}");
     assert!(
-        stderr.contains(REFUSAL),
-        "expected the BuildKit refusal:\n{stderr}"
+        stderr.contains("--cache-to requires BuildKit") && stderr.contains("--buildkit never"),
+        "expected the --cache-to refusal naming its cause:\n{stderr}"
     );
     assert!(
-        stderr.contains(&format!("{} buildx version", selected.display())),
-        "the refusal must name the binary that was asked:\n{stderr}"
-    );
-    assert!(
-        lines_of(&recorded, "selected", "buildx build").is_empty()
-            && lines_of(&recorded, "PATH", "buildx build").is_empty(),
+        lines_of(&recorded, "docker", "build").is_empty()
+            && lines_of(&recorded, "docker", "buildx build").is_empty(),
         "a build ran despite the refusal:\n{recorded}"
+    );
+}
+
+/// The two invocations of the classic route, both on `label`, and nothing on
+/// BuildKit.
+fn assert_classic_feature_build(shape: Shape, stderr: &str, recorded: &str, label: &str) {
+    assert!(
+        !stderr.contains(REFUSAL),
+        "{shape:?}: Features refused instead of built without BuildKit:\n{stderr}\nrecorded:\n{recorded}"
+    );
+    assert!(
+        !recorded.contains("buildx build"),
+        "{shape:?}: the Feature build went through buildx:\n{recorded}"
+    );
+    assert_eq!(
+        lines_of(recorded, label, "build -t deacon-feature-content:").len(),
+        1,
+        "{shape:?}: the Feature content image was not built on {label}:\n{recorded}"
+    );
+    let feature_builds: Vec<&str> = lines_of(recorded, label, "build ")
+        .into_iter()
+        .filter(|l| l.contains("--target dev_containers_target_stage"))
+        .collect();
+    assert_eq!(
+        feature_builds.len(),
+        1,
+        "{shape:?}: expected one plain `build` of the Feature stage on {label}:\n{recorded}"
+    );
+    assert!(
+        !feature_builds[0].contains("--build-context"),
+        "{shape:?}: the classic builder has no build contexts:\n{}",
+        feature_builds[0]
+    );
+    assert!(
+        recorded.contains(&format!("{label}: image rm -f deacon-feature-content:")),
+        "{shape:?}: the staged content image was not removed:\n{recorded}"
     );
 }
 
