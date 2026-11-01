@@ -1,0 +1,8 @@
+{
+	"name": "ConformanceBuildComposeFeatureBuildShape",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspace",
+	"remoteUser": "root",
+	"features": { "./features/marker": {} }
+}

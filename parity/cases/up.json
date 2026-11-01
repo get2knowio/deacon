@@ -5612,6 +5612,56 @@
         "tempdir": true
       },
       "notes": "The differential half of `case-up-classic-cache-to-refused-spec`. It runs nightly, gates nothing, and re-measures the difference on every run. If the reference ever refuses `--cache-to` without BuildKit, or deacon stops refusing it, the tolerance goes STALE and the run reports it.\n\nOnly `chan-exit-code` is observed, on purpose. The reference creates a container and deacon refuses before building, so `chan-structured-output` and `chan-container-state` would diverge on the bare channel (present against absent), which no tolerance may name (FR-032). The assertion pins deacon's side at 1, so a regression to a silent drop fails here instead of being absorbed as 'the two agree'."
+    },
+    {
+      "id": "case-up-no-buildx-compose-feature-build-shape-spec",
+      "behaviors": [
+        "bhv-compose-features-without-buildx"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-up",
+          "subcommand": "up",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--docker-path",
+            "${WORKSPACE}/no-buildx-docker"
+          ],
+          "fixtures": [
+            "fx-no-buildx-compose-feature-build-shape"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-up",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-up",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success"
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The `up` half of `case-build-no-buildx-compose-feature-spec`: a Compose `build:` service with a Feature, on a docker without buildx. deacon used to refuse with `BuildKit is required for feature installation`; the reference starts the container. PERTURBED by reverting the fix: exit 1 with that refusal."
     }
   ]
 }

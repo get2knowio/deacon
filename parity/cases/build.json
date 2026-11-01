@@ -2721,6 +2721,416 @@
         "tempdir": true
       },
       "notes": "`build` had no disallowed-Features gate at all until [#675](https://github.com/get2knowio/deacon/issues/675), so a Feature refused on `up` was installable by building the same configuration — a bypass needing no flag, just a different subcommand. The reference gates both paths (`configContainer.ts:64` for `up`, `devContainersSpecCLI.ts:680` for `build`).\n\nAsserts `outcome` alone rather than `disallowedFeatureId`: the reference emits that field on `up` and NOT on `build` (measured at oracle 0.87.0), and deacon deliberately matches that asymmetry, so asserting it here would pin the opposite of the intended behavior.\n\nThe `message` is asserted in full, and that is load-bearing rather than fussy. The first draft of this case asserted `outcome: error` alone and PASSED with the `env` channel deliberately disabled — `build` fails in a hermetic lane anyway, for want of a daemon, so the assertion was satisfied by the wrong failure and the case proved nothing. Its three siblings caught the same sabotage immediately because `disallowedFeatureId` can only come from the policy; `build` does not emit that field, so this case needs the sentence instead. Found by disabling `substitute_env` and re-running the lane, which is the only way to tell a case that covers something from a case that merely goes green."
+    },
+    {
+      "id": "case-build-no-buildx-dockerfile-feature-spec",
+      "behaviors": [
+        "bhv-build-classic-builder-without-buildx"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--docker-path",
+            "${WORKSPACE}/no-buildx-docker",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-no-buildx-dockerfile-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "devcontainer.metadata": "[{\"id\":\"./features/marker\"}]"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "A Dockerfile configuration with a Feature, built through the `no-buildx-docker` its fixture carries: a docker whose every `buildx` subcommand fails, as on an engine without the plugin, named with `--docker-path`. The reference falls back to plain `docker build` there; deacon used to run `buildx build` regardless and exit 1 with `docker: unknown command: docker buildx`. Now it resolves the builder once (`resolve_primary_builder`) and builds on the classic builder with the Feature content staged as an image. The `chan-image` label is only written by the build that installs the Feature, so it pins that the Feature stage ran, not just that something exited 0. PERTURBED by reverting the fix (the input here cannot be removed without removing the subject): deacon exits 1 and all three assertions fail. With the shim dropped instead, deacon builds through buildx and the case still passes, which is the point: the behavior is that the build works either way."
+    },
+    {
+      "id": "case-build-no-buildx-dockerfile-feature-differential",
+      "behaviors": [
+        "bhv-build-classic-builder-without-buildx"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--docker-path",
+            "${WORKSPACE}/no-buildx-docker"
+          ],
+          "fixtures": [
+            "fx-no-buildx-dockerfile-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The alignment half of `case-build-no-buildx-dockerfile-feature-spec`: both CLIs, on the same docker without buildx, complete the Feature build. MEASURED 2026-11-01 at oracle 0.89.0 with buildx truly absent: the reference ran `build -t dev_container_feature_content_temp …` then a plain `build … --target dev_containers_target_stage`, and the Feature's marker was in the image; deacon exited 1 before the fix. Kept to the exit code for the same reason as `case-build-dockerfile-feature-differential`: the two CLIs do not share a tagging flag surface."
+    },
+    {
+      "id": "case-build-no-buildx-image-feature-spec",
+      "behaviors": [
+        "bhv-build-classic-builder-without-buildx"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--docker-path",
+            "${WORKSPACE}/no-buildx-docker",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-no-buildx-image-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "success",
+              "imageName": [
+                "<IMAGE_TAG>"
+              ]
+            }
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "devcontainer.metadata": "[{\"id\":\"./features/marker\"},{\"remoteUser\":\"root\"}]"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "The image-reference shape of `case-build-no-buildx-dockerfile-feature-spec`, on `fx-no-buildx-image-feature` (an `image:` configuration with one local Feature, plus the same no-buildx shim). Before the fix deacon ran `buildx build` over its synthesized `FROM <image>` and exited 1. PERTURBED by reverting the fix: exit 1, and every assertion fails."
+    },
+    {
+      "id": "case-build-no-buildx-compose-feature-spec",
+      "behaviors": [
+        "bhv-compose-features-without-buildx"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--docker-path",
+            "${WORKSPACE}/no-buildx-docker",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-no-buildx-compose-feature-build-shape"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "parity.build.arg": "reached-the-build",
+                "devcontainer.metadata": "[{\"id\":\"./features/marker\"},{\"remoteUser\":\"root\"}]"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "A Compose `build:` service with a Feature, built through the no-buildx shim. deacon used to refuse with `BuildKit is required for feature installation` before resolving anything; the reference builds it. Compose does not need buildx: it builds with its own BuildKit client, which serves the named build contexts deacon declares, so nothing is staged as an image here. `parity.build.arg` pins that Compose still rendered the service's own `build.args` (#629), and the metadata label that the Feature stage ran. PERTURBED by reverting the fix: exit 1 with the refusal, and both assertions fail."
+    },
+    {
+      "id": "case-build-compose-buildkit-never-classic-spec",
+      "behaviors": [
+        "bhv-compose-buildkit-never-classic-builder"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--buildkit",
+            "never",
+            "--image-name",
+            "${IMAGE_TAG}",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-build-compose-feature-build-shape"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 0
+          }
+        },
+        {
+          "channel": "chan-image",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "source": "image",
+              "labels": {
+                "com.docker.compose.image.builder": "classic",
+                "parity.build.arg": "reached-the-build",
+                "devcontainer.metadata": "[{\"id\":\"./features/marker\"},{\"remoteUser\":\"root\"}]"
+              }
+            }
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "`--buildkit never` on a Compose configuration is HONOURED: deacon runs Compose with `DOCKER_BUILDKIT=0`, the switch Compose reads, and stages the Feature content as an image because the classic builder has no named build contexts. It used to be parsed and then ignored on this path. `com.docker.compose.image.builder: classic` is the label Compose itself writes for a classic build, so it is the one observable only the honoured flag produces. PERTURBED at the input: with `--buildkit never` dropped, Compose builds on BuildKit and the label assertion fails.\n\n`spec-expectation` because the reference's answer depends on the host's buildx: it runs Compose on BuildKit regardless, with the content as an image and no named context, and on buildx >= 0.37 that build fails on the `fs.read` entitlement (the reference's own #743-class defect). A differential would measure the runner's buildx, not deacon. See `bhv-compose-buildkit-never-classic-builder`."
+    },
+    {
+      "id": "case-build-no-buildx-cache-to-refused-spec",
+      "behaviors": [
+        "bhv-build-classic-builder-export-flags-refused"
+      ],
+      "context": [],
+      "oracleType": "spec-expectation",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--docker-path",
+            "${WORKSPACE}/no-buildx-docker",
+            "--cache-to",
+            "type=inline",
+            "--output-format",
+            "json"
+          ],
+          "fixtures": [
+            "fx-no-buildx-dockerfile-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        },
+        {
+          "channel": "chan-structured-output",
+          "operation": "op-build",
+          "assertion": {
+            "jsonSubset": {
+              "outcome": "error",
+              "message": "BuildKit is required for --cache-to"
+            }
+          }
+        },
+        {
+          "channel": "chan-stderr",
+          "operation": "op-build",
+          "assertion": {
+            "contains": "no-buildx-docker buildx version` failed"
+          }
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Pins deacon's side of a documented choice. On a docker without buildx the build runs on the classic builder, which cannot export a cache, and deacon refuses `--cache-to` before building, naming the failed `buildx version` probe. The reference drops the flag on that path and exits 0 (see the differential twin). The stderr assertion names the probe sentence only this refusal produces. PERTURBED at the input: with `--cache-to` dropped, deacon builds and exits 0, and all three assertions fail."
+    },
+    {
+      "id": "case-build-no-buildx-cache-to-refused-differential",
+      "behaviors": [
+        "bhv-build-classic-builder-export-flags-refused"
+      ],
+      "context": [],
+      "oracleType": "live-differential",
+      "resourceGroup": "docker-shared",
+      "operations": [
+        {
+          "id": "op-build",
+          "subcommand": "build",
+          "argv": [
+            "--workspace-folder",
+            "${WORKSPACE}",
+            "--docker-path",
+            "${WORKSPACE}/no-buildx-docker",
+            "--cache-to",
+            "type=inline"
+          ],
+          "fixtures": [
+            "fx-no-buildx-dockerfile-feature"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "channel": "chan-exit-code",
+          "operation": "op-build",
+          "assertion": {
+            "equals": 1
+          }
+        }
+      ],
+      "allowedDifferences": [
+        {
+          "behavior": "bhv-build-classic-builder-export-flags-refused",
+          "context": [],
+          "observablePath": "chan-exit-code.exitCode",
+          "rationale": "Without buildx the reference 0.89.0 builds with plain `docker build` and appends `--cache-to` only on its `buildx build` branch, so the flag is dropped and `build` exits 0. deacon refuses it and exits 1 rather than report success for a cache export that never happened.",
+          "divergenceId": "bhv-build-classic-builder-export-flags-refused"
+        }
+      ],
+      "cleanup": {
+        "containers": true,
+        "images": false,
+        "networks": true,
+        "volumes": true,
+        "tempdir": true
+      },
+      "notes": "Consumes `bhv-build-classic-builder-export-flags-refused` on the exit code, the one path where the difference is both real and addressable. Goes stale if either side changes: the reference starting to refuse, or deacon starting to drop the flag."
     }
   ]
 }
