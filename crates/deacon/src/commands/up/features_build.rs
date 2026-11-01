@@ -453,7 +453,7 @@ pub(crate) async fn build_image_with_features(
     // Generate image tag
     let extended_image_tag = format!("deacon-devcontainer-features:{}", identity.workspace_hash);
 
-    ensure_buildkit_or_error().await?;
+    ensure_buildkit_or_error(cli).await?;
     log_cache_configuration(build_options);
 
     // `devcontainer.metadata`, when the caller wants one recorded, computed from
@@ -808,7 +808,7 @@ pub(crate) async fn build_image_with_features_from_dockerfile(
 
     let extended_image_tag = format!("deacon-devcontainer-features:{}", identity.workspace_hash);
 
-    ensure_buildkit_or_error().await?;
+    ensure_buildkit_or_error(cli).await?;
     log_cache_configuration(build_options);
 
     // Build args: hand-rolled here (NOT the generator's defaults) because the
@@ -1758,15 +1758,29 @@ fn build_lockfile_from_features(
     Lockfile { features: entries }
 }
 
-pub(crate) async fn ensure_buildkit_or_error() -> Result<()> {
-    use deacon_core::build::buildkit::is_buildkit_available;
-    if !is_buildkit_available().await? {
-        return Err(DeaconError::Runtime(
-            "BuildKit is required for feature installation. Please enable BuildKit.".to_string(),
-        )
-        .into());
+/// Refuse a Feature build the runtime `up` will build with cannot run.
+///
+/// Asked of `cli`, the runtime the build runs on, through the probe `build`
+/// shares ([`deacon_core::build::buildkit::probe_buildkit`]). It used to run a
+/// literal `docker buildx version` (#780), which ignored `--docker-path`,
+/// `--runtime podman` and the podman fallback: a podman-only host refused every
+/// Feature install, and a second docker on `PATH` answered for the selected one.
+///
+/// Podman is not asked at all. Its builder is Buildah, which serves the build
+/// contexts and `RUN --mount`s the single-container Feature build uses, and the
+/// Compose path stages Feature content as an image under podman anyway (#719).
+/// `podman buildx version` would only answer with Buildah's version.
+pub(crate) async fn ensure_buildkit_or_error(cli: &deacon_core::docker::CliRuntime) -> Result<()> {
+    use deacon_core::build::buildkit::{BuildKitProbe, probe_buildkit};
+    match probe_buildkit(cli).await {
+        BuildKitProbe::Available | BuildKitProbe::Buildah => Ok(()),
+        BuildKitProbe::Unavailable => Err(DeaconError::Runtime(format!(
+            "BuildKit is required for feature installation, and `{} buildx version` failed. \
+             Install or enable the buildx plugin for this runtime.",
+            cli.runtime_path()
+        ))
+        .into()),
     }
-    Ok(())
 }
 
 fn log_cache_configuration(build_options: Option<&BuildOptions>) {
