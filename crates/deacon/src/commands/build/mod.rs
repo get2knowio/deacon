@@ -12,6 +12,7 @@ use crate::commands::shared::lockfile::{
     LockfilePolicy, apply_lockfile_policy, ensure_lockfile_usable,
 };
 use crate::commands::shared::{ConfigLoadArgs, TerminalDimensions, load_config};
+use crate::commands::up::features_build::buildkit_disabled;
 use anyhow::{Context, Result, anyhow};
 use deacon_core::config::DevContainerConfig;
 use deacon_core::errors::{DeaconError, DockerError};
@@ -529,118 +530,131 @@ fn report_and_fail(
     anyhow!(ReportedFailure(cause.into()))
 }
 
-/// Why BuildKit will not run this build's PRIMARY invocation, if it will not.
-///
-/// Distinct from [`deacon_core::build::buildkit::probe_buildkit`], which
-/// asks whether the selected runtime HAS BuildKit. Both questions have to be answered, and
-/// answering only the first is what let `--buildkit never --platform <arch>`
-/// build for the host architecture and exit 0 ([#592]).
-///
-/// It is also distinct from [`should_use_buildkit`], which cannot be reused here:
-/// that returns `false` both when the user disabled BuildKit and when they simply
-/// did not ask for it, and the second case still runs BuildKit on any modern
-/// Docker — the primary build sets no `DOCKER_BUILDKIT` at all and the daemon's
-/// own default applies. Gating on it would refuse the ordinary
-/// `deacon build --platform linux/amd64`, which works.
-///
-/// So the question this answers is narrower and decidable: did something
-/// EXPLICITLY turn BuildKit off?
-///
-/// [#592]: https://github.com/get2knowio/deacon/issues/592
-fn buildkit_disabled(buildkit_option: Option<&BuildKitOption>) -> Option<&'static str> {
-    if matches!(buildkit_option, Some(BuildKitOption::Never)) {
-        return Some("--buildkit never");
-    }
-    // `--buildkit auto` and an unset flag both defer to the environment, and the
-    // primary build passes that environment through untouched.
-    match std::env::var("DOCKER_BUILDKIT") {
-        Ok(value) if value == "0" || value.eq_ignore_ascii_case("false") => {
-            Some("DOCKER_BUILDKIT=0")
-        }
-        _ => None,
-    }
+/// How this build's PRIMARY invocation runs, decided once per build.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PrimaryBuilder {
+    /// `<runtime> buildx build`, which honours the buildx builder the user
+    /// selected (#595). Podman aliases `buildx` to its own `build`.
+    Buildx,
+    /// `<runtime> build` on the classic builder, with any Feature content staged
+    /// as an image rather than a named build context.
+    Classic(ClassicCause),
 }
 
-/// Helper function to validate BuildKit availability with consistent error handling.
+/// Why a build runs on the classic builder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ClassicCause {
+    /// BuildKit was switched off explicitly: `--buildkit never` or
+    /// `DOCKER_BUILDKIT=0` ([`buildkit_disabled`]).
+    Disabled(&'static str),
+    /// Docker, and `<runtime> buildx version` failed: there is no buildx to run
+    /// `buildx build` with. The reference's `getBuildKitVersion` answers
+    /// `undefined` here and its build falls back to plain `docker build`; deacon
+    /// used to run `buildx build` anyway and fail with
+    /// `docker: unknown command: docker buildx`.
+    NoBuildx { runtime: String },
+}
+
+/// Pick the builder for this build's primary invocation, as the reference does.
 ///
-/// `disabled_by` is `Some(cause)` when BuildKit is present but switched off for
-/// this build. Only the flags the PRIMARY build carries are gated that way:
-/// `--platform`, which the legacy builder ignores while reporting success;
-/// `--cache-to`, which it rejects with a bare `unknown flag`; and, since #595,
-/// `--output`, which now rides that build rather than a deferred `docker buildx
-/// build` pass and is equally unknown to the legacy builder.
-///
-/// `--push` stays deliberately NOT gated: a single-platform build still defers it
-/// ([`defers_publish`]) to a `docker push` over the local image, which works
-/// however the build itself ran, so refusing it would break a working invocation
-/// to no end. The reference refuses `--push` there; deacon honouring it is a
-/// superset in the direction that gives the caller what they asked for.
-async fn validate_buildkit_requirement(
-    output_format: &OutputFormat,
-    feature_name: &str,
-    flag_name: &str,
-    disabled_by: Option<&str>,
+/// - BuildKit switched off ([`buildkit_disabled`]) → classic, on any runtime.
+/// - Podman → `buildx build`, which podman aliases to Buildah's `build`. Nothing
+///   is probed: `podman buildx version` answers with Buildah's version (#775).
+/// - Docker → `buildx build` when `<runtime> buildx version` succeeds, else the
+///   classic builder. This is the probe the reference's `getBuildKitVersion`
+///   runs, asked of the binary the build will run on (#784).
+async fn resolve_primary_builder(
+    buildkit_option: Option<&BuildKitOption>,
     cli: &deacon_core::docker::CliRuntime,
-) -> Result<()> {
-    if let Some(cause) = disabled_by {
-        return Err(report_and_fail(
-            output_format,
-            result::BuildError::with_description(
-                format!("BuildKit is required for {}", flag_name),
-                format!(
-                    "{} disables BuildKit; remove it or remove {}",
-                    cause, flag_name
-                ),
-            ),
-            format!("BuildKit is required for {feature_name} but {cause} disabled it"),
-        ));
+) -> PrimaryBuilder {
+    if let Some(cause) = buildkit_disabled(buildkit_option) {
+        return PrimaryBuilder::Classic(ClassicCause::Disabled(cause));
     }
     use deacon_core::build::buildkit::{BuildKitProbe, probe_buildkit};
     match probe_buildkit(cli).await {
-        BuildKitProbe::Available => Ok(()),
-        // Podman's flags are vetted by `reject_buildkit_only_flags_on_podman`:
-        // Buildah is not BuildKit, so there is no BuildKit to require (#775).
-        BuildKitProbe::Buildah => Ok(()),
-        BuildKitProbe::Unavailable => Err(report_and_fail(
-            output_format,
-            result::BuildError::with_description(
-                format!("BuildKit is required for {}", flag_name),
-                format!("Enable BuildKit or remove {} flag", flag_name),
-            ),
-            format!("BuildKit is required for {feature_name}"),
-        )),
+        BuildKitProbe::Available | BuildKitProbe::Buildah => PrimaryBuilder::Buildx,
+        BuildKitProbe::Unavailable => {
+            info!(
+                runtime = %cli.runtime_path(),
+                "`buildx version` failed; building with the classic builder, as the reference does"
+            );
+            PrimaryBuilder::Classic(ClassicCause::NoBuildx {
+                runtime: cli.runtime_path().to_string(),
+            })
+        }
     }
 }
 
-/// The BuildKit gates for a build that runs on Docker: each BuildKit-only flag
-/// needs BuildKit present (probed on the runtime binary this build will run) and
-/// not switched off for the primary invocation.
-async fn validate_buildkit_flags(
-    args: &BuildArgs,
-    cli: &deacon_core::docker::CliRuntime,
-) -> Result<()> {
-    // Whether something explicitly switched BuildKit off for the primary build.
-    // Consulted only by the flags the primary invocation carries (#592).
-    let buildkit_off = buildkit_disabled(args.buildkit.as_ref());
+/// Refuse a BuildKit-only flag on a build that will run on the classic builder,
+/// naming why it will.
+///
+/// The error's `message` stays `BuildKit is required for <flag>` for every cause;
+/// the `description` names the cause, so the advice is one the user can act on
+/// (#592: `Enable BuildKit` is no advice to someone who passed `--buildkit never`).
+fn refuse_without_buildkit(
+    output_format: &OutputFormat,
+    feature_name: &str,
+    flag_name: &str,
+    cause: &ClassicCause,
+) -> anyhow::Error {
+    let (description, reported) = match cause {
+        ClassicCause::Disabled(switch) => (
+            format!("{switch} disables BuildKit; remove it or remove {flag_name}"),
+            format!("BuildKit is required for {feature_name} but {switch} disabled it"),
+        ),
+        ClassicCause::NoBuildx { runtime } => (
+            format!(
+                "`{runtime} buildx version` failed, so this build runs on the classic builder, \
+                 which cannot honour {flag_name}. Install the buildx plugin, or remove {flag_name}"
+            ),
+            format!(
+                "BuildKit is required for {feature_name}, and `{runtime} buildx version` failed"
+            ),
+        ),
+    };
+    report_and_fail(
+        output_format,
+        result::BuildError::with_description(
+            format!("BuildKit is required for {}", flag_name),
+            description,
+        ),
+        reported,
+    )
+}
+
+/// The BuildKit gates for a build that runs on the classic builder.
+///
+/// The reference's refusal without BuildKit is `--platform or --push require
+/// BuildKit enabled.`, and deacon refuses both: `--platform`, because the classic
+/// builder cannot target a platform and would build for the host while reporting
+/// success (#592); `--push` only when there is no buildx, see below.
+///
+/// Beyond the reference, `--output` and `--cache-to` are refused too. The
+/// reference appends both only on its `buildx build` branch and drops them
+/// silently otherwise, exiting 0 with no export and no cache written. That is
+/// the silent fallback constitution IV rules out, and deacon already refused
+/// them under `--buildkit never` (#592, #595).
+///
+/// `--push` is NOT refused when BuildKit is merely switched off: a
+/// single-platform build defers it ([`defers_publish`]) to a `docker push` over
+/// the local image, which works however the build ran. Without buildx it IS
+/// refused, as the reference refuses it.
+fn validate_buildkit_flags(args: &BuildArgs, builder: &PrimaryBuilder) -> Result<()> {
+    let PrimaryBuilder::Classic(cause) = builder else {
+        return Ok(());
+    };
     let fmt = &args.output_format;
-
-    // `--push` passes no `buildkit_off`: see `validate_buildkit_requirement`.
-    if args.push {
-        validate_buildkit_requirement(fmt, "push", "--push", None, cli).await?;
+    if args.push && matches!(cause, ClassicCause::NoBuildx { .. }) {
+        return Err(refuse_without_buildkit(fmt, "push", "--push", cause));
     }
-
-    // `buildkit_off` applies to `--output` since #595: it rides the primary build
-    // now, and the legacy builder has no such flag. It used to be deferred to a
-    // `docker buildx build` pass that ran whatever the primary build did, which is
-    // why it was ungated.
-    if args.output.is_some() {
-        validate_buildkit_requirement(fmt, "output", "--output", buildkit_off, cli).await?;
-    }
-    if args.platform.is_some() {
-        validate_buildkit_requirement(fmt, "platform", "--platform", buildkit_off, cli).await?;
-    }
-    if !args.cache_to.is_empty() {
-        validate_buildkit_requirement(fmt, "cache-to", "--cache-to", buildkit_off, cli).await?;
+    for (present, feature, flag) in [
+        (args.output.is_some(), "output", "--output"),
+        (args.platform.is_some(), "platform", "--platform"),
+        (!args.cache_to.is_empty(), "cache-to", "--cache-to"),
+    ] {
+        if present {
+            return Err(refuse_without_buildkit(fmt, feature, flag, cause));
+        }
     }
     Ok(())
 }
@@ -888,40 +902,22 @@ async fn execute_build_inner(
         .await
         .cli_docker();
 
+    // WHICH BUILDER runs the primary invocation, decided once: the flag
+    // validation below and the build itself must agree on it. A docker without
+    // buildx is no longer a build that fails on `docker: unknown command: docker
+    // buildx`; it is a classic build, as in the reference.
+    let primary_builder = resolve_primary_builder(args.buildkit.as_ref(), &cli).await;
+    debug!(?primary_builder, "Resolved the primary builder");
+
+    // Both runtimes share the BuildKit gates. On podman the builder only becomes
+    // classic through an explicit `--buildkit never`, which is the user's own
+    // instruction rather than a probe, and answering it differently per runtime
+    // would make the same command line mean two things
+    // (`case-build-buildkit-never-platform-refused-spec`). What Buildah itself
+    // cannot honour is podman-specific (#775).
+    validate_buildkit_flags(&args, &primary_builder)?;
     if cli.is_podman() {
-        // Podman's builder is Buildah, whatever `--buildkit` says, so the BuildKit
-        // probe below would answer a question about a builder that will not run
-        // (it used to probe a literal `docker buildx` — the wrong binary, and on a
-        // machine without docker a refusal of flags podman serves). What matters
-        // is which BuildKit-only shapes Buildah cannot honour (#775).
-        //
-        // An explicit `--buildkit never` is still refused alongside a flag that
-        // needs BuildKit: that is the user's own instruction, not a probe, and
-        // answering it differently per runtime would make the same command line
-        // mean two things (`case-build-buildkit-never-platform-refused-spec`).
-        // Only the flags `buildkit_off` gates; with a cause set, the check returns
-        // before it would probe anything. `--push` is not among them.
-        if let Some(cause) = buildkit_disabled(args.buildkit.as_ref()) {
-            for (present, feature, flag) in [
-                (args.output.is_some(), "output", "--output"),
-                (args.platform.is_some(), "platform", "--platform"),
-                (!args.cache_to.is_empty(), "cache-to", "--cache-to"),
-            ] {
-                if present {
-                    validate_buildkit_requirement(
-                        &args.output_format,
-                        feature,
-                        flag,
-                        Some(cause),
-                        &cli,
-                    )
-                    .await?;
-                }
-            }
-        }
         reject_buildkit_only_flags_on_podman(&args)?;
-    } else {
-        validate_buildkit_flags(&args, &cli).await?;
     }
 
     // Load configuration using shared helper for consistency with up/exec
@@ -1185,6 +1181,7 @@ async fn execute_build_inner(
     } else {
         match execute_single_container_build(
             &cli,
+            &primary_builder,
             &config,
             &load_result.raw_config,
             &args,
@@ -1801,24 +1798,9 @@ async fn is_image_available(cli: &deacon_core::docker::CliDocker, image_id: &str
     }
 }
 
-/// Whether the primary build runs through `docker buildx build` — which honours
-/// the buildx builder the user selected — rather than `docker build`, which always
-/// runs on the daemon's own "default" instance and ignores that selection (#595).
-///
-/// The gate is [`buildkit_disabled`], deliberately, and NOT
-/// [`should_use_buildkit`]. The latter is false when nothing ASKED for BuildKit,
-/// and that case still runs BuildKit on any modern Docker — deciding the
-/// invocation form on it would put the ordinary `deacon build` back on the legacy
-/// builder, which is the very defect #595 reports, reached by another route. Only
-/// an explicit off-switch (`--buildkit never`, `DOCKER_BUILDKIT=0`) reaches
-/// `docker build`, which is the sole route to the legacy builder.
-fn uses_buildx(buildkit_option: Option<&BuildKitOption>) -> bool {
-    buildkit_disabled(buildkit_option).is_none()
-}
-
 /// Detect if BuildKit should be used based on CLI flag and environment.
 ///
-/// Narrower than [`uses_buildx`]: this answers whether the caller ASKED for
+/// Narrower than [`resolve_primary_builder`]: this answers whether the caller ASKED for
 /// BuildKit, which decides whether to hand the child an explicit
 /// `DOCKER_BUILDKIT` and whether the BuildKit-only input flags (`--secret`,
 /// `--ssh`) are allowed. It is false when nothing asked and nothing refused, so it
@@ -1906,7 +1888,11 @@ async fn execute_compose_build(
     // DOCKER's store — after which every podman-side step (`tag`, `run`, `exec`)
     // reported `image not known`. Same defect class as #708 one layer up: the build
     // validated against the resolved runtime, then invoked a different one.
-    let compose_manager = ComposeManager::with_docker_path(cli.runtime_path().to_string());
+    //
+    // `--buildkit never` reaches Compose as `DOCKER_BUILDKIT=0` on the invocation
+    // (`with_classic_builder`); it used to be parsed and then ignored here.
+    let compose_manager = ComposeManager::with_docker_path(cli.runtime_path().to_string())
+        .with_classic_builder(buildkit_disabled(args.buildkit.as_ref()).is_some());
     let config_dir = config_path.parent().unwrap_or(workspace_folder);
     let project = compose_manager
         .create_project(config, workspace_folder, config_dir, &args.env_file)
@@ -2191,7 +2177,11 @@ async fn execute_compose_build_with_features(
     // DOCKER's store — after which every podman-side step (`tag`, `run`, `exec`)
     // reported `image not known`. Same defect class as #708 one layer up: the build
     // validated against the resolved runtime, then invoked a different one.
-    let compose_manager = ComposeManager::with_docker_path(cli.runtime_path().to_string());
+    // `--buildkit never` reaches Compose as `DOCKER_BUILDKIT=0`, and the Feature
+    // layer is then staged for the classic builder (`resolve_compose_feature_image`).
+    let buildkit_off = buildkit_disabled(args.buildkit.as_ref());
+    let compose_manager = ComposeManager::with_docker_path(cli.runtime_path().to_string())
+        .with_classic_builder(buildkit_off.is_some());
     // Compose files resolve relative to the config dir (spec parity). `--env-file` is
     // threaded for the same reason as `execute_compose_build` above: it participates in
     // resolving an authored `name: ${VAR}`, so ignoring it here would put `build` on a
@@ -2236,6 +2226,7 @@ async fn execute_compose_build_with_features(
         // is still the user's to choose, which is what #692 restored — `build`
         // hardcoded `docker` here and ignored `--docker-path` entirely.
         cli,
+        buildkit_off,
         LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
         // #436: record `devcontainer.metadata` on the image this build produces.
         // The label rides the Feature build itself rather than a second build that
@@ -2378,6 +2369,7 @@ struct BuildOverlay {
 #[instrument(skip(config, raw_config, args, build_config, labels, host_ca_set))]
 async fn execute_single_container_build(
     cli: &deacon_core::docker::CliDocker,
+    builder: &PrimaryBuilder,
     config: &DevContainerConfig,
     raw_config: &DevContainerConfig,
     args: &BuildArgs,
@@ -2478,10 +2470,9 @@ async fn execute_single_container_build(
         // image plus `COPY --from=`. The reference falls back to the second and so
         // does deacon now, which is what makes `--buildkit never` install Features
         // instead of erroring.
-        let content_image_builder = if uses_buildx(args.buildkit.as_ref()) {
-            None
-        } else {
-            Some(cli)
+        let content_image_builder = match builder {
+            PrimaryBuilder::Buildx => None,
+            PrimaryBuilder::Classic(_) => Some(cli),
         };
 
         let (staged_content, base_stage) =
@@ -2637,6 +2628,7 @@ async fn execute_single_container_build(
 
     let result = execute_docker_build(
         cli,
+        builder,
         &effective,
         args,
         &inner_hash,
@@ -2848,10 +2840,12 @@ async fn push_built_image(cli: &deacon_core::docker::CliDocker, targets: &[Strin
     Ok(())
 }
 
-/// Execute Docker build
+/// Execute Docker build on `builder`, the invocation `resolve_primary_builder` chose.
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip(build_config, args, workspace_folder, labels))]
 async fn execute_docker_build(
     cli: &deacon_core::docker::CliDocker,
+    builder: &PrimaryBuilder,
     build_config: &BuildConfig,
     args: &BuildArgs,
     config_hash: &str,
@@ -2886,19 +2880,27 @@ async fn execute_docker_build(
         // is out of reach (#595). `docker buildx build` honours the selection, and
         // is the reference CLI's own invocation.
         //
-        // The gate is `buildkit_disabled`, NOT `should_use_buildkit`: the latter is
-        // false when nothing ASKED for BuildKit, and that case still runs BuildKit
-        // on any modern Docker (the daemon's own default). Deciding the invocation
-        // form on it would put the ordinary `deacon build` back on the legacy
-        // builder — which is exactly the defect, just reached by a different route.
-        // Only an explicit off-switch (`--buildkit never`, `DOCKER_BUILDKIT=0`)
-        // sends this to `docker build`, the sole route to the legacy builder.
-        let use_buildx = uses_buildx(args.buildkit.as_ref());
+        // The gate is `resolve_primary_builder`, NOT `should_use_buildkit`: the
+        // latter is false when nothing ASKED for BuildKit, and that case still runs
+        // BuildKit on any modern Docker (the daemon's own default). Deciding the
+        // invocation form on it would put the ordinary `deacon build` back on the
+        // legacy builder — which is exactly the defect, just reached by a
+        // different route. Only an explicit off-switch (`--buildkit never`,
+        // `DOCKER_BUILDKIT=0`) or a docker with no buildx sends this to
+        // `docker build`.
+        let use_buildx = matches!(builder, PrimaryBuilder::Buildx);
+        let no_buildx = match builder {
+            PrimaryBuilder::Classic(ClassicCause::NoBuildx { runtime }) => Some(runtime.as_str()),
+            _ => None,
+        };
 
-        // Narrower question, unchanged: whether to hand the child an explicit
+        // Narrower question: whether to hand the child an explicit
         // `DOCKER_BUILDKIT`, and whether the BuildKit-only INPUT flags
-        // (`--secret`, `--ssh`) are allowed.
-        let use_buildkit = should_use_buildkit(args.buildkit.as_ref());
+        // (`--secret`, `--ssh`) are allowed. Never without buildx: a `docker
+        // build` told `DOCKER_BUILDKIT=1` with no buildx fails outright, which
+        // would turn `--buildkit auto` into a refusal of the build it asked to
+        // run on whatever is available.
+        let use_buildkit = no_buildx.is_none() && should_use_buildkit(args.buildkit.as_ref());
         debug!(use_buildx, use_buildkit, "Resolved the build invocation");
 
         let mut build_args = if use_buildx {
@@ -3113,6 +3115,13 @@ async fn execute_docker_build(
                     "The --secret/--build-secret/--ssh options require BuildKit but --buildkit never was specified"
                         .to_string(),
                 )
+                .into());
+            }
+            if let Some(runtime) = no_buildx {
+                return Err(DockerError::CLIError(format!(
+                    "The --secret/--build-secret/--ssh options require BuildKit, and \
+                     `{runtime} buildx version` failed. Install the buildx plugin, or remove them"
+                ))
                 .into());
             }
             return Err(DockerError::CLIError(
@@ -4106,34 +4115,37 @@ mod tests {
     /// in exactly that case, so deciding the invocation form on it would have left
     /// the defect in place for every user who has not set `DOCKER_BUILDKIT=1` —
     /// invisible on a dev machine that does set it.
+    ///
+    /// Only the off-switch half of [`resolve_primary_builder`] is pure: with no
+    /// switch, the probe decides, and `build_runtime_routing` covers that half.
     #[test]
     fn the_invocation_form_follows_the_off_switch_not_the_request() {
         temp_env::with_var_unset("DOCKER_BUILDKIT", || {
             assert!(
-                uses_buildx(None),
+                buildkit_disabled(None).is_none(),
                 "an ordinary `deacon build` must run on the selected buildx builder"
             );
             assert!(
                 !should_use_buildkit(None),
                 "the narrower question is false here — which is why it cannot decide this"
             );
-            assert!(uses_buildx(Some(&BuildKitOption::Auto)));
+            assert!(buildkit_disabled(Some(&BuildKitOption::Auto)).is_none());
             assert!(
-                !uses_buildx(Some(&BuildKitOption::Never)),
+                !buildkit_disabled(Some(&BuildKitOption::Never)).is_none(),
                 "`--buildkit never` is the one route to the legacy builder"
             );
         });
 
         // An explicit off-switch in the environment reaches the legacy builder too.
         temp_env::with_var("DOCKER_BUILDKIT", Some("0"), || {
-            assert!(!uses_buildx(None));
-            assert!(!uses_buildx(Some(&BuildKitOption::Auto)));
+            assert!(!buildkit_disabled(None).is_none());
+            assert!(!buildkit_disabled(Some(&BuildKitOption::Auto)).is_none());
         });
 
         temp_env::with_var("DOCKER_BUILDKIT", Some("1"), || {
-            assert!(uses_buildx(None));
+            assert!(buildkit_disabled(None).is_none());
             assert!(
-                !uses_buildx(Some(&BuildKitOption::Never)),
+                !buildkit_disabled(Some(&BuildKitOption::Never)).is_none(),
                 "the flag wins over the environment"
             );
         });

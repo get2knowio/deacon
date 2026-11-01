@@ -1931,35 +1931,42 @@ fn build_lockfile_from_features(
     Lockfile { features: entries }
 }
 
-/// Refuse a Compose Feature build the runtime `up` will build with cannot run.
+/// Why BuildKit was EXPLICITLY switched off for this invocation, if it was.
 ///
-/// Only the Compose route still asks this. The single-container route takes the
-/// reference's classic fallback instead ([`resolve_feature_builder`], #783).
+/// Distinct from [`deacon_core::build::buildkit::probe_buildkit`], which asks
+/// whether the selected runtime HAS BuildKit. Both questions have to be answered,
+/// and answering only the second is what let `--buildkit never --platform <arch>`
+/// build for the host architecture and exit 0 ([#592]).
 ///
-/// Asked of `cli`, the runtime the build runs on, through the probe `build`
-/// shares ([`deacon_core::build::buildkit::probe_buildkit`]). It used to run a
-/// literal `docker buildx version` (#780), which ignored `--docker-path`,
-/// `--runtime podman` and the podman fallback: a podman-only host refused every
-/// Feature install, and a second docker on `PATH` answered for the selected one.
+/// It is also distinct from `build`'s `should_use_buildkit`, which returns `false`
+/// both when the user disabled BuildKit and when they simply did not ask for it.
+/// The second case still runs BuildKit on any modern Docker, so gating on it would
+/// refuse the ordinary `deacon build --platform linux/amd64`, which works.
 ///
-/// Podman is not asked at all. Its builder is Buildah, which serves the build
-/// contexts and `RUN --mount`s the single-container Feature build uses, and the
-/// Compose path stages Feature content as an image under podman anyway (#719).
-/// `podman buildx version` would only answer with Buildah's version.
-pub(crate) async fn ensure_buildkit_or_error(cli: &deacon_core::docker::CliRuntime) -> Result<()> {
-    use deacon_core::build::buildkit::{BuildKitProbe, probe_buildkit};
-    match probe_buildkit(cli).await {
-        BuildKitProbe::Available | BuildKitProbe::Buildah => Ok(()),
-        BuildKitProbe::Unavailable => Err(DeaconError::Runtime(format!(
-            "BuildKit is required for feature installation, and `{} buildx version` failed. \
-             Install or enable the buildx plugin for this runtime.",
-            cli.runtime_path()
-        ))
-        .into()),
+/// So the question this answers is narrower and decidable: did something
+/// EXPLICITLY turn BuildKit off — `--buildkit never`, or a falsey
+/// `DOCKER_BUILDKIT` in the environment the build inherits?
+///
+/// [#592]: https://github.com/get2knowio/deacon/issues/592
+pub(crate) fn buildkit_disabled(
+    buildkit_option: Option<&crate::cli::BuildKitOption>,
+) -> Option<&'static str> {
+    if matches!(buildkit_option, Some(crate::cli::BuildKitOption::Never)) {
+        return Some("--buildkit never");
+    }
+    // `--buildkit auto` and an unset flag both defer to the environment, and the
+    // build passes that environment through untouched.
+    match std::env::var("DOCKER_BUILDKIT") {
+        Ok(value) if value == "0" || value.eq_ignore_ascii_case("false") => {
+            Some("DOCKER_BUILDKIT=0")
+        }
+        _ => None,
     }
 }
 
-/// The builder a single-container Feature build of `up` runs on (#783).
+/// The builder a Feature build deacon runs itself is on (#783): `up`'s
+/// single-container build, and the `image:` arm of a Compose Feature build on
+/// `up` and `build`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FeatureBuilder {
     /// `<runtime> buildx build`, with the Feature content in a named build context
@@ -2017,7 +2024,7 @@ pub(crate) async fn resolve_feature_builder(
 /// and `--no-cache` are flags the classic builder accepts, and they pass through.
 /// Build-time host-CA injection mounts the bundle through a BuildKit build context
 /// and a `RUN --mount`, and the classic builder has neither, so it is refused.
-fn classic_feature_build_option_args(
+pub(crate) fn classic_feature_build_option_args(
     why: &str,
     build_options: Option<&BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
