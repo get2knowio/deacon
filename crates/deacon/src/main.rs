@@ -41,6 +41,8 @@ fn run() -> Result<()> {
     // killed (a Chocolatey/Scoop shim's grandchild still streaming `podman events`) never
     // returns EOF, so `up` printed its result and then never exited (#239). A timeout
     // rather than `shutdown_background` so an in-flight `tokio::fs` write still finishes.
+    // The start-event gate now kills that whole process tree through a Job Object (#773),
+    // so its pipes do reach EOF; this stays as the bound for any other child that leaks one.
     runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
     result
 }

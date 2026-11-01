@@ -66,6 +66,14 @@ libc = "0.2"
 # Safe wrappers for setsid/kill/Pid used by the Unix forwarder daemon.
 nix.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# Spawns the `<runtime> events` subscription inside a Job Object so dropping the watch
+# kills the whole process tree, not just a Chocolatey/Scoop shim (#773). The Job Object
+# FFI and its `unsafe` stay inside this crate; our code calls only its safe API.
+# `default-features = false` keeps the graph to exactly what that needs: `job-object`
+# (the wrapper), `kill-on-drop` (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), `tokio1`.
+process-wrap = { version = "10.0.1", default-features = false, features = ["tokio1", "job-object", "kill-on-drop"] }
+
 [dev-dependencies]
 assert_cmd = "2.0"
 tokio-test = "0.4"
