@@ -61,20 +61,41 @@ fn write_shim(path: &Path, log: &Path, fail_buildx: bool) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Shape {
     Image,
     Dockerfile,
+    /// A Compose service declaring `image:`.
+    ComposeImage,
+    /// A Compose service declaring `build:`, on the same Dockerfile.
+    ComposeBuild,
 }
 
 /// Removes the container and the image `up` produced, whatever the test's outcome.
+#[derive(Default)]
 struct Cleanup {
     container: Option<String>,
     image: Option<String>,
+    /// The Compose project `up` reported, torn down with its network.
+    project: Option<String>,
 }
 
 impl Drop for Cleanup {
     fn drop(&mut self) {
+        if let Some(project) = &self.project {
+            let _ = StdCommand::new("docker")
+                .args([
+                    "compose",
+                    "-p",
+                    project,
+                    "down",
+                    "--remove-orphans",
+                    "-v",
+                    "--rmi",
+                    "local",
+                ])
+                .output();
+        }
         if let Some(id) = &self.container {
             let _ = StdCommand::new("docker").args(["rm", "-f", id]).output();
         }
@@ -101,15 +122,30 @@ impl Fixture {
         let dc = workspace.join(".devcontainer");
         let feat = dc.join("markerfeat");
         fs::create_dir_all(&feat).unwrap();
+        fs::write(
+            dc.join("Dockerfile"),
+            "FROM alpine:3.18\nRUN echo base > /etc/base-marker\n",
+        )
+        .unwrap();
         let source = match shape {
             Shape::Image => serde_json::json!({ "image": "alpine:3.18" }),
-            Shape::Dockerfile => {
+            Shape::Dockerfile => serde_json::json!({ "build": { "dockerfile": "Dockerfile" } }),
+            Shape::ComposeImage | Shape::ComposeBuild => {
+                let service = if shape == Shape::ComposeImage {
+                    "    image: alpine:3.18\n"
+                } else {
+                    "    build:\n      context: .\n      dockerfile: Dockerfile\n"
+                };
                 fs::write(
-                    dc.join("Dockerfile"),
-                    "FROM alpine:3.18\nRUN echo base > /etc/base-marker\n",
+                    dc.join("docker-compose.yml"),
+                    format!("services:\n  app:\n{service}    command: sleep infinity\n"),
                 )
                 .unwrap();
-                serde_json::json!({ "build": { "dockerfile": "Dockerfile" } })
+                serde_json::json!({
+                    "dockerComposeFile": "docker-compose.yml",
+                    "service": "app",
+                    "workspaceFolder": "/workspace"
+                })
             }
         };
         let mut config = serde_json::json!({
@@ -174,6 +210,11 @@ impl Fixture {
         let recorded = fs::read_to_string(&self.log).unwrap_or_default();
 
         let value: Option<Value> = serde_json::from_str(stdout.trim()).ok();
+        cleanup.project = value
+            .as_ref()
+            .and_then(|v| v["composeProjectName"].as_str())
+            .filter(|p| !p.is_empty())
+            .map(str::to_string);
         if let Some(id) = value
             .as_ref()
             .and_then(|v| v["containerId"].as_str())
@@ -221,7 +262,7 @@ fn assert_built_classically(shape: Shape, image: &str, recorded: &str) {
         "installed-783",
         "{shape:?}: the Feature is not in the produced image"
     );
-    if matches!(shape, Shape::Dockerfile) {
+    if matches!(shape, Shape::Dockerfile | Shape::ComposeBuild) {
         assert_eq!(
             cat_in_image(image, "/etc/base-marker"),
             "base",
@@ -254,10 +295,7 @@ fn up_installs_features_when_the_docker_has_no_buildx() {
     }
     for shape in [Shape::Image, Shape::Dockerfile] {
         let fixture = Fixture::new(shape, true);
-        let mut cleanup = Cleanup {
-            container: None,
-            image: None,
-        };
+        let mut cleanup = Cleanup::default();
         let (image, recorded) = fixture.up(&[], &mut cleanup);
         assert_built_classically(shape, &image, &recorded);
     }
@@ -271,11 +309,90 @@ fn up_buildkit_never_installs_features_with_plain_docker_build() {
     }
     for shape in [Shape::Image, Shape::Dockerfile] {
         let fixture = Fixture::new(shape, false);
-        let mut cleanup = Cleanup {
-            container: None,
-            image: None,
-        };
+        let mut cleanup = Cleanup::default();
         let (image, recorded) = fixture.up(&["--buildkit", "never"], &mut cleanup);
         assert_built_classically(shape, &image, &recorded);
     }
+}
+
+/// A Compose configuration with Features installs them on a docker without
+/// buildx. Both shapes used to be refused with `BuildKit is required for feature
+/// installation`; the reference installs them.
+///
+/// The `image:` service takes the single-container classic route. The `build:`
+/// service is built by Compose, which needs no buildx: its own BuildKit client
+/// serves the named build contexts, so no content image is staged.
+#[test]
+fn up_compose_installs_features_when_the_docker_has_no_buildx() {
+    if !is_docker_available() {
+        eprintln!("Skipping: Docker not available");
+        return;
+    }
+    let fixture = Fixture::new(Shape::ComposeImage, true);
+    let mut cleanup = Cleanup::default();
+    let (image, recorded) = fixture.up(&[], &mut cleanup);
+    assert_built_classically(Shape::ComposeImage, &image, &recorded);
+
+    let fixture = Fixture::new(Shape::ComposeBuild, true);
+    let mut cleanup = Cleanup::default();
+    let (image, recorded) = fixture.up(&[], &mut cleanup);
+    assert_compose_feature_image(Shape::ComposeBuild, &image, &recorded);
+    assert!(
+        !recorded
+            .lines()
+            .any(|l| l.starts_with("build -t deacon-feature-content:")),
+        "Compose has BuildKit here; no content image is needed:\n{recorded}"
+    );
+}
+
+/// `up --buildkit never` on a Compose configuration with Features is honoured:
+/// Compose runs with `DOCKER_BUILDKIT=0` and the Feature content is staged as an
+/// image. It used to be ignored. The reference fails the `build:` shape here on
+/// buildx >= 0.37 (`bhv-compose-buildkit-never-classic-builder`).
+#[test]
+fn up_compose_buildkit_never_installs_features_on_the_classic_builder() {
+    if !is_docker_available() {
+        eprintln!("Skipping: Docker not available");
+        return;
+    }
+    let fixture = Fixture::new(Shape::ComposeImage, false);
+    let mut cleanup = Cleanup::default();
+    let (image, recorded) = fixture.up(&["--buildkit", "never"], &mut cleanup);
+    assert_built_classically(Shape::ComposeImage, &image, &recorded);
+
+    let fixture = Fixture::new(Shape::ComposeBuild, false);
+    let mut cleanup = Cleanup::default();
+    let (image, recorded) = fixture.up(&["--buildkit", "never"], &mut cleanup);
+    assert_compose_feature_image(Shape::ComposeBuild, &image, &recorded);
+    assert!(
+        recorded
+            .lines()
+            .any(|l| l.starts_with("build -t deacon-feature-content:")),
+        "the classic builder needs the Feature content staged as an image:\n{recorded}"
+    );
+}
+
+/// The Feature and the base Dockerfile's marker are in the image Compose built,
+/// and no build went through buildx.
+fn assert_compose_feature_image(shape: Shape, image: &str, recorded: &str) {
+    assert_eq!(
+        cat_in_image(image, "/usr/local/share/marker-783"),
+        "installed-783",
+        "{shape:?}: the Feature is not in the produced image"
+    );
+    assert_eq!(
+        cat_in_image(image, "/etc/base-marker"),
+        "base",
+        "{shape:?}: the Feature stage did not build on the service's Dockerfile"
+    );
+    assert!(
+        !recorded.lines().any(|l| l.starts_with("buildx build")),
+        "{shape:?}: a build went through buildx:\n{recorded}"
+    );
+    assert!(
+        recorded
+            .lines()
+            .any(|l| l.starts_with("compose ") && l.contains(" build ")),
+        "{shape:?}: Compose did not build the service:\n{recorded}"
+    );
 }

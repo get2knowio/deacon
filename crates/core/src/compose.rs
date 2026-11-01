@@ -107,6 +107,9 @@ pub struct ComposeCommand {
     env_files: Vec<PathBuf>,
     /// Profiles to activate
     profiles: Vec<String>,
+    /// Run Compose's builds on the classic (non-BuildKit) builder; see
+    /// [`ComposeManager::with_classic_builder`].
+    classic_builder: bool,
 }
 
 /// Buildx knob that suppresses the default provenance/SBOM attestations.
@@ -126,12 +129,21 @@ impl ComposeCommand {
             base_path,
             env_files: Vec::new(),
             profiles: Vec::new(),
+            classic_builder: false,
         }
     }
 
     /// Set custom docker binary path
     pub fn with_docker_path(mut self, docker_path: String) -> Self {
         self.docker_path = docker_path;
+        self
+    }
+
+    /// Run every invocation with `DOCKER_BUILDKIT=0`, which puts the builds
+    /// Compose performs on the classic builder; see
+    /// [`ComposeManager::with_classic_builder`].
+    pub fn with_classic_builder(mut self, classic_builder: bool) -> Self {
+        self.classic_builder = classic_builder;
         self
     }
 
@@ -178,6 +190,13 @@ impl ComposeCommand {
     ) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(&self.docker_path);
         command.arg("compose");
+
+        // `--buildkit never` reaching Compose. `DOCKER_BUILDKIT=0` is the switch
+        // Compose itself reads to build with the classic builder; set on every
+        // invocation rather than on `build` alone, because `up` can build too.
+        if self.classic_builder {
+            command.env("DOCKER_BUILDKIT", "0");
+        }
 
         // A cached rebuild must produce the SAME image, or Compose replaces the
         // container it is running (#700).
@@ -1186,6 +1205,8 @@ fn parse_service_build_plan(
 pub struct ComposeManager {
     /// Docker binary path
     docker_path: String,
+    /// Whether Compose builds on the classic builder (`DOCKER_BUILDKIT=0`).
+    classic_builder: bool,
 }
 
 impl ComposeManager {
@@ -1193,12 +1214,33 @@ impl ComposeManager {
     pub fn new() -> Self {
         Self {
             docker_path: "docker".to_string(),
+            classic_builder: false,
         }
     }
 
     /// Create a new compose manager with custom docker path
     pub fn with_docker_path(docker_path: String) -> Self {
-        Self { docker_path }
+        Self {
+            docker_path,
+            classic_builder: false,
+        }
+    }
+
+    /// Make every Compose invocation this manager issues build on the classic
+    /// (non-BuildKit) builder, by running it with `DOCKER_BUILDKIT=0`.
+    ///
+    /// This is how `--buildkit never` reaches a Compose configuration. Compose
+    /// has no flag for it; the environment variable is the switch Compose reads.
+    /// A build on that builder has no named build contexts, so a caller that
+    /// sets this must also stage Feature content as an image.
+    pub fn with_classic_builder(mut self, classic_builder: bool) -> Self {
+        self.classic_builder = classic_builder;
+        self
+    }
+
+    /// Whether [`Self::with_classic_builder`] selected the classic builder.
+    pub fn classic_builder(&self) -> bool {
+        self.classic_builder
     }
 
     /// Create a compose project from configuration.
@@ -1390,6 +1432,7 @@ impl ComposeManager {
             .with_project_name(project.name.clone())
             .with_env_files(project.env_files.clone())
             .with_profiles(project.profiles.clone())
+            .with_classic_builder(self.classic_builder)
     }
 
     /// Find Compose projects that still hold NAMED VOLUMES for this workspace under a
@@ -2737,6 +2780,55 @@ mod tests {
     use super::*;
     use std::path::Path;
     use tempfile::TempDir;
+
+    /// `DOCKER_BUILDKIT` as the spawned command will see it, if set on it.
+    fn buildkit_env(command: &tokio::process::Command) -> Option<String> {
+        command
+            .as_std()
+            .get_envs()
+            .find(|(k, _)| *k == "DOCKER_BUILDKIT")
+            .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+    }
+
+    /// `--buildkit never` reaches Compose as `DOCKER_BUILDKIT=0` on every
+    /// invocation a classic-builder manager issues, and on none otherwise.
+    #[test]
+    fn classic_builder_sets_docker_buildkit_off_on_every_invocation() {
+        let project = ComposeProject {
+            name: "p".to_string(),
+            base_path: PathBuf::from("/w"),
+            compose_files: vec![PathBuf::from("/w/docker-compose.yml")],
+            service: "app".to_string(),
+            run_services: Vec::new(),
+            env_files: Vec::new(),
+            additional_mounts: Vec::new(),
+            profiles: Vec::new(),
+            additional_env: IndexMap::new(),
+            external_volumes: Vec::new(),
+            override_command: Some(false),
+            service_image_override: None,
+            deacon_labels: IndexMap::new(),
+        };
+        let classic = ComposeManager::new().with_classic_builder(true);
+        assert!(classic.classic_builder());
+        for args in [&["build", "app"][..], &["up", "-d"][..], &["config"][..]] {
+            assert_eq!(
+                buildkit_env(&classic.get_command(&project).build_command(args)),
+                Some("0".to_string()),
+                "{args:?}"
+            );
+        }
+        let default = ComposeManager::new();
+        assert!(!default.classic_builder());
+        assert_eq!(
+            buildkit_env(
+                &default
+                    .get_command(&project)
+                    .build_command(&["build", "app"])
+            ),
+            None
+        );
+    }
 
     #[test]
     fn test_compose_command_build() {

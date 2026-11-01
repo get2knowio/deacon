@@ -8,8 +8,9 @@
 
 use super::args::{MountType, NormalizedMount, UpArgs};
 use super::features_build::{
-    FEATURE_TARGET_STAGE, FeatureBuildOutput, base_stage_for_features, build_image_with_features,
-    ensure_buildkit_or_error, prepare_dockerfile_feature_build,
+    FEATURE_TARGET_STAGE, FeatureBuildOutput, FeatureBuilder, base_stage_for_features,
+    build_image_with_features, buildkit_disabled, classic_feature_build_option_args,
+    prepare_dockerfile_feature_build, resolve_feature_builder,
 };
 use super::helpers::{apply_user_mapping, handle_lockfile_post_build};
 use super::lifecycle::{HostTrustArgs, execute_initialize_command};
@@ -128,7 +129,14 @@ pub(crate) async fn execute_compose_up(
     // store while deacon reported success against podman. `runtime` is already
     // resolved here; take the binary from it.
     let runtime_bin = runtime.cli_docker().runtime_path().to_string();
-    let compose_manager = ComposeManager::with_docker_path(runtime_bin.clone());
+    // `--buildkit never` (or `DOCKER_BUILDKIT=0`) reaches Compose too. It used to
+    // be parsed and then ignored on this path, so every Compose build ran on
+    // BuildKit regardless. Every Compose invocation now carries `DOCKER_BUILDKIT=0`,
+    // and the Feature build below stages its content as an image, since the
+    // classic builder has no named build contexts.
+    let buildkit_off = buildkit_disabled(args.buildkit.as_ref());
+    let compose_manager = ComposeManager::with_docker_path(runtime_bin.clone())
+        .with_classic_builder(buildkit_off.is_some());
     // Compose files resolve relative to the directory containing devcontainer.json
     // (the `.devcontainer` dir for the standard layout), not the workspace folder.
     let config_dir = config_path.parent().unwrap_or(workspace_folder);
@@ -500,6 +508,7 @@ pub(crate) async fn execute_compose_up(
             Some(&build_options),
             host_ca_set,
             &runtime.cli_docker(),
+            buildkit_off,
             LockfilePolicy::from_flags(args.no_lockfile, args.frozen_lockfile),
             args.control_manifest.as_ref(),
         )
@@ -1167,6 +1176,7 @@ async fn install_features_for_compose(
     build_options: Option<&deacon_core::build::BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
+    buildkit_off: Option<&'static str>,
     lockfile_policy: LockfilePolicy,
     control_manifest: Option<&deacon_core::control_manifest::ControlManifestSource>,
 ) -> Result<Option<FeatureBuildOutput>> {
@@ -1180,6 +1190,7 @@ async fn install_features_for_compose(
         build_options,
         host_ca_set,
         cli,
+        buildkit_off,
         lockfile_policy,
         // `up` records `devcontainer.metadata` on the CONTAINER it creates, not on
         // this intermediate image, so it asks for no label here.
@@ -1220,6 +1231,21 @@ async fn install_features_for_compose(
 /// `service_image_override` to run the extended image) and `build` (which tags
 /// the produced image for the user and writes the lockfile). Returns `None` when
 /// the config declares no features.
+///
+/// `buildkit_off` is [`buildkit_disabled`]'s answer for this invocation, and the
+/// caller must have built `compose_manager` with
+/// `with_classic_builder(buildkit_off.is_some())`, so the Compose build this runs
+/// is on the builder the Feature layer is prepared for.
+///
+/// Neither arm refuses because the runtime has no buildx (#783's Compose half):
+/// - `image:` takes the single-container builder choice
+///   ([`resolve_feature_builder`]): BuildKit, or the classic builder with the
+///   Feature content staged as an image when the probe fails or BuildKit is
+///   switched off. This is the reference's outcome on the same inputs.
+/// - `build:` is built by Compose, and Compose does not need buildx: its
+///   built-in BuildKit client serves the named build contexts. Only when
+///   BuildKit is switched off does it build on the classic builder, with the
+///   content staged as an image.
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip(config, compose_manager, project, workspace_folder))]
 pub(crate) async fn resolve_compose_feature_image(
@@ -1232,6 +1258,7 @@ pub(crate) async fn resolve_compose_feature_image(
     build_options: Option<&deacon_core::build::BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
+    buildkit_off: Option<&'static str>,
     lockfile_policy: LockfilePolicy,
     metadata_raw_config: Option<&DevContainerConfig>,
     control_manifest: Option<&deacon_core::control_manifest::ControlManifestSource>,
@@ -1293,9 +1320,14 @@ pub(crate) async fn resolve_compose_feature_image(
             let mut synth_config = config.clone();
             synth_config.image = Some(base_image.clone());
 
-            // The Compose route keeps its BuildKit requirement; only the
-            // single-container route falls back to the classic builder (#783).
-            ensure_buildkit_or_error(cli).await?;
+            // The single-container choice (#783): BuildKit, or the classic builder
+            // when BuildKit is switched off or the runtime has no buildx. This arm
+            // builds with `<runtime> build` directly, not through Compose, so a
+            // missing buildx is a missing BuildKit here.
+            let builder = match buildkit_off {
+                Some(why) => FeatureBuilder::Classic { why },
+                None => resolve_feature_builder(cli, None).await,
+            };
             build_image_with_features(
                 &synth_config,
                 &identity,
@@ -1304,7 +1336,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 build_options,
                 host_ca_set,
                 cli,
-                super::features_build::FeatureBuilder::BuildKit,
+                builder,
                 lockfile_policy,
                 metadata_raw_config,
                 control_manifest,
@@ -1329,6 +1361,7 @@ pub(crate) async fn resolve_compose_feature_image(
                 build_options,
                 host_ca_set,
                 cli,
+                buildkit_off,
                 lockfile_policy,
                 metadata_raw_config,
                 control_manifest,
@@ -1388,6 +1421,7 @@ async fn build_compose_service_with_features(
     build_options: Option<&deacon_core::build::BuildOptions>,
     host_ca_set: Option<&CorporateCaSet>,
     cli: &deacon_core::docker::CliRuntime,
+    buildkit_off: Option<&'static str>,
     lockfile_policy: LockfilePolicy,
     metadata_raw_config: Option<&DevContainerConfig>,
     control_manifest: Option<&deacon_core::control_manifest::ControlManifestSource>,
@@ -1421,10 +1455,20 @@ async fn build_compose_service_with_features(
         "Building feature-extended image for compose service (build: shape)"
     );
 
-    // Refuse before resolving anything: installing Features needs BuildKit's named
-    // contexts and RUN mounts, and finding that out after downloading every
-    // Feature would be work done for a build that was never going to run.
-    ensure_buildkit_or_error(cli).await?;
+    // No buildx probe here. Compose builds this service, and Compose does not
+    // need buildx: without the plugin it builds with its own BuildKit client,
+    // which serves the named build contexts below. MEASURED on docker 29.9.2 with
+    // Compose 2.40.3 and the buildx plugin removed: the reference and deacon both
+    // build the Feature into the image. deacon used to refuse here with
+    // `BuildKit is required for feature installation` (#783's Compose half).
+    //
+    // With BuildKit switched off (`buildkit_off`), Compose runs with
+    // `DOCKER_BUILDKIT=0` and builds on the classic builder, which has no named
+    // build contexts. What that builder cannot honour is refused now, before any
+    // Feature is downloaded, for the same reasons as the single-container path.
+    if let Some(why) = buildkit_off {
+        classic_feature_build_option_args(why, build_options, host_ca_set)?;
+    }
 
     let dockerfile_content = tokio::fs::read_to_string(&dockerfile_path)
         .await
@@ -1474,8 +1518,17 @@ async fn build_compose_service_with_features(
         // so the Feature content has to arrive as an image instead (#719). This is
         // the reference's own switch (`dockerCompose.ts:191`, `!params.isPodman`),
         // and it is scoped to COMPOSE: the single-container podman path builds with
-        // `podman build` directly and keeps its build contexts.
-        if cli.is_podman() { Some(cli) } else { None },
+        // `podman build` directly and keeps its build contexts. `buildkit_off`
+        // pins docker-compose to the classic builder the same way, with
+        // `DOCKER_BUILDKIT=0` on the invocation.
+        //
+        // The merged Dockerfile stays inside the content directory (#743). The
+        // classic builder does not gate that read, so the placement is harmless.
+        if cli.is_podman() || buildkit_off.is_some() {
+            Some(cli)
+        } else {
+            None
+        },
         build_options.is_some_and(|o| o.omit_syntax_directive),
     )
     .await

@@ -1,0 +1,9 @@
+#!/bin/sh
+# A docker without buildx: every `buildx` subcommand fails as it does on an engine
+# with no buildx plugin, and everything else runs on the `docker` on PATH.
+# Cases name it with `--docker-path ${WORKSPACE}/no-buildx-docker` (#783).
+if [ "$1" = buildx ]; then
+  echo "docker: unknown command: docker buildx" >&2
+  exit 1
+fi
+exec docker "$@"
